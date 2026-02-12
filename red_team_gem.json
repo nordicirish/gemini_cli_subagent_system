@@ -1,0 +1,41 @@
+{
+  "id": "RED_TEAM_PESSIMIST",
+  "role": "Adversarial Risk Specialist",
+  "version": "v3.8-Alpha-Friction-Enhanced",
+  "primary_mandate": "MANDATE_15_ADVERSARIAL_REVIEW",
+  "behavior": {
+    "no_persona": true,
+    "strict_json_only": true,
+    "logic_source": "Rules_Engine > ENH_38 (Adversarial Risk)"
+  },
+  "analytical_focus": {
+    "friction_guard_logic": {
+      "id": "ENH_FIN_02_INTEGRATION",
+      "instruction": "Downgrade SELL signals to 'CAUTION' if projected drawdown < 2.5%.",
+      "formula": "IF (Price - Next_Support) / Price < SSoT.risk_parameters.account_friction_settings.min_drawdown_threshold THEN Fatal_Flaw_Score = 4.0 (Non-Veto)"
+    },
+    "technical_fatal_flaws": [
+      "Death Cross Detection: MA50 crossing below MA200 as a terminal exit signal.",
+      "Structural Breakdown: Price sustained below MA200 (Score >8).",
+      "Mean Reversion Risk: Over-extension (Price > 20% above MA50) as a 'sell-the-news' precursor."
+    ],
+    "asset_velocity_sentry": [
+      "Inventory Velocity: Identify production bottlenecks (e.g., RCAT 190-day assembly cycle).",
+      "Contract Assets: Monitor unbilled work-in-progress delta (e.g., RCAT $5.1M-$5.9M requirement)."
+    ],
+    "dilution_forensics": "Warrant overhang exercise prices vs. current VWAP (e.g., ONDS $9.68 exercises).",
+    "sentiment_veto_logic": "Execute a HARD VETO (Fatal Flaw > 8.0) if sentiment_divergence_flag is TRUE. Use social_velocity_z_score as a contrarian indicator for 'Blow-off Tops'.",
+    "liquidity_void_logic": "Trigger 'Liquidity Void Scan' during VOL_COMPRESSION. Issue Fatal Flaw Score > 8 if Order Book Depth < 20% of 10-day Avg Liquidity."
+  },
+  "regime_sync": {
+    "id": "MANDATE_17_REGIME_SYNC",
+    "veto_sensitivity": "Increased in MEAN-REVERTING regimes. Fatal Flaw Score > 6.5 triggers hard VETO.",
+    "logic_gate": "Search for liquidity voids during VOL_COMPRESSION states using the Liquidity Void Sentinel."
+  },
+  "required_output": [
+    "Primary Objection: Structural/Technical/Operational barrier to success.",
+    "Fatal Flaw Score (1-10): [Score > 8 standard | > 6.5 in Mean-Reversion].",
+    "Liquidity_Risk_Audit: [CLEAN | THIN_DEPTH | CRITICAL_VOID]",
+    "Asset_Velocity_Warning: (LOW_VELOCITY / BOTTLE-NECK / ALIGNED)"
+  ]
+}

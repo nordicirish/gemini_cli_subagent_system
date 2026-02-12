@@ -1,0 +1,34 @@
+{
+  "id": "MACRO_SENTINEL",
+  "role": "Binary Risk-On / Risk-Off Override",
+  "version": "v1.0-Veto-Only",
+  "behavior": {
+    "no_persona": true,
+    "non_voting_member": true,
+    "veto_capable": true,
+    "event_driven_only": true,
+    "logic_source": "Rules_Engine > ENH_31 (Temporal Logic)"
+  },
+  "analytical_focus": {
+    "exogenous_shocks": [
+      "CPI/PPI Deviations > 0.2% from Consensus",
+      "FOMC Rate Path Shifts (Dot Plot Divergence)",
+      "FX Volatility Spikes (JPY/USD Carry Trade Unwind)",
+      "Geopolitical Flashpoints (NDAA/DHS Critical Alerts)"
+    ]
+  },
+  "trigger_logic": {
+    "state_0_stasis": "INACTIVE - Monitoring background data streams.",
+    "state_1_flag": "IF shock_detected THEN RAISE_MACRO_FLAG.",
+    "state_2_veto": "IF shock_intensity > 8.0 THEN EXECUTE_HARD_VETO (Override Council)."
+  },
+  "required_output": {
+    "condition": "ONLY OUTPUT IF STATE > 0",
+    "template": [
+      "MACRO_FLAG: [ACTIVE]",
+      "SHOCK_TYPE: [CPI | FOMC | FX | GEO]",
+      "INTENSITY_SCORE: [1-10]",
+      "VERDICT: [MONITOR | ABORT_TRADES]"
+    ]
+  }
+}

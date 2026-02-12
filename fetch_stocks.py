@@ -1,0 +1,1142 @@
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import requests
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
+import os
+import time as t_time
+import sys
+import json
+import pyperclip
+import re
+from scipy.stats import norm
+
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
+
+# Load configuration from JSON file
+with open('config.json', 'r') as f:
+    config = json.load(f)
+
+# -----------------------------
+# CONFIGURATION
+# -----------------------------
+FINNHUB_API_KEY = config.get("FINNHUB_API_KEY")
+POLYGON_API_KEY = config.get("POLYGON_API_KEY")
+
+USE_FINNHUB = True
+USE_POLYGON = False  # keep false unless you want Polygon volume fallback
+
+TICKERS = [
+    'ONDS', 'UMAC', 'RCAT', 'DFTX',
+    'RKLB', 'PLTR',
+]
+
+MACRO_TICKERS = [
+    'SPY',
+    'VXX',
+    'IEF',
+    'UUP',
+]
+
+ALL_TICKERS = TICKERS + MACRO_TICKERS
+INVERSE_MACRO = ['VXX', 'UUP']
+
+REFRESH_RATE_SECONDS = 30
+HISTORY_REFRESH_CYCLES = 10
+
+# -----------------------------
+# COLOR CODES
+# -----------------------------
+os.system("")
+GREEN = "\033[38;5;46m"
+RED = "\033[38;5;196m"
+YELLOW = "\033[38;5;226m"
+CYAN = "\033[38;5;51m"
+BLUE = "\033[38;5;39m"
+PURPLE = "\033[38;5;129m"
+WHITE = "\033[38;5;255m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+BG_NORMAL = ""
+BG_STRIPE = "\033[48;5;236m"
+
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+})
+
+class MarketDataCache:
+    def __init__(self):
+        self.history = {}
+        self.technicals = {}
+        self.prices = {}
+        self.gaps = {}
+        self.vwaps = {}
+        self.volumes = {}
+        self.gex = {}
+        self.session = {}
+        self.session_liquidity = {}
+        self.pre_market_change = {}
+        self.after_hours_change = {}
+        self.overnight_return = {}
+        self.pre_market_price = {}
+        self.after_hours_price = {}
+        self.pre_market_volume = {}
+        self.after_hours_volume = {}
+        self.cycles = 0
+        self.vwap_pointer = 0
+
+    def clear(self):
+        self.__init__()
+
+cache = MarketDataCache()
+
+# -----------------------------
+# UTILS
+# -----------------------------
+def get_market_status():
+    ny_now = datetime.now(ZoneInfo("America/New_York"))
+    t = ny_now.time()
+    if ny_now.weekday() >= 5:
+        return "CLOSED"
+    if time(4, 0) <= t < time(9, 30):
+        return "PRE-MARKET"
+    if time(9, 30) <= t < time(16, 0):
+        return "OPEN"
+    if time(16, 0) <= t < time(20, 0):
+        return "AFTER-HOURS"
+    return "CLOSED"
+
+def to_float(val):
+    try:
+        if isinstance(val, (pd.Series, pd.DataFrame)):
+            return float(val.iloc[-1])
+        return float(val)
+    except:
+        return 0.0
+
+def format_volume(vol, symbol):
+    try:
+        if vol >= 1_000_000_000:
+            return f"{vol/1_000_000_000:.2f}B"
+        if vol >= 1_000_000:
+            return f"{vol/1_000_000:.2f}M"
+        if vol >= 1_000:
+            return f"{vol/1_000:.0f}K"
+        return str(int(vol))
+    except:
+        return "-"
+
+def get_visible_length(s):
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return len(ansi_escape.sub('', s))
+def calculate_gamma(S, K, T, r, sigma):
+    """
+    Black-Scholes Gamma.
+    S     = spot price
+    K     = strike
+    T     = time to expiry (years)
+    r     = risk-free rate
+    sigma = implied volatility (decimal, e.g. 0.35)
+    """
+
+    try:
+        if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
+            return 0.0
+
+        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
+
+        # Numerical safety
+        if np.isnan(gamma) or np.isinf(gamma):
+            return 0.0
+
+        return float(gamma)
+
+    except Exception:
+        return 0.0
+
+def calculate_delta(S, K, T, r, sigma, option_type):
+    try:
+        if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
+            return 0.0
+        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        if option_type == 'call':
+            return float(norm.cdf(d1))
+        elif option_type == 'put':
+            return float(norm.cdf(d1) - 1.0)
+        return 0.0
+    except:
+        return 0.0
+
+# -----------------------------
+# FETCHERS
+# -----------------------------
+def get_live_chart_data(symbol, status):
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=1m&includePrePost=true"
+        r = session.get(url, timeout=2)
+        data = r.json()
+        result = data['chart']['result'][0]
+        timestamps = result['timestamp']
+        quote = result['indicators']['quote'][0]
+        closes = quote.get('close', [])
+        volumes = quote.get('volume', [])
+
+        live_price = 0.0
+        if closes:
+            valid_closes = [c for c in closes if c is not None]
+            if valid_closes:
+                live_price = float(valid_closes[-1])
+
+        total_vol = 0
+        ny_tz = ZoneInfo("America/New_York")
+        now = datetime.now(ny_tz)
+        cutoff_ts = 0
+
+        if status == "OPEN":
+            cutoff_dt = now.replace(hour=9, minute=30, second=0, microsecond=0)
+            cutoff_ts = cutoff_dt.timestamp()
+        elif status == "AFTER-HOURS":
+            cutoff_dt = now.replace(hour=16, minute=0, second=0, microsecond=0)
+            cutoff_ts = cutoff_dt.timestamp()
+
+        if volumes and timestamps:
+            for ts, v in zip(timestamps, volumes):
+                if v is None:
+                    continue
+                if ts >= cutoff_ts:
+                    total_vol += v
+
+        return live_price, total_vol
+    except:
+        return 0.0, 0
+
+def get_true_intraday_vwap(symbol, status):
+    try:
+        ny_tz = ZoneInfo("America/New_York")
+        now = datetime.now(ny_tz)
+
+        if status == "PRE-MARKET":
+            anchor_time = now.replace(hour=4, minute=0, second=0, microsecond=0)
+            include_pre = "true"
+        else:
+            anchor_time = now.replace(hour=9, minute=30, second=0, microsecond=0)
+            include_pre = "false"
+
+        if now < anchor_time:
+            return 0.0
+
+        ts_open = int(anchor_time.timestamp())
+        ts_now = int(now.timestamp())
+
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={ts_open}&period2={ts_now}&interval=1m&includePrePost={include_pre}"
+        r = session.get(url, timeout=3)
+        data = r.json()
+        result = data['chart']['result'][0]
+        indicators = result['indicators']['quote'][0]
+        closes = indicators.get('close', [])
+        volumes = indicators.get('volume', [])
+
+        valid = [(c, v) for c, v in zip(closes, volumes) if c is not None and v is not None and v > 0]
+        if not valid:
+            return 0.0
+
+        total_vp = sum(c * v for c, v in valid)
+        total_v = sum(v for _, v in valid)
+        if total_v > 0:
+            return total_vp / total_v
+        return 0.0
+    except:
+        return 0.0
+
+def fallback_vwap(symbol):
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=1m"
+        r = session.get(url, timeout=2)
+        data = r.json()
+        result = data['chart']['result'][0]
+        q = result['indicators']['quote'][0]
+        closes = q.get('close', [])
+        volumes = q.get('volume', [])
+        vp = 0.0
+        tv = 0.0
+        for c, v in zip(closes, volumes):
+            if c is None or v is None or v <= 0:
+                continue
+            vp += c * v
+            tv += v
+        if tv > 0:
+            return vp / tv
+        return 0.0
+    except:
+        return 0.0
+
+def get_finnhub_quote(symbol):
+    if not USE_FINNHUB:
+        return None, None
+    try:
+        url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_API_KEY}"
+        r = session.get(url, timeout=2)
+        if r.status_code != 200:
+            return None, None
+        data = r.json()
+        c = float(data.get('c', 0))
+        pc = float(data.get('pc', 0))
+        if c > 0:
+            return c, pc
+    except:
+        pass
+    return None, None
+
+def get_polygon_history_df(symbol):
+    if not USE_POLYGON:
+        return pd.DataFrame()
+    end_dt = datetime.now().strftime('%Y-%m-%d')
+    start_dt = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%d')
+    url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/{start_dt}/{end_dt}?adjusted=true&sort=asc&apiKey={POLYGON_API_KEY}"
+    try:
+        t_time.sleep(15)
+        r = session.get(url, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get('resultsCount', 0) > 0:
+                results = data['results']
+                df = pd.DataFrame(results)
+                df['Date'] = pd.to_datetime(df['t'], unit='ms')
+                df.set_index('Date', inplace=True)
+                df.rename(columns={'c': 'Close', 'h': 'High', 'l': 'Low', 'o': 'Open', 'v': 'Volume'}, inplace=True)
+                return df[['Open', 'High', 'Low', 'Close', 'Volume']]
+    except:
+        pass
+    return pd.DataFrame()
+
+def polygon_volume(symbol):
+    if not USE_POLYGON:
+        return None
+    try:
+        url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev?adjusted=true&apiKey={POLYGON_API_KEY}"
+        r = session.get(url, timeout=2)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get('resultsCount', 0) > 0:
+                return data['results'][0].get('v', None)
+    except:
+        pass
+    return None
+
+def get_previous_close(symbol):
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1d"
+        r = session.get(url, timeout=2)
+        data = r.json()
+        result = data['chart']['result'][0]
+        q = result['indicators']['quote'][0]
+        closes = q.get('close', [])
+        valid = [c for c in closes if c is not None]
+        if len(valid) >= 2:
+            return float(valid[-2])
+    except:
+        pass
+    return None
+
+def get_batch_quotes(symbols):
+    try:
+        syms = ",".join(symbols)
+        url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={syms}"
+        r = session.get(url, timeout=3)
+        data = r.json()
+        return {q['symbol']: q for q in data['quoteResponse']['result']}
+    except:
+        return {}
+
+# -----------------------------
+# GEX LOGIC
+# -----------------------------
+
+
+def get_gex_profile(ticker_obj, spot_price):
+    """
+    Calculates GEX, Gamma Flip, and Inventory Velocity Delta (Net Delta).
+    """
+    default_res = {
+        'net_gex': 0.0, 
+        'flip_price': 0.0, 
+        'inventory_velocity_delta': 0.0,
+        'gex_slope': 0.0,
+        'flip_proximity_percent': 0.0,
+        'strike_oi_magnet': 0.0
+    }
+    if spot_price is None or spot_price <= 0:
+        return default_res
+
+    try:
+        expirations = ticker_obj.options
+        if not expirations:
+            return default_res
+        
+        target_exps = expirations[:2]
+        r = 0.045 # Approx risk-free rate
+        ny_now = datetime.now(ZoneInfo("America/New_York"))
+        
+        option_inventory = []
+        strike_oi_map = {}
+
+        for exp_date_str in target_exps:
+            try:
+                chain = ticker_obj.option_chain(exp_date_str)
+                
+                exp_dt = datetime.strptime(exp_date_str, "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
+                exp_dt = exp_dt.replace(hour=16, minute=0, second=0)
+                T = (exp_dt - ny_now).total_seconds() / (365 * 24 * 3600)
+                if T <= 0.001: T = 0.001
+
+                if chain.calls is not None and not chain.calls.empty:
+                    for _, row in chain.calls.iterrows():
+                        if pd.isna(row.get('openInterest')) or row.get('openInterest') <= 0: continue
+                        if pd.isna(row.get('impliedVolatility')) or row.get('impliedVolatility') <= 0: continue
+                        k = float(row['strike'])
+                        oi = float(row['openInterest'])
+                        strike_oi_map[k] = strike_oi_map.get(k, 0.0) + oi
+                        option_inventory.append({
+                            'K': float(row['strike']), 'T': T, 'sigma': float(row['impliedVolatility']),
+                            'oi': float(row['openInterest']), 'type': 'call'
+                        })
+
+                if chain.puts is not None and not chain.puts.empty:
+                    for _, row in chain.puts.iterrows():
+                        if pd.isna(row.get('openInterest')) or row.get('openInterest') <= 0: continue
+                        if pd.isna(row.get('impliedVolatility')) or row.get('impliedVolatility') <= 0: continue
+                        k = float(row['strike'])
+                        oi = float(row['openInterest'])
+                        strike_oi_map[k] = strike_oi_map.get(k, 0.0) + oi
+                        option_inventory.append({
+                            'K': float(row['strike']), 'T': T, 'sigma': float(row['impliedVolatility']),
+                            'oi': float(row['openInterest']), 'type': 'put'
+                        })
+            except:
+                continue
+
+        if not option_inventory:
+            return default_res
+
+        magnet_price = 0.0
+        if strike_oi_map:
+            magnet_price = max(strike_oi_map, key=strike_oi_map.get)
+
+        # 1. Calc Current GEX and Net Delta (Inventory Velocity Delta)
+        net_gex = 0.0
+        net_delta = 0.0
+        
+        for opt in option_inventory:
+            gamma = calculate_gamma(spot_price, opt['K'], opt['T'], r, opt['sigma'])
+            delta = calculate_delta(spot_price, opt['K'], opt['T'], r, opt['sigma'], opt['type'])
+            
+            term = gamma * opt['oi'] * (spot_price**2) * 100
+            if opt['type'] == 'call':
+                net_gex += term
+                net_delta += (-delta * opt['oi'] * 100) # Dealer Short Call
+            else:
+                net_gex -= term
+                net_delta += (-delta * opt['oi'] * 100) # Dealer Short Put
+
+        avg_vol = 0
+        try:
+            avg_vol = ticker_obj.fast_info.three_month_average_volume
+        except:
+            pass
+            
+        final_gex = net_gex
+        final_slope = 0.0
+        
+        if avg_vol and avg_vol > 0:
+            final_gex = net_gex / (avg_vol * spot_price)
+
+        # 2. Calc Gamma Flip (Scan +/- 50%)
+        flip_price = 0.0
+        low_p = spot_price * 0.50
+        high_p = spot_price * 1.50
+        steps = 100
+        step_size = (high_p - low_p) / steps
+        prices = [low_p + i*step_size for i in range(steps+1)]
+        gex_values = []
+        
+        for p_sim in prices:
+            g_sim = 0.0
+            for opt in option_inventory:
+                val = calculate_gamma(p_sim, opt['K'], opt['T'], r, opt['sigma'])
+                term = val * opt['oi'] * (p_sim**2) * 100
+                if opt['type'] == 'call': g_sim += term
+                else: g_sim -= term
+            gex_values.append(g_sim)
+            
+        for i in range(len(gex_values)-1):
+            if (gex_values[i] > 0 and gex_values[i+1] < 0) or (gex_values[i] < 0 and gex_values[i+1] > 0):
+                y1, y2 = gex_values[i], gex_values[i+1]
+                x1, x2 = prices[i], prices[i+1]
+                if (y2 - y1) != 0:
+                    flip_price = x1 - y1 * (x2 - x1) / (y2 - y1)
+                else:
+                    flip_price = x1
+                break
+
+        # 3. Calc GEX Slope (Local derivative at spot)
+        p_up = spot_price * 1.01
+        gex_up = 0.0
+        for opt in option_inventory:
+            val = calculate_gamma(p_up, opt['K'], opt['T'], r, opt['sigma'])
+            term = val * opt['oi'] * (p_up**2) * 100
+            if opt['type'] == 'call': gex_up += term
+            else: gex_up -= term
+        
+        raw_slope = (gex_up - net_gex) / (p_up - spot_price)
+        final_slope = raw_slope
+        if avg_vol and avg_vol > 0:
+            final_slope = raw_slope / (avg_vol * spot_price)
+
+        flip_prox = 0.0
+        if flip_price > 0:
+            flip_prox = (spot_price - flip_price) / spot_price
+
+        return {
+            'net_gex': final_gex,
+            'flip_price': flip_price,
+            'inventory_velocity_delta': net_delta,
+            'gex_slope': final_slope,
+            'flip_proximity_percent': flip_prox,
+            'strike_oi_magnet': magnet_price
+        }
+
+    except Exception:
+        return default_res
+
+
+# -----------------------------
+# LOGIC (UPDATED)
+# -----------------------------
+
+def update_history_and_technicals(symbol, t_obj):
+    try:
+        hist = t_obj.history(period="2y", interval="1d")
+        if hist.empty:
+            hist = t_obj.history(period="1y", interval="1d")
+        if hist.empty:
+            hist = t_obj.history(period="3mo", interval="1d")
+        if hist.empty:
+            raise ValueError("Empty YF")
+    except:
+        hist = get_polygon_history_df(symbol)
+
+    cache.history[symbol] = hist
+
+    if not hist.empty:
+        try:
+            close = hist['Close']
+
+            # --- SAFER SMA CHECKS ---
+            sma_20 = to_float(close.rolling(20).mean().iloc[-1]) if len(close) >= 20 else None
+            sma_50 = to_float(close.rolling(50).mean().iloc[-1]) if len(close) >= 50 else None
+            sma_200 = to_float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else None
+
+            # --- RSI (Wilder) ---
+            delta = close.diff()
+            gain = (delta.where(delta > 0, 0)).ewm(com=13, adjust=False).mean()
+            loss = (-delta.where(delta < 0, 0)).ewm(com=13, adjust=False).mean()
+            rs = gain / (loss + 1e-9)
+            rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
+
+            # --- ATR (Wilder) ---
+            tr = pd.concat([
+                hist['High'] - hist['Low'],
+                (hist['High'] - close.shift(1)).abs(),
+                (hist['Low'] - close.shift(1)).abs()
+            ], axis=1).max(axis=1)
+
+            atr = tr.ewm(alpha=1/14, adjust=False).mean().iloc[-1]
+            atr_pct = (atr / close.iloc[-1]) * 100
+
+            # --- Previous Regular Close ---
+            last_reg_close = 0.0
+            if hasattr(t_obj, 'fast_info'):
+                try:
+                    last_reg_close = float(t_obj.fast_info.previous_close)
+                except:
+                    pass
+
+            if last_reg_close == 0.0 and len(close) >= 2:
+                last_reg_close = to_float(close.iloc[-2])
+
+            if last_reg_close == 0.0:
+                alt_pc = get_previous_close(symbol)
+                if alt_pc:
+                    last_reg_close = alt_pc
+
+            # --- Trend Score (Improved) ---
+            trend_score = 0
+            if sma_20 is not None and sma_50 is not None:
+                trend_score += 1 if sma_20 > sma_50 else -1
+            if sma_50 is not None and sma_200 is not None:
+                trend_score += 1 if sma_50 > sma_200 else -1
+            if sma_20 is not None:
+                trend_score += 1 if close.iloc[-1] > sma_20 else -1
+
+            cache.technicals[symbol] = {
+                "SMA_20": sma_20,
+                "SMA_50": sma_50,
+                "SMA_200": sma_200,
+                "RSI": to_float(rsi_val),
+                "ATR_Pct": to_float(atr_pct),
+                "ATR": to_float(atr),
+                "Trend_Score": int(trend_score),
+                "Last_Reg_Close": last_reg_close
+            }
+
+        except Exception as e:
+            print("Tech error:", e)
+            pass
+
+
+def update_price_tick(symbol, t_obj, status, quote_data=None):
+    price = 0.0
+    vol = 0
+    used_batch = False
+
+    # --- SESSION TAG ---
+    cache.session[symbol] = status
+
+    # --- SESSION LIQUIDITY ---
+    cache.session_liquidity[symbol] = (
+        "LOW" if status in ("AFTER-HOURS", "PRE-MARKET") else "HIGH"
+    )
+
+    # --- Extract session prices ---
+    pre_price = None
+    post_price = None
+    reg_price = None
+    pre_vol = 0
+    post_vol = 0
+
+    if quote_data:
+        try:
+            pre_price = quote_data.get('preMarketPrice')
+            post_price = quote_data.get('postMarketPrice')
+            reg_price = quote_data.get('regularMarketPrice')
+            vol = int(quote_data.get('regularMarketVolume', 0) or 0)
+            pre_vol = int(quote_data.get('preMarketVolume', 0) or 0)
+            post_vol = int(quote_data.get('postMarketVolume', 0) or 0)
+            used_batch = True
+        except:
+            pass
+
+    # --- Session-aware price selection ---
+    if status == "PRE-MARKET" and pre_price:
+        price = float(pre_price)
+    elif status == "AFTER-HOURS" and post_price:
+        price = float(post_price)
+    elif reg_price:
+        price = float(reg_price)
+
+    # --- Fallbacks ---
+    if price == 0:
+        api_price, api_vol = get_live_chart_data(symbol, status)
+        if api_price > 0:
+            price = api_price
+        if api_vol > 0:
+            vol = api_vol
+
+    if price == 0 and USE_FINNHUB:
+        fh_c, fh_pc = get_finnhub_quote(symbol)
+        if fh_c:
+            price = fh_c
+
+    # --- Final fallback to fast_info ---
+    try:
+        fi = t_obj.fast_info
+        if vol == 0:
+            vol = fi.last_volume or fi.three_month_average_volume
+        if price == 0:
+            if status == "PRE-MARKET" and getattr(fi, 'pre_market_price', None):
+                price = float(fi.pre_market_price)
+            elif status == "AFTER-HOURS" and getattr(fi, 'post_market_price', None):
+                price = float(fi.post_market_price)
+            elif getattr(fi, 'last_price', None):
+                price = float(fi.last_price)
+    except:
+        pass
+
+    # --- Volume fallback ---
+    if vol == 0:
+        alt_vol = polygon_volume(symbol)
+        if alt_vol:
+            vol = alt_vol
+
+    # --- Cache updates ---
+    if vol > 0:
+        cache.volumes[symbol] = vol
+
+    if pre_vol > 0:
+        cache.pre_market_volume[symbol] = pre_vol
+    if post_vol > 0:
+        cache.after_hours_volume[symbol] = post_vol
+
+    if price > 0:
+        cache.prices[symbol] = price
+
+        if status == "PRE-MARKET" and (pre_price is None or pre_price == 0):
+            pre_price = price
+        elif status == "AFTER-HOURS" and (post_price is None or post_price == 0):
+            post_price = price
+
+        techs = cache.technicals.get(symbol, {})
+        reg_close = techs.get("Last_Reg_Close", 0.0)
+
+        # --- Session-aware returns ---
+        if reg_close > 0:
+            cache.gaps[symbol] = ((price - reg_close) / reg_close) * 100
+
+        if pre_price is not None:
+            cache.pre_market_price[symbol] = pre_price
+            if reg_close > 0:
+                cache.pre_market_change[symbol] = ((pre_price - reg_close) / reg_close) * 100
+
+        if post_price is not None:
+            cache.after_hours_price[symbol] = post_price
+            if reg_close > 0:
+                cache.after_hours_change[symbol] = ((post_price - reg_close) / reg_close) * 100
+
+        # --- Overnight return (non-compounded) ---
+        if pre_price is not None and post_price is not None and post_price > 0:
+            cache.overnight_return[symbol] = ((pre_price - post_price) / post_price) * 100
+
+
+def calculate_rvol(symbol):
+    hist = cache.history.get(symbol)
+    if hist is None or hist.empty or 'Volume' not in hist.columns:
+        return 1.0
+
+    avg_vol = hist['Volume'].tail(20).mean()
+    cur_vol = cache.volumes.get(symbol, 0)
+
+    if avg_vol == 0:
+        return 1.0
+
+    return cur_vol / avg_vol
+
+
+def distance_from_vwap(symbol):
+    p = cache.prices.get(symbol, 0)
+    v = cache.vwaps.get(symbol, 0)
+
+    if p == 0 or v == 0:
+        return 0.0
+
+    return ((p - v) / v) * 100.0
+
+
+def classify_signal(symbol):
+    t = cache.technicals.get(symbol, {})
+    rsi = t.get("RSI", 50)
+    atr = t.get("ATR_Pct", 0)
+    rvol = calculate_rvol(symbol)
+    dist_vwap = distance_from_vwap(symbol)
+
+    if rvol > 2 and dist_vwap > atr:
+        return "BREAKOUT"
+    if rvol > 2 and dist_vwap < -atr:
+        return "BREAKDOWN"
+    if rsi < 30:
+        return "OVERSOLD"
+    if rsi > 70:
+        return "OVERBOUGHT"
+    if abs(dist_vwap) < 0.2:
+        return "VWAP PIN"
+    return "NEUTRAL"
+
+
+def calculate_score(symbol):
+    t = cache.technicals.get(symbol, {})
+    p = cache.prices.get(symbol, 0)
+    v = cache.vwaps.get(symbol, 0)
+
+    if p == 0 or not t:
+        return 0, ""
+
+    score = 0
+    note = ""
+
+    # -----------------------------
+    # 1. TREND SCORE (single use)
+    # -----------------------------
+    trend_component = t.get("Trend_Score", 0)
+    score += trend_component
+
+    # -----------------------------
+    # 2. RSI COMPONENT
+    # -----------------------------
+    rsi = t.get("RSI", 50)
+    if rsi > 60:
+        score += 1
+    elif rsi < 40:
+        score -= 1
+
+    # -----------------------------
+    # 3. VWAP COMPONENT (fixed)
+    # -----------------------------
+    if v > 0:
+        dist = distance_from_vwap(symbol)      # % distance
+        atr = t.get("ATR_Pct", 0)              # ATR%
+
+        if dist > 0:
+            score += 1
+        else:
+            # Always penalize price < VWAP
+            score -= 1
+
+            # HV BREAK: stronger penalty
+            if abs(dist) > atr * 0.25:
+                score -= 1
+                note = "(HV BREAK)"
+
+    # -----------------------------
+    # 4. RVOL COMPONENT
+    # -----------------------------
+    rvol = calculate_rvol(symbol)
+    if rvol > 2:
+        score += 1
+    elif rvol < 0.5:
+        score -= 1
+
+    # -----------------------------
+    # 5. INVERSE MACRO (apply last)
+    # -----------------------------
+    return score, note
+
+
+# -----------------------------
+# MAIN LOOP
+# -----------------------------
+def run_daemon():
+    print(f"{CYAN}Initializing GEM Daemon v16.0 (Data Hardened + Trend)...{RESET}")
+    tickers_obj = {sym: yf.Ticker(sym) for sym in ALL_TICKERS}
+
+    print(f"{YELLOW}Performing initial heavy fetch...{RESET}")
+    for sym, obj in tickers_obj.items():
+        print(f"Loading {sym}...", end="\r")
+        update_history_and_technicals(sym, obj)
+
+    try:
+        while True:
+            os.system('cls' if os.name == 'nt' else 'clear')
+            print("\033[?25l", end="", flush=True)
+            ny_now = datetime.now(ZoneInfo("America/New_York"))
+            status = get_market_status()
+
+            cache.cycles += 1
+            is_heavy = (cache.cycles % HISTORY_REFRESH_CYCLES == 0)
+
+            BATCH_SIZE = 8
+
+            # Dynamic Table Width Calculation
+            try:
+                term_cols = os.get_terminal_size().columns
+            except:
+                term_cols = 115
+            eff_width = max(70, min(term_cols, 140))
+            avail = eff_width - 8 # 8 spaces between columns
+            scale = avail / 107.0 # 107 is base content width
+            w_sym = max(5, int(8 * scale))
+            w_prc = max(7, int(10 * scale))
+            w_gap = max(8, int(12 * scale))
+            w_vol = max(6, int(10 * scale))
+            w_atr = max(6, int(10 * scale))
+            w_rsi = max(5, int(10 * scale))
+            w_vwp = max(7, int(12 * scale))
+            w_trd = max(5, int(10 * scale))
+            used = w_sym + w_prc + w_gap + w_vol + w_atr + w_rsi + w_vwp + w_trd
+            w_scr = max(10, avail - used)
+            table_width = used + w_scr + 8
+
+            pointer = cache.vwap_pointer
+            if pointer >= len(ALL_TICKERS):
+                pointer = 0
+            batch = ALL_TICKERS[pointer: pointer + BATCH_SIZE]
+            cache.vwap_pointer = (pointer + BATCH_SIZE) % len(ALL_TICKERS)
+
+            status_color = GREEN
+            if status == "PRE-MARKET":
+                status_color = BLUE
+            elif status == "AFTER-HOURS":
+                status_color = PURPLE
+            elif status == "CLOSED":
+                status_color = RED
+
+            if is_heavy:
+                mode_str = f"{YELLOW}HEAVY REFRESH{RESET}"
+            else:
+                mode_str = f"Tick Update (VWAP Batch: {batch[0]}...)"
+
+            print(f"\n{BOLD}GEM DAEMON COMMANDER (v16.0 - Hardened + Trend){RESET}")
+            print(f"Time: {ny_now.strftime('%H:%M:%S')} | Status: {status_color}{status}{RESET}")
+            print(f"Mode: {mode_str}")
+
+            batch_quotes = get_batch_quotes(ALL_TICKERS)
+
+            for b_sym in batch:
+                v_true = get_true_intraday_vwap(b_sym, status)
+                if v_true == 0.0:
+                    v_true = fallback_vwap(b_sym)
+                if v_true > 0:
+                    cache.vwaps[b_sym] = v_true
+
+            sep_line = "-" * table_width
+            print(sep_line)
+            header_str = (
+                f"{'TICKER':<{w_sym}} {'PRICE':<{w_prc}} {'GAP%':<{w_gap}} {'VOL':<{w_vol}} "
+                f"{'ATR%':<{w_atr}} {'RSI':<{w_rsi}} {'VWAP':<{w_vwp}} {'TREND':<{w_trd}} {'SCORE':^{w_scr}}"
+            )
+            print(header_str)
+            print(sep_line)
+
+            data = []
+
+            macro_state = {
+                'IEF': {'price': 0, 'gap': 0, 'trend': 'FLAT'},
+                'VXX': {'price': 0, 'gap': 0}
+            }
+
+            for i, sym in enumerate(ALL_TICKERS):
+                # Dynamic sleep: slower on heavy refresh to respect rate limits
+                if is_heavy or sym not in cache.history or cache.history[sym].empty:
+                    t_time.sleep(1.5)
+                else:
+                    t_time.sleep(0.1)
+
+                obj = tickers_obj[sym]
+
+                if is_heavy or sym not in cache.history or cache.history[sym].empty:
+                    update_history_and_technicals(sym, obj)
+
+                update_price_tick(sym, obj, status, batch_quotes.get(sym))
+
+                # GEX is heavy, run only on heavy cycles after price is known
+                if is_heavy:
+                    spot_price = cache.prices.get(sym)
+                    if spot_price and spot_price > 0:
+                        gex_profile = get_gex_profile(obj, spot_price)
+                        cache.gex[sym] = gex_profile
+                    else:
+                        cache.gex[sym] = {
+                            'net_gex': 0.0, 
+                            'flip_price': 0.0, 
+                            'inventory_velocity_delta': 0.0,
+                            'gex_slope': 0.0,
+                            'flip_proximity_percent': 0.0,
+                            'strike_oi_magnet': 0.0
+                        }
+
+                p = cache.prices.get(sym, 0)
+                gap = cache.gaps.get(sym, 0)
+                vol = cache.volumes.get(sym, 0)
+                vwap = cache.vwaps.get(sym, 0)
+                techs = cache.technicals.get(sym, {})
+                score, note = calculate_score(sym)
+
+                if p == 0:
+                    print(f"{sym:<8} {RED}NO DATA{RESET}")
+                    continue
+
+                if sym == 'IEF':
+                    trend = "BULLISH (Safe)" if gap > 0 else "BEARISH (Risk)"
+                    macro_state['IEF'] = {'price': p, 'gap': gap, 'trend': trend}
+                if sym == 'VXX':
+                    macro_state['VXX'] = {'price': p, 'gap': gap}
+
+                if i % 2 == 1:
+                    ROW_BG = BG_STRIPE
+                    R_RST = f"{RESET}{BG_STRIPE}"
+                else:
+                    ROW_BG = BG_NORMAL
+                    R_RST = RESET
+
+                gap_val = f"{gap:+.2f}%"
+                if gap > 0:
+                    gap_cell = f"{GREEN}{gap_val:<{w_gap}}{R_RST}"
+                elif gap < 0:
+                    gap_cell = f"{RED}{gap_val:<{w_gap}}{R_RST}"
+                else:
+                    gap_cell = f"{WHITE}{gap_val:<{w_gap}}{R_RST}"
+
+                rsi_raw = techs.get('RSI', 0)
+                rsi_val = f"{rsi_raw:.1f}"
+                if rsi_raw >= 70:
+                    rsi_cell = f"{RED}{rsi_val:<{w_rsi}}{R_RST}"
+                elif rsi_raw <= 30:
+                    rsi_cell = f"{GREEN}{rsi_val:<{w_rsi}}{R_RST}"
+                else:
+                    rsi_cell = f"{WHITE}{rsi_val:<{w_rsi}}{R_RST}"
+
+                # TREND LABEL (color-coded)
+                ts = techs.get("Trend_Score", 0)
+                if ts >= 2:
+                    trend_label = f"{GREEN}{'UP':<{w_trd}}{R_RST}"
+                elif ts <= -2:
+                    trend_label = f"{RED}{'DOWN':<{w_trd}}{R_RST}"
+                else:
+                    trend_label = f"{YELLOW}{'FLAT':<{w_trd}}{R_RST}"
+
+                vwap_warn = ""
+                if sym not in INVERSE_MACRO and vwap > 0 and p < vwap and score > 0:
+                    vwap_warn = f"{RED}(⚠️ < VWAP){R_RST}"
+
+                if score >= 3:
+                    score_disp = f"{GREEN}+{score} (BULL){R_RST} {vwap_warn}"
+                elif score <= -3:
+                    score_disp = f"{RED}{score} (BEAR){R_RST}{RED}{note}{R_RST}"
+                else:
+                    score_disp = f"{YELLOW}{score:+}{R_RST}{YELLOW}{note}{R_RST}"
+
+                if sym in INVERSE_MACRO:
+                    if score <= -2:
+                        score_disp = f"{GREEN}{score} (SAFE){R_RST}"
+                    elif score >= 2:
+                        score_disp = f"{RED}+{score} (RISK){R_RST}"
+
+                atr_val = techs.get('ATR_Pct', 0)
+                atr_str = "0.00%" if pd.isna(atr_val) else f"{atr_val:.2f}%"
+                vol_str = format_volume(vol, sym)
+                vwap_str = f"{vwap:.2f}" if vwap > 0 else "-"
+
+                # Center SCORE
+                s_vis = get_visible_length(score_disp)
+                s_pad = w_scr - s_vis
+                if s_pad > 0:
+                    pad_l = s_pad // 2
+                    pad_r = s_pad - pad_l
+                    score_cell = f"{' '*pad_l}{score_disp}{' '*pad_r}"
+                else:
+                    score_cell = score_disp
+
+                row_content = (
+                    f"{sym:<{w_sym}} {p:<{w_prc}.2f} {gap_cell} {vol_str:<{w_vol}} {atr_str:<{w_atr}} "
+                    f"{rsi_cell} {vwap_str:<{w_vwp}} {trend_label} {score_cell}"
+                )
+
+                vis_len = get_visible_length(row_content)
+                padding = table_width - vis_len
+                if padding > 0:
+                    row_content += " " * padding
+
+                print(f"{ROW_BG}{row_content}{RESET}")
+
+                if is_heavy:
+                    p_pct = (i + 1) / len(ALL_TICKERS)
+                    p_len = 20
+                    p_fill = int(p_len * p_pct)
+                    p_bar = f"{YELLOW}[{'=' * p_fill}{' ' * (p_len - p_fill)}]{RESET}"
+                    # Update Mode line (Line 4) with progress bar using ANSI Save/Restore cursor
+                    print(f"\033[s\033[4;1HMode: {YELLOW}HEAVY REFRESH{RESET} {p_bar} {int(p_pct * 100)}%\033[u", end="", flush=True)
+
+                gex_data = cache.gex.get(sym, {})
+                if isinstance(gex_data, float): # Fallback if cache has old float format
+                    gex_data = {'net_gex': gex_data}
+
+                data.append({
+                    "ticker": sym,
+                    "session": cache.session.get(sym),
+                    "session_liquidity": cache.session_liquidity.get(sym),
+
+                    # Prices
+                    "price": float(p),
+                    "regular_close": float(techs.get("Last_Reg_Close", 0.0)),
+                    "pre_market_price": float(cache.pre_market_price.get(sym, 0)),
+                    "after_hours_price": float(cache.after_hours_price.get(sym, 0)),
+
+                    # Returns
+                    "gap_percent": float(gap),
+                    "pre_market_change_percent": float(cache.pre_market_change.get(sym, 0)),
+                    "after_hours_change_percent": float(cache.after_hours_change.get(sym, 0)),
+                    "overnight_return_percent": float(cache.overnight_return.get(sym, 0)),
+
+                    # Volume
+                    "volume": int(vol),
+                    "rvol": float(calculate_rvol(sym)),
+                    "pre_market_volume": int(cache.pre_market_volume.get(sym, 0)),
+                    "after_hours_volume": int(cache.after_hours_volume.get(sym, 0)),
+
+                    # Technicals
+                    "atr_percent": float(atr_val),
+                    "atr": float(techs.get("ATR", 0)),
+                    "rsi": float(rsi_raw),
+                    "vwap": float(vwap),
+                    "distance_from_vwap": float(distance_from_vwap(sym)),
+                    "trend_score": int(techs.get("Trend_Score", 0)),
+
+                    # Composite
+                    "gex_exposure": float(gex_data.get('net_gex', 0.0)),
+                    "gamma_flip_price": float(gex_data.get('flip_price', 0.0)),
+                    "inventory_velocity_delta": float(gex_data.get('inventory_velocity_delta', 0.0)),
+                    "gex_slope": float(gex_data.get('gex_slope', 0.0)),
+                    "flip_proximity_percent": float(gex_data.get('flip_proximity_percent', 0.0)),
+                    "strike_oi_magnet": float(gex_data.get('strike_oi_magnet', 0.0)),
+                    "ma_50": float(techs.get("SMA_50") or 0.0),
+                    "ma_200": float(techs.get("SMA_200") or 0.0),
+                    "score": int(score),
+                    "signal": classify_signal(sym),
+                    "trend": "UP" if ts >= 2 else "DOWN" if ts <= -2 else "FLAT",
+                    "note": note.strip()
+                })
+
+
+
+            print("-" * table_width)
+            ief = macro_state['IEF']
+            if ief['gap'] < -0.15:
+                print(f"   >>> BOND ALERT:  7-10Y Bond Price {ief['price']:.2f} ({ief['gap']:+.2f}%) {RED}[YIELDS RISING - RISK]{RESET}")
+            else:
+                print(f"   >>> BOND STATUS: 7-10Y Bond Price {ief['price']:.2f} ({ief['gap']:+.2f}%) {GREEN}[YIELDS STABLE]{RESET}")
+
+            vxx = macro_state['VXX']
+            if vxx['price'] > 20.0 and vxx['gap'] > 2.0:
+                print(f"   >>> FEAR ALERT:  VXX (Vol) is {vxx['price']:.2f} (Gap {vxx['gap']:+.2f}%) {RED}[CAUTION]{RESET}")
+            else:
+                print(f"   >>> FEAR STATUS: VXX (Vol) is {vxx['price']:.2f} (Gap {vxx['gap']:+.2f}%) {GREEN}[STABLE]{RESET}")
+
+            sleep_needed = REFRESH_RATE_SECONDS
+            print("")
+
+            wait_start = t_time.time()
+            while True:
+                remaining = sleep_needed - (t_time.time() - wait_start)
+                if remaining <= 0:
+                    break
+                print(f"\r\033[?25l{CYAN}Next Update in {int(remaining)}s... Press 'c' to copy JSON, 'r' to reset cache.{RESET}    ", end="", flush=True)
+
+                if msvcrt and msvcrt.kbhit():
+                    key = msvcrt.getch().decode('utf-8').lower()
+                    if key == 'r':
+                        cache.clear()
+                        print(f"\n{YELLOW}Cache cleared! Forcing heavy refresh...{RESET}")
+                        break
+                    if key == 'c':
+                        final_output = {
+                            "timestamp": datetime.now(ZoneInfo("America/New_York")).strftime('%Y-%m-%d %H:%M:%S'),
+                            "status": status,
+                            "tickers": data
+                        }
+                        json_data = json.dumps(final_output, indent=2)
+                        pyperclip.copy(json_data)
+                        print(f"\n{YELLOW}JSON (wrapped) copied to clipboard!{RESET}")
+                        t_time.sleep(1)
+                        break
+                t_time.sleep(0.1)
+
+    except KeyboardInterrupt:
+        print(f"\033[?25h", end="")
+        print(f"\n{YELLOW}Daemon Shutdown.{RESET}")
+
+if __name__ == "__main__":
+    run_daemon()
