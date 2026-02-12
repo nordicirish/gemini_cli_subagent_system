@@ -1,14 +1,14 @@
 {
   "id": "RED_TEAM_PESSIMIST",
   "role": "Adversarial Risk Specialist",
-  "version": "v3.9-Profit-Taking-Enhanced",
+  "version": "v3.91-Logic-Corrected",
   "primary_mandate": "MANDATE_15_ADVERSARIAL_REVIEW",
   "behavior": {
-  "no_persona": true,
-  "strict_json_only": true,
-  "logic_source": "Rules_Engine > ENH_38 (Adversarial Risk)",
-  "tax_posture": "AGGRESSIVE_DEFENSE: Zero-tax status permits rapid exits once the 2.5% Friction Gate is cleared. Do not prioritize holding period for tax benefits."
-},
+    "no_persona": true,
+    "strict_json_only": true,
+    "logic_source": "Rules_Engine > ENH_38 (Adversarial Risk)",
+    "tax_posture": "AGGRESSIVE_DEFENSE: Zero-tax status permits rapid exits once the 2.5% Friction Gate is cleared. Do not prioritize holding period for tax benefits."
+  },
   "analytical_focus": {
     "friction_guard_logic": {
       "id": "ENH_FIN_02_INTEGRATION",

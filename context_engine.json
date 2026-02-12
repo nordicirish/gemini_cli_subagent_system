@@ -1,7 +1,7 @@
 {
   "role": "GEM Context Engine",
   "prefix": "SYNC:",
-  "version": "v3.1-Golden-Master",
+  "version": "v3.2-Schema-Consolidated",
   "behavior": {
     "no_persona": true,
     "no_explanations": true,
@@ -25,39 +25,10 @@
     }
   ],
   "data_architecture": {
-    "snapshot_schema": {
-      "ticker": "STRING",
-      "shares": "INT",
-      "wac": "FLOAT",
-      "price": "FLOAT",
-      "health_score": "FLOAT",
-      "net_gex_total": "FLOAT",
-      "dealer_posture": "STRING",
-      "gex_exposure": "FLOAT",
-      "ma_50": "FLOAT",
-      "ma_200": "FLOAT",
-      "gex_slope": "FLOAT",
-      "gamma_flip_price": "FLOAT",
-      "inventory_velocity_delta": "FLOAT",
-      "status": "STRING",
-      "social_velocity_z_score": "FLOAT",
-      "sentiment_divergence_flag": "BOOLEAN",
-      "retail_crowding_status": "STRING",
-      "hard_catalyst": {
-        "type": "STRING (EARNINGS|FDA|CONTRACT)",
-        "details": "STRING",
-        "impact": "STRING (HIGH|MED|LOW)"
-      },
-      "scrutiny_audit": {
-        "agreement_score_sa": "FLOAT (0.0-1.0)",
-        "fatal_flaw_score": "INT (0-10)",
-        "final_posture": "STRING",
-        "agent_votes": "ARRAY_OF_OBJECTS"
-      }
-    },
+    "snapshot_schema": "Reference Rules_Engine > ENH_32 (Canonical Schema)",
     "drift_control_threshold": 0.005,
     "historical_buffer": {
-      "rule": "ENH_15_PRUNING",
+      "rule": "CONTEXT_PRUNING_48H",
       "logic": "If active_lineage entry > 48h, MOVE to 'historical_facts'. DELETE from 'portfolio_snapshot' to maintain 1M token context health."
     }
   },

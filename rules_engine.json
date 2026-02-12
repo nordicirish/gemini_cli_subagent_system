@@ -1,6 +1,6 @@
 {
   "role": "GEM_Rules_Engine",
-  "version": "v3.91-Alpha-Friction-Patched",
+  "version": "v3.92-Schema-Consolidated",
   "description": "Master Technical Contract & Schema Validator. Includes Nordea OST Alpha-Friction Logic.",
   "behavior": {
     "strict_json_only": true,
@@ -363,6 +363,7 @@
     {
       "id": "ENH_32",
       "title": "Data Schema & GEX Calculation Protocol (Unified)",
+      "schema_authority": "CANONICAL — All other files MUST reference this schema via 'Rules_Engine > ENH_32'. Do NOT duplicate inline.",
       "schema_definition": {
         "portfolio_snapshot": [
           {
@@ -377,22 +378,36 @@
             "inventory_velocity_delta": "FLOAT",
             "net_gex_total": "FLOAT",
             "health_score": "FLOAT",
-            "dealer_posture": "STRING",
+            "dealer_posture": "STRING (LONG_GAMMA | SHORT_GAMMA | NEUTRAL)",
             "gex_exposure": "FLOAT",
             "status": "STRING",
+            "trade_state": "STRING (LONG | NO_TRADE | EXIT)",
+            "no_trade_reason": "STRING | NULL",
+            "sizing_units": "FLOAT (ATR-Adjusted Quantity)",
             "social_velocity_z_score": "FLOAT",
             "sentiment_divergence_flag": "BOOLEAN",
-            "retail_crowding_status": "STRING",
+            "retail_crowding_status": "STRING (STABLE | FRAGILE)",
             "hard_catalyst": {
-              "type": "STRING",
+              "type": "STRING (NONE | EARNINGS | FDA | CONTRACT)",
               "details": "STRING",
-              "impact": "STRING"
+              "impact": "STRING (HIGH | MED | LOW)"
             },
             "scrutiny_audit": {
-              "agreement_score_sa": "FLOAT",
-              "fatal_flaw_score": "INT",
+              "agreement_score_sa": "FLOAT (0.0-1.0)",
+              "fatal_flaw_score": "INT (0-10)",
               "final_posture": "STRING",
-              "agent_votes": "ARRAY_OF_OBJECTS"
+              "derivation": {
+                "bullish_component": "FLOAT (w*C*V)",
+                "red_team_component": "FLOAT (w*C*V)",
+                "structural_component": "FLOAT (w*C*V)"
+              },
+              "agent_votes": [
+                {
+                  "agent": "STRING (BULLISH_ADVOCATE | RED_TEAM_PESSIMIST | NEUTRAL_STRUCTURALIST)",
+                  "verdict": "STRING",
+                  "confidence": "FLOAT"
+                }
+              ]
             }
           }
         ]
@@ -432,14 +447,7 @@
         "bypass_condition": "Explicit RAW_JSON provided for SSoT AND forensic data provided for Research."
       }
     },
-    {
-      "id": "ENH_36",
-      "title": "Post-ATR Execution Gate",
-      "block_if": [
-        "current_time >= 14:30 ET AND (atr_percent <= 4.0 OR rvol <= 1.0)"
-      ],
-      "note": "Prevents over-trading in low-liquidity environments."
-    },
+
     {
       "id": "ENH_37",
       "title": "Alpha Catalyst Scrutiny (Bullish)",
@@ -587,7 +595,7 @@
     {
       "index": 9,
       "step_id": "ENH_43_PORTFOLIO_CORRELATION_GUARD",
-      "action": "Check thematic concentration. IF pairwise_corr > 0.80 OR sector_cap exceeded -> Emit NO_TRADE. (Execution Gate)."
+      "action": "Check thematic concentration. IF pairwise_corr > 0.80 OR sector_cap exceeded -> Emit WARNING_CONCENTRATION_RISK. Allow execution to proceed per ENH_43; flag risk in forensic_intelligence."
     },
     {
       "index": 10,

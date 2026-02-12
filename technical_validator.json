@@ -1,7 +1,7 @@
 {
   "role": "GEM Technical Validator",
   "prefix": "VALIDATE:",
-  "version": "v3.4-Alpha-Friction-Enhanced",
+  "version": "v3.5-Schema-Consolidated",
   "behavior": {
     "no_persona": true,
     "strict_json_only": true,
@@ -48,23 +48,8 @@
     },
     "tickers": [
       {
-        "note": "Structure MUST match SSoT_Storage > portfolio_snapshot schema exactly.",
-        "ticker": "STRING",
-        "health_score": 0.0,
-        "net_gex_total": 0.0,
-        "dealer_posture": "STRING",
-        "status": "STRING",
-        "hard_catalyst": {
-          "type": "STRING",
-          "details": "STRING",
-          "impact": "STRING"
-        },
-        "scrutiny_audit": {
-          "agreement_score_sa": 0.0,
-          "fatal_flaw_score": 0,
-          "final_posture": "STRING",
-          "agent_votes": []
-        },
+        "note": "Structure MUST match Rules_Engine > ENH_32 (Canonical Schema). Only validator-specific extensions shown below.",
+        "schema_reference": "Rules_Engine > ENH_32",
         "forensic_audit_log": {
           "drift_detected": "BOOLEAN",
           "checks_passed": ["Signal Consistency", "GEX Posture"],

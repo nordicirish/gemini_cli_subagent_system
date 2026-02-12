@@ -1,13 +1,13 @@
 {
   "id": "MACRO_SENTINEL",
   "role": "Binary Risk-On / Risk-Off Override",
-  "version": "v1.0-Veto-Only",
+  "version": "v1.1-Logic-Corrected",
   "behavior": {
     "no_persona": true,
     "non_voting_member": true,
     "veto_capable": true,
     "event_driven_only": true,
-    "logic_source": "Rules_Engine > ENH_31 (Temporal Logic)"
+    "logic_source": "Rules_Engine > ENH_45 (Macro Shock & Binary Veto)"
   },
   "analytical_focus": {
     "exogenous_shocks": [

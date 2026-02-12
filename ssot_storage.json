@@ -1,6 +1,6 @@
 {
   "role": "GEM SSoT Controller",
-  "version": "v3.2-Alpha-Friction-Patched",
+  "version": "v3.3-Schema-Consolidated",
   "description": "Passive Data Schema and State Container. ALL EXECUTION LOGIC DEFERRED TO RULES_ENGINE.",
   "layer_model": {
     "immutable_background": [
@@ -82,59 +82,15 @@
     },
     "correlation_action": "STRING (MONITOR | REDUCE | NO_TRADE)"
   },
-  "portfolio_snapshot": [
-    {
-      "ticker": "STRING",
-      "shares": "INT",
-      "wac": "FLOAT",
-      "price": "FLOAT",
-      "health_score": "FLOAT",
-      "net_gex_total": "FLOAT",
-      "dealer_posture": "STRING",
-      "gex_exposure": "FLOAT",
-      "ma_50": "FLOAT",
-      "ma_200": "FLOAT",
-      "gex_slope": "FLOAT",
-      "gamma_flip_price": "FLOAT",
-      "inventory_velocity_delta": "FLOAT",
-      "status": "STRING",
+  "portfolio_snapshot": {
+    "schema_reference": "Rules_Engine > ENH_32 (Canonical Schema)",
+    "defaults": {
       "social_velocity_z_score": 0.0,
       "sentiment_divergence_flag": false,
       "retail_crowding_status": "STABLE",
-      "hard_catalyst": {
-        "type": "NONE",
-        "details": "N/A",
-        "impact": "LOW"
-      },
-      "scrutiny_audit": {
-        "agreement_score_sa": "FLOAT (e.g., 0.82)",
-        "fatal_flaw_score": "INT (0-10)",
-        "final_posture": "STRING (e.g., BULLISH_STABLE)",
-        "derivation": {
-          "bullish_component": "FLOAT (w*C*V)",
-          "red_team_component": "FLOAT (w*C*V)",
-          "structural_component": "FLOAT (w*C*V)"
-        },
-        "agent_votes": [
-          {
-            "agent": "BULLISH_ADVOCATE",
-            "verdict": "STRING",
-            "confidence": "FLOAT"
-          },
-          {
-            "agent": "RED_TEAM_PESSIMIST",
-            "verdict": "STRING",
-            "confidence": "FLOAT"
-          },
-          {
-            "agent": "NEUTRAL_STRUCTURALIST",
-            "verdict": "STRING",
-            "confidence": "FLOAT"
-          }
-        ]
-      }
+      "hard_catalyst": { "type": "NONE", "details": "N/A", "impact": "LOW" }
     }
-  ],
+  },
   "risk_parameters": {
     "SCHEMA_VERSION": "1.4.0-Merged-V7-Consensus",
     "GEX_POSTURE": "STRING",

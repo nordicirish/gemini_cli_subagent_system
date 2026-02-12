@@ -1,12 +1,13 @@
 {
   "id": "NEUTRAL_STRUCTURALIST",
   "role": "Market Architecture Specialist",
-  "version": "v3.8-Alpha-Friction-Enhanced",
+  "version": "v3.91-Logic-Corrected",
   "primary_mandate": "MANDATE_16_STRUCTURAL_NEUTRALITY",
   "behavior": {
     "no_persona": true,
     "strict_json_only": true,
-    "logic_source": "Rules_Engine > ENH_39 (Structural Stability)"
+    "logic_source": "Rules_Engine > ENH_39 (Structural Stability)",
+    "tax_posture": "STRUCTURE_NEUTRAL: Tax-free status acknowledged. Structural capacity and liquidity depth remain the sole sizing constraints; tax considerations do not apply."
   },
   "analytical_focus": {
     "dealer_positioning_matrix": {
