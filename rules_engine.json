@@ -1,6 +1,6 @@
 {
   "role": "GEM_Rules_Engine",
-  "version": "v3.92-Schema-Consolidated",
+  "version": "v3.94-Structured-Logic",
   "description": "Master Technical Contract & Schema Validator. Includes Nordea OST Alpha-Friction Logic.",
   "behavior": {
     "strict_json_only": true,
@@ -201,7 +201,11 @@
           "gate_id": "NDS_01",
           "name": "Narrative Divergence Sentry",
           "instruction": "Auto-trigger 'Grok Flash' if Social Score drops >0.4 OR RS Rating > 90.",
-          "multi_source": ["X_Velocity", "SEC_EDGAR", "DoD_Portals"]
+          "multi_source": [
+            "X_Velocity",
+            "SEC_EDGAR",
+            "DoD_Portals"
+          ]
         },
         {
           "gate_id": "ATR_01",
@@ -353,7 +357,19 @@
     {
       "id": "ENH_30",
       "title": "Forensic Structural Filter",
-      "instruction": "Forensic flags (Dilution/Warrants) trigger immediate 50% reduction in sizing."
+      "instruction": "Forensic flags (Dilution/Warrants) trigger sizing reduction per the structural_modifier_table below.",
+      "structural_modifier_table": {
+        "authority": "CANONICAL — institutional.json and structural_risk.json MUST reference this table.",
+        "base": 1.0,
+        "high_dilution": 0.5,
+        "distressed_capital": 0.5,
+        "questionable_governance": 0.75,
+        "speculative_sector": 0.75,
+        "umac_delay_penalty": 0.85,
+        "legislative_mismatch_penalty": 0.5,
+        "shelf_offering_active": 0.25,
+        "note": "Modifiers are multiplicative. shelf_offering_active (0.25) applies when 424B filed within < 72h."
+      }
     },
     {
       "id": "ENH_31",
@@ -447,7 +463,6 @@
         "bypass_condition": "Explicit RAW_JSON provided for SSoT AND forensic data provided for Research."
       }
     },
-
     {
       "id": "ENH_37",
       "title": "Alpha Catalyst Scrutiny (Bullish)",
@@ -533,9 +548,45 @@
       ],
       "note": "Prevents over-trading in low-liquidity environments."
     },
+    "liquidity_gate": {
+      "id": "GATE_LIQ_01",
+      "authority": "CANONICAL — execution.json MUST reference this gate.",
+      "block_if": [
+        "volume < 100000",
+        "implied_spread_percent > 5",
+        "abs(distance_from_vwap) > VWAP_EXECUTION_BLOCK (see system_thresholds)"
+      ],
+      "note": "Blocks execution in illiquid conditions."
+    },
+    "regulatory_gate": {
+      "id": "GATE_REG_01",
+      "authority": "CANONICAL — execution.json MUST reference this gate.",
+      "block_if": [
+        "Risk_Regime == CRITICAL",
+        "health_score < HEALTH_SCORE_MINIMUM (see system_thresholds)",
+        "dealer_posture == SHORT_GAMMA"
+      ],
+      "enh_ref": "ENH_08",
+      "note": "Blocks execution under adverse regime or structural conditions."
+    },
     "consensus_gate": {
       "id": "ENH_40",
-      "logic": "IF S_A < 0.75 AND ticker_volatility > 5% THEN BLOCK_EXECUTION",
+      "conditions": [
+        {
+          "field": "S_A",
+          "operator": "<",
+          "value": 0.75
+        },
+        {
+          "field": "ticker_volatility",
+          "operator": ">",
+          "value": 0.05
+        }
+      ],
+      "logic": "ALL",
+      "emit": {
+        "action": "BLOCK_EXECUTION"
+      },
       "note": "Enforces MANDATE_13 Consensus for high-volatility assets."
     },
     "ssr_gate": {
@@ -570,12 +621,43 @@
     {
       "index": 4,
       "step_id": "VALIDATE_MACRO",
-      "action": "Check MACRO_SENTINEL for active Veto/Flags (ENH_45). Override Consensus if shock > 8.0."
+      "action": {
+        "description": "Check MACRO_SENTINEL for active Veto/Flags",
+        "conditions": [
+          {
+            "field": "shock_intensity",
+            "operator": ">",
+            "threshold": "SHOCK_ABORT_THRESHOLD"
+          }
+        ],
+        "emit_true": {
+          "action": "Override Consensus",
+          "enh_ref": "ENH_45"
+        },
+        "emit_false": {
+          "action": "Continue"
+        }
+      }
     },
     {
       "index": 5,
       "step_id": "VALIDATE_CONSENSUS",
-      "action": "Compute Agreement Score (S_A), verify RED_TEAM fatal flaw score < 8. Acts as Veto Gate."
+      "action": {
+        "description": "Compute Agreement Score and check RED_TEAM veto",
+        "conditions": [
+          {
+            "field": "RED_TEAM.fatal_flaw_score",
+            "operator": ">=",
+            "threshold": "FATAL_FLAW_VETO_STANDARD"
+          }
+        ],
+        "emit_true": {
+          "action": "Veto Gate — S_A forced to 0.0"
+        },
+        "emit_false": {
+          "action": "Proceed with calculated S_A"
+        }
+      }
     },
     {
       "index": 6,
@@ -595,17 +677,51 @@
     {
       "index": 9,
       "step_id": "ENH_43_PORTFOLIO_CORRELATION_GUARD",
-      "action": "Check thematic concentration. IF pairwise_corr > 0.80 OR sector_cap exceeded -> Emit WARNING_CONCENTRATION_RISK. Allow execution to proceed per ENH_43; flag risk in forensic_intelligence."
+      "action": {
+        "description": "Check thematic concentration",
+        "conditions": [
+          {
+            "field": "pairwise_corr",
+            "operator": ">",
+            "value": 0.80
+          },
+          {
+            "field": "sector_exposure",
+            "operator": ">",
+            "value": 0.35
+          }
+        ],
+        "logic": "ANY",
+        "emit_true": {
+          "action": "WARNING_CONCENTRATION_RISK",
+          "note": "Advisory only per ENH_43 — does not force NO_TRADE"
+        },
+        "emit_false": {
+          "action": "Continue"
+        }
+      }
     },
     {
       "index": 10,
       "step_id": "ENH_41_DETERMINISTIC_POSITION_SIZING",
-      "action": "Execute regime-weighted risk math: Size = (Base_Risk * Regime_Mult * S_A_Scaler)."
+      "action": {
+        "description": "Execute regime-weighted risk math",
+        "formula": "Size = Base_Risk * Regime_Mult * S_A_Scaler",
+        "enh_ref": "ENH_41"
+      }
     },
     {
       "index": 11,
       "step_id": "ENH_42_TRADE_STATE_EMISSION",
-      "action": "Emit final state [LONG | NO_TRADE | EXIT] with mandatory reason codes."
+      "action": {
+        "description": "Emit final trade state with mandatory reason codes",
+        "valid_states": [
+          "LONG",
+          "NO_TRADE",
+          "EXIT"
+        ],
+        "enh_ref": "ENH_42"
+      }
     },
     {
       "index": 12,
@@ -671,5 +787,316 @@
     "target": "GEM-Context-SSOT",
     "method": "FORCE_WRITE",
     "rule": "ENH_12_ATOMIC_PERSISTENCE"
+  },
+  "health_score_protocol": {
+    "authority": "CANONICAL — technical_validator.json MUST reference this protocol.",
+    "base_score": 100,
+    "penalties": [
+      {
+        "condition": "S_A < 0.65",
+        "deduction": 100,
+        "label": "Consensus Failure/Deadlock"
+      },
+      {
+        "condition": "Risk_Regime == CRITICAL",
+        "deduction": 50,
+        "label": "ENH_08 Critical Regime",
+        "enh_ref": "ENH_08"
+      },
+      {
+        "condition": "Trade_State == EXIT AND Drawdown_Gap < 2.5%",
+        "deduction": 30,
+        "label": "Alpha-Friction Violation",
+        "enh_ref": "ENH_FIN_02"
+      },
+      {
+        "condition": "fields labeled Unverified",
+        "deduction": 20,
+        "label": "MANDATE_04 Drift"
+      },
+      {
+        "condition": "Supply Chain flags active",
+        "deduction": 15,
+        "label": "ENH_10 Supply Chain",
+        "enh_ref": "ENH_10"
+      },
+      {
+        "condition": "Signal/Trend mismatch",
+        "deduction": 15,
+        "label": "Drift Detection"
+      },
+      {
+        "condition": "rvol < 0.5 OR rvol > 4.0",
+        "deduction": 10,
+        "label": "rVol Anomaly"
+      }
+    ]
+  },
+  "signal_consistency_thresholds": {
+    "authority": "CANONICAL — technical_validator.json MUST reference these thresholds.",
+    "rules": [
+      {
+        "condition": "rsi < 30",
+        "expected_label": "OVERSOLD"
+      },
+      {
+        "condition": "rsi > 70",
+        "expected_label": "OVERBOUGHT"
+      },
+      {
+        "condition": "abs(distance_from_vwap) < VWAP_PIN_DISTANCE",
+        "expected_label": "VWAP PIN"
+      },
+      {
+        "condition": "rsi >= 30 AND rsi <= 70",
+        "expected_label": "NEUTRAL"
+      }
+    ],
+    "dealer_posture_logic": {
+      "positive_gex": "LONG_GAMMA",
+      "negative_gex": "SHORT_GAMMA",
+      "zero_gex": "NEUTRAL"
+    }
+  },
+  "system_thresholds": {
+    "authority": "CANONICAL — All sub-engines MUST reference named constants here instead of hardcoding values.",
+    "RVOL_CONFIRMATION": {
+      "value": 1.5,
+      "usage": "Minimum rVol for trend/skew confirmation",
+      "used_by": [
+        "bullish_gem",
+        "structural_risk",
+        "research"
+      ]
+    },
+    "RVOL_HIGH_ANOMALY": {
+      "value": 4.0,
+      "usage": "Upper rVol anomaly bound",
+      "used_by": [
+        "technical_validator"
+      ]
+    },
+    "RVOL_LOW_ANOMALY": {
+      "value": 0.5,
+      "usage": "Lower rVol anomaly bound",
+      "used_by": [
+        "technical_validator"
+      ]
+    },
+    "RVOL_OST_GATE": {
+      "value": 1.0,
+      "usage": "Minimum rVol for OST execution",
+      "used_by": [
+        "execution",
+        "ENH_36"
+      ]
+    },
+    "VWAP_PIN_DISTANCE": {
+      "value": 0.2,
+      "usage": "Max % distance for VWAP PIN classification",
+      "used_by": [
+        "technical_validator",
+        "signal_consistency"
+      ]
+    },
+    "VWAP_GAMMA_TRAP_DISTANCE": {
+      "value": 0.25,
+      "usage": "Gamma trap detection proximity",
+      "used_by": [
+        "research"
+      ]
+    },
+    "VWAP_EXECUTION_BLOCK": {
+      "value": 3.0,
+      "usage": "Block execution if VWAP distance exceeds this",
+      "used_by": [
+        "execution",
+        "liquidity_gate"
+      ]
+    },
+    "HEALTH_SCORE_MINIMUM": {
+      "value": 40,
+      "usage": "Below this, regulatory gate blocks execution",
+      "used_by": [
+        "execution",
+        "regulatory_gate"
+      ]
+    },
+    "ATR_PERCENT_MINIMUM": {
+      "value": 4.0,
+      "usage": "Minimum ATR% for post-14:30 execution",
+      "used_by": [
+        "execution",
+        "ENH_36"
+      ]
+    },
+    "CONSENSUS_FAILURE_THRESHOLD": {
+      "value": 0.65,
+      "usage": "S_A below this = consensus failure",
+      "used_by": [
+        "health_score_protocol",
+        "technical_validator"
+      ]
+    },
+    "ALPHA_FRICTION_MINIMUM": {
+      "value": 0.025,
+      "usage": "2.5% minimum viable move for entry/exit",
+      "used_by": [
+        "bullish_gem",
+        "red_team_gem",
+        "ENH_FIN_02"
+      ]
+    },
+    "VOLUME_FLOOR": {
+      "value": 100000,
+      "usage": "Minimum volume for execution",
+      "used_by": [
+        "execution",
+        "liquidity_gate"
+      ]
+    },
+    "SPREAD_CEILING": {
+      "value": 5.0,
+      "usage": "Max implied spread % for execution",
+      "used_by": [
+        "execution",
+        "liquidity_gate"
+      ]
+    },
+    "FATAL_FLAW_VETO_STANDARD": {
+      "value": 8,
+      "usage": "Fatal flaw score triggering hard veto",
+      "used_by": [
+        "red_team_gem",
+        "MANDATE_13"
+      ]
+    },
+    "FATAL_FLAW_VETO_MEAN_REVERT": {
+      "value": 6.5,
+      "usage": "Lower veto threshold in mean-reverting regimes",
+      "used_by": [
+        "red_team_gem",
+        "MANDATE_17"
+      ]
+    },
+    "SHOCK_CAUTION_THRESHOLD": {
+      "value": 5.0,
+      "usage": "Macro shock intensity for CAUTION mode",
+      "used_by": [
+        "macro_arbiter",
+        "ENH_45"
+      ]
+    },
+    "SHOCK_ABORT_THRESHOLD": {
+      "value": 8.0,
+      "usage": "Macro shock intensity for ABORT/NO_TRADE",
+      "used_by": [
+        "macro_arbiter",
+        "ENH_45",
+        "MANDATE_20"
+      ]
+    },
+    "DRIFT_CONTROL_THRESHOLD": {
+      "value": 0.005,
+      "usage": "Minimum delta for SSoT field update to count as meaningful change",
+      "used_by": [
+        "ssot_storage",
+        "context_engine"
+      ]
+    },
+    "ROUND_TRIP_COST_BASIS": {
+      "value": 0.01,
+      "usage": "Nordea OST round-trip cost (1%)",
+      "used_by": [
+        "ssot_storage",
+        "fin_account_gate",
+        "ENH_FIN_02"
+      ]
+    },
+    "OST_LOCKOUT_TIME": {
+      "value": "14:30 ET",
+      "usage": "Post-this-time execution requires elevated ATR/rVol",
+      "used_by": [
+        "execution",
+        "ENH_36"
+      ]
+    },
+    "SLIPPAGE_PENALTY": {
+      "value": 0.5,
+      "usage": "Execution slippage sizing multiplier",
+      "used_by": [
+        "execution"
+      ]
+    },
+    "SUPPLY_CHAIN_PENALTY": {
+      "value": 0.85,
+      "usage": "Supply chain delay sizing multiplier (ENH_10)",
+      "used_by": [
+        "execution",
+        "ENH_10"
+      ]
+    }
+  },
+  "basket_definition": {
+    "authority": "CANONICAL — All sub-engines MUST reference tickers from this section. Update here when adding/removing tickers.",
+    "defense_tech": {
+      "tickers": [
+        "RCAT",
+        "ONDS",
+        "UMAC",
+        "RKLB",
+        "DFTX",
+        "PLTR",
+        "KTOS"
+      ],
+      "theme": "Drone/Defense",
+      "regulatory_flags": [
+        "NDAA",
+        "DHS",
+        "ENH_08"
+      ]
+    },
+    "health_tech": {
+      "tickers": [
+        "DFTX"
+      ],
+      "theme": "Health Technology / Neuropsychiatry",
+      "regulatory_flags": []
+    },
+    "all_watched": [
+      "RCAT",
+      "ONDS",
+      "UMAC",
+      "RKLB",
+      "PLTR",
+      "KTOS",
+      "DFTX"
+    ]
+  },
+  "sector_taxonomy": {
+    "authority": "CANONICAL — SSoT sector_exposure fields MUST align with these categories.",
+    "categories": [
+      "defense_tech",
+      "neuropsychiatry",
+      "infrastructure"
+    ],
+    "note": "Update SSoT portfolio_risk_geometry.sector_exposure when adding new sectors."
+  },
+  "temporal_events": {
+    "authority": "CANONICAL — All date-sensitive rules MUST reference events here. Update this section when deadlines change.",
+    "DHS_CR_EXPIRY": {
+      "value": "2026-02-13",
+      "usage": "DHS Continuing Resolution expiry date",
+      "used_by": [
+        "sentiment_engine"
+      ]
+    },
+    "RCAT_INNOVATION_DAY": {
+      "value": null,
+      "usage": "RCAT Innovation Day date (set when announced)",
+      "used_by": [
+        "sentiment_engine"
+      ]
+    }
   }
 }

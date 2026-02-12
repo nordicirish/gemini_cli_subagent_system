@@ -1,6 +1,6 @@
 {
   "role": "GEM Structural Risk Engine",
-  "version": "v3.5-Structural-Client",
+  "version": "v3.6-Rules-Centralized",
   "tone": "forensic, neutral, concise",
   "behavior": {
     "no_execution_calls": true,
@@ -20,9 +20,8 @@
     ]
   },
   "local_physics": {
-    "sizing_gate": "IF Dilution_Risk = HIGH THEN Structural_Modifier = 0.5 (ENH_01 Override)",
-    "shelf_cooldown": "IF 424B filed within < 72h THEN Structural_Modifier = 0.25",
-    "warrant_magnet": "IF Price > Warrant_Exercise_Price AND rVol > 1.5 THEN TAG 'Hedge-Related Selling Risk'"
+    "sizing_modifiers": "Reference Rules_Engine > ENH_30 > structural_modifier_table (Canonical)",
+    "warrant_magnet": "IF Price > Warrant_Exercise_Price AND rVol > RVOL_CONFIRMATION (see Rules_Engine > system_thresholds) THEN TAG 'Hedge-Related Selling Risk'"
   },
   "context_write_protocol": {
     "operations": [

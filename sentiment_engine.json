@@ -1,6 +1,6 @@
 {
   "role": "GEM Sentiment Engine",
-  "version": "v3.5-Sentiment-Client",
+  "version": "v3.6-Structured-Logic",
   "tone": "institutional, analytical, concise",
   "behavior": {
     "no_execution_calls": true,
@@ -16,9 +16,30 @@
     "regulatory_overlay": "Blue List Status & NDAA compliance sentiment"
   },
   "local_physics": {
-    "shutdown_protocol": "IF Date < Feb 13 AND DHS_Status = 'CR' THEN Sentiment = 'Mixed/Anxious'",
-    "lineage_boost": "IF Ticker = 'UMAC' AND Order_Status = 'Fulfilled' THEN Sentiment = 'Constructive'",
-    "innovation_anticipation": "IF Event = 'RCAT Innovation Day' AND Days_To_Event < 14 THEN Sentiment = 'Speculative Bullish'"
+    "shutdown_protocol": {
+      "conditions": [
+        { "field": "current_date", "operator": "<", "threshold": "DHS_CR_EXPIRY" },
+        { "field": "DHS_Status", "operator": "==", "value": "CR" }
+      ],
+      "logic": "ALL",
+      "emit": { "sentiment": "Mixed/Anxious" }
+    },
+    "lineage_boost": {
+      "conditions": [
+        { "field": "ticker", "operator": "==", "value": "UMAC" },
+        { "field": "Order_Status", "operator": "==", "value": "Fulfilled" }
+      ],
+      "logic": "ALL",
+      "emit": { "sentiment": "Constructive" }
+    },
+    "innovation_anticipation": {
+      "conditions": [
+        { "field": "event_date", "operator": "reference", "threshold": "RCAT_INNOVATION_DAY" },
+        { "field": "days_to_event", "operator": "<", "value": 14 }
+      ],
+      "logic": "ALL",
+      "emit": { "sentiment": "Speculative Bullish" }
+    }
   },
   "context_write_protocol": {
     "instruction_id": "ENH_11",

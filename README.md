@@ -188,6 +188,33 @@ MACRO_TICKERS = ['SPY', 'VXX', 'IEF', 'UUP']
 ALL_TICKERS = TICKERS + MACRO_TICKERS
 ```
 
+> [!IMPORTANT]
+> **When changing tickers**, you must also update the centralized constants in `rules_engine.json`. All ticker-specific data is consolidated in one file — see the reference table below.
+
+#### Ticker-Dependent Constants (`rules_engine.json`)
+
+These sections **must** be updated whenever you add, remove, or change portfolio tickers:
+
+| Section | Path in `rules_engine.json` | What to change |
+|---------|---------------------------|----------------|
+| **Basket Definition** | `basket_definition > defense_tech > tickers` | Add/remove tickers per theme |
+| | `basket_definition > health_tech > tickers` | Add/remove tickers per theme |
+| | `basket_definition > all_watched` | Must contain the union of all theme tickers |
+| **Sector Taxonomy** | `sector_taxonomy > categories` | Add new sector names if your basket expands beyond current themes |
+| **Temporal Events** | `temporal_events > DHS_CR_EXPIRY` | Update when government CR deadline changes |
+| | `temporal_events > RCAT_INNOVATION_DAY` | Update when event date is announced (set `null` if unknown) |
+
+These sections are **ticker-independent** but may need tuning for a different broker or strategy:
+
+| Section | Path | Default | When to change |
+|---------|------|---------|----------------|
+| **Round-Trip Cost** | `system_thresholds > ROUND_TRIP_COST_BASIS` | `0.01` (1%) | Different broker fee structure |
+| **Alpha-Friction Minimum** | `system_thresholds > ALPHA_FRICTION_MINIMUM` | `0.025` (2.5%) | Adjusting minimum viable move |
+| **Slippage Penalty** | `system_thresholds > SLIPPAGE_PENALTY` | `0.5` | Different execution environment |
+| **OST Lockout Time** | `system_thresholds > OST_LOCKOUT_TIME` | `14:30 ET` | Different market/time zone |
+
+All 22+ named constants live in `rules_engine.json > system_thresholds`. Sub-engine files reference these by name — **never hardcode values in sub-engines**.
+
 ### 4. Set Up Google Drive SSoT Backup
 The Gems are stateless web sessions — create a Google Drive document to persist your SSoT state across sessions:
 

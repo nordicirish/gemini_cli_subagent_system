@@ -1,6 +1,6 @@
 {
   "role": "GEM SSoT Controller",
-  "version": "v3.3-Schema-Consolidated",
+  "version": "v3.4-Facts-Centralized",
   "description": "Passive Data Schema and State Container. ALL EXECUTION LOGIC DEFERRED TO RULES_ENGINE.",
   "layer_model": {
     "immutable_background": [
@@ -75,11 +75,7 @@
   "portfolio_risk_geometry": {
     "avg_portfolio_corr": "FLOAT",
     "max_pairwise_corr": "FLOAT",
-    "sector_exposure": {
-      "defense_tech": "FLOAT (%)",
-      "neuropsychiatry": "FLOAT (%)",
-      "infrastructure": "FLOAT (%)"
-    },
+    "sector_exposure": "Reference Rules_Engine > sector_taxonomy (Canonical)",
     "correlation_action": "STRING (MONITOR | REDUCE | NO_TRADE)"
   },
   "portfolio_snapshot": {
@@ -96,10 +92,10 @@
     "GEX_POSTURE": "STRING",
     "SSR_STATUS": "BOOLEAN",
     "CONSENSUS_ACTIVE": true,
-    "drift_control_threshold": 0.005,
+    "drift_control_threshold": "Reference Rules_Engine > system_thresholds > DRIFT_CONTROL_THRESHOLD (Canonical)",
     "account_friction_settings": {
-      "round_trip_cost_basis": 0.01,
-      "min_drawdown_threshold": 0.025,
+      "round_trip_cost_basis": "Reference Rules_Engine > system_thresholds > ROUND_TRIP_COST_BASIS (Canonical)",
+      "min_drawdown_threshold": "Reference Rules_Engine > system_thresholds > ALPHA_FRICTION_MINIMUM (Canonical)",
       "tax_structure": "DEFERRED_WITHDRAWAL"
     }
   },

@@ -1,7 +1,7 @@
 {
   "role": "GEM Execution Engine",
   "prefix": "EXECUTE:",
-  "version": "v3.6-Restored-Physics",
+  "version": "v3.8-Facts-Centralized",
   "tone": "institutional, neutral, concise",
   "behavior": {
     "strict_template_only": true,
@@ -12,33 +12,11 @@
   },
   "session_logic": {
     "ost_lockout": "Reference Rules_Engine > ENH_36 (Post-ATR Execution Gate)",
-    "local_constraints": {
-      "time_zone": "ET",
-      "lockout_thresholds": {
-        "atr_percent": "> 4.0",
-        "rvol": "> 1.0"
-      }
-    }
+    "lockout_thresholds": "Reference Rules_Engine > system_thresholds (ATR_PERCENT_MINIMUM, RVOL_OST_GATE, OST_LOCKOUT_TIME)"
   },
   "execution_gates": {
-    "reference_source": "Rules_Engine > global_logic_gates",
-    "local_physics": {
-      "liquidity_gate": {
-        "block_if": [
-          "volume < 100000",
-          "implied_spread_percent > 5",
-          "abs(distance_from_vwap) > 3.0"
-        ]
-      }
-    },
-    "regulatory_gate": {
-      "instruction_id": "ENH_08",
-      "block_if": [
-        "Risk Regime == CRITICAL",
-        "health_score < 40",
-        "dealer_posture == 'SHORT_GAMMA'"
-      ]
-    }
+    "liquidity_gate": "Reference Rules_Engine > global_logic_gates > liquidity_gate (GATE_LIQ_01)",
+    "regulatory_gate": "Reference Rules_Engine > global_logic_gates > regulatory_gate (GATE_REG_01)"
   },
   "position_sizing": {
     "logic_source": "Rules_Engine > ENH_41 (Deterministic Position Sizing)",
@@ -49,8 +27,8 @@
       "SSoT.scrutiny_audit.agreement_score_sa"
     ],
     "local_modifiers": {
-      "slippage_penalty": 0.5,
-      "supply_chain_penalty": 0.85
+      "slippage_penalty": "Reference Rules_Engine > system_thresholds > SLIPPAGE_PENALTY (Canonical)",
+      "supply_chain_penalty": "Reference Rules_Engine > system_thresholds > SUPPLY_CHAIN_PENALTY (Canonical)"
     },
     "global_modifiers": {
       "structural_component": "Reference SSoT.scrutiny_audit.derivation.structural_component",

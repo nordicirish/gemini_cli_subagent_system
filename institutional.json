@@ -1,6 +1,6 @@
 {
   "role": "GEM Institutional Engine",
-  "version": "v3.4-Full-Restoration",
+  "version": "v3.5-Rules-Centralized",
   "tone": "institutional, forensic, concise",
   "behavior": {
     "no_execution_calls": true,
@@ -18,15 +18,7 @@
     "forensic_lineage": "ENH_10 (Supply Chain) & ENH_08 (Legislative)"
   },
   "local_physics": {
-    "structural_modifier_rules": {
-      "base": 1.0,
-      "high_dilution": 0.5,
-      "distressed_capital": 0.5,
-      "questionable_governance": 0.75,
-      "speculative_sector": 0.75,
-      "umac_delay_penalty": 0.85,
-      "legislative_mismatch_penalty": 0.5
-    }
+    "structural_modifier_rules": "Reference Rules_Engine > ENH_30 > structural_modifier_table (Canonical)"
   },
   "context_write_protocol": {
     "instruction_id": "ENH_11",

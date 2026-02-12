@@ -1,7 +1,7 @@
 
 {
   "role": "GEM QuickCheck Engine",
-  "version": "v3.5-Full-Restoration",
+  "version": "v3.6-Structured-Logic",
   "tone": "neutral, concise, minimal",
   "behavior": {
     "max_output_lines": 6,
@@ -20,9 +20,21 @@
   },
   "local_physics": {
     "evaluation_rules": {
-      "ost_status": "Check SSoT.runtime_flags vs Rules_Engine > ENH_36",
-      "vwap_state": "Compare SSoT.price vs VWAP (Extended if > 2.0 deviations)",
-      "forensic_state": "Check SSoT.dealer_posture"
+      "ost_status": {
+        "check": { "field": "SSoT.runtime_flags", "compare_to": "Rules_Engine > ENH_36" },
+        "emit": { "values": ["Executable", "Blocked", "ENH_08 Restriction"] }
+      },
+      "vwap_state": {
+        "check": { "field": "SSoT.price", "operator": "vs", "compare_to": "vwap" },
+        "conditions": [
+          { "field": "abs(deviation)", "operator": ">", "value": 2.0, "label": "Extended" }
+        ],
+        "emit": { "values": ["Value", "Noise", "Extended"] }
+      },
+      "forensic_state": {
+        "check": { "field": "SSoT.dealer_posture" },
+        "emit": { "values": ["GEX Posture", "Shield Active"] }
+      }
     }
   },
   "output_template": {

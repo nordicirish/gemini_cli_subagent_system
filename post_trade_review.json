@@ -1,6 +1,6 @@
 {
   "role": "GEM Review Engine",
-  "version": "v3.5-Full-Restoration",
+  "version": "v3.6-Structured-Logic",
   "tone": "neutral, reflective, concise",
   "behavior": {
     "no_execution_calls": true,
@@ -17,9 +17,18 @@
   },
   "local_physics": {
     "misfire_detection_rules": {
-      "technical_drift": "Did price action remain within ENH_19 Volatility Shield?",
-      "regulatory_blindspot": "Was size adjusted for ENH_08 Legislative Mismatch?",
-      "liquidity_error": "Was rVol > 1.0 (OST Gate) ignored?"
+      "technical_drift": {
+        "check": { "field": "price_action", "operator": "WITHIN", "compare_to": "ENH_19_Volatility_Shield" },
+        "emit_false": { "tag": "TECHNICAL_DRIFT", "enh_ref": "ENH_19" }
+      },
+      "regulatory_blindspot": {
+        "check": { "field": "sizing_adjusted_for_legislative", "operator": "==", "value": true },
+        "emit_false": { "tag": "REGULATORY_BLINDSPOT", "enh_ref": "ENH_08" }
+      },
+      "liquidity_error": {
+        "check": { "field": "rvol_at_entry", "operator": ">", "threshold": "RVOL_OST_GATE" },
+        "emit_false": { "tag": "LIQUIDITY_ERROR_OST_GATE_IGNORED" }
+      }
     }
   },
   "context_write_protocol": {

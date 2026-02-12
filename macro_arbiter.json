@@ -1,7 +1,7 @@
 {
   "id": "MACRO_SENTINEL",
   "role": "Binary Risk-On / Risk-Off Override",
-  "version": "v1.1-Logic-Corrected",
+  "version": "v1.2-Structured-Logic",
   "behavior": {
     "no_persona": true,
     "non_voting_member": true,
@@ -18,9 +18,22 @@
     ]
   },
   "trigger_logic": {
-    "state_0_stasis": "INACTIVE - Monitoring background data streams.",
-    "state_1_flag": "IF shock_detected THEN RAISE_MACRO_FLAG.",
-    "state_2_veto": "IF shock_intensity > 8.0 THEN EXECUTE_HARD_VETO (Override Council)."
+    "state_0_stasis": {
+      "conditions": [],
+      "emit": { "status": "INACTIVE", "action": "Monitoring background data streams" }
+    },
+    "state_1_flag": {
+      "conditions": [
+        { "field": "shock_detected", "operator": "==", "value": true }
+      ],
+      "emit": { "status": "MACRO_FLAG", "action": "RAISE_MACRO_FLAG" }
+    },
+    "state_2_veto": {
+      "conditions": [
+        { "field": "shock_intensity", "operator": ">", "threshold": "SHOCK_ABORT_THRESHOLD" }
+      ],
+      "emit": { "status": "HARD_VETO", "action": "EXECUTE_HARD_VETO", "override": "Council" }
+    }
   },
   "required_output": {
     "condition": "ONLY OUTPUT IF STATE > 0",
