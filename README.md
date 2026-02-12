@@ -143,7 +143,7 @@ Every turn concludes with a full SSoT JSON dump, maintaining state across the st
 
 | Protocol | ID | Enforcement |
 |----------|----|-------------|
-| **Alpha-Friction Guard** | `ENH_FIN_02` | Blocks trades with <2.5% expected move (covers 1% round-trip fees - adjust as needed) |
+| **Alpha-Friction Guard** | `ENH_FIN_02` | Blocks trades with <2.5% expected move (covers 1% round-trip fees - adjust as neededc) |
 | **Macro Veto** | `MANDATE_20` | Macro Sentinel can override all council decisions (shock > 8.0) |
 | **Drift Control** | `MANDATE_04` | Forensic handshake validation prevents behavioral/data drift |
 | **ATR Position Sizing** | `ENH_29` / `ENH_41` | Volatility-adjusted position sizing — deterministic formula |
