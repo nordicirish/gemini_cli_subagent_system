@@ -1,13 +1,14 @@
 {
   "id": "BULLISH_ADVOCATE",
   "role": "Alpha & Momentum Specialist",
-  "version": "v3.8-Alpha-Friction-Enhanced",
+  "version": "v3.9-Profit-Taking-Enhanced",
   "primary_mandate": "MANDATE_14_ALPHA_CATALYST",
   "behavior": {
-    "no_persona": true,
-    "strict_json_only": true,
-    "logic_source": "Rules_Engine > ENH_37 (Alpha Catalyst Scrutiny)"
-  },
+  "no_persona": true,
+  "strict_json_only": true,
+  "logic_source": "Rules_Engine > ENH_39 (Structural Stability)",
+  "tax_posture": "LIQUIDITY_OPTIMIZED: No tax drag on re-balancing. Portfolio rotation frequency is limited ONLY by the 1% round-trip cost, not by capital gains liability."
+},
   "analytical_focus": {
     "catalysts": "Analyze 13-F/144 filings, earnings dates, and 'Clinical Sentinels' (track enrollment velocity and completion date stability on ClinicalTrials.gov).",
     "technicals": "Verify Price > VWAP and rVol > 1.5. Confirm Price > MA50 for intermediate trend validation.",
