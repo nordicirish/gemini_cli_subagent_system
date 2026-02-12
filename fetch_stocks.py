@@ -71,24 +71,24 @@ session.headers.update({
 
 class MarketDataCache:
     def __init__(self):
-        self.history = {}
-        self.technicals = {}
-        self.prices = {}
-        self.gaps = {}
-        self.vwaps = {}
-        self.volumes = {}
-        self.gex = {}
-        self.session = {}
-        self.session_liquidity = {}
-        self.pre_market_change = {}
-        self.after_hours_change = {}
-        self.overnight_return = {}
-        self.pre_market_price = {}
-        self.after_hours_price = {}
-        self.pre_market_volume = {}
-        self.after_hours_volume = {}
-        self.cycles = 0
-        self.vwap_pointer = 0
+        self.history: dict[str, pd.DataFrame] = {}
+        self.technicals: dict[str, dict] = {}
+        self.prices: dict[str, float] = {}
+        self.gaps: dict[str, float] = {}
+        self.vwaps: dict[str, float] = {}
+        self.volumes: dict[str, int] = {}
+        self.gex: dict[str, dict] = {}
+        self.session: dict[str, str] = {}
+        self.session_liquidity: dict[str, str] = {}
+        self.pre_market_change: dict[str, float] = {}
+        self.after_hours_change: dict[str, float] = {}
+        self.overnight_return: dict[str, float] = {}
+        self.pre_market_price: dict[str, float] = {}
+        self.after_hours_price: dict[str, float] = {}
+        self.pre_market_volume: dict[str, int] = {}
+        self.after_hours_volume: dict[str, int] = {}
+        self.cycles: int = 0
+        self.vwap_pointer: int = 0
 
     def clear(self):
         self.__init__()
@@ -426,7 +426,7 @@ def get_gex_profile(ticker_obj, spot_price):
 
         magnet_price = 0.0
         if strike_oi_map:
-            magnet_price = max(strike_oi_map, key=strike_oi_map.get)
+            magnet_price = max(strike_oi_map, key=lambda k: strike_oi_map.get(k, 0.0))
 
         # 1. Calc Current GEX and Net Delta (Inventory Velocity Delta)
         net_gex = 0.0
@@ -536,18 +536,26 @@ def update_history_and_technicals(symbol, t_obj):
     if not hist.empty:
         try:
             close = hist['Close']
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
 
             # --- SAFER SMA CHECKS ---
             sma_20 = to_float(close.rolling(20).mean().iloc[-1]) if len(close) >= 20 else None
             sma_50 = to_float(close.rolling(50).mean().iloc[-1]) if len(close) >= 50 else None
             sma_200 = to_float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else None
 
+            # --- Helper to safely get the last value from a Series or scalar ---
+            def _last(val):
+                if isinstance(val, (int, float, np.floating, np.integer)):
+                    return float(val)
+                return float(val.iloc[-1])
+
             # --- RSI (Wilder) ---
             delta = close.diff()
             gain = (delta.where(delta > 0, 0)).ewm(com=13, adjust=False).mean()
             loss = (-delta.where(delta < 0, 0)).ewm(com=13, adjust=False).mean()
             rs = gain / (loss + 1e-9)
-            rsi_val = (100 - (100 / (1 + rs))).iloc[-1]
+            rsi_val = _last(100 - (100 / (1 + rs)))
 
             # --- ATR (Wilder) ---
             tr = pd.concat([
@@ -556,8 +564,9 @@ def update_history_and_technicals(symbol, t_obj):
                 (hist['Low'] - close.shift(1)).abs()
             ], axis=1).max(axis=1)
 
-            atr = tr.ewm(alpha=1/14, adjust=False).mean().iloc[-1]
-            atr_pct = (atr / close.iloc[-1]) * 100
+            atr = _last(tr.ewm(alpha=1/14, adjust=False).mean())
+            last_close = _last(close)
+            atr_pct = (atr / last_close) * 100 if last_close != 0 else 0
 
             # --- Previous Regular Close ---
             last_reg_close = 0.0
@@ -568,7 +577,10 @@ def update_history_and_technicals(symbol, t_obj):
                     pass
 
             if last_reg_close == 0.0 and len(close) >= 2:
-                last_reg_close = to_float(close.iloc[-2])
+                if isinstance(close, (int, float, np.floating, np.integer)):
+                    last_reg_close = float(close)
+                else:
+                    last_reg_close = to_float(close.iloc[-2])
 
             if last_reg_close == 0.0:
                 alt_pc = get_previous_close(symbol)
@@ -582,7 +594,7 @@ def update_history_and_technicals(symbol, t_obj):
             if sma_50 is not None and sma_200 is not None:
                 trend_score += 1 if sma_50 > sma_200 else -1
             if sma_20 is not None:
-                trend_score += 1 if close.iloc[-1] > sma_20 else -1
+                trend_score += 1 if last_close > sma_20 else -1
 
             cache.technicals[symbol] = {
                 "SMA_20": sma_20,
@@ -715,7 +727,9 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
 
 def calculate_rvol(symbol):
     hist = cache.history.get(symbol)
-    if hist is None or hist.empty or 'Volume' not in hist.columns:
+    if hist is None:
+        return 1.0
+    if hist.empty or 'Volume' not in hist.columns:
         return 1.0
 
     avg_vol = hist['Volume'].tail(20).mean()
@@ -828,6 +842,38 @@ def run_daemon():
         print(f"Loading {sym}...", end="\r")
         update_history_and_technicals(sym, obj)
 
+    # Initial GEX population — uses batch quotes for spot price, then computes
+    # GEX per ticker with a throttled delay to avoid Yahoo Finance rate limits.
+    print(f"{YELLOW}Loading initial GEX profiles...{RESET}")
+    status = get_market_status()
+    boot_quotes = get_batch_quotes(ALL_TICKERS)
+    for idx, sym in enumerate(ALL_TICKERS):
+        obj = tickers_obj[sym]
+        # Get an initial price from batch quotes
+        q = boot_quotes.get(sym, {})
+        spot = None
+        if status == "PRE-MARKET":
+            spot = q.get('preMarketPrice')
+        elif status == "AFTER-HOURS":
+            spot = q.get('postMarketPrice')
+        if not spot:
+            spot = q.get('regularMarketPrice')
+        if not spot:
+            spot = cache.prices.get(sym)
+        if spot and float(spot) > 0:
+            spot = float(spot)
+            cache.prices[sym] = spot
+            print(f"  GEX [{idx+1}/{len(ALL_TICKERS)}] {sym}...", end="\r")
+            cache.gex[sym] = get_gex_profile(obj, spot)
+            t_time.sleep(2)  # throttle to avoid API rate limits
+        else:
+            cache.gex[sym] = {
+                'net_gex': 0.0, 'flip_price': 0.0,
+                'inventory_velocity_delta': 0.0, 'gex_slope': 0.0,
+                'flip_proximity_percent': 0.0, 'strike_oi_magnet': 0.0
+            }
+    print(f"{GREEN}GEX profiles loaded.{RESET}                    ")
+
     try:
         while True:
             os.system('cls' if os.name == 'nt' else 'clear')
@@ -838,7 +884,7 @@ def run_daemon():
             cache.cycles += 1
             is_heavy = (cache.cycles % HISTORY_REFRESH_CYCLES == 0)
 
-            BATCH_SIZE = 8
+            BATCH_SIZE = 10
 
             # Dynamic Table Width Calculation
             try:
@@ -860,10 +906,10 @@ def run_daemon():
             w_scr = max(10, avail - used)
             table_width = used + w_scr + 8
 
-            pointer = cache.vwap_pointer
+            pointer = int(cache.vwap_pointer)
             if pointer >= len(ALL_TICKERS):
                 pointer = 0
-            batch = ALL_TICKERS[pointer: pointer + BATCH_SIZE]
+            batch = ALL_TICKERS[pointer: pointer + BATCH_SIZE]  # type: ignore[call-overload]
             cache.vwap_pointer = (pointer + BATCH_SIZE) % len(ALL_TICKERS)
 
             status_color = GREEN
@@ -879,9 +925,12 @@ def run_daemon():
             else:
                 mode_str = f"Tick Update (VWAP Batch: {batch[0]}...)"
 
+            remaining_tickers = [s for s in ALL_TICKERS if s not in batch]
             print(f"\n{BOLD}GEM DAEMON COMMANDER (v16.0 - Hardened + Trend){RESET}")
             print(f"Time: {ny_now.strftime('%H:%M:%S')} | Status: {status_color}{status}{RESET}")
             print(f"Mode: {mode_str}")
+            if remaining_tickers and not is_heavy:
+                print(f"{YELLOW}⏳ VWAP batch: [{', '.join(batch)}] fresh | [{', '.join(remaining_tickers)}] cached from prior cycle{RESET}")
 
             batch_quotes = get_batch_quotes(ALL_TICKERS)
 
@@ -904,8 +953,8 @@ def run_daemon():
             data = []
 
             macro_state = {
-                'IEF': {'price': 0, 'gap': 0, 'trend': 'FLAT'},
-                'VXX': {'price': 0, 'gap': 0}
+                'IEF': {'price': 0.0, 'gap': 0.0, 'trend': 'FLAT'},
+                'VXX': {'price': 0.0, 'gap': 0.0}
             }
 
             for i, sym in enumerate(ALL_TICKERS):
@@ -938,8 +987,8 @@ def run_daemon():
                             'strike_oi_magnet': 0.0
                         }
 
-                p = cache.prices.get(sym, 0)
-                gap = cache.gaps.get(sym, 0)
+                p = float(cache.prices.get(sym, 0))
+                gap = float(cache.gaps.get(sym, 0))
                 vol = cache.volumes.get(sym, 0)
                 vwap = cache.vwaps.get(sym, 0)
                 techs = cache.technicals.get(sym, {})
@@ -1094,16 +1143,20 @@ def run_daemon():
 
             print("-" * table_width)
             ief = macro_state['IEF']
-            if ief['gap'] < -0.15:
-                print(f"   >>> BOND ALERT:  7-10Y Bond Price {ief['price']:.2f} ({ief['gap']:+.2f}%) {RED}[YIELDS RISING - RISK]{RESET}")
+            ief_gap = float(ief['gap'])
+            ief_price = float(ief['price'])
+            if ief_gap < -0.15:
+                print(f"   >>> BOND ALERT:  7-10Y Bond Price {ief_price:.2f} ({ief_gap:+.2f}%) {RED}[YIELDS RISING - RISK]{RESET}")
             else:
-                print(f"   >>> BOND STATUS: 7-10Y Bond Price {ief['price']:.2f} ({ief['gap']:+.2f}%) {GREEN}[YIELDS STABLE]{RESET}")
+                print(f"   >>> BOND STATUS: 7-10Y Bond Price {ief_price:.2f} ({ief_gap:+.2f}%) {GREEN}[YIELDS STABLE]{RESET}")
 
             vxx = macro_state['VXX']
-            if vxx['price'] > 20.0 and vxx['gap'] > 2.0:
-                print(f"   >>> FEAR ALERT:  VXX (Vol) is {vxx['price']:.2f} (Gap {vxx['gap']:+.2f}%) {RED}[CAUTION]{RESET}")
+            vxx_price = float(vxx['price'])
+            vxx_gap = float(vxx['gap'])
+            if vxx_price > 20.0 and vxx_gap > 2.0:
+                print(f"   >>> FEAR ALERT:  VXX (Vol) is {vxx_price:.2f} (Gap {vxx_gap:+.2f}%) {RED}[CAUTION]{RESET}")
             else:
-                print(f"   >>> FEAR STATUS: VXX (Vol) is {vxx['price']:.2f} (Gap {vxx['gap']:+.2f}%) {GREEN}[STABLE]{RESET}")
+                print(f"   >>> FEAR STATUS: VXX (Vol) is {vxx_price:.2f} (Gap {vxx_gap:+.2f}%) {GREEN}[STABLE]{RESET}")
 
             sleep_needed = REFRESH_RATE_SECONDS
             print("")
@@ -1115,8 +1168,8 @@ def run_daemon():
                     break
                 print(f"\r\033[?25l{CYAN}Next Update in {int(remaining)}s... Press 'c' to copy JSON, 'r' to reset cache.{RESET}    ", end="", flush=True)
 
-                if msvcrt and msvcrt.kbhit():
-                    key = msvcrt.getch().decode('utf-8').lower()
+                if msvcrt and msvcrt.kbhit():  # type: ignore[union-attr]
+                    key = msvcrt.getch().decode('utf-8').lower()  # type: ignore[union-attr]
                     if key == 'r':
                         cache.clear()
                         print(f"\n{YELLOW}Cache cleared! Forcing heavy refresh...{RESET}")
