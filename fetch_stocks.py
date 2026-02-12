@@ -587,12 +587,12 @@ def update_history_and_technicals(symbol, t_obj):
                 if alt_pc:
                     last_reg_close = alt_pc
 
-            # --- Trend Score (Improved) ---
+            # --- Trend Score (Weighted — SMA200 cross is ±2) ---
             trend_score = 0
             if sma_20 is not None and sma_50 is not None:
                 trend_score += 1 if sma_20 > sma_50 else -1
             if sma_50 is not None and sma_200 is not None:
-                trend_score += 1 if sma_50 > sma_200 else -1
+                trend_score += 2 if sma_50 > sma_200 else -2  # Golden/Death cross weighted 2x
             if sma_20 is not None:
                 trend_score += 1 if last_close > sma_20 else -1
 
@@ -783,22 +783,29 @@ def calculate_score(symbol):
     note = ""
 
     # -----------------------------
-    # 1. TREND SCORE (single use)
+    # 1. TREND SCORE (weighted — SMA200 cross is ±2)
+    # Range: -4 to +4
     # -----------------------------
     trend_component = t.get("Trend_Score", 0)
     score += trend_component
 
     # -----------------------------
-    # 2. RSI COMPONENT
+    # 2. RSI COMPONENT (tiered)
+    # Range: -2 to +2
     # -----------------------------
     rsi = t.get("RSI", 50)
-    if rsi > 60:
+    if rsi > 70:
+        score += 2
+    elif rsi > 60:
         score += 1
+    elif rsi < 30:
+        score -= 2
     elif rsi < 40:
         score -= 1
 
     # -----------------------------
-    # 3. VWAP COMPONENT (fixed)
+    # 3. VWAP COMPONENT (symmetric)
+    # Range: -2 to +2
     # -----------------------------
     if v > 0:
         dist = distance_from_vwap(symbol)      # % distance
@@ -806,27 +813,66 @@ def calculate_score(symbol):
 
         if dist > 0:
             score += 1
+            # HV BREAKOUT: strong move above VWAP with volume confirmation
+            if dist > atr * 0.25:
+                score += 1
+                note = "(HV BREAKOUT)"
         else:
-            # Always penalize price < VWAP
             score -= 1
-
-            # HV BREAK: stronger penalty
+            # HV BREAK: strong move below VWAP
             if abs(dist) > atr * 0.25:
                 score -= 1
                 note = "(HV BREAK)"
 
     # -----------------------------
-    # 4. RVOL COMPONENT
+    # 4. RVOL COMPONENT (direction-aware)
+    # Range: -1 to +1
     # -----------------------------
     rvol = calculate_rvol(symbol)
+    gap = cache.gaps.get(symbol, 0)
     if rvol > 2:
-        score += 1
+        # High volume confirms the direction of the move
+        if gap >= 0:
+            score += 1  # High vol on up-move = bullish
+        else:
+            score -= 1  # High vol on down-move = bearish (distribution)
     elif rvol < 0.5:
+        score -= 1  # Low volume = lack of conviction
+
+    # -----------------------------
+    # 5. GAP% COMPONENT (new)
+    # Range: -1 to +1
+    # -----------------------------
+    if gap > 1.0:
+        score += 1
+    elif gap < -1.0:
         score -= 1
 
     # -----------------------------
-    # 5. INVERSE MACRO (apply last)
+    # 6. GEX REGIME MODIFIER (new)
+    # Range: -1 to +1
     # -----------------------------
+    gex_data = cache.gex.get(symbol, {})
+    if isinstance(gex_data, dict):
+        net_gex = gex_data.get('net_gex', 0.0)
+        flip_prox = gex_data.get('flip_proximity_percent', 0.0)
+        if net_gex > 0:
+            score += 1  # Positive gamma = supportive (dealers buy dips, sell rips)
+        elif net_gex < 0:
+            score -= 1  # Negative gamma = amplifies moves (dealers sell dips, buy rips)
+
+    # -----------------------------
+    # 7. SESSION LIQUIDITY DISCOUNT (new)
+    # Reduces confidence during low-liquidity sessions
+    # -----------------------------
+    session = cache.session.get(symbol, "OPEN")
+    if session in ("PRE-MARKET", "AFTER-HOURS"):
+        score = round(score * 0.7)
+        if note:
+            note += " [LIQ⚠️]"
+        else:
+            note = "[LIQ⚠️]"
+
     return score, note
 
 
@@ -834,7 +880,7 @@ def calculate_score(symbol):
 # MAIN LOOP
 # -----------------------------
 def run_daemon():
-    print(f"{CYAN}Initializing GEM Daemon v16.0 (Data Hardened + Trend)...{RESET}")
+    print(f"{CYAN}Initializing GEM Dashboard v16.0 (Data Hardened + Trend)...{RESET}")
     tickers_obj = {sym: yf.Ticker(sym) for sym in ALL_TICKERS}
 
     print(f"{YELLOW}Performing initial heavy fetch...{RESET}")
@@ -926,7 +972,7 @@ def run_daemon():
                 mode_str = f"Tick Update (VWAP Batch: {batch[0]}...)"
 
             remaining_tickers = [s for s in ALL_TICKERS if s not in batch]
-            print(f"\n{BOLD}GEM DAEMON COMMANDER (v16.0 - Hardened + Trend){RESET}")
+            print(f"\n{BOLD}GEM Dashboard (v16.1 - Hardened + Trend){RESET}")
             print(f"Time: {ny_now.strftime('%H:%M:%S')} | Status: {status_color}{status}{RESET}")
             print(f"Mode: {mode_str}")
             if remaining_tickers and not is_heavy:
@@ -1028,11 +1074,11 @@ def run_daemon():
                 else:
                     rsi_cell = f"{WHITE}{rsi_val:<{w_rsi}}{R_RST}"
 
-                # TREND LABEL (color-coded)
+                # TREND LABEL (color-coded — updated thresholds for weighted SMA200)
                 ts = techs.get("Trend_Score", 0)
-                if ts >= 2:
+                if ts >= 3:
                     trend_label = f"{GREEN}{'UP':<{w_trd}}{R_RST}"
-                elif ts <= -2:
+                elif ts <= -3:
                     trend_label = f"{RED}{'DOWN':<{w_trd}}{R_RST}"
                 else:
                     trend_label = f"{YELLOW}{'FLAT':<{w_trd}}{R_RST}"
@@ -1041,17 +1087,17 @@ def run_daemon():
                 if sym not in INVERSE_MACRO and vwap > 0 and p < vwap and score > 0:
                     vwap_warn = f"{RED}(⚠️ < VWAP){R_RST}"
 
-                if score >= 3:
+                if score >= 5:
                     score_disp = f"{GREEN}+{score} (BULL){R_RST} {vwap_warn}"
-                elif score <= -3:
+                elif score <= -5:
                     score_disp = f"{RED}{score} (BEAR){R_RST}{RED}{note}{R_RST}"
                 else:
                     score_disp = f"{YELLOW}{score:+}{R_RST}{YELLOW}{note}{R_RST}"
 
                 if sym in INVERSE_MACRO:
-                    if score <= -2:
+                    if score <= -3:
                         score_disp = f"{GREEN}{score} (SAFE){R_RST}"
-                    elif score >= 2:
+                    elif score >= 3:
                         score_disp = f"{RED}+{score} (RISK){R_RST}"
 
                 atr_val = techs.get('ATR_Pct', 0)
@@ -1135,7 +1181,7 @@ def run_daemon():
                     "ma_200": float(techs.get("SMA_200") or 0.0),
                     "score": int(score),
                     "signal": classify_signal(sym),
-                    "trend": "UP" if ts >= 2 else "DOWN" if ts <= -2 else "FLAT",
+                    "trend": "UP" if ts >= 3 else "DOWN" if ts <= -3 else "FLAT",
                     "note": note.strip()
                 })
 
