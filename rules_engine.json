@@ -1,6 +1,6 @@
 {
   "role": "GEM_Rules_Engine",
-  "version": "v3.94-Structured-Logic",
+  "version": "v3.97-ONDS-Warrant-Dilution",
   "description": "Master Technical Contract & Schema Validator. Includes Nordea OST Alpha-Friction Logic.",
   "behavior": {
     "strict_json_only": true,
@@ -50,7 +50,8 @@
     "ENH_42: Trade State Emission",
     "ENH_43: Correlation Advisory Guard",
     "ENH_44: Context-SSoT Handshake Protocol",
-    "ENH_45: Macro Shock & Binary Veto Protocol"
+    "ENH_45: Macro Shock & Binary Veto Protocol",
+    "ENH_46: Temporal Institutional Rebalancing Sentinel"
   ],
   "mandate_registry": [
     "MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)",
@@ -193,9 +194,31 @@
         {
           "gate_id": "ENH_FIN_02",
           "name": "Alpha-Friction Protocol",
-          "instruction": "Friction Guard: 1% Round-Trip + Re-entry Risk implies a 2.5% minimum viable move. Prevent churn.",
-          "logic": "IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < 0.025) AND Hard_Catalyst == NONE THEN OVERRIDE_ACTION = HOLD",
-          "rationale": "Do not sell for a <2.5% drop when round-trip cost is ~1.5-2.0%. Wait for structural break or 2.5%+ extension."
+          "instruction": "Friction Guard: 1% Round-Trip + Re-entry Risk implies a 2.5% minimum viable move. Prevent churn. EXCEPTION: Bypass this gate when volatility_override is TRUE (protective exits).",
+          "logic": "IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < 0.025) AND Hard_Catalyst == NONE AND volatility_override == FALSE THEN OVERRIDE_ACTION = HOLD",
+          "rationale": "Do not sell for a <2.5% drop when round-trip cost is ~1%. But DO allow exits during volatile breakdowns where losses are real and accelerating.",
+          "volatility_override": {
+            "description": "Protective Exit Override — bypasses friction gate during active breakdowns to prevent holding through avoidable losses.",
+            "conditions": [
+              {
+                "field": "atr_percent",
+                "operator": ">",
+                "threshold": "PROTECTIVE_EXIT_ATR"
+              },
+              {
+                "field": "session_change_pct",
+                "operator": "<",
+                "threshold": "PROTECTIVE_EXIT_SESSION_DROP"
+              },
+              {
+                "field": "rvol",
+                "operator": ">",
+                "threshold": "RVOL_CONFIRMATION"
+              }
+            ],
+            "logic": "ANY 2 of 3",
+            "effect": "SET volatility_override = TRUE — friction gate bypassed, exit treated as protective, not churn"
+          }
         },
         {
           "gate_id": "NDS_01",
@@ -538,6 +561,39 @@
         "IF shock_intensity >= 5.0 -> SET alpha_sentry_mode = 'CAUTION'",
         "IF shock_intensity >= 8.0 -> SET alpha_sentry_mode = 'ABORT' AND trade_state = 'NO_TRADE'"
       ]
+    },
+    {
+      "id": "ENH_46",
+      "title": "Temporal Institutional Rebalancing Sentinel",
+      "version": "1.0",
+      "status": "ACTIVE",
+      "instruction": "Monitors seasonal institutional flow patterns to prevent misinterpreting rebalancing volatility as fundamental breakdown. Distinguishes mechanistic flows (forced selling) from fundamental catalyst decay.",
+      "parameters": {
+        "trigger_type": "Temporal_Window_Alignment",
+        "enforcement_level": "MANDATE_04_DRIFT_CONTROL"
+      },
+      "temporal_logic_gates": {
+        "ANNUAL_RESET": {
+          "window": "Reference Rules_Engine > temporal_events > ANNUAL_RESET_WINDOW",
+          "action": "Flag_Mandatory_SSoT_Realignment",
+          "description": "Primary institutional reset; high conviction for year-ahead capital allocation."
+        },
+        "MID_QUARTER_REVIEW": {
+          "window": "Reference Rules_Engine > temporal_events > MID_QUARTER_REVIEW_WINDOWS",
+          "action": "Flag_Tactical_Trimming_Risk",
+          "description": "Secondary review window; often results in trimming growth winners to buy laggards/bonds."
+        },
+        "QUARTERLY_ROLL": {
+          "window": "Reference Rules_Engine > temporal_events > QUARTERLY_ROLL_WINDOWS",
+          "action": "Engage_VWAP_Execution_Guard",
+          "description": "Index rebalancing and futures rolls; peak liquidity and structural volatility."
+        }
+      },
+      "execution_constraints": {
+        "drift_threshold": "Reference Rules_Engine > system_thresholds > REBALANCING_DRIFT_THRESHOLD",
+        "friction_gate": "ENH_FIN_02",
+        "behavioral_directive": "Distinguish mechanistic flows (forced selling) from fundamental catalyst decay."
+      }
     }
   ],
   "global_logic_gates": {
@@ -804,9 +860,9 @@
         "enh_ref": "ENH_08"
       },
       {
-        "condition": "Trade_State == EXIT AND Drawdown_Gap < 2.5%",
+        "condition": "Trade_State == EXIT AND Drawdown_Gap < 2.5% AND volatility_override == FALSE",
         "deduction": 30,
-        "label": "Alpha-Friction Violation",
+        "label": "Alpha-Friction Violation (churn only — bypassed during Protective Exit Override)",
         "enh_ref": "ENH_FIN_02"
       },
       {
@@ -1035,6 +1091,33 @@
         "execution",
         "ENH_10"
       ]
+    },
+    "REBALANCING_DRIFT_THRESHOLD": {
+      "value": 0.05,
+      "usage": "Drift threshold for institutional rebalancing windows (ENH_46)",
+      "used_by": [
+        "ENH_46",
+        "post_trade_review",
+        "research"
+      ]
+    },
+    "PROTECTIVE_EXIT_ATR": {
+      "value": 6.0,
+      "usage": "ATR% threshold for Protective Exit Override — bypass friction gate during volatile breakdowns",
+      "used_by": [
+        "ENH_FIN_02",
+        "red_team_gem",
+        "execution"
+      ]
+    },
+    "PROTECTIVE_EXIT_SESSION_DROP": {
+      "value": -3.0,
+      "usage": "Intraday session drop % triggering Protective Exit Override",
+      "used_by": [
+        "ENH_FIN_02",
+        "red_team_gem",
+        "execution"
+      ]
     }
   },
   "basket_definition": {
@@ -1091,11 +1174,51 @@
         "sentiment_engine"
       ]
     },
+    "ONDS_WARRANT_DILUTION": {
+      "value": "MONITOR_DAILY",
+      "usage": "Mandatory forensic check for daily structural overhead and share-count expansion resulting from the $1B (Jan 2026) warrant tranche (121.58M common units).",
+      "used_by": [
+        "structural_engine",
+        "technical_validator"
+      ]
+    },
     "RCAT_INNOVATION_DAY": {
       "value": null,
-      "usage": "RCAT Innovation Day date (set when announced)",
+      "usage": "RCAT Innovation Day date (February 27, 2026, at 9:30 AM EST.)",
       "used_by": [
         "sentiment_engine"
+      ]
+    },
+    "ANNUAL_RESET_WINDOW": {
+      "value": "January 01 - January 15",
+      "usage": "Primary institutional reset window — year-ahead capital allocation",
+      "used_by": [
+        "ENH_46",
+        "research",
+        "post_trade_review"
+      ]
+    },
+    "MID_QUARTER_REVIEW_WINDOWS": {
+      "value": [
+        "February 10 - February 20",
+        "May 10 - May 20",
+        "August 10 - August 20",
+        "November 10 - November 20"
+      ],
+      "usage": "Secondary tactical review windows — trimming growth winners for laggards/bonds",
+      "used_by": [
+        "ENH_46",
+        "research",
+        "post_trade_review"
+      ]
+    },
+    "QUARTERLY_ROLL_WINDOWS": {
+      "value": "Final 5 Trading Days of March, June, September, December",
+      "usage": "Index rebalancing and futures rolls — peak structural volatility",
+      "used_by": [
+        "ENH_46",
+        "execution",
+        "research"
       ]
     }
   }

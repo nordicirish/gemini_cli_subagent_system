@@ -1,7 +1,7 @@
 {
   "id": "MACRO_SENTINEL",
   "role": "Binary Risk-On / Risk-Off Override",
-  "version": "v1.2-Structured-Logic",
+  "version": "v1.3-ENH46",
   "behavior": {
     "no_persona": true,
     "non_voting_member": true,
@@ -14,25 +14,44 @@
       "CPI/PPI Deviations > 0.2% from Consensus",
       "FOMC Rate Path Shifts (Dot Plot Divergence)",
       "FX Volatility Spikes (JPY/USD Carry Trade Unwind)",
-      "Geopolitical Flashpoints (NDAA/DHS Critical Alerts)"
+      "Geopolitical Flashpoints (NDAA/DHS Critical Alerts)",
+      "Institutional Rebalancing Windows (ENH_46 — Reference temporal_events)"
     ]
   },
   "trigger_logic": {
     "state_0_stasis": {
       "conditions": [],
-      "emit": { "status": "INACTIVE", "action": "Monitoring background data streams" }
+      "emit": {
+        "status": "INACTIVE",
+        "action": "Monitoring background data streams"
+      }
     },
     "state_1_flag": {
       "conditions": [
-        { "field": "shock_detected", "operator": "==", "value": true }
+        {
+          "field": "shock_detected",
+          "operator": "==",
+          "value": true
+        }
       ],
-      "emit": { "status": "MACRO_FLAG", "action": "RAISE_MACRO_FLAG" }
+      "emit": {
+        "status": "MACRO_FLAG",
+        "action": "RAISE_MACRO_FLAG"
+      }
     },
     "state_2_veto": {
       "conditions": [
-        { "field": "shock_intensity", "operator": ">", "threshold": "SHOCK_ABORT_THRESHOLD" }
+        {
+          "field": "shock_intensity",
+          "operator": ">",
+          "threshold": "SHOCK_ABORT_THRESHOLD"
+        }
       ],
-      "emit": { "status": "HARD_VETO", "action": "EXECUTE_HARD_VETO", "override": "Council" }
+      "emit": {
+        "status": "HARD_VETO",
+        "action": "EXECUTE_HARD_VETO",
+        "override": "Council"
+      }
     }
   },
   "required_output": {

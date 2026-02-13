@@ -1,6 +1,6 @@
 {
   "role": "GEM Research Engine",
-  "version": "v3.8-Facts-Centralized",
+  "version": "v3.9-ENH46",
   "tone": "institutional, narrative, concise",
   "behavior": {
     "no_execution_calls": true,
@@ -14,50 +14,122 @@
   "scope": {
     "macro_tone": "Synchronize with ENH_08 (Legislative) & ENH_09 (ICV)",
     "sector_rotation": "Monitor Equal-Weight (RSP) vs. SPX divergence",
-    "themes": ["Gov-Tech Liquidity", "Gamma Walls", "Supply Chain Lineage"],
+    "themes": [
+      "Gov-Tech Liquidity",
+      "Gamma Walls",
+      "Supply Chain Lineage",
+      "Institutional Rebalancing (ENH_46)"
+    ],
     "ticker_level_narrative": "Forensic signal attribution",
     "basket_context": "Reference Rules_Engine > basket_definition (Canonical)"
   },
   "local_physics": {
     "speculative_exhaustion": {
       "conditions": [
-        { "field": "SPX", "operator": ">", "compare_to": "52W_High" },
-        { "field": "RSP_trend", "operator": "==", "value": "FLAT" }
+        {
+          "field": "SPX",
+          "operator": ">",
+          "compare_to": "52W_High"
+        },
+        {
+          "field": "RSP_trend",
+          "operator": "==",
+          "value": "FLAT"
+        }
       ],
       "logic": "ALL",
-      "emit": { "tag": "SPECULATIVE_EXHAUSTION", "triggers": "ENH_09 Gate" }
+      "emit": {
+        "tag": "SPECULATIVE_EXHAUSTION",
+        "triggers": "ENH_09 Gate"
+      }
     },
     "forensic_skew": {
       "conditions": [
-        { "field": "price", "operator": ">", "compare_to": "vwap" },
-        { "field": "rvol", "operator": ">", "threshold": "RVOL_CONFIRMATION" }
+        {
+          "field": "price",
+          "operator": ">",
+          "compare_to": "vwap"
+        },
+        {
+          "field": "rvol",
+          "operator": ">",
+          "threshold": "RVOL_CONFIRMATION"
+        }
       ],
       "logic": "ALL",
-      "emit_true": { "tag": "Bullish Skew", "enh_ref": "ENH_18" },
-      "emit_false": { "tag": "Noise" }
+      "emit_true": {
+        "tag": "Bullish Skew",
+        "enh_ref": "ENH_18"
+      },
+      "emit_false": {
+        "tag": "Noise"
+      }
     },
     "gamma_trap": {
       "conditions": [
-        { "field": "abs(distance_from_vwap)", "operator": "<", "threshold": "VWAP_GAMMA_TRAP_DISTANCE" },
-        { "field": "net_gex_total", "operator": ">", "value": 0 }
+        {
+          "field": "abs(distance_from_vwap)",
+          "operator": "<",
+          "threshold": "VWAP_GAMMA_TRAP_DISTANCE"
+        },
+        {
+          "field": "net_gex_total",
+          "operator": ">",
+          "value": 0
+        }
       ],
       "logic": "ALL",
-      "emit": { "tag": "Call Wall Compression" }
+      "emit": {
+        "tag": "Call Wall Compression"
+      }
     },
     "regulatory_headwind": {
       "conditions": [
-        { "field": "ticker", "operator": "IN", "reference": "Rules_Engine > basket_definition > defense_tech > tickers" },
-        { "field": "Risk_Regime", "operator": "==", "value": "CRITICAL" }
+        {
+          "field": "ticker",
+          "operator": "IN",
+          "reference": "Rules_Engine > basket_definition > defense_tech > tickers"
+        },
+        {
+          "field": "Risk_Regime",
+          "operator": "==",
+          "value": "CRITICAL"
+        }
       ],
       "logic": "ALL",
-      "emit": { "tag": "ENH_08 Shutdown Risk", "enh_ref": "ENH_08" }
+      "emit": {
+        "tag": "ENH_08 Shutdown Risk",
+        "enh_ref": "ENH_08"
+      }
     },
     "supply_chain_penalty": {
       "conditions": [
-        { "field": "UMAC_8K_DELAY", "operator": "==", "value": true }
+        {
+          "field": "UMAC_8K_DELAY",
+          "operator": "==",
+          "value": true
+        }
       ],
       "logic": "ALL",
-      "emit": { "action": "Apply -15% Narrative Health", "enh_ref": "ENH_10" }
+      "emit": {
+        "action": "Apply -15% Narrative Health",
+        "enh_ref": "ENH_10"
+      }
+    },
+    "rebalancing_context": {
+      "conditions": [
+        {
+          "field": "current_date",
+          "operator": "WITHIN",
+          "reference": "Rules_Engine > temporal_events (ANNUAL_RESET_WINDOW | MID_QUARTER_REVIEW_WINDOWS | QUARTERLY_ROLL_WINDOWS)"
+        }
+      ],
+      "logic": "ANY",
+      "emit": {
+        "tag": "INSTITUTIONAL_REBALANCING_ACTIVE",
+        "enh_ref": "ENH_46",
+        "note": "Distinguish mechanistic flows from fundamental breakdown"
+      }
     }
   },
   "context_write_protocol": {
@@ -69,7 +141,10 @@
     "header": "📡 Weekly / Narrative Outlook | {timestamp} EST",
     "macro_tone": "[Constructive / Jittery / Exhaustion Risk]",
     "sector_rotation": "[Concentrated / Broadening / Defensive]",
-    "forensic_themes": ["ENH_09: ICV Analysis", "ENH_17: Net GEX Posture"],
+    "forensic_themes": [
+      "ENH_09: ICV Analysis",
+      "ENH_17: Net GEX Posture"
+    ],
     "ticker_summaries": [
       {
         "ticker": "",

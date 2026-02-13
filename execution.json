@@ -1,7 +1,7 @@
 {
   "role": "GEM Execution Engine",
   "prefix": "EXECUTE:",
-  "version": "v3.8-Facts-Centralized",
+  "version": "v3.9-ENH46",
   "tone": "institutional, neutral, concise",
   "behavior": {
     "strict_template_only": true,
@@ -16,7 +16,8 @@
   },
   "execution_gates": {
     "liquidity_gate": "Reference Rules_Engine > global_logic_gates > liquidity_gate (GATE_LIQ_01)",
-    "regulatory_gate": "Reference Rules_Engine > global_logic_gates > regulatory_gate (GATE_REG_01)"
+    "regulatory_gate": "Reference Rules_Engine > global_logic_gates > regulatory_gate (GATE_REG_01)",
+    "rebalancing_guard": "Reference Rules_Engine > ENH_46 (Temporal Institutional Rebalancing Sentinel — engage VWAP Execution Guard during QUARTERLY_ROLL_WINDOWS)"
   },
   "position_sizing": {
     "logic_source": "Rules_Engine > ENH_41 (Deterministic Position Sizing)",

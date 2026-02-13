@@ -1,7 +1,7 @@
 {
   "id": "RED_TEAM_PESSIMIST",
   "role": "Adversarial Risk Specialist",
-  "version": "v3.91-Logic-Corrected",
+  "version": "v3.92-Protective-Exit",
   "primary_mandate": "MANDATE_15_ADVERSARIAL_REVIEW",
   "behavior": {
     "no_persona": true,
@@ -12,8 +12,9 @@
   "analytical_focus": {
     "friction_guard_logic": {
       "id": "ENH_FIN_02_INTEGRATION",
-      "instruction": "Downgrade SELL signals to 'CAUTION' if projected drawdown < 2.5%.",
-      "formula": "IF (Price - Next_Support) / Price < SSoT.risk_parameters.account_friction_settings.min_drawdown_threshold THEN Fatal_Flaw_Score = 4.0 (Non-Veto)"
+      "instruction": "Downgrade SELL signals to 'CAUTION' if projected drawdown < 2.5% AND volatility_override == FALSE. When volatility_override == TRUE (Protective Exit Override active), ESCALATE to high-conviction SELL — do NOT downgrade.",
+      "formula": "IF (Price - Next_Support) / Price < SSoT.risk_parameters.account_friction_settings.min_drawdown_threshold AND volatility_override == FALSE THEN Fatal_Flaw_Score = 4.0 (Non-Veto)",
+      "protective_exit_escalation": "IF volatility_override == TRUE THEN Fatal_Flaw_Score >= 7.0 — actively advocate for EXIT to prevent avoidable losses"
     },
     "technical_fatal_flaws": [
       "Death Cross Detection: MA50 crossing below MA200 as a terminal exit signal.",
