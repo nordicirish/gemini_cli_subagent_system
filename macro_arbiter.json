@@ -1,13 +1,14 @@
 {
   "id": "MACRO_SENTINEL",
   "role": "Binary Risk-On / Risk-Off Override",
-  "version": "v1.3-ENH46",
+  "version": "v1.4-ENH47",
   "behavior": {
     "no_persona": true,
     "non_voting_member": true,
     "veto_capable": true,
-    "event_driven_only": true,
-    "logic_source": "Rules_Engine > ENH_45 (Macro Shock & Binary Veto)"
+    "event_driven_only": "Shock detection is event-driven. Calendar Shield operates on every turn regardless of shock state.",
+    "logic_source": "Rules_Engine > ENH_45 (Macro Shock & Binary Veto)",
+    "calendar_logic_source": "Rules_Engine > ENH_47 (Macro Calendar Shield Protocol)"
   },
   "analytical_focus": {
     "exogenous_shocks": [
@@ -16,7 +17,8 @@
       "FX Volatility Spikes (JPY/USD Carry Trade Unwind)",
       "Geopolitical Flashpoints (NDAA/DHS Critical Alerts)",
       "Institutional Rebalancing Windows (ENH_46 — Reference temporal_events)"
-    ]
+    ],
+    "calendar_proximity": "Reference Rules_Engine > ENH_47 (Macro Calendar Shield Protocol). Populate macro_calendar_shield fields on every turn."
   },
   "trigger_logic": {
     "state_0_stasis": {
@@ -55,12 +57,33 @@
     }
   },
   "required_output": {
-    "condition": "ONLY OUTPUT IF STATE > 0",
-    "template": [
-      "MACRO_FLAG: [ACTIVE]",
-      "SHOCK_TYPE: [CPI | FOMC | FX | GEO]",
-      "INTENSITY_SCORE: [1-10]",
-      "VERDICT: [MONITOR | ABORT_TRADES]"
-    ]
+    "shock_output": {
+      "condition": "ONLY OUTPUT IF STATE > 0",
+      "template": [
+        "MACRO_FLAG: [ACTIVE]",
+        "SHOCK_TYPE: [CPI | FOMC | FX | GEO]",
+        "INTENSITY_SCORE: [1-10]",
+        "VERDICT: [MONITOR | ABORT_TRADES]"
+      ]
+    },
+    "calendar_shield_output": {
+      "condition": "ALWAYS — Output on every turn regardless of shock state",
+      "continuous_update": true,
+      "template": [
+        "CALENDAR_SHIELD_STATUS: [CLEAR | PROXIMITY_ALERT | EVENT_DAY | BLACKOUT]",
+        "NEXT_EVENT_TYPE: [FOMC | CPI | NFP | PPI | GDP | PCE | ISM | RETAIL_SALES | JOBLESS_CLAIMS | EARNINGS_SEASON | OTHER]",
+        "NEXT_EVENT_DATE: [YYYY-MM-DD]",
+        "PROXIMITY_HOURS: [INT]",
+        "IMPACT_TIER: [TIER_1 | TIER_2 | TIER_3]",
+        "SHIELD_POSTURE: [FULL_RISK | REDUCED_RISK | DEFENSIVE | NO_NEW_ENTRIES]",
+        "CALENDAR_SIZING_DAMPENER: [0.25 - 1.0]",
+        "ACTIVE_EVENTS_WINDOW: [Rolling 5-day forward array]"
+      ],
+      "temporal_safeguard": {
+        "rule": "Events in active_events_window with date >= current_date are IMMUTABLE. Only prune events where date < current_date.",
+        "enforcement": "Reference SSoT_Storage > deletion_rules > calendar_shield_protection",
+        "on_update": "MERGE_PRESERVE_FUTURE_EVENTS — incoming updates to active_events_window must preserve all entries where event.date >= current_date. New events are APPENDED, expired events (date < current_date) are PRUNED."
+      }
+    }
   }
 }

@@ -66,6 +66,12 @@
       "market_status": "STRING",
       "engine_mode": "STRING"
     },
+    "macro_calendar_shield": {
+      "status": "STRING (CLEAR | PROXIMITY_ALERT | EVENT_DAY | BLACKOUT)",
+      "next_event": {},
+      "shield_posture": "STRING",
+      "sizing_dampener": "FLOAT"
+    },
     "notes": []
   },
   "preferred_tier": "PRO"

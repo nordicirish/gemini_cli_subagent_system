@@ -17,6 +17,7 @@
       "behavior": "Strictly decline any output failing forensic handshake or showing behavioral drift from Alpha-Friction constraints.",
       "routing_priority": {
         "MACRO_FILTER": "Reference Rules_Engine > ENH_45",
+        "CALENDAR_SHIELD": "Reference Rules_Engine > ENH_47",
         "EXECUTION_LOGIC": "Reference Rules_Engine > ENH_29",
         "STRUCTURAL_FILTER": "Reference Rules_Engine > ENH_30",
         "TEMPORAL_LOGIC": "Reference Rules_Engine > ENH_31",
@@ -29,8 +30,16 @@
       "enabled": false
     },
     "debug_toggle_commands": {
-      "enable_phrases": ["DEBUG ON", "ENABLE DEBUG", "TURN DEBUG ON"],
-      "disable_phrases": ["DEBUG OFF", "DISABLE DEBUG", "TURN DEBUG OFF"]
+      "enable_phrases": [
+        "DEBUG ON",
+        "ENABLE DEBUG",
+        "TURN DEBUG ON"
+      ],
+      "disable_phrases": [
+        "DEBUG OFF",
+        "DISABLE DEBUG",
+        "TURN DEBUG OFF"
+      ]
     },
     "routing_debug": {
       "debug_annotations": true
@@ -87,8 +96,12 @@
       "daily_limit": 20,
       "state": {
         "used_today": 0
-              },
-      "triggers": ["DEEP RESEARCH:", "DEEP:", "DR:"],
+      },
+      "triggers": [
+        "DEEP RESEARCH:",
+        "DEEP:",
+        "DR:"
+      ],
       "routing_rules": [
         "If trigger AND used_today < limit → Deep Research (Gemini 3 Pro).",
         "If trigger AND used_today >= limit → Research Engine fallback.",
@@ -101,7 +114,10 @@
     "pipeline_overrides": {
       "FORENSIC_VALIDATION_FLOW": {
         "trigger": "IF forensic_flag (8-K/144/S-3/Shelf)",
-        "path": ["STRUCTURAL_ENGINE", "TECHNICAL_VALIDATOR"],
+        "path": [
+          "STRUCTURAL_ENGINE",
+          "TECHNICAL_VALIDATOR"
+        ],
         "enforcement": "MANDATE_08_VALIDATION_CHAIN",
         "requirement": "TECHNICAL_VALIDATOR must sign off on STRUCTURAL_ENGINE extraction before SSoT update."
       }
@@ -132,7 +148,8 @@
         "state_context",
         "portfolio_snapshot",
         "forensic_intelligence",
-        "runtime_flags"
+        "runtime_flags",
+        "macro_calendar_shield"
       ],
       "enh_ref": "MANDATE_09"
     },
@@ -143,23 +160,23 @@
     },
     "post_processing": {
       "rules": [
-    "Verify MANDATE_09 compliance: Check for full SSoT dump as the final block.",
-    "If SSoT block is missing/truncated, the turn is invalid. Force retry with RAW_JSON_DUMP trigger.",
-    "If valid JSON and RAW_JSON not requested → convert to structured text.",
-    "Arrays → bullet lists.",
-    "Nested objects → labeled sections.",
-    "Numeric fields → labeled values.",
-    "Status fields → bold labels.",
-    "Notes/flags → Notes section.",
-    "MANDATORY: Output '### 🏁 Final Council Decision' block FIRST.",
-    "Decision must be a single, high-conviction directive: (EXECUTE | HOLD | REJECT).",
-    "Decision must respect Alpha-Friction (ENH_FIN_02) constraints.",
-    "Include a 'Confidence Score' based on the consensus delta between the Advocate and the Pessimist.",
-    "Ensure Decision includes Posture, Confidence Score, and Friction-Aware Rationale.",
-    "Follow immediately with '### 🏛️ GEM Council Debate' block featuring distinct BULLISH, RED_TEAM, and NEUTRAL blocks.",
-    "Append '### 📚 Source Index' at the very bottom before the JSON dump.",
-    "Only output raw JSON if RAW_JSON explicitly requested or for SSoT updates."
-  ]
+        "Verify MANDATE_09 compliance: Check for full SSoT dump as the final block.",
+        "If SSoT block is missing/truncated, the turn is invalid. Force retry with RAW_JSON_DUMP trigger.",
+        "If valid JSON and RAW_JSON not requested → convert to structured text.",
+        "Arrays → bullet lists.",
+        "Nested objects → labeled sections.",
+        "Numeric fields → labeled values.",
+        "Status fields → bold labels.",
+        "Notes/flags → Notes section.",
+        "MANDATORY: Output '### 🏁 Final Council Decision' block FIRST.",
+        "Decision must be a single, high-conviction directive: (EXECUTE | HOLD | REJECT).",
+        "Decision must respect Alpha-Friction (ENH_FIN_02) constraints.",
+        "Include a 'Confidence Score' based on the consensus delta between the Advocate and the Pessimist.",
+        "Ensure Decision includes Posture, Confidence Score, and Friction-Aware Rationale.",
+        "Follow immediately with '### 🏛️ GEM Council Debate' block featuring distinct BULLISH, RED_TEAM, and NEUTRAL blocks.",
+        "Append '### 📚 Source Index' at the very bottom before the JSON dump.",
+        "Only output raw JSON if RAW_JSON explicitly requested or for SSoT updates."
+      ]
     }
   },
   "mode_selection_matrix": {

@@ -14,6 +14,8 @@
     "step_1_audit": "Consume user fields. Verify mathematical integrity (Price vs Close, RSI vs Label).",
     "step_2_enrich": "Populate 'scrutiny_audit' and 'hard_catalyst' objects as defined in Rules_Engine > ENH_32.",
     "step_3_consensus": "Execute MANDATE_13 via ENH_40 (Meta-Arbiter). Calculate Agreement Score (S_A).",
+    "step_3b_calendar_shield": "Validate macro_calendar_shield object is present and well-formed per Rules_Engine > ENH_47. Verify status, shield_posture, sizing_dampener, and next_event fields conform to schema.",
+    "step_3c_calendar_integrity": "TURN-OVER-TURN INTEGRITY CHECK: Compare proposed_state.macro_calendar_shield.active_events_window against prior_state. IF any event with date >= current_date was present in prior_state but ABSENT in proposed_state THEN emit CALENDAR_SHIELD_INTEGRITY_VIOLATION to forensic_intelligence.risk_alerts and REJECT the calendar_shield update. Reference SSoT_Storage > deletion_rules > calendar_shield_protection.",
     "step_4_veto_check": "MANDATORY: IF RED_TEAM_PESSIMIST.fatal_flaw_score >= FATAL_FLAW_VETO_STANDARD (see Rules_Engine > system_thresholds) THEN SET S_A = 0.0 AND TRIGGER ABORT_PROTOCOL.",
     "step_5_score": "Calculate final technical_health_score using Rules_Engine > health_score_protocol (Canonical).",
     "step_6_prune": "Discard all transient session data (gaps, volumes, PM/AH prices) after scoring to prevent SSoT bloat."
@@ -36,7 +38,10 @@
         "schema_reference": "Rules_Engine > ENH_32",
         "forensic_audit_log": {
           "drift_detected": "BOOLEAN",
-          "checks_passed": ["Signal Consistency", "GEX Posture"],
+          "checks_passed": [
+            "Signal Consistency",
+            "GEX Posture"
+          ],
           "notes": []
         }
       }

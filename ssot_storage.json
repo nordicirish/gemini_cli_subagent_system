@@ -13,7 +13,8 @@
       "state_context",
       "portfolio_snapshot",
       "forensic_intelligence",
-      "runtime_flags"
+      "runtime_flags",
+      "macro_calendar_shield"
     ]
   },
   "persistence_contract": {
@@ -35,7 +36,8 @@
       "state_context",
       "portfolio_snapshot",
       "forensic_intelligence",
-      "runtime_flags"
+      "runtime_flags",
+      "macro_calendar_shield"
     ]
   },
   "historical_memory": {
@@ -48,7 +50,14 @@
   },
   "deletion_rules": {
     "allow_deletion": false,
-    "require_explicit_flag": "DELETE_FIELD"
+    "require_explicit_flag": "DELETE_FIELD",
+    "calendar_shield_protection": {
+      "scope": "macro_calendar_shield.active_events_window",
+      "rule": "TEMPORAL_IMMUTABILITY",
+      "instruction": "Events where event.date >= current_date are IMMUTABLE — cannot be deleted, overwritten, or omitted during merge. Only events where event.date < current_date may be pruned.",
+      "enforcement": "MANDATORY — applies during merge_engine processing and APPLY_DELETION_RULES step",
+      "violation_action": "REJECT_UPDATE and emit CALENDAR_SHIELD_INTEGRITY_VIOLATION to forensic_intelligence.risk_alerts"
+    }
   },
   "context_echo": {
     "require_full_ingestion": true
@@ -84,7 +93,11 @@
       "social_velocity_z_score": 0.0,
       "sentiment_divergence_flag": false,
       "retail_crowding_status": "STABLE",
-      "hard_catalyst": { "type": "NONE", "details": "N/A", "impact": "LOW" }
+      "hard_catalyst": {
+        "type": "NONE",
+        "details": "N/A",
+        "impact": "LOW"
+      }
     }
   },
   "risk_parameters": {
@@ -133,6 +146,19 @@
         "keep_display": "Consensus_Score"
       }
     ]
+  },
+  "macro_calendar_shield": {
+    "status": "STRING (CLEAR | PROXIMITY_ALERT | EVENT_DAY | BLACKOUT)",
+    "next_event": {
+      "type": "STRING (FOMC | CPI | PPI | NFP | GDP | PCE | RETAIL_SALES | ISM | JOBLESS_CLAIMS | EARNINGS_SEASON | OTHER)",
+      "date": "DATE (YYYY-MM-DD)",
+      "proximity_hours": "INT",
+      "consensus_estimate": "STRING | NULL",
+      "impact_tier": "STRING (TIER_1 | TIER_2 | TIER_3)"
+    },
+    "shield_posture": "STRING (FULL_RISK | REDUCED_RISK | DEFENSIVE | NO_NEW_ENTRIES)",
+    "sizing_dampener": "FLOAT (0.25 - 1.0)",
+    "active_events_window": "ARRAY<OBJECT> (Rolling 5-day forward calendar)"
   },
   "runtime_flags": {
     "sync_id": "STRING",

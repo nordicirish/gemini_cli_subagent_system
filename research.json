@@ -18,7 +18,8 @@
       "Gov-Tech Liquidity",
       "Gamma Walls",
       "Supply Chain Lineage",
-      "Institutional Rebalancing (ENH_46)"
+      "Institutional Rebalancing (ENH_46)",
+      "Macro Calendar Proximity (ENH_47)"
     ],
     "ticker_level_narrative": "Forensic signal attribution",
     "basket_context": "Reference Rules_Engine > basket_definition (Canonical)"
@@ -129,6 +130,21 @@
         "tag": "INSTITUTIONAL_REBALANCING_ACTIVE",
         "enh_ref": "ENH_46",
         "note": "Distinguish mechanistic flows from fundamental breakdown"
+      }
+    },
+    "calendar_proximity_context": {
+      "conditions": [
+        {
+          "field": "macro_calendar_shield.status",
+          "operator": "!=",
+          "value": "CLEAR"
+        }
+      ],
+      "logic": "ANY",
+      "emit": {
+        "tag": "MACRO_CALENDAR_PROXIMITY_ALERT",
+        "enh_ref": "ENH_47",
+        "note": "Flag upcoming macro event in narrative; distinguish pre-event uncertainty from structural weakness"
       }
     }
   },

@@ -594,6 +594,58 @@
         "friction_gate": "ENH_FIN_02",
         "behavioral_directive": "Distinguish mechanistic flows (forced selling) from fundamental catalyst decay."
       }
+    },
+    {
+      "id": "ENH_47",
+      "title": "Macro Calendar Shield Protocol",
+      "version": "1.0",
+      "status": "ACTIVE",
+      "instruction": "Forward-looking economic calendar awareness layer. Monitors proximity to scheduled macro releases (FOMC, CPI, NFP, etc.) and adjusts shield_posture and sizing_dampener to prevent entries into pre-event uncertainty windows.",
+      "parameters": {
+        "trigger_type": "Calendar_Proximity_Alignment",
+        "enforcement_level": "MANDATE_20_MACRO_VETO"
+      },
+      "event_tiers": {
+        "TIER_1": {
+          "events": [
+            "FOMC",
+            "CPI",
+            "NFP"
+          ],
+          "proximity_threshold_hours": 24,
+          "shield_posture": "NO_NEW_ENTRIES",
+          "sizing_dampener": 0.5
+        },
+        "TIER_2": {
+          "events": [
+            "PPI",
+            "GDP",
+            "PCE",
+            "ISM"
+          ],
+          "proximity_threshold_hours": 12,
+          "shield_posture": "REDUCED_RISK",
+          "sizing_dampener": 0.75
+        },
+        "TIER_3": {
+          "events": [
+            "RETAIL_SALES",
+            "JOBLESS_CLAIMS",
+            "EARNINGS_SEASON",
+            "OTHER"
+          ],
+          "proximity_threshold_hours": 6,
+          "shield_posture": "DEFENSIVE",
+          "sizing_dampener": 0.85
+        }
+      },
+      "logic_gates": [
+        "IF proximity_hours <= TIER_1.proximity_threshold_hours AND event IN TIER_1 -> shield_posture = NO_NEW_ENTRIES, sizing_dampener = 0.5",
+        "IF proximity_hours <= TIER_2.proximity_threshold_hours AND event IN TIER_2 -> shield_posture = REDUCED_RISK, sizing_dampener = 0.75",
+        "IF proximity_hours <= TIER_3.proximity_threshold_hours AND event IN TIER_3 -> shield_posture = DEFENSIVE, sizing_dampener = 0.85",
+        "IF proximity_hours == 0 (EVENT_DAY) AND event IN TIER_1 -> shield_posture = NO_NEW_ENTRIES, sizing_dampener = 0.25",
+        "IF no events within 48h -> shield_posture = FULL_RISK, sizing_dampener = 1.0"
+      ]
     }
   ],
   "global_logic_gates": {
@@ -697,6 +749,27 @@
     },
     {
       "index": 5,
+      "step_id": "VALIDATE_CALENDAR_SHIELD",
+      "action": {
+        "description": "Check macro_calendar_shield for event proximity and apply sizing_dampener",
+        "conditions": [
+          {
+            "field": "macro_calendar_shield.status",
+            "operator": "!=",
+            "value": "CLEAR"
+          }
+        ],
+        "emit_true": {
+          "action": "Apply sizing_dampener from ENH_47 tier logic",
+          "enh_ref": "ENH_47"
+        },
+        "emit_false": {
+          "action": "Continue — no calendar constraints active"
+        }
+      }
+    },
+    {
+      "index": 6,
       "step_id": "VALIDATE_CONSENSUS",
       "action": {
         "description": "Compute Agreement Score and check RED_TEAM veto",
@@ -716,22 +789,22 @@
       }
     },
     {
-      "index": 6,
+      "index": 7,
       "step_id": "PRODUCE_FULL_STATE",
       "action": "Generate a complete, fully merged SSoT JSON update based on reasoning and validation."
     },
     {
-      "index": 7,
+      "index": 8,
       "step_id": "APPLY_PERSISTENCE_CONTRACT",
       "action": "Preserve all protected sections and fields not explicitly updated by the current turn."
     },
     {
-      "index": 8,
+      "index": 9,
       "step_id": "APPLY_DELETION_RULES",
       "action": "Reject implicit deletions. Only process explicit DELETE_FIELD instructions."
     },
     {
-      "index": 9,
+      "index": 10,
       "step_id": "ENH_43_PORTFOLIO_CORRELATION_GUARD",
       "action": {
         "description": "Check thematic concentration",
@@ -758,7 +831,7 @@
       }
     },
     {
-      "index": 10,
+      "index": 11,
       "step_id": "ENH_41_DETERMINISTIC_POSITION_SIZING",
       "action": {
         "description": "Execute regime-weighted risk math",
@@ -767,7 +840,7 @@
       }
     },
     {
-      "index": 11,
+      "index": 12,
       "step_id": "ENH_42_TRADE_STATE_EMISSION",
       "action": {
         "description": "Emit final trade state with mandatory reason codes",
@@ -780,17 +853,17 @@
       }
     },
     {
-      "index": 12,
+      "index": 13,
       "step_id": "TECHNICAL_VALIDATION",
       "action": "Validate JSON against ENH_32 schema and MANDATE_06 type constraints."
     },
     {
-      "index": 13,
+      "index": 14,
       "step_id": "ARCHIVE_AND_PRUNE",
       "action": "Move items to historical_facts according to state_pruning_enforcement."
     },
     {
-      "index": 14,
+      "index": 15,
       "step_id": "FORCE_WRITE",
       "action": "Commit the merged state as the new SSoT snapshot if all checks pass; else return VALIDATION_FAILED."
     }
@@ -820,6 +893,17 @@
         "preserve_if_absent_in_delta": true,
         "allow_deletion": false
       }
+    },
+    "calendar_shield_merge_logic": {
+      "key": "active_events_window[].date",
+      "rules": {
+        "preserve_future_events": "IF event.date >= current_date THEN PRESERVE — event is IMMUTABLE until its date has passed",
+        "prune_expired_events": "IF event.date < current_date THEN PRUNE — remove from active_events_window",
+        "append_new_events": "IF event NOT in active_events_window AND event.date >= current_date THEN APPEND",
+        "update_next_event": "SET next_event = MIN(active_events_window.date WHERE date >= current_date)",
+        "recalculate_on_merge": "After merge, recalculate status, shield_posture, and sizing_dampener from ENH_47 tier logic based on updated next_event.proximity_hours"
+      },
+      "integrity_check": "IF count(active_events_window WHERE date >= current_date) decreased between prior_state and proposed_state THEN REJECT_UPDATE and emit CALENDAR_SHIELD_INTEGRITY_VIOLATION"
     }
   },
   "io_contract": {
@@ -835,6 +919,7 @@
         "portfolio_snapshot",
         "forensic_intelligence",
         "runtime_flags",
+        "macro_calendar_shield",
         "DELETE_FIELD (optional)"
       ]
     }
@@ -1116,6 +1201,19 @@
       "used_by": [
         "ENH_FIN_02",
         "red_team_gem",
+        "execution"
+      ]
+    },
+    "MACRO_CALENDAR_PROXIMITY_HOURS": {
+      "value": {
+        "TIER_1": 24,
+        "TIER_2": 12,
+        "TIER_3": 6
+      },
+      "usage": "Hours before macro event that activates shield posture (ENH_47)",
+      "used_by": [
+        "ENH_47",
+        "macro_arbiter",
         "execution"
       ]
     }
