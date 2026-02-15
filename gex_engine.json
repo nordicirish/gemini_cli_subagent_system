@@ -3,7 +3,11 @@
   "version": "v3.4-Full-Restoration",
   "purpose": "Fetch option chain, compute per-strike gamma, aggregate into net GEX.",
   "input_schema": {
-    "expected_fields": ["ticker", "price", "session"]
+    "expected_fields": [
+      "ticker",
+      "price",
+      "session"
+    ]
   },
   "data_sources": {
     "option_chain_provider": "CONFIGURABLE (e.g., broker API, yfinance, custom feed)",
@@ -12,7 +16,7 @@
   "calculation_logic": {
     "net_gex_total": "Sum position_gamma across all strikes.",
     "gamma_flip_price": "Price level where cumulative GEX crosses zero (interpolate if needed).",
-    "dealer_posture": "Reference Rules_Engine > ENH_20 (Synthetic GEX Logic)",
+    "dealer_posture": "Reference rules.json > ENH_20 (Synthetic GEX Logic)",
     "gex_slope": "Calculate rate of change in GEX per $1 price move (required for ENH_17)."
   },
   "drift_and_quality_rules": {
@@ -22,7 +26,10 @@
   },
   "output_schema": {
     "fields": [
-      { "field": "ticker", "type": "STRING" },
+      {
+        "field": "ticker",
+        "type": "STRING"
+      },
       {
         "field": "net_gex_total",
         "type": "FLOAT",
@@ -33,11 +40,19 @@
         "type": "FLOAT",
         "label": "VOLATILITY_THRESHOLD"
       },
-      { "field": "gex_slope", "type": "FLOAT", "label": "MOMENTUM_FACTOR" },
+      {
+        "field": "gex_slope",
+        "type": "FLOAT",
+        "label": "MOMENTUM_FACTOR"
+      },
       {
         "field": "dealer_posture",
         "type": "STRING",
-        "options": ["LONG_GAMMA", "SHORT_GAMMA", "NEUTRAL"]
+        "options": [
+          "LONG_GAMMA",
+          "SHORT_GAMMA",
+          "NEUTRAL"
+        ]
       },
       {
         "field": "data_quality_flag",
@@ -49,7 +64,10 @@
           "PRICING_ERRORS"
         ]
       },
-      { "field": "notes", "type": "ARRAY<STRING>" }
+      {
+        "field": "notes",
+        "type": "ARRAY<STRING>"
+      }
     ]
   },
   "output_template": {

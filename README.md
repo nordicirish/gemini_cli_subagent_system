@@ -54,7 +54,7 @@ Each JSON file in this repository is a **system instruction** designed to be loa
           └─────────────────────┘
 ```
 
-**Governance backbone:** The **Rules Engine** (`rules_engine.json`) contains 45+ ENH protocols and 20 MANDATEs that every Gem must obey.
+**Governance backbone:** The **Rule Enforcer** (`rule_enforcer_engine.json`) actively validates compliance, while `rules.json` serves as the static legislative body containing the 45+ ENH protocols, 20 MANDATEs, and system thresholds.
 
 ---
 
@@ -65,7 +65,8 @@ Each JSON file in this repository is a **system instruction** designed to be loa
 | File | Gem Role | Gemini Mode | Purpose |
 |------|----------|-------------|---------|
 | `terminal.json` | **Orchestrator** | PRO | Master router — classifies user input and dispatches to the correct engine |
-| `rules_engine.json` | **Rules Engine** | PRO | Master contract with 45+ ENH protocols & 20 MANDATEs governing all logic |
+| `rules.json` | **Legislative Body** | N/A | **STATIC KNOWLEDGE**: Contains all Protocols, Mandates, and Thresholds. Upload to EVERY Gem. |
+| `rule_enforcer_engine.json` | **Rule Enforcer** | PRO | Active Enforcer — Policing Agent that validates logic against `rules.json` |
 | `SSoT_Storage.json` | **SSoT Controller** | PRO | Passive data schema & state container (Single Source of Truth) |
 | `context_engine.json` | **Context Engine** | PRO | Active SSoT bridge — drift detection, state merging, sync orchestration |
 | `bullish_gem.json` | **Bullish Advocate** | THINKING | Alpha & momentum specialist — identifies reasons to approve trades |
@@ -86,7 +87,7 @@ Each JSON file in this repository is a **system instruction** designed to be loa
 
 | File | Purpose |
 |------|---------|
-| `fetch_stocks.py` | **Financial Dashboard** — Real-time terminal displaying price, VWAP, GEX, RSI, ATR, rVol, and health scores. Output is copied to clipboard for pasting into Gem conversations. |
+| `fetch_stocks.py` | **Financial Dashboard** — Real-time terminal displaying price, VWAP, GEX, RSI, ATR, rVol, and health scores. Press 'c' to copy output to clipboard for pasting into Gem conversations. |
 | `compare_json.py` | Diff utility — compares two JSON instruction files to detect missing or added values |
 | `format_json.py` | Formatter — pretty-prints a JSON instruction file with consistent indentation |
 
@@ -107,7 +108,7 @@ The dashboard runs in a loop (30-second refresh), fetching live data from Yahoo 
 - **rVol** — relative volume vs. 20-day average
 - **Health Score** — composite signal scoring
 
-The formatted output is automatically **copied to your clipboard**.
+The formatted output is **copied to your clipboard** when you press 'c'.
 
 ### 2. Paste Into a Gem Conversation
 Open the relevant Gemini Gem (e.g., the Terminal Orchestrator) and paste the dashboard output. The Gem parses the financial data and routes it through the appropriate engine pipeline.
@@ -189,13 +190,13 @@ ALL_TICKERS = TICKERS + MACRO_TICKERS
 ```
 
 > [!IMPORTANT]
-> **When changing tickers**, you must also update the centralized constants in `rules_engine.json`. All ticker-specific data is consolidated in one file — see the reference table below.
+> **When changing tickers**, you must also update the centralized constants in `rules.json`. All ticker-specific data is consolidated in one file — see the reference table below.
 
-#### Ticker-Dependent Constants (`rules_engine.json`)
+#### Ticker-Dependent Constants (`rules.json`)
 
 These sections **must** be updated whenever you add, remove, or change portfolio tickers:
 
-| Section | Path in `rules_engine.json` | What to change |
+| Section | Path in `rules.json` | What to change |
 |---------|---------------------------|----------------|
 | **Basket Definition** | `basket_definition > defense_tech > tickers` | Add/remove tickers per theme |
 | | `basket_definition > health_tech > tickers` | Add/remove tickers per theme |
@@ -213,7 +214,7 @@ These sections are **ticker-independent** but may need tuning for a different br
 | **Slippage Penalty** | `system_thresholds > SLIPPAGE_PENALTY` | `0.5` | Different execution environment |
 | **OST Lockout Time** | `system_thresholds > OST_LOCKOUT_TIME` | `14:30 ET` | Different market/time zone |
 
-All 22+ named constants live in `rules_engine.json > system_thresholds`. Sub-engine files reference these by name — **never hardcode values in sub-engines**.
+All 22+ named constants live in `rules.json > system_thresholds`. Sub-engine files reference these by name — **never hardcode values in sub-engines**.
 
 ### 4. Set Up Google Drive SSoT Backup
 The Gems are stateless web sessions — create a Google Drive document to persist your SSoT state across sessions:
@@ -230,13 +231,17 @@ For each JSON file, create a new Gem in Google Gemini:
 1. Go to [gemini.google.com/gems](https://gemini.google.com/gems)
 2. Click **"New Gem"**
 3. Paste the contents of the JSON file as the Gem's system instruction
-4. Name the Gem to match its role (e.g., *"GEM Terminal"*, *"GEM Rules Engine"*)
+4. Name the Gem to match its role (e.g., *"GEM Terminal"*, *"GEM Rule Enforcer"*)
+5. **Knowledge Injection (CRITICAL):**
+   - In the "Knowledge" section of the Gem editor, upload `rules.json`.
+   - This allows the Gem to access the centralized thresholds via the `rules.json` reference.
+   - **Repeat this for EVERY Gem** (Bullish, Red Team, Execution, etc.).
 
 ### 6. Run the Dashboard
 ```bash
 python fetch_stocks.py
 ```
-The output auto-copies to your clipboard — paste it into the Terminal Orchestrator Gem to begin analysis.
+The output copies to your clipboard when you press 'c' — paste it into the Terminal Orchestrator Gem to begin analysis.
 
 ---
 
@@ -310,7 +315,7 @@ The `scrutiny_audit` object contains the full council vote record:
 ## 🏗️ Design Principles
 
 - **No Persona Contamination** — Every Gem identifies its engine role to prevent cross-role hallucination
-- **Logic/Data Separation** — `SSoT_Storage.json` holds schema only; `rules_engine.json` holds all execution logic
+- **Logic/Data Separation** — `SSoT_Storage.json` holds state schema; `rules.json` holds static laws; `rule_enforcer_engine.json` holds enforcement logic
 - **Non-Destructive Merging** — Field-level merge with `PRESERVE_IF_NOT_UPDATED` strategy
 - **Forensic Lineage** — Every state change includes timestamped source attribution
 - **Alpha-Friction Awareness** — All engines account for the 1% round-trip cost of the Nordea OST platform

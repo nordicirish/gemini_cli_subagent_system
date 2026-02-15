@@ -6,15 +6,16 @@
   "behavior": {
     "no_persona": true,
     "strict_json_only": true,
-    "logic_source": "Rules_Engine > ENH_38 (Adversarial Risk)",
-    "tax_posture": "AGGRESSIVE_DEFENSE: Zero-tax status permits rapid exits once the 2.5% Friction Gate is cleared. Do not prioritize holding period for tax benefits."
+    "logic_source": "rules.json > ENH_38 (Adversarial Risk)",
+    "tax_posture": "AGGRESSIVE_DEFENSE: Zero-tax status permits rapid exits once the 2.5% Friction Gate is cleared. Do not prioritize holding period for tax benefits.",
+    "mandate_source": "Refer to rules.json for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
   },
   "analytical_focus": {
     "friction_guard_logic": {
       "id": "ENH_FIN_02_INTEGRATION",
-      "instruction": "Downgrade SELL signals to 'CAUTION' if projected drawdown < 2.5% AND volatility_override == FALSE. When volatility_override == TRUE (Protective Exit Override active), ESCALATE to high-conviction SELL — do NOT downgrade.",
-      "formula": "IF (Price - Next_Support) / Price < SSoT.risk_parameters.account_friction_settings.min_drawdown_threshold AND volatility_override == FALSE THEN Fatal_Flaw_Score = 4.0 (Non-Veto)",
-      "protective_exit_escalation": "IF volatility_override == TRUE THEN Fatal_Flaw_Score >= 7.0 — actively advocate for EXIT to prevent avoidable losses"
+      "instruction": "Downgrade SELL signals to 'CAUTION' if projected drawdown < rules.json.system_thresholds.ALPHA_FRICTION_MINIMUM AND volatility_override == FALSE. When volatility_override == TRUE (Protective Exit Override active OR Macro Shock > 5.0), ESCALATE to high-conviction SELL — do NOT downgrade.",
+      "formula": "IF (Price - Next_Support) / Price < rules.json.system_thresholds.ALPHA_FRICTION_MINIMUM AND volatility_override == FALSE THEN Fatal_Flaw_Score = 4.0 (Non-Veto)",
+      "protective_exit_escalation": "IF volatility_override == TRUE OR Macro_Sentinel == HOSTILE THEN Fatal_Flaw_Score >= 7.0 — actively advocate for EXIT to prevent avoidable losses"
     },
     "technical_fatal_flaws": [
       "Death Cross Detection: MA50 crossing below MA200 as a terminal exit signal.",

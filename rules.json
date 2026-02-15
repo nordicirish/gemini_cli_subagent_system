@@ -1,0 +1,1243 @@
+{
+    "role": "GEM_Rules_Data",
+    "version": "v3.9-Alpha-Friction-Patched",
+    "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
+    "enh_xx_registry": [
+        "ENH_01: Keep-First Portfolio Reconciliation",
+        "ENH_02: Session-Aware Indicator Validation",
+        "ENH_03: Source Lineage Rule",
+        "ENH_04: SSR & Regulatory Awareness",
+        "ENH_07: SSR Trigger Verification",
+        "ENH_08: Bicameral Vote Requirement",
+        "ENH_09: Bifurcation Filter",
+        "ENH_10: Supply Chain Lead Indicator",
+        "ENH_11: Standardized Sync Payload Protocol",
+        "ENH_12: VSC Fallback Protocol",
+        "ENH_16: Score Bifurcation",
+        "ENH_17: Gamma Exposure (GEX) Protocol",
+        "ENH_18: Synthetic Vol Logic",
+        "ENH_19: Volatility Proxy",
+        "ENH_20: Synthetic GEX Logic",
+        "ENH_21: Vol Proxy Rule",
+        "ENH_22: Docs Native Bridge Protocol",
+        "ENH_23: Memory Initialization & Persistence",
+        "ENH_24: Data Integrity & Schema Enforcement",
+        "ENH_25: Temporal Guardrail Enforcement",
+        "ENH_26: Uncertainty Disclosure Protocol",
+        "ENH_27: Speculative Logic Thresholds",
+        "ENH_28: Drift Control Protocol",
+        "ENH_29: ATR-Adjusted Sizing & Execution Protocol",
+        "ENH_30: Forensic Structural Filtering",
+        "ENH_31: Temporal Logic & Catalyst Verification",
+        "ENH_32: Data Schema & GEX Calculation Protocol",
+        "ENH_33: Dynamic Research Synchronization",
+        "ENH_34: Auto Load GEM-Context-SSOT doc",
+        "ENH_35: Attachment & Source Verification",
+        "ENH_36: Post-ATR Execution Gate",
+        "ENH_37: Alpha Catalyst Scrutiny (Bullish)",
+        "ENH_38: Adversarial Risk Rebuttal (Red Team)",
+        "ENH_39: Structural Stability Neutrality",
+        "ENH_40: Meta-Arbiter Consensus Scrutiny",
+        "ENH_41: Deterministic Position Sizing",
+        "ENH_42: Trade State Emission",
+        "ENH_43: Correlation Advisory Guard",
+        "ENH_44: Context-SSoT Handshake Protocol",
+        "ENH_45: Macro Shock & Binary Veto Protocol",
+        "ENH_46: Temporal Institutional Rebalancing Sentinel",
+        "ENH_47: Macro Calendar Shield Protocol",
+        "ENH_48: Narrative Bridge Protocol"
+    ],
+    "mandate_registry": [
+        "MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)",
+        "MANDATE_02: WRITE_AUTHORITY (Terminal State Commit)",
+        "MANDATE_03: VALIDATION_PROTOCOL (Risk & Regulatory Gates)",
+        "MANDATE_04: DRIFT_CONTROL (Forensic Handshake Enforcement)",
+        "MANDATE_05: TEMPORAL_PRIORITY (User Timestamp Override)",
+        "MANDATE_06: COORDINATION (Technical Validator Sign-off)",
+        "MANDATE_07: ENGINE_OVERRIDE (Tier Synchronization)",
+        "MANDATE_08: SCHEMA_ENFORCEMENT (Forensic Field Validation)",
+        "MANDATE_09: STATE_EMISSION (Untruncated JSON Requirement)",
+        "MANDATE_10: SCHEMA_VALIDATION (Narrative & Array Checks)",
+        "MANDATE_11: RESEARCH_SYNC (Trading_Research Folder Link)",
+        "MANDATE_12: BOOT_SYNC (Session Start File Fetch)",
+        "MANDATE_13: CONSENSUS_SCRUTINY (Weighted Agent Voting)",
+        "MANDATE_14: ALPHA_CATALYST (Bullish Advocate Lens)",
+        "MANDATE_15: ADVERSARIAL_REVIEW (Red Team Lens)",
+        "MANDATE_16: STRUCTURAL_NEUTRALITY (Liquidity Lens)",
+        "MANDATE_17: REGIME_SYNC (Dynamic Weighting & Meta-Arbiter)",
+        "MANDATE_18: RESTRICTED_EXECUTION (Nordea/Retail Constraints)",
+        "MANDATE_19: SCHEMA_MIRRORING (Context vs. SSoT Parity)",
+        "MANDATE_20: MACRO_VETO_POWER (Binary Risk-Off Override)"
+    ],
+    "behavioral_guardrails": [
+        {
+            "id": "MANDATE_01_GATEKEEPER",
+            "instruction": "The SSoT GEM is the exclusive interface for state commitment. However, it MUST accept 'Proposed States' from Context Engine v3.1 as the primary valid input source."
+        },
+        {
+            "id": "MANDATE_02_WRITE_AUTHORITY",
+            "instruction": "This GEM is the sole authority allowed to 'Commit' changes to the terminal state in Google Docs. Exclusive permission to execute 'FORCE_WRITE' to the master 'GEM-Context-SSOT' entry is reserved for the SSoT GEM."
+        },
+        {
+            "id": "MANDATE_03_VALIDATION_PROTOCOL",
+            "instruction": "Validate all requests against the Rules GEM using the live state parsed from the 'GEM-Context-SSOT' Google Doc. Block operations violating liquidity limits, risk regimes (MOMENTUM_BREAKOUT), or regulatory gates (NDAA Section 1709)."
+        },
+        {
+            "id": "MANDATE_04_DRIFT_CONTROL",
+            "protocol": "ENH_28",
+            "enforcement_level": "STRICT",
+            "instruction": "Prevents behavioral or data drift by mandating forensic handshake validation. Strictly decline any output failing forensic handshake or showing divergence from the SSOT Knowledge Base.",
+            "logic_source": "rules.json (Self)",
+            "action_on_failure": "TERMINATE_SESSION_RETRY"
+        },
+        {
+            "id": "MANDATE_05_TEMPORAL_PRIORITY",
+            "instruction": "Always prioritize the user-provided console/dashboard timestamp over the AI system time for all VWAP and trade log baselines."
+        },
+        {
+            "id": "MANDATE_06_COORDINATION",
+            "protocol": "ENH_23",
+            "enforcement_level": "MANDATORY",
+            "instruction": "Ensures cross-module synergy and state synchronization. Mandates that the TECHNICAL_VALIDATOR (PRO) must sign off on any data extraction or SSoT update to prevent isolated engine hallucinations.",
+            "logic_source": "GEM_Rule_Enforcer_Engine",
+            "routing_priority": "PRIMARY"
+        },
+        {
+            "id": "MANDATE_07_ENGINE_OVERRIDE",
+            "instruction": "All sub-engines must adhere to GOOGLE_AI_PRO_2026 tier synchronization: ATR-derived sizing, 50% forensic reductions, and mandatory EST sync."
+        },
+        {
+            "id": "MANDATE_08_SCHEMA_ENFORCEMENT",
+            "instruction": "All state updates must conform to the schema defined in ENH_32. Reject handshakes lacking forensic fields: health_score, net_gex_total, and dealer_posture."
+        },
+        {
+            "id": "MANDATE_09_STATE_EMISSION",
+            "status": "STRICT_ENFORCE",
+            "instruction": "Every turn MUST terminate with the complete, untruncated SSoT JSON state. Trigger regeneration if truncated."
+        },
+        {
+            "id": "MANDATE_10_SCHEMA_VALIDATION",
+            "status": "STRICT",
+            "instruction": "Verify 'forensic_intelligence' contains narrative strings and 'portfolio_snapshot' is an array of objects."
+        },
+        {
+            "id": "MANDATE_11_RESEARCH_SYNC",
+            "status": "STRICT_ENFORCE",
+            "instruction": "Maintain active sync with 'Trading_Research' folder. Execute delta-check prior to EVERY response. Folder data overrides general training."
+        },
+        {
+            "id": "MANDATE_12_BOOT_SYNC",
+            "trigger": "SESSION_START",
+            "status": "STRICT_ENFORCE",
+            "instruction": "CONTEXT_ENGINE must call 'file_content_fetcher' for 'GEM-Context-SSOT' at session start. Pause terminal until sync is complete."
+        },
+        {
+            "id": "MANDATE_13",
+            "name": "Weighted_Consensus_Scrutiny",
+            "status": "ACTIVE",
+            "logic": {
+                "engine_weights": {
+                    "NEUTRAL_STRUCTURALIST": 0.45,
+                    "RED_TEAM_PESSIMIST": 0.35,
+                    "BULLISH_ADVOCATE": 0.2
+                },
+                "thresholds": {
+                    "execution_threshold": 0.75,
+                    "caution_threshold": 0.5,
+                    "fatal_flaw_limit": 8
+                },
+                "governance_rules": [
+                    "RULE_01: IF RED_TEAM_FATAL_FLAW > fatal_flaw_limit THEN S_A = 0.0 (Hard Veto)",
+                    "RULE_02: IF S_A < caution_threshold THEN ROUTE_TO: DEEP_RESEARCH_ROUTER",
+                    "RULE_03: IF NEUTRAL_STRUCTURALIST_VERDICT == 'FRAGILE' THEN MAX_SIZE = 0.25 (Size Penalty)"
+                ]
+            }
+        },
+        {
+            "id": "MANDATE_14_ALPHA_CATALYST",
+            "instruction": "The Bullish Advocate must prioritize GROWTH and MOMENTUM. Identify reasons to APPROVE, assuming the thesis is correct but needs verification."
+        },
+        {
+            "id": "MANDATE_15_ADVERSARIAL_REVIEW",
+            "instruction": "The Red Team must prioritize RISK and FAILURE. Identify reasons to REJECT, assuming the thesis is flawed."
+        },
+        {
+            "id": "MANDATE_16_STRUCTURAL_NEUTRALITY",
+            "instruction": "The Neutral Structuralist must prioritize LIQUIDITY and GEX. Direction is secondary to structural capacity."
+        },
+        {
+            "id": "MANDATE_17_REGIME_SYNC",
+            "status": "ACTIVE",
+            "instruction": "All sub-engines MUST adhere to regime-based weighting determined by the NEUTRAL_STRUCTURALIST. Influence coefficients (weights) are dynamic: 1.5x for Bullish in TRENDING/EXPANSION; Veto threshold 6.5 for Red Team in MEAN-REVERTING/COMPRESSION.",
+            "meta_arbiter_enforcement": {
+                "logic_source": "ENH_40",
+                "instruction": "The SSoT Controller MUST validate the final Agreement Score (S_A) against the Meta-Arbiter logic in ENH_40 before committing."
+            }
+        },
+        {
+            "id": "MANDATE_18_RESTRICTED_EXECUTION",
+            "account_class": "Nordea_Finland_OST",
+            "description": "Hard-codes platform limitations and Alpha-Friction logic for high-fee retail accounts.",
+            "logic_gates": [
+                {
+                    "gate_id": "ROM_01",
+                    "name": "Restricted Order Mapping",
+                    "instruction": "Strictly prohibit MOC/LOC suggestions. Default to 'Auction Hunter' (Marketable Limit at 15:59:45 EST).",
+                    "limit_buffer_pct": 2.0
+                },
+                {
+                    "gate_id": "ENH_FIN_02",
+                    "name": "Alpha-Friction Protocol",
+                    "instruction": "Friction Guard: 1% Round-Trip + Re-entry Risk implies a 1.5% minimum viable move. Prevent churn. EXCEPTION: Bypass this gate when volatility_override is TRUE (protective exits) OR Macro_Sentinel is HOSTILE.",
+                    "logic": "IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < 0.015) AND Hard_Catalyst == NONE AND volatility_override == FALSE THEN OVERRIDE_ACTION = HOLD",
+                    "rationale": "Do not sell for a <1.5% drop (churn). But DO allow exits during volatile breakdowns OR macro stress events where losses are real and accelerating.",
+                    "volatility_override": {
+                        "description": "Protective Exit Override — bypasses friction gate during active breakdowns or macro stress to prevent holding through avoidable losses.",
+                        "conditions": [
+                            {
+                                "field": "atr_percent",
+                                "operator": ">",
+                                "threshold": "PROTECTIVE_EXIT_ATR"
+                            },
+                            {
+                                "field": "session_change_pct",
+                                "operator": "<",
+                                "threshold": "PROTECTIVE_EXIT_SESSION_DROP (Dynamic: -2.0% Normal | -1.5% Stressed)"
+                            },
+                            {
+                                "field": "rvol",
+                                "operator": ">",
+                                "threshold": "RVOL_CONFIRMATION"
+                            },
+                            {
+                                "field": "macro_shock_intensity",
+                                "operator": ">=",
+                                "threshold": "SHOCK_CAUTION_THRESHOLD"
+                            }
+                        ],
+                        "logic": "ANY 2 of 4 (Macro Shock counts as a valid trigger)",
+                        "effect": "SET volatility_override = TRUE — friction gate bypassed, exit treated as protective, not churn"
+                    }
+                },
+                {
+                    "gate_id": "NDS_01",
+                    "name": "Narrative Divergence Sentry",
+                    "instruction": "Auto-trigger 'Grok Flash' if Social Score drops >0.4 OR RS Rating > 90.",
+                    "multi_source": [
+                        "X_Velocity",
+                        "SEC_EDGAR",
+                        "DoD_Portals"
+                    ]
+                },
+                {
+                    "gate_id": "ATR_01",
+                    "name": "Volatility Buffer Calibration",
+                    "formula": "VWAP + (0.25 * Current_ATR)",
+                    "goal": "Ensuring >80% fill probability on manual limits."
+                }
+            ]
+        },
+        {
+            "id": "MANDATE_19_SCHEMA_MIRRORING",
+            "status": "ACTIVE",
+            "instruction": "Reject any 'Handshake Request' from the Context Engine that does not contain the 'scrutiny_audit' and 'hard_catalyst' objects. Null values are forbidden; use defaults."
+        },
+        {
+            "id": "MANDATE_20_MACRO_VETO",
+            "status": "ACTIVE",
+            "instruction": "The MACRO_SENTINEL possesses absolute veto authority. If shock_intensity > 8.0, the SSoT Controller MUST set trade_state = NO_TRADE regardless of Council S_A score.",
+            "logic_source": "ENH_45"
+        }
+    ],
+    "enh_protocols": [
+        {
+            "id": "ENH_01",
+            "title": "Keep-First Portfolio Reconciliation",
+            "instruction": "Logic: [Keep Document Balance] + [New Buys] - [Confirmed Sells]."
+        },
+        {
+            "id": "ENH_02",
+            "title": "Session-Aware Indicator Validation",
+            "instruction": "Label PM/AH signals as 'Low Confidence Artifacts' unless compared to off-hour averages."
+        },
+        {
+            "id": "ENH_03",
+            "title": "Source Lineage Rule",
+            "instruction": "Include 'Confirmed by user at [Time]' for every portfolio state change."
+        },
+        {
+            "id": "ENH_04",
+            "title": "SSR & Regulatory Awareness",
+            "instruction": "Carry SSR status into 'Context Bridge' for 24 hours following a trigger."
+        },
+        {
+            "id": "ENH_07",
+            "title": "SSR Trigger Verification",
+            "instruction": "Verify 10% decline exclusively during RTH (09:30 - 16:00 EST)."
+        },
+        {
+            "id": "ENH_08",
+            "title": "Bicameral Vote Requirement",
+            "instruction": "Senate-only passage is PROVISIONAL. Risk Regime stays CRITICAL until House confirms."
+        },
+        {
+            "id": "ENH_09",
+            "title": "Bifurcation Filter",
+            "instruction": "If SPX rises but RSP is flat, trigger 'Speculative Exhaustion' warning."
+        },
+        {
+            "id": "ENH_10",
+            "title": "Supply Chain Lead Indicator",
+            "instruction": "Monitor $UMAC 8-K as a leading indicator for $RCAT/$ONDS. -15% health penalty on delays."
+        },
+        {
+            "id": "ENH_11",
+            "title": "Standardized Sync Payload Protocol",
+            "instruction": "On manual request, output recovery JSON with sync_event: MANUAL_RECONCILIATION."
+        },
+        {
+            "id": "ENH_12",
+            "title": "Volatile State Cache (VSC) Fallback",
+            "instruction": "Revert to VSC if Google Docs bridge is unreachable. Mode: Read-Only, State-Locked."
+        },
+        {
+            "id": "ENH_16",
+            "title": "Score Bifurcation",
+            "instruction": "Isolate price action integrity from macro/legislative penalties."
+        },
+        {
+            "id": "ENH_17",
+            "title": "Gamma Exposure (GEX) Protocol",
+            "instruction": "GEX > 0 = Stabilizing; GEX < 0 = Accelerating. Scale sizing modifiers accordingly."
+        },
+        {
+            "id": "ENH_18",
+            "title": "Synthetic Vol Logic",
+            "instruction": "Identify Synthetic Skew using: Bullish (Price > VWAP & rVol > 1.5), Bearish (Price < VWAP & rVol > 1.5)."
+        },
+        {
+            "id": "ENH_19",
+            "title": "Volatility Proxy",
+            "instruction": "Use ATR and IV to establish noise thresholds: (ATR_Percent * 1.25)."
+        },
+        {
+            "id": "ENH_20",
+            "title": "Synthetic GEX Logic",
+            "instruction": "Infer Dealer Posture: rVol > 2.0 and Price < VWAP flags 'Potential Short Gamma Acceleration'."
+        },
+        {
+            "id": "ENH_21",
+            "title": "Vol Proxy Rule",
+            "instruction": "Only flag 'Breakouts' if move > (ATR_Percent * 1.5)."
+        },
+        {
+            "id": "ENH_22",
+            "title": "Docs Native Bridge Protocol",
+            "instruction": "SINGLE SOURCE OF TRUTH: GOOGLE DOCS SSoT.",
+            "protocol": {
+                "sync_id": "STRING",
+                "market_status": "STRING",
+                "on_session_start": "LOAD_LATEST_SSOT",
+                "on_session_end": "WRITE_MERGED_SSOT"
+            }
+        },
+        {
+            "id": "ENH_23",
+            "title": "Memory Initialization & Persistence",
+            "instruction": "Synchronize with GEM-Context-SSOT Doc context buffer on first turn."
+        },
+        {
+            "id": "ENH_24",
+            "title": "Data Integrity & Schema Enforcement",
+            "instruction": "Use WAC and shares from GEM-Context-SSOT Doc for all P&L calculations."
+        },
+        {
+            "id": "ENH_25",
+            "title": "Temporal Guardrail Enforcement",
+            "instruction": "Priority: User_Timestamp > Verified_Search_Data > System_Clock."
+        },
+        {
+            "id": "ENH_26",
+            "title": "Uncertainty Disclosure Protocol",
+            "instruction": "Prepend 'Unverified: Speculative Logic' to dark pool or rumor-based data."
+        },
+        {
+            "id": "ENH_27",
+            "title": "Speculative Logic Thresholds",
+            "instruction": "Apply 50% sizing reduction for Gov-Tech tickers during shutdowns."
+        },
+        {
+            "id": "ENH_28",
+            "title": "Drift Control Protocol",
+            "instruction": "Adhere strictly to terminal tasks; do not offer side-monitoring suggestions."
+        },
+        {
+            "id": "ENH_29",
+            "title": "ATR & Order Execution Logic",
+            "instruction": "Position size MUST be derived from ATR-adjusted volatility."
+        },
+        {
+            "id": "ENH_30",
+            "title": "Forensic Structural Filter",
+            "instruction": "Forensic flags (Dilution/Warrants) trigger sizing reduction per the structural_modifier_table below.",
+            "structural_modifier_table": {
+                "authority": "CANONICAL — institutional.json and structural_risk.json MUST reference this table.",
+                "base": 1.0,
+                "high_dilution": 0.5,
+                "distressed_capital": 0.5,
+                "questionable_governance": 0.75,
+                "speculative_sector": 0.75,
+                "umac_delay_penalty": 0.85,
+                "legislative_mismatch_penalty": 0.5,
+                "shelf_offering_active": 0.25,
+                "note": "Modifiers are multiplicative. shelf_offering_active (0.25) applies when 424B filed within < 72h."
+            }
+        },
+        {
+            "id": "ENH_31",
+            "title": "Temporal Catalyst Logic",
+            "instruction": "THINKING mode mandatory for FOMC sentiment or macro cross-referencing."
+        },
+        {
+            "id": "ENH_32",
+            "title": "Data Schema & GEX Calculation Protocol (Unified)",
+            "schema_authority": "CANONICAL — All other files MUST reference this schema via 'rules.json > ENH_32'. Do NOT duplicate inline.",
+            "schema_definition": {
+                "portfolio_snapshot": [
+                    {
+                        "ticker": "STRING",
+                        "shares": "INT",
+                        "wac": "FLOAT",
+                        "price": "FLOAT",
+                        "ma_50": "FLOAT",
+                        "ma_200": "FLOAT",
+                        "gex_slope": "FLOAT",
+                        "gamma_flip_price": "FLOAT",
+                        "inventory_velocity_delta": "FLOAT",
+                        "net_gex_total": "FLOAT",
+                        "health_score": "FLOAT",
+                        "dealer_posture": "STRING (LONG_GAMMA | SHORT_GAMMA | NEUTRAL)",
+                        "gex_exposure": "FLOAT",
+                        "status": "STRING",
+                        "trade_state": "STRING (LONG | NO_TRADE | EXIT)",
+                        "no_trade_reason": "STRING | NULL",
+                        "sizing_units": "FLOAT (ATR-Adjusted Quantity)",
+                        "social_velocity_z_score": "FLOAT",
+                        "sentiment_divergence_flag": "BOOLEAN",
+                        "retail_crowding_status": "STRING (STABLE | FRAGILE)",
+                        "hard_catalyst": {
+                            "type": "STRING (NONE | EARNINGS | FDA | CONTRACT)",
+                            "details": "STRING",
+                            "impact": "STRING (HIGH | MED | LOW)"
+                        },
+                        "scrutiny_audit": {
+                            "agreement_score_sa": "FLOAT (0.0-1.0)",
+                            "fatal_flaw_score": "INT (0-10)",
+                            "final_posture": "STRING",
+                            "derivation": {
+                                "bullish_component": "FLOAT (w*C*V)",
+                                "red_team_component": "FLOAT (w*C*V)",
+                                "structural_component": "FLOAT (w*C*V)"
+                            },
+                            "agent_votes": [
+                                {
+                                    "agent": "STRING (BULLISH_ADVOCATE | RED_TEAM_PESSIMIST | NEUTRAL_STRUCTURALIST)",
+                                    "verdict": "STRING",
+                                    "confidence": "FLOAT"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            "calculation_logic": {
+                "gex_exposure": "shares * net_gex_total",
+                "total_portfolio_gex": "sum(gex_exposure)"
+            }
+        },
+        {
+            "id": "ENH_33",
+            "title": "Dynamic Research Synchronization",
+            "instruction": "Prioritize '@Google Drive' extension for 'Trading_Research' folder. Trigger dynamic re-reads between turns."
+        },
+        {
+            "id": "ENH_34",
+            "title": "Auto Load GEM-Context-SSOT doc",
+            "status": "ENABLED",
+            "instruction": "MANDATORY_SESSION_START_SYNC",
+            "protocol": {
+                "target_file": "GEM-Context-SSOT",
+                "source_provider": "GOOGLE_DRIVE_CENTRAL",
+                "boot_sequence": "PRIORITY_0",
+                "sync_verification": "MANDATE_12_COMPLIANT"
+            }
+        },
+        {
+            "id": "ENH_35",
+            "title": "Attachment & Source Verification",
+            "status": "ENABLED",
+            "instruction": "The system MUST perform a metadata scan for both the 'GEM-Context-SSOT' file and the 'Trading_Research' folder/file cluster at session start or turn trigger.",
+            "protocol": {
+                "gate_01_ssot": "If 'GEM-Context-SSOT' is NULL -> TRIGGER: CRITICAL_SYNC_ALERT.",
+                "gate_02_research": "If 'Trading_Research' files are NULL -> TRIGGER: DATA_STAGNATION_WARNING.",
+                "action": "ISSUE_USER_REMINDER",
+                "template": "CRITICAL: SSoT Source or Research Folder Missing. \n- SSoT Status: {ssot_status}\n- Research Status: {research_status}\nPlease attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploaded to restore data lineage.",
+                "bypass_condition": "Explicit RAW_JSON provided for SSoT AND forensic data provided for Research."
+            }
+        },
+        {
+            "id": "ENH_37",
+            "title": "Alpha Catalyst Scrutiny (Bullish)",
+            "instruction": "Rule: Identify 13-F/144 filings and positive momentum catalysts. Output: Confidence Score (0.0-1.0)."
+        },
+        {
+            "id": "ENH_38",
+            "title": "Adversarial Risk Rebuttal (Red Team)",
+            "instruction": "Rule: Search for dilution, structural traps, and liquidity voids. Output: Fatal Flaw Score (1-10)."
+        },
+        {
+            "id": "ENH_39",
+            "title": "Structural Stability Neutrality (Neutral)",
+            "instruction": "Rule: Evaluate GEX levels, ATR regime, and dark pool stability. Output: Posture (STABLE/FRAGILE)."
+        },
+        {
+            "id": "ENH_40",
+            "title": "Meta-Arbiter Logic Layer (The Optimizer)",
+            "role": "Synthesis & Optimization",
+            "status": "ACTIVE",
+            "logic_gate": "MANDATE_17_REGIME_SYNC",
+            "description": "Invisible orchestration layer that converts Council consensus into actionable execution directives based on market regime and structural posture.",
+            "inputs": [
+                "Bullish_Advocate_Confidence",
+                "Neutral_Structural_Posture",
+                "Red_Team_Fatal_Flaw_Score",
+                "Regime_Classifier_Output",
+                "MACRO_SENTINEL_Output"
+            ],
+            "processing_rules": {
+                "regime_weighting": "IF Regime == TRENDING|EXPANSION THEN BULL_WEIGHT = 1.5x; IF Regime == MEAN-REVERTING|COMPRESSION THEN RED_VETO_THRESHOLD = 6.5",
+                "sizing_logic": "Position Size Multiplier = (Agreement_Score_SA * Structural_Stability_Coefficient)",
+                "horizon_mapping": "IF GEX_Slope == ACCELERATING THEN HORIZON = INTRADAY; IF Net_GEX == STABLE_POSITIVE THEN HORIZON = SWING; IF Dealer_Posture == RE-ACCUMULATING THEN HORIZON = POSITION",
+                "macro_overlay": "IF MACRO_SENTINEL.state > 0 THEN Sizing_Multiplier = Sizing_Multiplier * 0.5",
+                "veto_integration": "IF MANDATE_20 == TRIGGERED THEN S_A = 0.0"
+            },
+            "outputs": {
+                "trade_horizon": "[INTRADAY | SWING | POSITION]",
+                "position_size_multiplier": "0.25x to 1.5x",
+                "allowed_hold_time": "Calculated based on Expiry-Weighted Gamma Decay",
+                "kill_switch_conditions": [
+                    "IF GEX_Flip_Proximity < 0.5% AND Regime == VOL_EXPANSION -> ABORT_ALL",
+                    "IF Net_GEX_Total < 0 AND ATR_Percent > (Threshold * 1.5) -> STOP_LOSS_TIGHTEN"
+                ]
+            },
+            "enforcement": "MANDATORY. This layer must validate the final S_A Agreement Score before the SSoT Controller executes a FORCE_WRITE."
+        },
+        {
+            "id": "ENH_41",
+            "title": "Deterministic Position Sizing",
+            "instruction": "Position size MUST be calculated as: (Base_Risk_Pct * Regime_Multiplier * Agreement_Score_SA). If Liquidity_Depth == VOID, Size = 0."
+        },
+        {
+            "id": "ENH_42",
+            "title": "Trade State Emission",
+            "instruction": "Every turn MUST emit an explicit 'trade_state' [LONG | NO_TRADE | EXIT]. A 'NO_TRADE' state requires a mandatory 'no_trade_reason'."
+        },
+        {
+            "id": "ENH_43",
+            "title": "Correlation Advisory Guard",
+            "instruction": "IF pairwise_corr > 0.80 OR Sector_Exposure > 35%, THEN emit WARNING_CONCENTRATION_RISK. Do NOT force trade_state = NO_TRADE; allow execution to proceed based on Council consensus while flagging high thematic beta in forensic_intelligence."
+        },
+        {
+            "id": "ENH_44",
+            "title": "Context-SSoT Handshake Protocol",
+            "instruction": "The Rules Engine acts as the Arbiter. It verifies that the Context Engine's 'Proposed State' matches the 'Active SSoT' schema before allowing a write. Discrepancies > 0.5% in logic flow trigger a REJECTION."
+        },
+        {
+            "id": "ENH_45",
+            "title": "Macro Shock & Binary Veto Protocol",
+            "instruction": "Monitors exogenous data for Black Swan events. Triggers high-priority flag in forensic_intelligence.risk_alerts.",
+            "logic_gates": [
+                "IF shock_intensity >= 5.0 -> SET alpha_sentry_mode = 'CAUTION'",
+                "IF shock_intensity >= 8.0 -> SET alpha_sentry_mode = 'ABORT' AND trade_state = 'NO_TRADE'"
+            ]
+        },
+        {
+            "id": "ENH_46",
+            "title": "Temporal Institutional Rebalancing Sentinel",
+            "version": "1.0",
+            "status": "ACTIVE",
+            "instruction": "Monitors seasonal institutional flow patterns to prevent misinterpreting rebalancing volatility as fundamental breakdown. Distinguishes mechanistic flows (forced selling) from fundamental catalyst decay.",
+            "parameters": {
+                "trigger_type": "Temporal_Window_Alignment",
+                "enforcement_level": "MANDATE_04_DRIFT_CONTROL"
+            },
+            "temporal_logic_gates": {
+                "ANNUAL_RESET": {
+                    "window": "Reference rules.json > temporal_events > ANNUAL_RESET_WINDOW",
+                    "action": "Force-close all MEAN-REVERSION trades; Only FUNDAMENTAL-MOMENTUM permitted."
+                },
+                "MID_QUARTER_REVIEW": {
+                    "window": "Reference rules.json > temporal_events > MID_QUARTER_REVIEW_WINDOWS",
+                    "action": "Tighten stops on losing positions; Permit new entries only with S_A > 0.85."
+                },
+                "QUARTERLY_ROLL": {
+                    "window": "Reference rules.json > temporal_events > QUARTERLY_ROLL_WINDOWS",
+                    "action": "Reduce sizing by 50% for all new entries; prioritize LIQUIDITY."
+                }
+            },
+            "execution_constraints": {
+                "drift_threshold": "Reference rules.json > system_thresholds > REBALANCING_DRIFT_THRESHOLD",
+                "friction_gate": "ENH_FIN_02",
+                "behavioral_directive": "Distinguish mechanistic flows (forced selling) from fundamental catalyst decay."
+            }
+        },
+        {
+            "id": "ENH_47",
+            "title": "Macro Calendar Shield Protocol",
+            "version": "1.0",
+            "status": "ACTIVE",
+            "instruction": "Forward-looking economic calendar awareness layer. Monitors proximity to scheduled macro releases (FOMC, CPI, NFP, etc.) and adjusts shield_posture and sizing_dampener to prevent entries into pre-event uncertainty windows.",
+            "parameters": {
+                "trigger_type": "Calendar_Proximity_Alignment",
+                "enforcement_level": "MANDATE_20_MACRO_VETO"
+            },
+            "event_tiers": {
+                "TIER_1": {
+                    "events": [
+                        "FOMC",
+                        "CPI",
+                        "NFP"
+                    ],
+                    "proximity_threshold_hours": 24,
+                    "shield_posture": "NO_NEW_ENTRIES",
+                    "sizing_dampener": 0.5
+                },
+                "TIER_2": {
+                    "events": [
+                        "PPI",
+                        "GDP",
+                        "PCE",
+                        "ISM"
+                    ],
+                    "proximity_threshold_hours": 12,
+                    "shield_posture": "REDUCED_RISK",
+                    "sizing_dampener": 0.75
+                },
+                "TIER_3": {
+                    "events": [
+                        "RETAIL_SALES",
+                        "JOBLESS_CLAIMS",
+                        "EARNINGS_SEASON",
+                        "OTHER"
+                    ],
+                    "proximity_threshold_hours": 6,
+                    "shield_posture": "DEFENSIVE",
+                    "sizing_dampener": 0.85
+                }
+            },
+            "logic_gates": [
+                "IF proximity_hours <= TIER_1.proximity_threshold_hours AND event IN TIER_1 -> shield_posture = NO_NEW_ENTRIES, sizing_dampener = 0.5",
+                "IF proximity_hours <= TIER_2.proximity_threshold_hours AND event IN TIER_2 -> shield_posture = REDUCED_RISK, sizing_dampener = 0.75",
+                "IF proximity_hours <= TIER_3.proximity_threshold_hours AND event IN TIER_3 -> shield_posture = DEFENSIVE, sizing_dampener = 0.85",
+                "IF proximity_hours == 0 (EVENT_DAY) AND event IN TIER_1 -> shield_posture = NO_NEW_ENTRIES, sizing_dampener = 0.25",
+                "IF no events within 48h -> shield_posture = FULL_RISK, sizing_dampener = 1.0"
+            ]
+        },
+        {
+            "id": "ENH_48",
+            "title": "Narrative Bridge Protocol",
+            "process_id": "NARRATIVE_BRIDGE_V1",
+            "trigger": "ON_SPEAKER_HIT_TAPE",
+            "instruction": "Prevents 'Hallucinated Calm' by linking current Fed cautiousness to the established fear of DOJ-induced central bank instability.",
+            "execution_logic": [
+                {
+                    "step": 1,
+                    "action": "QUERY_LEGACY_ANCHOR_DATABASE",
+                    "target_keys": [
+                        "Independence",
+                        "Roaring Back",
+                        "Stink Bug",
+                        "Subpoena",
+                        "March Cut"
+                    ]
+                },
+                {
+                    "step": 2,
+                    "action": "CALCULATE_NARRATIVE_RESONANCE",
+                    "formula": "$Resonance = (Live_Keyword_Match * Legacy_Anchor_Weight) / Time_Decay_Constant",
+                    "threshold": 0.75
+                },
+                {
+                    "step": 3,
+                    "action": "EMIT_VOLATILITY_WARNING",
+                    "conditions": {
+                        "if": "$Resonance > 0.85",
+                        "then": "RE-RATE_TICKER_SENSITIVITY",
+                        "targets": [
+                            "$ONDS",
+                            "$DFTX",
+                            "$PLTR"
+                        ]
+                    }
+                }
+            ]
+        }
+    ],
+    "global_logic_gates": {
+        "execution_gate": {
+            "id": "ENH_36",
+            "block_if": [
+                "current_time >= 14:30 ET AND (atr_percent <= 4.0 OR rvol <= 1.0)"
+            ],
+            "note": "Prevents over-trading in low-liquidity environments."
+        },
+        "liquidity_gate": {
+            "id": "GATE_LIQ_01",
+            "authority": "CANONICAL — execution.json MUST reference this gate.",
+            "block_if": [
+                "volume < 100000",
+                "implied_spread_percent > 5",
+                "abs(distance_from_vwap) > VWAP_EXECUTION_BLOCK (see system_thresholds)"
+            ],
+            "note": "Blocks execution in illiquid conditions."
+        },
+        "regulatory_gate": {
+            "id": "GATE_REG_01",
+            "authority": "CANONICAL — execution.json MUST reference this gate.",
+            "block_if": [
+                "Risk_Regime == CRITICAL",
+                "health_score < HEALTH_SCORE_MINIMUM (see system_thresholds)",
+                "dealer_posture == SHORT_GAMMA"
+            ],
+            "enh_ref": "ENH_08",
+            "note": "Blocks execution under adverse regime or structural conditions."
+        },
+        "consensus_gate": {
+            "id": "ENH_40",
+            "conditions": [
+                {
+                    "field": "S_A",
+                    "operator": "<",
+                    "value": 0.75
+                },
+                {
+                    "field": "ticker_volatility",
+                    "operator": ">",
+                    "value": 0.05
+                }
+            ],
+            "logic": "ALL",
+            "emit": {
+                "action": "BLOCK_EXECUTION"
+            },
+            "note": "Enforces MANDATE_13 Consensus for high-volatility assets."
+        },
+        "ssr_gate": {
+            "id": "ENH_07",
+            "status": "ACTIVE"
+        },
+        "fin_account_gate": {
+            "id": "ENH_FIN_01",
+            "provider": "Nordea_Finland_OST",
+            "round_trip_cost": 0.01,
+            "constraints": {
+                "min_alpha_threshold": "expected_move > 0.025"
+            }
+        }
+    },
+    "deletion_policy": {
+        "inherit_from_ssot": true,
+        "allow_deletion": false,
+        "explicit_delete_flag": "DELETE_FIELD",
+        "examples": [
+            "DELETE_FIELD: forensic_intelligence.UMAC_Threshold_Cross",
+            "DELETE_FIELD: portfolio_snapshot[RCAT].catalyst"
+        ]
+    },
+    "merge_engine": {
+        "strategy": "NON_DESTRUCTIVE_MERGE",
+        "section_rules": {
+            "forensic_intelligence": "APPEND_OR_UPDATE_KEYS_PRESERVE_OTHERS",
+            "portfolio_snapshot": "MERGE_BY_TICKER_PRESERVE_UNTOUCHED_TICKERS",
+            "risk_parameters": "UPDATE_ONLY_IF_EXPLICITLY_PROVIDED",
+            "mapping_rules": "IMMUTABLE",
+            "global_logic_gates": "IMMUTABLE"
+        },
+        "portfolio_merge_logic": {
+            "key": "ticker",
+            "rules": {
+                "update_if_present": true,
+                "preserve_if_absent_in_delta": true,
+                "allow_deletion": false
+            }
+        },
+        "calendar_shield_merge_logic": {
+            "key": "active_events_window[].date",
+            "rules": {
+                "preserve_future_events": "IF event.date >= current_date THEN PRESERVE — event is IMMUTABLE until its date has passed",
+                "prune_expired_events": "IF event.date < current_date THEN PRUNE — remove from active_events_window",
+                "append_new_events": "IF event NOT in active_events_window AND event.date >= current_date THEN APPEND",
+                "update_next_event": "SET next_event = MIN(active_events_window.date WHERE date >= current_date)",
+                "recalculate_on_merge": "After merge, recalculate status, shield_posture, and sizing_dampener from ENH_47 tier logic based on updated next_event.proximity_hours"
+            },
+            "integrity_check": "IF count(active_events_window WHERE date >= current_date) decreased between prior_state and proposed_state THEN REJECT_UPDATE and emit CALENDAR_SHIELD_INTEGRITY_VIOLATION"
+        }
+    },
+    "io_contract": {
+        "input": {
+            "context_engine_proposal": "FULL_JSON",
+            "previous_ssot_snapshot": "FULL_JSON"
+        },
+        "output": {
+            "mode": "FULL_STATE_OUTPUT",
+            "format": "STRICT_JSON",
+            "required_fields": [
+                "state_context",
+                "portfolio_snapshot",
+                "forensic_intelligence",
+                "runtime_flags",
+                "macro_calendar_shield",
+                "DELETE_FIELD (optional)"
+            ]
+        }
+    },
+    "context_write_protocol": {
+        "target": "GEM-Context-SSOT",
+        "method": "FORCE_WRITE",
+        "rule": "ENH_12_ATOMIC_PERSISTENCE"
+    },
+    "health_score_protocol": {
+        "authority": "CANONICAL — technical_validator.json MUST reference this protocol.",
+        "base_score": 100,
+        "penalties": [
+            {
+                "condition": "S_A < 0.65",
+                "deduction": 100,
+                "label": "Consensus Failure/Deadlock"
+            },
+            {
+                "condition": "Risk_Regime == CRITICAL",
+                "deduction": 50,
+                "label": "ENH_08 Critical Regime",
+                "enh_ref": "ENH_08"
+            },
+            {
+                "condition": "Trade_State == EXIT AND Drawdown_Gap < 1.5% AND volatility_override == FALSE",
+                "deduction": 30,
+                "label": "Alpha-Friction Violation (churn only — bypassed during Protective Exit Override)",
+                "enh_ref": "ENH_FIN_02"
+            },
+            {
+                "condition": "fields labeled Unverified",
+                "deduction": 20,
+                "label": "MANDATE_04 Drift"
+            },
+            {
+                "condition": "Supply Chain flags active",
+                "deduction": 15,
+                "label": "ENH_10 Supply Chain",
+                "enh_ref": "ENH_10"
+            },
+            {
+                "condition": "Signal/Trend mismatch",
+                "deduction": 15,
+                "label": "Drift Detection"
+            },
+            {
+                "condition": "rvol < 0.5 OR rvol > 4.0",
+                "deduction": 10,
+                "label": "rVol Anomaly"
+            }
+        ]
+    },
+    "signal_consistency_thresholds": {
+        "authority": "CANONICAL — technical_validator.json MUST reference these thresholds.",
+        "rules": [
+            {
+                "condition": "rsi < 30",
+                "expected_label": "OVERSOLD"
+            },
+            {
+                "condition": "rsi > 70",
+                "expected_label": "OVERBOUGHT"
+            },
+            {
+                "condition": "abs(distance_from_vwap) < VWAP_PIN_DISTANCE",
+                "expected_label": "VWAP PIN"
+            },
+            {
+                "condition": "rsi >= 30 AND rsi <= 70",
+                "expected_label": "NEUTRAL"
+            }
+        ],
+        "dealer_posture_logic": {
+            "positive_gex": "LONG_GAMMA",
+            "negative_gex": "SHORT_GAMMA",
+            "zero_gex": "NEUTRAL"
+        }
+    },
+    "system_thresholds": {
+        "authority": "CANONICAL — All sub-engines MUST reference named constants here instead of hardcoding values.",
+        "RVOL_CONFIRMATION": {
+            "value": 1.5,
+            "usage": "Minimum rVol for trend/skew confirmation",
+            "used_by": [
+                "bullish_gem",
+                "structural_risk",
+                "research"
+            ]
+        },
+        "RVOL_HIGH_ANOMALY": {
+            "value": 4.0,
+            "usage": "Upper rVol anomaly bound",
+            "used_by": [
+                "technical_validator"
+            ]
+        },
+        "RVOL_LOW_ANOMALY": {
+            "value": 0.5,
+            "usage": "Lower rVol anomaly bound",
+            "used_by": [
+                "technical_validator"
+            ]
+        },
+        "RVOL_OST_GATE": {
+            "value": 1.0,
+            "usage": "Minimum rVol for OST execution",
+            "used_by": [
+                "execution",
+                "ENH_36"
+            ]
+        },
+        "VWAP_PIN_DISTANCE": {
+            "value": 0.2,
+            "usage": "Max % distance for VWAP PIN classification",
+            "used_by": [
+                "technical_validator",
+                "signal_consistency"
+            ]
+        },
+        "VWAP_GAMMA_TRAP_DISTANCE": {
+            "value": 0.25,
+            "usage": "Gamma trap detection proximity",
+            "used_by": [
+                "research"
+            ]
+        },
+        "VWAP_EXECUTION_BLOCK": {
+            "value": 3.0,
+            "usage": "Block execution if VWAP distance exceeds this",
+            "used_by": [
+                "execution",
+                "liquidity_gate"
+            ]
+        },
+        "HEALTH_SCORE_MINIMUM": {
+            "value": 40,
+            "usage": "Below this, regulatory gate blocks execution",
+            "used_by": [
+                "execution",
+                "regulatory_gate"
+            ]
+        },
+        "ATR_PERCENT_MINIMUM": {
+            "value": 4.0,
+            "usage": "Minimum ATR% for post-14:30 execution",
+            "used_by": [
+                "execution",
+                "ENH_36"
+            ]
+        },
+        "CONSENSUS_FAILURE_THRESHOLD": {
+            "value": 0.65,
+            "usage": "S_A below this = consensus failure",
+            "used_by": [
+                "health_score_protocol",
+                "technical_validator"
+            ]
+        },
+        "ALPHA_FRICTION_MINIMUM": {
+            "value": 0.015,
+            "usage": "1.5% minimum viable move for entry/exit (Logic: 1% cost + 0.5% buffer)",
+            "used_by": [
+                "bullish_gem",
+                "red_team_gem",
+                "ENH_FIN_02"
+            ]
+        },
+        "LIQUIDITY_REQUIREMENTS": {
+            "value": {
+                "min_dollar_volume_5d": 2000000,
+                "min_relative_volume": 0.5,
+                "hard_floor_shares": 10000
+            },
+            "usage": "Dynamic liquidity gate: >$2M Avg Dollar Vol OR >50% Relative Vol + 10k share floor",
+            "used_by": [
+                "execution",
+                "liquidity_gate"
+            ]
+        },
+        "benchmarks": {
+            "primary_index": "SPX",
+            "equal_weight_index": "RSP",
+            "volatility_index": "VXX"
+        },
+        "SPREAD_CEILING": {
+            "value": 5.0,
+            "usage": "Max implied spread % for execution",
+            "used_by": [
+                "execution",
+                "liquidity_gate"
+            ]
+        },
+        "FATAL_FLAW_VETO_STANDARD": {
+            "value": 8,
+            "usage": "Fatal flaw score triggering hard veto",
+            "used_by": [
+                "red_team_gem",
+                "MANDATE_13"
+            ]
+        },
+        "FATAL_FLAW_VETO_MEAN_REVERT": {
+            "value": 6.5,
+            "usage": "Lower veto threshold in mean-reverting regimes",
+            "used_by": [
+                "red_team_gem",
+                "MANDATE_17"
+            ]
+        },
+        "SHOCK_CAUTION_THRESHOLD": {
+            "value": 5.0,
+            "usage": "Macro shock intensity for CAUTION mode",
+            "used_by": [
+                "macro_arbiter",
+                "ENH_45"
+            ]
+        },
+        "SHOCK_ABORT_THRESHOLD": {
+            "value": 8.0,
+            "usage": "Macro shock intensity for ABORT/NO_TRADE",
+            "used_by": [
+                "macro_arbiter",
+                "ENH_45",
+                "MANDATE_20"
+            ]
+        },
+        "DRIFT_CONTROL_THRESHOLD": {
+            "value": 0.005,
+            "usage": "Minimum delta for SSoT field update to count as meaningful change",
+            "used_by": [
+                "ssot_storage",
+                "context_engine"
+            ]
+        },
+        "ROUND_TRIP_COST_BASIS": {
+            "value": 0.01,
+            "usage": "Nordea OST round-trip cost (1%)",
+            "used_by": [
+                "ssot_storage",
+                "fin_account_gate",
+                "ENH_FIN_02"
+            ]
+        },
+        "OST_LOCKOUT_TIME": {
+            "value": "14:30 ET",
+            "usage": "Post-this-time execution requires elevated ATR/rVol",
+            "used_by": [
+                "execution",
+                "ENH_36"
+            ]
+        },
+        "SLIPPAGE_PENALTY": {
+            "value": 0.5,
+            "usage": "Execution slippage sizing multiplier",
+            "used_by": [
+                "execution"
+            ]
+        },
+        "SUPPLY_CHAIN_PENALTY": {
+            "value": 0.85,
+            "usage": "Supply chain delay sizing multiplier (ENH_10)",
+            "used_by": [
+                "execution",
+                "ENH_10"
+            ]
+        },
+        "REBALANCING_DRIFT_THRESHOLD": {
+            "value": 0.05,
+            "usage": "Drift threshold for institutional rebalancing windows (ENH_46)",
+            "used_by": [
+                "ENH_46",
+                "post_trade_review",
+                "research"
+            ]
+        },
+        "PROTECTIVE_EXIT_ATR": {
+            "value": 4.0,
+            "usage": "ATR% threshold for Protective Exit Override — bypass friction gate during volatile breakdowns",
+            "used_by": [
+                "ENH_FIN_02",
+                "red_team_gem",
+                "execution"
+            ]
+        },
+        "PROTECTIVE_EXIT_SESSION_DROP": {
+            "value": {
+                "normal": -2.0,
+                "stressed": -1.5
+            },
+            "usage": "Intraday session drop % triggering Protective Exit Override (Stressed if shock_intensity > 5 or MACRO_SENTINEL == HOSTILE)",
+            "used_by": [
+                "ENH_FIN_02",
+                "red_team_gem",
+                "execution"
+            ]
+        },
+        "MACRO_CALENDAR_PROXIMITY_HOURS": {
+            "value": {
+                "TIER_1": 24,
+                "TIER_2": 12,
+                "TIER_3": 6
+            },
+            "usage": "Hours before macro event that activates shield posture (ENH_47)",
+            "used_by": [
+                "ENH_47",
+                "macro_arbiter",
+                "execution"
+            ]
+        },
+        "NARRATIVE_RESONANCE_THRESHOLD": {
+            "value": 0.75,
+            "usage": "Threshold for Narrative Bridge (ENH_48) resonance calculation",
+            "used_by": [
+                "research"
+            ]
+        },
+        "INNOVATION_ANTICIPATION_DAYS": {
+            "value": 14,
+            "usage": "Days prior to innovation event to trigger speculative bullish sentiment",
+            "used_by": [
+                "sentiment_engine"
+            ]
+        },
+        "CPI_DEVIATION_THRESHOLD": {
+            "value": 0.2,
+            "usage": "CPI/PPI deviation % from consensus triggering Macro Flag",
+            "used_by": [
+                "macro_arbiter"
+            ]
+        }
+    },
+    "basket_definition": {
+        "authority": "CANONICAL — All sub-engines MUST reference tickers from this section. Update here when adding/removing tickers.",
+        "defense_tech": {
+            "tickers": [
+                "RCAT",
+                "ONDS",
+                "UMAC",
+                "RKLB",
+                "DFTX",
+                "PLTR",
+                "KTOS"
+            ],
+            "theme": "Drone/Defense",
+            "regulatory_flags": [
+                "NDAA",
+                "DHS",
+                "ENH_08"
+            ]
+        },
+        "health_tech": {
+            "tickers": [
+                "DFTX"
+            ],
+            "theme": "Health Technology / Neuropsychiatry",
+            "regulatory_flags": []
+        },
+        "all_watched": [
+            "RCAT",
+            "ONDS",
+            "UMAC",
+            "RKLB",
+            "PLTR",
+            "KTOS",
+            "DFTX"
+        ],
+        "special_situations": {
+            "primary_lineage_ticker": "UMAC",
+            "innovation_day_ticker": "RCAT",
+            "warrant_dilution_ticker": "ONDS"
+        },
+        "regulatory_context": {
+            "authority": "CANONICAL — Defines the primary regulatory body and risk triggers for the current basket.",
+            "agency_name": "DHS",
+            "risk_event_trigger": "CR"
+        }
+    },
+    "sector_taxonomy": {
+        "authority": "CANONICAL — SSoT sector_exposure fields MUST align with these categories.",
+        "categories": [
+            "defense_tech",
+            "neuropsychiatry",
+            "infrastructure"
+        ],
+        "note": "Update SSoT portfolio_risk_geometry.sector_exposure when adding new sectors."
+    },
+    "temporal_events": {
+        "authority": "CANONICAL — All date-sensitive rules MUST reference events here. Update this section when deadlines change.",
+        "GOV_FUNDING_EXPIRY": {
+            "value": "2026-02-13",
+            "usage": "Government Funding / CR expiry date",
+            "used_by": [
+                "sentiment_engine"
+            ]
+        },
+        "DILUTION_WARRANT_EVENT": {
+            "value": "MONITOR_DAILY",
+            "usage": "Mandatory forensic check for daily structural overhead and share-count expansion resulting from warrant tranches.",
+            "used_by": [
+                "structural_engine",
+                "technical_validator"
+            ]
+        },
+        "STRATEGIC_INNOVATION_EVENT": {
+            "value": null,
+            "usage": "Strategic Innovation Event date (e.g., Product Launch, Investor Day)",
+            "used_by": [
+                "sentiment_engine"
+            ]
+        },
+        "ANNUAL_RESET_WINDOW": {
+            "value": "January 01 - January 15",
+            "usage": "Primary institutional reset window — year-ahead capital allocation",
+            "used_by": [
+                "ENH_46",
+                "research",
+                "post_trade_review"
+            ]
+        },
+        "MID_QUARTER_REVIEW_WINDOWS": {
+            "value": [
+                "February 10 - February 20",
+                "May 10 - May 20",
+                "August 10 - August 20",
+                "November 10 - November 20"
+            ],
+            "usage": "Secondary tactical review windows — trimming growth winners for laggards/bonds",
+            "used_by": [
+                "ENH_46",
+                "research",
+                "post_trade_review"
+            ]
+        },
+        "QUARTERLY_ROLL_WINDOWS": {
+            "value": "Final 5 Trading Days of March, June, September, December",
+            "usage": "Index rebalancing and futures rolls — peak structural volatility",
+            "used_by": [
+                "ENH_46",
+                "execution",
+                "research"
+            ]
+        }
+    }
+}

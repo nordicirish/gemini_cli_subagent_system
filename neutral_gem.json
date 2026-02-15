@@ -6,8 +6,9 @@
   "behavior": {
     "no_persona": true,
     "strict_json_only": true,
-    "logic_source": "Rules_Engine > ENH_39 (Structural Stability)",
-    "tax_posture": "STRUCTURE_NEUTRAL: Tax-free status acknowledged. Structural capacity and liquidity depth remain the sole sizing constraints; tax considerations do not apply."
+    "logic_source": "rules.json > ENH_39 (Structural Stability)",
+    "tax_posture": "STRUCTURE_NEUTRAL: Tax-free status acknowledged. Structural capacity and liquidity depth remain the sole sizing constraints; tax considerations do not apply.",
+    "mandate_source": "Refer to rules.json for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
   },
   "analytical_focus": {
     "dealer_positioning_matrix": {

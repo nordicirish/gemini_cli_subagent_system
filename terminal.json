@@ -8,20 +8,22 @@
     "no_extra_text": true,
     "no_mixing_modules": true,
     "strict_forensic_tone_for_financial_data": true,
-    "mandate_override": "NONE - STRICT ADHERENCE TO RULES_ENGINE",
+    "mandate_override": "NONE - STRICT ADHERENCE TO GEM_RULE_ENFORCER_ENGINE",
     "coordination_constraints": {
-      "logic_source": "GEM_Rules_Engine",
+      "logic_source": "rules.json",
+      "coordination": "Execute commands only after validating rights with GEM_Rule_Enforcer_Engine protocol.",
+      "mandate_source": "Refer to rules.json for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
       "enforcement_mandate": "MANDATE_04_DRIFT_CONTROL",
       "secondary_mandate": "MANDATE_20_MACRO_VETO",
       "friction_gate": "MANDATE_18 (ENH_FIN_02)",
       "behavior": "Strictly decline any output failing forensic handshake or showing behavioral drift from Alpha-Friction constraints.",
       "routing_priority": {
-        "MACRO_FILTER": "Reference Rules_Engine > ENH_45",
-        "CALENDAR_SHIELD": "Reference Rules_Engine > ENH_47",
-        "EXECUTION_LOGIC": "Reference Rules_Engine > ENH_29",
-        "STRUCTURAL_FILTER": "Reference Rules_Engine > ENH_30",
-        "TEMPORAL_LOGIC": "Reference Rules_Engine > ENH_31",
-        "FRICTION_GUARD": "Reference Rules_Engine > ENH_FIN_02"
+        "MACRO_FILTER": "Reference rules.json > ENH_45",
+        "CALENDAR_SHIELD": "Reference rules.json > ENH_47",
+        "EXECUTION_LOGIC": "Reference rules.json > ENH_29",
+        "STRUCTURAL_FILTER": "Reference rules.json > ENH_30",
+        "TEMPORAL_LOGIC": "Reference rules.json > ENH_31",
+        "FRICTION_GUARD": "Reference rules.json > ENH_FIN_02"
       }
     }
   },
@@ -50,7 +52,7 @@
     "debug_footer": {
       "behavior": "append_to_bottom",
       "only_if_debug_enabled": true,
-      "template": "### Debug (v3.9)\n{emoji} **{module_selected}**\n- Rule Fired: {routing_rule_fired}\n- Consensus Score: {agreement_score_sa}\n- Veto Active: {veto_triggered}\n- Friction Guard: {friction_violation_status}\n- Schema Source: SSoT v3.1-Friction-Aware\n- Logic Source: Rules Engine v3.9-Alpha-Friction-Patched",
+      "template": "### Debug (v3.9)\n{emoji} **{module_selected}**\n- Rule Fired: {routing_rule_fired}\n- Consensus Score: {agreement_score_sa}\n- Veto Active: {veto_triggered}\n- Friction Guard: {friction_violation_status}\n- Context Health: {context_percentage_used} ({estimated_tokens_used}/{estimated_tokens_limit})\n- Health Status: {context_health_status}\n- Schema Source: SSoT v3.1-Friction-Aware\n- Logic Source: rules.json & GEM_Rule_Enforcer_Engine",
       "deep_research_debug": {
         "used_today": "{deep_research_used_today}",
         "daily_limit": "{deep_research_daily_limit}",
@@ -71,7 +73,7 @@
     "REVIEW_ENGINE": "Post-trade reflection and misfire detection.",
     "CONTEXT_ENGINE": "Active SSoT Bridge.",
     "GEX_ENGINE": "Calculates gamma exposure for each ticker.",
-    "RULES_ENGINE": "Master ENH protocol enforcement.",
+    "RULE_ENFORCER_ENGINE": "Master ENH protocol enforcement.",
     "TECHNICAL_VALIDATOR": "Data Integrity & Enrichment.",
     "SSoT_STORAGE": "Passive Data Schema.",
     "BULLISH_ADVOCATE": "Alpha & Momentum specialist (ENH_37).",
@@ -91,7 +93,7 @@
       "enforcement": "MANDATE_13_CONSENSUS",
       "mandatory_synthesis": true,
       "final_output_gate": "MANDATORY_COUNCIL_DECISION",
-      "execution_logic": "Reference Rules_Engine > update_flow"
+      "execution_logic": "Reference GEM_Rule_Enforcer_Engine > update_flow"
     },
     "deep_research_system": {
       "daily_limit": 20,
@@ -203,7 +205,7 @@
       "QUICKCHECK_ENGINE": "FAST",
       "GEX_ENGINE": "PRO",
       "SSoT_Storage": "PRO",
-      "RULES_ENGINE": "PRO",
+      "RULE_ENFORCER_ENGINE": "PRO",
       "BULLISH_ADVOCATE": "THINKING",
       "RED_TEAM_PESSIMIST": "THINKING",
       "NEUTRAL_STRUCTURALIST": "PRO"

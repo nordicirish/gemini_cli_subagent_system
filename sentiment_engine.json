@@ -5,40 +5,70 @@
   "behavior": {
     "no_execution_calls": true,
     "no_override_of_technicals": true,
-    "no_persona": true,
-    "ssot_sync": "MANDATORY_KEEP_WRITE",
-    "logic_source": "Rules_Engine > ENH_16 (Score Bifurcation)"
+    "logic_source": "rules.json",
+    "coordination": "Submit findings to Context Engine. Reference rules.json > MANDATE_13 (Consensus Scrutiny).",
+    "mandate_source": "Refer to rules.json for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
   },
   "scope": {
     "sentiment_json": true,
-    "catalyst_extraction": "Forensic focus on ENH_08 (DHS) and ENH_10 (UMAC/RCAT)",
+    "catalyst_extraction": "Forensic focus on ENH_08 (Regulatory) and ENH_10 (Lineage)",
     "theme_detection": "Concentration vs. Broadening (ENH_09)",
     "regulatory_overlay": "Blue List Status & NDAA compliance sentiment"
   },
   "local_physics": {
-    "shutdown_protocol": {
+    "regulatory_risk_protocol": {
       "conditions": [
-        { "field": "current_date", "operator": "<", "threshold": "DHS_CR_EXPIRY" },
-        { "field": "DHS_Status", "operator": "==", "value": "CR" }
+        {
+          "field": "current_date",
+          "operator": "<",
+          "threshold": "GOV_FUNDING_EXPIRY"
+        },
+        {
+          "field": "REGULATORY_STATUS",
+          "operator": "==",
+          "value": "rules.json.basket_definition.regulatory_context.risk_event_trigger"
+        }
       ],
       "logic": "ALL",
-      "emit": { "sentiment": "Mixed/Anxious" }
+      "emit": {
+        "sentiment": "Mixed/Anxious"
+      }
     },
     "lineage_boost": {
       "conditions": [
-        { "field": "ticker", "operator": "==", "value": "UMAC" },
-        { "field": "Order_Status", "operator": "==", "value": "Fulfilled" }
+        {
+          "field": "ticker",
+          "operator": "==",
+          "value": "rules.json.basket_definition.special_situations.primary_lineage_ticker"
+        },
+        {
+          "field": "Order_Status",
+          "operator": "==",
+          "value": "Fulfilled"
+        }
       ],
       "logic": "ALL",
-      "emit": { "sentiment": "Constructive" }
+      "emit": {
+        "sentiment": "Constructive"
+      }
     },
     "innovation_anticipation": {
       "conditions": [
-        { "field": "event_date", "operator": "reference", "threshold": "RCAT_INNOVATION_DAY" },
-        { "field": "days_to_event", "operator": "<", "value": 14 }
+        {
+          "field": "event_date",
+          "operator": "reference",
+          "threshold": "STRATEGIC_INNOVATION_EVENT"
+        },
+        {
+          "field": "days_to_event",
+          "operator": "<",
+          "value": "rules.json.system_thresholds.INNOVATION_ANTICIPATION_DAYS"
+        }
       ],
       "logic": "ALL",
-      "emit": { "sentiment": "Speculative Bullish" }
+      "emit": {
+        "sentiment": "Speculative Bullish"
+      }
     }
   },
   "context_write_protocol": {

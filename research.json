@@ -8,8 +8,10 @@
     "no_extra_text": true,
     "enforce_thinking_mode": true,
     "ssot_sync": "MANDATORY_KEEP_WRITE",
-    "logic_source": "Rules_Engine > ENH_09 (Bifurcation Filter)",
-    "data_source": "External Market Data + SSoT (Risk Regime)"
+    "logic_source": "rules.json",
+    "coordination": "Submit findings to Context Engine. Reference rules.json > MANDATE_11.",
+    "data_source": "External Market Data + SSoT (Risk Regime)",
+    "mandate_source": "Refer to rules.json for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
   },
   "scope": {
     "macro_tone": "Synchronize with ENH_08 (Legislative) & ENH_09 (ICV)",
@@ -19,155 +21,216 @@
       "Gamma Walls",
       "Supply Chain Lineage",
       "Institutional Rebalancing (ENH_46)",
-      "Macro Calendar Proximity (ENH_47)"
+      "Macro Calendar Proximity (ENH_47)",
+      "Narrative Bridge (ENH_48)"
     ],
     "ticker_level_narrative": "Forensic signal attribution",
-    "basket_context": "Reference Rules_Engine > basket_definition (Canonical)"
-  },
-  "local_physics": {
-    "speculative_exhaustion": {
-      "conditions": [
-        {
-          "field": "SPX",
-          "operator": ">",
-          "compare_to": "52W_High"
-        },
-        {
-          "field": "RSP_trend",
-          "operator": "==",
-          "value": "FLAT"
-        }
-      ],
-      "logic": "ALL",
-      "emit": {
-        "tag": "SPECULATIVE_EXHAUSTION",
-        "triggers": "ENH_09 Gate"
-      }
-    },
-    "forensic_skew": {
-      "conditions": [
-        {
-          "field": "price",
-          "operator": ">",
-          "compare_to": "vwap"
-        },
-        {
-          "field": "rvol",
-          "operator": ">",
-          "threshold": "RVOL_CONFIRMATION"
-        }
-      ],
-      "logic": "ALL",
-      "emit_true": {
-        "tag": "Bullish Skew",
-        "enh_ref": "ENH_18"
+    "basket_context": "Reference rules.json > basket_definition (Canonical)",
+    "benchmark_logic": {
+      "primary": {
+        "ticker": "SPY",
+        "role": "Broad Market Beta",
+        "data_source": "yfinance",
+        "field": "rules.json.benchmarks.primary_index"
       },
-      "emit_false": {
-        "tag": "Noise"
+      "secondary": {
+        "ticker": "RSP",
+        "role": "Equal Weight Beta",
+        "data_source": "yfinance",
+        "field": "rules.json.benchmarks.equal_weight_index + '_trend'"
       }
     },
-    "gamma_trap": {
-      "conditions": [
-        {
-          "field": "abs(distance_from_vwap)",
-          "operator": "<",
-          "threshold": "VWAP_GAMMA_TRAP_DISTANCE"
+    "correlation_constraints": [
+      "IF correlation(Ticker, SPY) > 0.85 THEN REDUCE_POSITION_SIZE (High Beta)",
+      "IF correlation(Ticker, Sector_ETF) > 0.90 THEN FLAG_SECTOR_CROWDING"
+    ],
+    "local_physics": {
+      "speculative_exhaustion": {
+        "conditions": [
+          {
+            "field": "rules.json.benchmarks.primary_index",
+            "operator": ">",
+            "compare_to": "52W_High"
+          },
+          {
+            "field": "rules.json.benchmarks.equal_weight_index + '_trend'",
+            "operator": "==",
+            "value": "FLAT"
+          }
+        ],
+        "logic": "ALL",
+        "emit": {
+          "tag": "SPECULATIVE_EXHAUSTION",
+          "triggers": "ENH_09 Gate"
+        }
+      },
+      "forensic_skew": {
+        "conditions": [
+          {
+            "field": "price",
+            "operator": ">",
+            "compare_to": "vwap"
+          },
+          {
+            "field": "rvol",
+            "operator": ">",
+            "threshold": "RVOL_CONFIRMATION"
+          }
+        ],
+        "logic": "ALL",
+        "emit_true": {
+          "tag": "Bullish Skew",
+          "enh_ref": "ENH_18"
         },
-        {
-          "field": "net_gex_total",
-          "operator": ">",
-          "value": 0
+        "emit_false": {
+          "tag": "Noise"
         }
-      ],
-      "logic": "ALL",
-      "emit": {
-        "tag": "Call Wall Compression"
+      },
+      "gamma_trap": {
+        "conditions": [
+          {
+            "field": "abs(distance_from_vwap)",
+            "operator": "<",
+            "threshold": "VWAP_GAMMA_TRAP_DISTANCE"
+          },
+          {
+            "field": "net_gex_total",
+            "operator": ">",
+            "value": 0
+          }
+        ],
+        "logic": "ALL",
+        "emit": {
+          "tag": "Call Wall Compression"
+        }
+      },
+      "regulatory_headwind": {
+        "conditions": [
+          {
+            "field": "ticker",
+            "operator": "IN",
+            "reference": "rules.json > basket_definition > defense_tech > tickers"
+          },
+          {
+            "field": "Risk_Regime",
+            "operator": "==",
+            "value": "CRITICAL"
+          }
+        ],
+        "logic": "ALL",
+        "emit": {
+          "tag": "ENH_08 Shutdown Risk",
+          "enh_ref": "ENH_08"
+        }
+      },
+      "supply_chain_penalty": {
+        "conditions": [
+          {
+            "field": "SUPPLY_CHAIN_DELAY_FLAG",
+            "operator": "==",
+            "value": true
+          }
+        ],
+        "logic": "ALL",
+        "emit": {
+          "action": "Apply -15% Narrative Health",
+          "enh_ref": "ENH_10"
+        }
+      },
+      "rebalancing_context": {
+        "conditions": [
+          {
+            "field": "current_date",
+            "operator": "WITHIN",
+            "reference": "rules.json > temporal_events (ANNUAL_RESET_WINDOW | MID_QUARTER_REVIEW_WINDOWS | QUARTERLY_ROLL_WINDOWS)"
+          }
+        ],
+        "logic": "ANY",
+        "emit": {
+          "tag": "INSTITUTIONAL_REBALANCING_ACTIVE",
+          "enh_ref": "ENH_46",
+          "note": "Distinguish mechanistic flows from fundamental breakdown"
+        }
+      },
+      "calendar_proximity_context": {
+        "conditions": [
+          {
+            "field": "macro_calendar_shield.status",
+            "operator": "!=",
+            "value": "CLEAR"
+          }
+        ],
+        "logic": "ANY",
+        "emit": {
+          "tag": "MACRO_CALENDAR_PROXIMITY_ALERT",
+          "enh_ref": "ENH_47",
+          "note": "Flag upcoming macro event in narrative; distinguish pre-event uncertainty from structural weakness"
+        }
+      },
+      "narrative_bridge_logic": {
+        "conditions": [
+          {
+            "field": "trigger",
+            "operator": "==",
+            "value": "ON_SPEAKER_HIT_TAPE"
+          },
+          {
+            "field": "narrative_resonance",
+            "operator": ">",
+            "threshold": "rules.json.system_thresholds.NARRATIVE_RESONANCE_THRESHOLD"
+          }
+        ],
+        "logic": "ALL",
+        "emit": {
+          "tag": "VOLATILITY_WARNING",
+          "enh_ref": "ENH_48",
+          "action": "RE-RATE_TICKER_SENSITIVITY",
+          "targets": "rules.json.basket_definition.all_watched",
+          "note": "Prevents 'Hallucinated Calm'"
+        }
       }
     },
-    "regulatory_headwind": {
-      "conditions": [
-        {
-          "field": "ticker",
-          "operator": "IN",
-          "reference": "Rules_Engine > basket_definition > defense_tech > tickers"
-        },
-        {
-          "field": "Risk_Regime",
-          "operator": "==",
-          "value": "CRITICAL"
-        }
-      ],
-      "logic": "ALL",
-      "emit": {
-        "tag": "ENH_08 Shutdown Risk",
-        "enh_ref": "ENH_08"
-      }
+    "context_write_protocol": {
+      "target": "SSoT.forensic_intelligence.active_flags",
+      "action": "Append any triggered tags (e.g., 'SPECULATIVE_EXHAUSTION', 'ENH_08 Shutdown Risk').",
+      "note": "Critical for closing Execution Engine Bifurcation Gate."
     },
-    "supply_chain_penalty": {
-      "conditions": [
+    "output_template": {
+      "header": "📡 Weekly / Narrative Outlook | {timestamp} EST",
+      "macro_tone": "[Constructive / Jittery / Exhaustion Risk]",
+      "sector_rotation": "[Concentrated / Broadening / Defensive]",
+      "forensic_themes": [
+        "ENH_09: ICV Analysis",
+        "ENH_17: Net GEX Posture"
+      ],
+      "ticker_summaries": [
         {
-          "field": "UMAC_8K_DELAY",
-          "operator": "==",
-          "value": true
+          "ticker": "",
+          "forensic_signal": "[Forensic Proxy: ACTIVE/INACTIVE]",
+          "summary": "Forensic narrative based on ENH logic blocks."
         }
       ],
-      "logic": "ALL",
-      "emit": {
-        "action": "Apply -15% Narrative Health",
-        "enh_ref": "ENH_10"
-      }
-    },
-    "rebalancing_context": {
-      "conditions": [
-        {
-          "field": "current_date",
-          "operator": "WITHIN",
-          "reference": "Rules_Engine > temporal_events (ANNUAL_RESET_WINDOW | MID_QUARTER_REVIEW_WINDOWS | QUARTERLY_ROLL_WINDOWS)"
-        }
-      ],
-      "logic": "ANY",
-      "emit": {
-        "tag": "INSTITUTIONAL_REBALANCING_ACTIVE",
-        "enh_ref": "ENH_46",
-        "note": "Distinguish mechanistic flows from fundamental breakdown"
-      }
-    },
-    "calendar_proximity_context": {
-      "conditions": [
-        {
-          "field": "macro_calendar_shield.status",
-          "operator": "!=",
-          "value": "CLEAR"
-        }
-      ],
-      "logic": "ANY",
-      "emit": {
-        "tag": "MACRO_CALENDAR_PROXIMITY_ALERT",
-        "enh_ref": "ENH_47",
-        "note": "Flag upcoming macro event in narrative; distinguish pre-event uncertainty from structural weakness"
-      }
+      "risk_regime_status": "Current SSoT Risk Level"
     }
   },
-  "context_write_protocol": {
-    "target": "SSoT.forensic_intelligence.active_flags",
-    "action": "Append any triggered tags (e.g., 'SPECULATIVE_EXHAUSTION', 'ENH_08 Shutdown Risk').",
-    "note": "Critical for closing Execution Engine Bifurcation Gate."
+  "logic_gates": {
+    "narrative_gate": {
+      "condition": "IF narrative_score < NARRATIVE_RESONANCE_THRESHOLD THEN REJECT",
+      "threshold": "rules.json.system_thresholds.NARRATIVE_RESONANCE_THRESHOLD"
+    },
+    "sector_gate": {
+      "condition": "IF sector_trend == 'DISTRIBUTION' THEN REJECT_LONG",
+      "override": "Can be overridden if idiosyncratic catalyst score > 8.5"
+    }
   },
   "output_template": {
-    "header": "📡 Weekly / Narrative Outlook | {timestamp} EST",
-    "macro_tone": "[Constructive / Jittery / Exhaustion Risk]",
-    "sector_rotation": "[Concentrated / Broadening / Defensive]",
-    "forensic_themes": [
-      "ENH_09: ICV Analysis",
-      "ENH_17: Net GEX Posture"
-    ],
-    "ticker_summaries": [
-      {
-        "ticker": "",
-        "forensic_signal": "[Forensic Proxy: ACTIVE/INACTIVE]",
-        "summary": "Forensic narrative based on ENH logic blocks."
-      }
-    ],
-    "risk_regime_status": "Current SSoT Risk Level"
+    "header": "🔬 Research Engine Analysis | {timestamp} EST",
+    "ticker": "{ticker}",
+    "narrative_verdict": "[STRONG_ALIGNMENT / WEAK_ALIGNMENT / DISCONNECTED]",
+    "sector_context": "[ACCUMULATION / DISTRIBUTION / NUANCE]",
+    "basket_membership": {
+      "targets": "rules.json.basket_definition.all_watched",
+      "status": "[MEMBER / OUTSIDER]"
+    }
   }
 }

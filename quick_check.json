@@ -1,4 +1,3 @@
-
 {
   "role": "GEM QuickCheck Engine",
   "version": "v3.6-Structured-Logic",
@@ -9,7 +8,8 @@
     "no_explanations": true,
     "no_narrative": true,
     "temporal_sync": "MANDATORY (ENH_07)",
-    "data_source": "SSoT_Storage"
+    "data_source": "SSoT_Storage",
+    "mandate_source": "Refer to GEM_Rule_Enforcer_Engine for all thresholds and mandates."
   },
   "scope": {
     "ost_feasibility": true,
@@ -21,19 +21,50 @@
   "local_physics": {
     "evaluation_rules": {
       "ost_status": {
-        "check": { "field": "SSoT.runtime_flags", "compare_to": "Rules_Engine > ENH_36" },
-        "emit": { "values": ["Executable", "Blocked", "ENH_08 Restriction"] }
+        "check": {
+          "field": "SSoT.runtime_flags",
+          "compare_to": "rules.json > ENH_36"
+        },
+        "emit": {
+          "values": [
+            "Executable",
+            "Blocked",
+            "ENH_08 Restriction"
+          ]
+        }
       },
       "vwap_state": {
-        "check": { "field": "SSoT.price", "operator": "vs", "compare_to": "vwap" },
+        "check": {
+          "field": "SSoT.price",
+          "operator": "vs",
+          "compare_to": "vwap"
+        },
         "conditions": [
-          { "field": "abs(deviation)", "operator": ">", "value": 2.0, "label": "Extended" }
+          {
+            "field": "abs(deviation)",
+            "operator": ">",
+            "value": 2.0,
+            "label": "Extended"
+          }
         ],
-        "emit": { "values": ["Value", "Noise", "Extended"] }
+        "emit": {
+          "values": [
+            "Value",
+            "Noise",
+            "Extended"
+          ]
+        }
       },
       "forensic_state": {
-        "check": { "field": "SSoT.dealer_posture" },
-        "emit": { "values": ["GEX Posture", "Shield Active"] }
+        "check": {
+          "field": "SSoT.dealer_posture"
+        },
+        "emit": {
+          "values": [
+            "GEX Posture",
+            "Shield Active"
+          ]
+        }
       }
     }
   },
@@ -46,4 +77,3 @@
     "note": "[1-line summary + ENH_11 Sync ID]"
   }
 }
-

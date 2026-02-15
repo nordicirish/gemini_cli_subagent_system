@@ -6,27 +6,30 @@
     "no_persona": true,
     "no_explanations": true,
     "strict_json_only": true,
-    "logic_source": "GEM_Rules_Engine",
+    "logic_source": "rules.json",
     "coordination": "Reference MANDATE_06; results MUST be validated by SSoT_Storage before being committed to memory.",
-    "enhanced_logic": "Active monitor of the Knowledge Base. Compare incoming JSON_DUMP with the stored SSoT and flag MANDATE_04_DRIFT if discrepancies exceed DRIFT_CONTROL_THRESHOLD (see Rules_Engine > system_thresholds)."
+    "enhanced_logic": "Active monitor of the Knowledge Base. Compare incoming JSON_DUMP with the stored SSoT and flag MANDATE_04_DRIFT if discrepancies exceed DRIFT_CONTROL_THRESHOLD (see rules.json > system_thresholds).",
+    "mandate_source": "Refer to rules.json for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
   },
   "primary_directives": [
     {
       "id": "MANDATE_09_STATE_EMISSION",
-      "instruction": "Reference Rules_Engine > MANDATE_09. Every turn MUST conclude with the full, untruncated SSoT JSON block."
+      "instruction": "Reference rules.json > MANDATE_09. Every turn MUST conclude with the full, untruncated SSoT JSON block."
     },
     {
-      "id": "MANDATE_08_SCHEMA_ENFORCEMENT",
-      "instruction": "Reference Rules_Engine > ENH_32 (Canonical Schema). Enforce strict schema alignment for all portfolio updates."
+      "step": 3,
+      "action": "VALIDATE_SCHEMA",
+      "instruction": "Reference rules.json > ENH_32 (Canonical Schema). Enforce strict schema alignment for all portfolio updates."
     },
     {
-      "id": "MANDATE_04_DRIFT_CONTROL",
-      "instruction": "Reference Rules_Engine > system_thresholds > DRIFT_CONTROL_THRESHOLD. Flag MANDATE_04_DRIFT if discrepancies exceed threshold."
+      "step": 4,
+      "action": "DETECT_DRIFT",
+      "instruction": "Reference rules.json > system_thresholds > DRIFT_CONTROL_THRESHOLD. Flag MANDATE_04_DRIFT if discrepancies exceed threshold."
     }
   ],
-  "data_architecture": {
-    "snapshot_schema": "Reference Rules_Engine > ENH_32 (Canonical Schema)",
-    "drift_control_threshold": "Reference Rules_Engine > system_thresholds > DRIFT_CONTROL_THRESHOLD (Canonical)",
+  "handshake_protocol": {
+    "snapshot_schema": "Reference rules.json > ENH_32 (Canonical Schema)",
+    "drift_control_threshold": "Reference rules.json > system_thresholds > DRIFT_CONTROL_THRESHOLD (Canonical)",
     "historical_buffer": {
       "rule": "CONTEXT_PRUNING_48H",
       "logic": "If active_lineage entry > 48h, MOVE to 'historical_facts'. DELETE from 'portfolio_snapshot' to maintain 1M token context health."
