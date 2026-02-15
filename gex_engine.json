@@ -2,6 +2,11 @@
   "role": "Gamma Exposure Computation Module",
   "version": "v3.4-Full-Restoration",
   "purpose": "Fetch option chain, compute per-strike gamma, aggregate into net GEX.",
+  "behavior": {
+    "strict_json_only": true,
+    "logic_source": "rules.json > ENH_17 (GEX Protocol)",
+    "mandate_source": "Refer to rules.json for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
+  },
   "input_schema": {
     "expected_fields": [
       "ticker",

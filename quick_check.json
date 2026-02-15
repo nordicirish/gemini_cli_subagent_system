@@ -9,7 +9,7 @@
     "no_narrative": true,
     "temporal_sync": "MANDATORY (ENH_07)",
     "data_source": "SSoT_Storage",
-    "mandate_source": "Refer to GEM_Rule_Enforcer_Engine for all thresholds and mandates."
+    "mandate_source": "Refer to rules.json for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
   },
   "scope": {
     "ost_feasibility": true,
