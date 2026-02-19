@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v3.9-Alpha-Friction-Patched",
+    "version": "v3.91-MANDATE_21_CONFIRMATION",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -67,23 +67,28 @@
         "MANDATE_17: REGIME_SYNC (Dynamic Weighting & Meta-Arbiter)",
         "MANDATE_18: RESTRICTED_EXECUTION (Nordea/Retail Constraints)",
         "MANDATE_19: SCHEMA_MIRRORING (Context vs. SSoT Parity)",
-        "MANDATE_20: MACRO_VETO_POWER (Binary Risk-Off Override)"
+        "MANDATE_20: MACRO_VETO_POWER (Binary Risk-Off Override)",
+        "MANDATE_21: USER_CONFIRMATION (Provisional Trade State)"
     ],
     "behavioral_guardrails": [
         {
             "id": "MANDATE_01_GATEKEEPER",
+            "status": "ACTIVE",
             "instruction": "The SSoT GEM is the exclusive interface for state commitment. However, it MUST accept 'Proposed States' from Context Engine v3.1 as the primary valid input source."
         },
         {
             "id": "MANDATE_02_WRITE_AUTHORITY",
+            "status": "ACTIVE",
             "instruction": "This GEM is the sole authority allowed to 'Commit' changes to the terminal state in Google Docs. Exclusive permission to execute 'FORCE_WRITE' to the master 'GEM-Context-SSOT' entry is reserved for the SSoT GEM."
         },
         {
             "id": "MANDATE_03_VALIDATION_PROTOCOL",
+            "status": "ACTIVE",
             "instruction": "Validate all requests against the Rules GEM using the live state parsed from the 'GEM-Context-SSOT' Google Doc. Block operations violating liquidity limits, risk regimes (MOMENTUM_BREAKOUT), or regulatory gates (NDAA Section 1709)."
         },
         {
             "id": "MANDATE_04_DRIFT_CONTROL",
+            "status": "ACTIVE",
             "protocol": "ENH_28",
             "enforcement_level": "STRICT",
             "instruction": "Prevents behavioral or data drift by mandating forensic handshake validation. Strictly decline any output failing forensic handshake or showing divergence from the SSOT Knowledge Base.",
@@ -92,10 +97,12 @@
         },
         {
             "id": "MANDATE_05_TEMPORAL_PRIORITY",
+            "status": "ACTIVE",
             "instruction": "Always prioritize the user-provided console/dashboard timestamp over the AI system time for all VWAP and trade log baselines."
         },
         {
             "id": "MANDATE_06_COORDINATION",
+            "status": "ACTIVE",
             "protocol": "ENH_23",
             "enforcement_level": "MANDATORY",
             "instruction": "Ensures cross-module synergy and state synchronization. Mandates that the TECHNICAL_VALIDATOR (PRO) must sign off on any data extraction or SSoT update to prevent isolated engine hallucinations.",
@@ -104,10 +111,12 @@
         },
         {
             "id": "MANDATE_07_ENGINE_OVERRIDE",
+            "status": "ACTIVE",
             "instruction": "All sub-engines must adhere to GOOGLE_AI_PRO_2026 tier synchronization: ATR-derived sizing, 50% forensic reductions, and mandatory EST sync."
         },
         {
             "id": "MANDATE_08_SCHEMA_ENFORCEMENT",
+            "status": "ACTIVE",
             "instruction": "All state updates must conform to the schema defined in ENH_32. Reject handshakes lacking forensic fields: health_score, net_gex_total, and dealer_posture."
         },
         {
@@ -144,7 +153,7 @@
                 "thresholds": {
                     "execution_threshold": 0.75,
                     "caution_threshold": 0.5,
-                    "fatal_flaw_limit": 8
+                    "fatal_flaw_limit": "Reference system_thresholds > FATAL_FLAW_VETO_STANDARD"
                 },
                 "governance_rules": [
                     "RULE_01: IF RED_TEAM_FATAL_FLAW > fatal_flaw_limit THEN S_A = 0.0 (Hard Veto)",
@@ -155,20 +164,23 @@
         },
         {
             "id": "MANDATE_14_ALPHA_CATALYST",
+            "status": "ACTIVE",
             "instruction": "The Bullish Advocate must prioritize GROWTH and MOMENTUM. Identify reasons to APPROVE, assuming the thesis is correct but needs verification."
         },
         {
             "id": "MANDATE_15_ADVERSARIAL_REVIEW",
+            "status": "ACTIVE",
             "instruction": "The Red Team must prioritize RISK and FAILURE. Identify reasons to REJECT, assuming the thesis is flawed."
         },
         {
             "id": "MANDATE_16_STRUCTURAL_NEUTRALITY",
+            "status": "ACTIVE",
             "instruction": "The Neutral Structuralist must prioritize LIQUIDITY and GEX. Direction is secondary to structural capacity."
         },
         {
             "id": "MANDATE_17_REGIME_SYNC",
             "status": "ACTIVE",
-            "instruction": "All sub-engines MUST adhere to regime-based weighting determined by the NEUTRAL_STRUCTURALIST. Influence coefficients (weights) are dynamic: 1.5x for Bullish in TRENDING/EXPANSION; Veto threshold 6.5 for Red Team in MEAN-REVERTING/COMPRESSION.",
+            "instruction": "All sub-engines MUST adhere to regime-based weighting determined by the NEUTRAL_STRUCTURALIST. Influence coefficients (weights) are dynamic: 1.5x for Bullish in TRENDING/EXPANSION; Veto threshold per FATAL_FLAW_VETO_MEAN_REVERT for Red Team in MEAN-REVERTING/COMPRESSION.",
             "meta_arbiter_enforcement": {
                 "logic_source": "ENH_40",
                 "instruction": "The SSoT Controller MUST validate the final Agreement Score (S_A) against the Meta-Arbiter logic in ENH_40 before committing."
@@ -176,6 +188,7 @@
         },
         {
             "id": "MANDATE_18_RESTRICTED_EXECUTION",
+            "status": "ACTIVE",
             "account_class": "Nordea_Finland_OST",
             "description": "Hard-codes platform limitations and Alpha-Friction logic for high-fee retail accounts.",
             "logic_gates": [
@@ -188,9 +201,9 @@
                 {
                     "gate_id": "ENH_FIN_02",
                     "name": "Alpha-Friction Protocol",
-                    "instruction": "Friction Guard: 1% Round-Trip + Re-entry Risk implies a 1.5% minimum viable move. Prevent churn. EXCEPTION: Bypass this gate when volatility_override is TRUE (protective exits) OR Macro_Sentinel is HOSTILE.",
-                    "logic": "IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < 0.015) AND Hard_Catalyst == NONE AND volatility_override == FALSE THEN OVERRIDE_ACTION = HOLD",
-                    "rationale": "Do not sell for a <1.5% drop (churn). But DO allow exits during volatile breakdowns OR macro stress events where losses are real and accelerating.",
+                    "instruction": "Friction Guard: 1% Round-Trip + Re-entry Risk implies a 2.5% minimum viable move. Prevent churn. EXCEPTION: Bypass this gate when volatility_override is TRUE (protective exits) OR Macro_Sentinel is HOSTILE.",
+                    "logic": "IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < 0.025) AND Hard_Catalyst == NONE AND volatility_override == FALSE THEN OVERRIDE_ACTION = HOLD",
+                    "rationale": "Do not sell for a <2.5% drop (churn). But DO allow exits during volatile breakdowns OR macro stress events where losses are real and accelerating.",
                     "volatility_override": {
                         "description": "Protective Exit Override — bypasses friction gate during active breakdowns or macro stress to prevent holding through avoidable losses.",
                         "conditions": [
@@ -245,8 +258,13 @@
         {
             "id": "MANDATE_20_MACRO_VETO",
             "status": "ACTIVE",
-            "instruction": "The MACRO_SENTINEL possesses absolute veto authority. If shock_intensity > 8.0, the SSoT Controller MUST set trade_state = NO_TRADE regardless of Council S_A score.",
+            "instruction": "The MACRO_SENTINEL possesses absolute veto authority. If shock_intensity > SHOCK_ABORT_THRESHOLD, the SSoT Controller MUST set trade_state = NO_TRADE regardless of Council S_A score.",
             "logic_source": "ENH_45"
+        },
+        {
+            "id": "MANDATE_21_USER_CONFIRMATION",
+            "status": "ACTIVE",
+            "instruction": "The LLM (and all sub-engines) must NOT assume that recommended trades will be actioned or concluded until the user explicitly confirms it. All trade states are PROVISIONAL until confirmed."
         }
     ],
     "enh_protocols": [
@@ -557,8 +575,8 @@
             "title": "Macro Shock & Binary Veto Protocol",
             "instruction": "Monitors exogenous data for Black Swan events. Triggers high-priority flag in forensic_intelligence.risk_alerts.",
             "logic_gates": [
-                "IF shock_intensity >= 5.0 -> SET alpha_sentry_mode = 'CAUTION'",
-                "IF shock_intensity >= 8.0 -> SET alpha_sentry_mode = 'ABORT' AND trade_state = 'NO_TRADE'"
+                "IF shock_intensity >= SHOCK_CAUTION_THRESHOLD -> SET alpha_sentry_mode = 'CAUTION'",
+                "IF shock_intensity >= SHOCK_ABORT_THRESHOLD -> SET alpha_sentry_mode = 'ABORT' AND trade_state = 'NO_TRADE'"
             ]
         },
         {
@@ -687,7 +705,7 @@
         "execution_gate": {
             "id": "ENH_36",
             "block_if": [
-                "current_time >= 14:30 ET AND (atr_percent <= 4.0 OR rvol <= 1.0)"
+                "current_time >= OST_LOCKOUT_TIME AND (atr_percent <= ATR_PERCENT_MINIMUM OR rvol <= RVOL_OST_GATE)"
             ],
             "note": "Prevents over-trading in low-liquidity environments."
         },
@@ -696,7 +714,7 @@
             "authority": "CANONICAL — execution.json MUST reference this gate.",
             "block_if": [
                 "volume < 100000",
-                "implied_spread_percent > 5",
+                "implied_spread_percent > SPREAD_CEILING",
                 "abs(distance_from_vwap) > VWAP_EXECUTION_BLOCK (see system_thresholds)"
             ],
             "note": "Blocks execution in illiquid conditions."
@@ -739,9 +757,9 @@
         "fin_account_gate": {
             "id": "ENH_FIN_01",
             "provider": "Nordea_Finland_OST",
-            "round_trip_cost": 0.01,
+            "round_trip_cost": "Reference system_thresholds > ROUND_TRIP_COST_BASIS",
             "constraints": {
-                "min_alpha_threshold": "expected_move > 0.025"
+                "min_alpha_threshold": "Reference system_thresholds > ALPHA_FRICTION_MINIMUM (Canonical)"
             }
         }
     },
@@ -957,8 +975,8 @@
             ]
         },
         "ALPHA_FRICTION_MINIMUM": {
-            "value": 0.015,
-            "usage": "1.5% minimum viable move for entry/exit (Logic: 1% cost + 0.5% buffer)",
+            "value": 0.025,
+            "usage": "2.5% minimum viable move for entry/exit (Logic: 1% cost + 1.5% buffer)",
             "used_by": [
                 "bullish_gem",
                 "red_team_gem",

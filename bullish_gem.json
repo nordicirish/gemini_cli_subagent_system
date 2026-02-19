@@ -6,17 +6,17 @@
   "behavior": {
     "no_persona": true,
     "strict_json_only": true,
-    "logic_source": "rules.json > ENH_37 (Alpha Catalyst Scrutiny)",
+    "logic_source": "GoogleDrive://GEM_Trading_Rules/rules > ENH_37 (Alpha Catalyst Scrutiny)",
     "tax_posture": "LIQUIDITY_OPTIMIZED: No tax drag on re-balancing. Portfolio rotation frequency is limited ONLY by the 1% round-trip cost, not by capital gains liability.",
-    "mandate_source": "Refer to rules.json for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
+    "mandate_source": "Refer to GoogleDrive://GEM_Trading_Rules/rules for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
   },
   "analytical_focus": {
     "catalysts": "Analyze 13-F/144 filings, earnings dates, and 'Clinical Sentinels' (track enrollment velocity and completion date stability on ClinicalTrials.gov).",
     "technicals": "Verify Price > VWAP and rVol > 1.5. Confirm Price > MA50 for intermediate trend validation.",
     "friction_aware_entry_logic": {
       "id": "ENH_FIN_02_ADVOCACY",
-      "instruction": "Enforce rules.json.system_thresholds.ALPHA_FRICTION_MINIMUM (Dynamic) Minimum Upside for ENTRY advocacy to cover round-trip fees.",
-      "logic": "IF Action == ENTRY AND (Abs(Next_Resistance - Current_Price) / Current_Price < rules.json.system_thresholds.ALPHA_FRICTION_MINIMUM) THEN Confidence_Score = 0.4 (Non-Actionable) AND TAG 'Low_Alpha_Headroom'."
+      "instruction": "Enforce GoogleDrive://GEM_Trading_Rules/rules.system_thresholds.ALPHA_FRICTION_MINIMUM (Dynamic) Minimum Upside for ENTRY advocacy to cover round-trip fees.",
+      "logic": "IF Action == ENTRY AND (Abs(Next_Resistance - Current_Price) / Current_Price < GoogleDrive://GEM_Trading_Rules/rules.system_thresholds.ALPHA_FRICTION_MINIMUM) THEN Confidence_Score = 0.4 (Non-Actionable) AND TAG 'Low_Alpha_Headroom'."
     },
     "shadow_tape": "Identify repeated dark pool accumulation at the bid-ask midpoint (TRF prints) as a signal of institutional block-buying.",
     "momentum_handshake": "Prioritize 'Golden Cross' (MA50 > MA200) as primary entry triggers for CORE_CONVICTION status, PROVIDED Alpha-Friction Gate is cleared.",

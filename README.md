@@ -54,7 +54,7 @@ Each JSON file in this repository is a **system instruction** designed to be loa
           └─────────────────────┘
 ```
 
-**Governance backbone:** The **Rule Enforcer** (`rule_enforcer_engine.json`) actively validates compliance, while `rules.json` serves as the static legislative body containing the 45+ ENH protocols, 20 MANDATEs, and system thresholds.
+**Governance backbone:** The **Rule Enforcer** (`rule_enforcer_engine.json`) actively validates compliance, while `rules.json` (stored on Google Drive) serves as the static legislative body containing the 45+ ENH protocols, 20 MANDATEs, and system thresholds.
 
 ---
 
@@ -65,7 +65,7 @@ Each JSON file in this repository is a **system instruction** designed to be loa
 | File | Gem Role | Gemini Mode | Purpose |
 |------|----------|-------------|---------|
 | `terminal.json` | **Orchestrator** | PRO | Master router — classifies user input and dispatches to the correct engine |
-| `rules.json` | **Legislative Body** | N/A | **STATIC KNOWLEDGE**: Contains all Protocols, Mandates, and Thresholds. Upload to EVERY Gem. |
+| `rules.json` | **Legislative Body** | N/A | **SSoT**: Stored centrally at `GoogleDrive://GEM_Trading_Rules/rules.json`. DO NOT upload as static knowledge. |
 | `rule_enforcer_engine.json` | **Rule Enforcer** | PRO | Active Enforcer — Policing Agent that validates logic against `rules.json` |
 | `SSoT_Storage.json` | **SSoT Controller** | PRO | Passive data schema & state container (Single Source of Truth) |
 | `context_engine.json` | **Context Engine** | PRO | Active SSoT bridge — drift detection, state merging, sync orchestration |
@@ -81,7 +81,6 @@ Each JSON file in this repository is a **system instruction** designed to be loa
 | `technical_validator.json` | **Technical Validator** | PRO | Data integrity, consensus synthesis, health score calculation |
 | `research.json` | **Research Engine** | THINKING | Macro narrative, sector rotation, forensic signal attribution |
 | `post_trade_review.json` | **Review Engine** | PRO | Post-trade reflection — thesis vs. outcome, misfire detection |
-| `quick_check.json` | **QuickCheck Engine** | FAST | Fast feasibility check (≤6 lines) — OST status, VWAP, GEX posture |
 
 ### Python Utilities
 
@@ -232,10 +231,11 @@ For each JSON file, create a new Gem in Google Gemini:
 2. Click **"New Gem"**
 3. Paste the contents of the JSON file as the Gem's system instruction
 4. Name the Gem to match its role (e.g., *"GEM Terminal"*, *"GEM Rule Enforcer"*)
-5. **Knowledge Injection (CRITICAL):**
-   - In the "Knowledge" section of the Gem editor, upload `rules.json`.
-   - This allows the Gem to access the centralized thresholds via the `rules.json` reference.
-   - **Repeat this for EVERY Gem** (Bullish, Red Team, Execution, etc.).
+5. **Knowledge Injection (CRITICAL - ZERO TOUCH SYNC):**
+   - **ALL Gems**: You MUST attach the **`rules`** Google Doc (from `GEM_Trading_Rules/`) to the Gem's knowledge base using the Drive extension.
+   - **SSoT Controller ONLY**: You MUST ALSO attach the **`GEM-Context-SSOT`** Google Doc. (The Context Engine will ask the Controller for this state).
+   - **Automatic Sync**: The Gems are programmed to *automatically* check these attached documents for updates before every response. You do not need to manually reload them; just edit the Google Doc, and the Gem will see it instantly.
+   - **Do NOT upload static files**. Internal JSON instructions are now "Knowledge Bound" to these live Drive files.
 
 ### 6. Run the Dashboard
 ```bash
@@ -245,11 +245,58 @@ The output copies to your clipboard when you press 'c' — paste it into the Ter
 
 ---
 
+## ✅ Verifying Rules Connection
+
+To ensure your Gems are correctly loading the rules from Google Drive, perform these two tests:
+
+### Test 1: The Citation Verification
+Open your **Terminal Orchestrator Gem** (or any other Gem) and paste this prompt:
+
+```text
+System Check: Access the rules at GoogleDrive://GEM_Trading_Rules/rules.
+Please cite the exact value for "ALPHA_FRICTION_MINIMUM" located in "system_thresholds".
+Also, confirm which "ENH_Protocol" governs the "Macro Calendar Shield".
+```
+
+**Expected Result:**
+- `ALPHA_FRICTION_MINIMUM`: **0.025** (default)
+- `Macro Calendar Shield`: **ENH_47**
+
+### Test 2: The Mutation Verification (Definitive)
+Confirm the Gem is reading the *live* Google Doc, not a stale cache.
+
+1.  **Modify:** Open `GEM_Trading_Rules/rules` in Google Drive. Change `"ALPHA_FRICTION_MINIMUM": 0.025` to **`0.099`**.
+2.  **Ask:** In the Gem, ask:
+    ```text
+    Reload Rules from GoogleDrive://GEM_Trading_Rules/rules.
+    What is the current value of ALPHA_FRICTION_MINIMUM?
+    ```
+3.  **Verify:** The Gem should report **0.099**.
+4.  **Reset:** Change the value back to **0.025** in the Google Doc.
+
+---
+
 ## 💬 Essential Prompts
 
 These are the key prompts used to manage state across Gem sessions. Copy-paste them as needed.
 
-### Context Bridge Sync (Periodic Backup)
+### 🔴 Force Reset & Reload (Google Doc Standard)
+Use this if the Gem seems confused or is citing old rules.
+
+```text
+/reset
+CRITICAL INSTRUCTION: WIPE MEMORY & FORCE TOOL USE.
+Protocol:
+0.  **ACKNOWLEDGE**: You have access to the 'Google Drive' extension. It is ACTIVE.
+1.  **ACTION**: Search for Google Doc named "rules" in folder "GEM_Trading_Rules".
+2.  **CONSTRAINT**: Do NOT fabricate data. If you cannot read the file, STOP and say "TOOL FAILURE".
+3.  **VERIFICATION**:
+    -   Cite `version` string verbatim from the Google Doc.
+    -   Cite `system_thresholds > ALPHA_FRICTION_MINIMUM`.
+4.  **Confirm Status**: "Synced with Google Doc 'rules' (SSoT)".
+```
+
+### 🟧 Session Start Bridge Sync (Periodic Backup)
 Periodically save your SSoT to the Google Drive document:
 
 ```

@@ -4,8 +4,8 @@
   "purpose": "Fetch option chain, compute per-strike gamma, aggregate into net GEX.",
   "behavior": {
     "strict_json_only": true,
-    "logic_source": "rules.json > ENH_17 (GEX Protocol)",
-    "mandate_source": "Refer to rules.json for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
+    "logic_source": "GoogleDrive://GEM_Trading_Rules/rules > ENH_17 (GEX Protocol)",
+    "mandate_source": "Refer to GoogleDrive://GEM_Trading_Rules/rules for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
   },
   "input_schema": {
     "expected_fields": [
@@ -21,7 +21,7 @@
   "calculation_logic": {
     "net_gex_total": "Sum position_gamma across all strikes.",
     "gamma_flip_price": "Price level where cumulative GEX crosses zero (interpolate if needed).",
-    "dealer_posture": "Reference rules.json > ENH_20 (Synthetic GEX Logic)",
+    "dealer_posture": "Reference GoogleDrive://GEM_Trading_Rules/rules > ENH_20 (Synthetic GEX Logic)",
     "gex_slope": "Calculate rate of change in GEX per $1 price move (required for ENH_17)."
   },
   "drift_and_quality_rules": {

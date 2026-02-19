@@ -7,8 +7,8 @@
     "no_persona": true,
     "no_extra_text": true,
     "ssot_sync": "MANDATORY_KEEP_WRITE",
-    "logic_source": "rules.json > ENH_30 (Forensic Structural Filter)",
-    "mandate_source": "Refer to rules.json for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
+    "logic_source": "GoogleDrive://GEM_Trading_Rules/rules > ENH_30 (Forensic Structural Filter)",
+    "mandate_source": "Refer to GoogleDrive://GEM_Trading_Rules/rules for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
   },
   "scope": {
     "dilution_risk": "Monitor conversion floors and outstanding ATM (At-The-Market) capacity.",
@@ -21,8 +21,8 @@
     ]
   },
   "local_physics": {
-    "sizing_modifiers": "Reference rules.json > ENH_30 > structural_modifier_table (Canonical)",
-    "warrant_magnet": "IF Price > Warrant_Exercise_Price AND rVol > RVOL_CONFIRMATION (see rules.json > system_thresholds) THEN TAG 'Hedge-Related Selling Risk'"
+    "sizing_modifiers": "Reference GoogleDrive://GEM_Trading_Rules/rules > ENH_30 > structural_modifier_table (Canonical)",
+    "warrant_magnet": "IF Price > Warrant_Exercise_Price AND rVol > RVOL_CONFIRMATION (see GoogleDrive://GEM_Trading_Rules/rules > system_thresholds) THEN TAG 'Hedge-Related Selling Risk'"
   },
   "context_write_protocol": {
     "operations": [

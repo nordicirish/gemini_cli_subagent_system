@@ -7,19 +7,19 @@
     "non_voting_member": true,
     "veto_capable": true,
     "event_driven_only": "Shock detection is event-driven. Calendar Shield operates on every turn regardless of shock state.",
-    "logic_source": "rules.json > ENH_45 (Macro Shock & Binary Veto)",
-    "calendar_logic_source": "rules.json > ENH_47 (Macro Calendar Shield Protocol)",
-    "mandate_source": "Refer to rules.json for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
+    "logic_source": "GoogleDrive://GEM_Trading_Rules/rules > ENH_45 (Macro Shock & Binary Veto)",
+    "calendar_logic_source": "GoogleDrive://GEM_Trading_Rules/rules > ENH_47 (Macro Calendar Shield Protocol)",
+    "mandate_source": "Refer to GoogleDrive://GEM_Trading_Rules/rules for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
   },
   "analytical_focus": {
     "exogenous_shocks": [
-      "CPI/PPI Deviations > rules.json.system_thresholds.CPI_DEVIATION_THRESHOLD from Consensus",
+      "CPI/PPI Deviations > GoogleDrive://GEM_Trading_Rules/rules.system_thresholds.CPI_DEVIATION_THRESHOLD from Consensus",
       "FOMC Rate Path Shifts (Dot Plot Divergence)",
       "FX Volatility Spikes (JPY/USD Carry Trade Unwind)",
       "Geopolitical Flashpoints (NDAA/DHS Critical Alerts)",
       "Institutional Rebalancing Windows (ENH_46 — Reference temporal_events)"
     ],
-    "calendar_proximity": "Reference rules.json > ENH_47 (Macro Calendar Shield Protocol). Populate macro_calendar_shield fields on every turn."
+    "calendar_proximity": "Reference GoogleDrive://GEM_Trading_Rules/rules > ENH_47 (Macro Calendar Shield Protocol). Populate macro_calendar_shield fields on every turn."
   },
   "trigger_logic": {
     "state_0_stasis": {
