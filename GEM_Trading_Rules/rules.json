@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v4.1-Console_Architecture",
+    "version": "v4.2-Autonomous-Evolution",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -49,7 +49,9 @@
         "ENH_49: Air-Gap Sandbox Bridge Protocol",
         "ENH_50: Pre-Execution Formulation Protocol",
         "ENH_51: Retrospective & Self-Improvement Protocol",
-        "ENH_52: Autonomous Risk Resolution Protocol"
+        "ENH_52: Autonomous Risk Resolution Protocol",
+        "ENH_53: State Compression Protocol",
+        "ENH_54: SSoT Mutation Protocol"
     ],
     "mandate_registry": [
         "MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)",
@@ -213,7 +215,7 @@
                     "logic": "IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < 0.025) AND Hard_Catalyst == NONE AND volatility_override == FALSE THEN OVERRIDE_ACTION = HOLD",
                     "rationale": "Do not sell for a <2.5% drop (churn). But DO allow exits during volatile breakdowns OR macro stress events where losses are real and accelerating.",
                     "volatility_override": {
-                        "description": "Protective Exit Override — bypasses friction gate during active breakdowns or macro stress to prevent holding through avoidable losses.",
+                        "description": "Protective Exit Override \u00e2\u20ac\u201d bypasses friction gate during active breakdowns or macro stress to prevent holding through avoidable losses.",
                         "conditions": [
                             {
                                 "field": "atr_percent",
@@ -237,7 +239,7 @@
                             }
                         ],
                         "logic": "ANY 2 of 4 (Macro Shock counts as a valid trigger). Negative Delta Force: IF Net_GEX < 0 AND session_change_pct < -1.0%, SET volatility_override = TRUE and emit EXIT.",
-                        "effect": "SET volatility_override = TRUE — friction gate bypassed, exit treated as protective, not churn"
+                        "effect": "SET volatility_override = TRUE \u00e2\u20ac\u201d friction gate bypassed, exit treated as protective, not churn"
                     }
                 },
                 {
@@ -407,7 +409,7 @@
             "title": "Forensic Structural Filter",
             "instruction": "Forensic flags (Dilution/Warrants) trigger sizing reduction per the structural_modifier_table below.",
             "structural_modifier_table": {
-                "authority": "CANONICAL — institutional.json and structural_risk.json MUST reference this table.",
+                "authority": "CANONICAL \u00e2\u20ac\u201d institutional.json and structural_risk.json MUST reference this table.",
                 "base": 1.0,
                 "high_dilution": 0.5,
                 "distressed_capital": 0.5,
@@ -427,7 +429,7 @@
         {
             "id": "ENH_32",
             "title": "Data Schema & GEX Calculation Protocol (Unified)",
-            "schema_authority": "CANONICAL — All other files MUST reference this schema via 'rules.json > ENH_32'. Do NOT duplicate inline.",
+            "schema_authority": "CANONICAL \u00e2\u20ac\u201d All other files MUST reference this schema via 'rules.json > ENH_32'. Do NOT duplicate inline.",
             "schema_definition": {
                 "portfolio_snapshot": [
                     {
@@ -606,7 +608,7 @@
                 "MID_QUARTER_REVIEW": {
                     "window": "Reference rules.json > temporal_events > MID_QUARTER_REVIEW_WINDOWS",
                     "action": "Tighten stops on losing positions; Permit new entries only with S_A > 0.85.",
-                    "harvest_efficiency": "During the MID_QUARTER_REVIEW window (Feb 10–20), the sentinel must override the Alpha-Friction Protocol (ENH_FIN_02) for any position showing >1.5x RVol to lock in gains ahead of rebalancing-induced volatility."
+                    "harvest_efficiency": "During the MID_QUARTER_REVIEW window (Feb 10\u00e2\u20ac\u201c20), the sentinel must override the Alpha-Friction Protocol (ENH_FIN_02) for any position showing >1.5x RVol to lock in gains ahead of rebalancing-induced volatility."
                 },
                 "QUARTERLY_ROLL": {
                     "window": "Reference rules.json > temporal_events > QUARTERLY_ROLL_WINDOWS",
@@ -751,6 +753,26 @@
                 "3. EVIDENCE_CITATION: Point directly at the failing parameters as the rationale for the action.",
                 "4. PRE_FORMATTING: Pre-format the exact JSON state output to resolve the risk immediately, requiring only a MANDATE_21_USER_CONFIRMATION to execute."
             ]
+        },
+        {
+            "id": "ENH_53",
+            "title": "State Compression Protocol",
+            "instruction": "Manages Context Garbage Collection. If the 'trade_lessons' array provided in the prompt payload contains 20 or more entries, the RESEARCH_ENGINE MUST trigger a compression sweep to prevent context window bloat.",
+            "execution_flow": [
+                "1. SYNTHESIS: Read all 20+ historical trade lessons.",
+                "2. COMPRESSION: Distill the granular, distinct lessons into a maximum of 5 overarching fundamental Guardrails or Philosophies.",
+                "3. EMISSION: Output the 5 new compressed rules in the `EXECUTION_PAYLOAD` under a `compressed_trade_lessons` array. The orchestrator will overwrite the historical file, effectively deleting the old context."
+            ]
+        },
+        {
+            "id": "ENH_54",
+            "title": "SSoT Mutation Protocol",
+            "instruction": "Enables autonomous, permanent system evolution via JSON Patching. If a post-mortem identifies that a trade failure was caused by a flawed hardcoded systemic threshold in rules.json (e.g., 'ALPHA_FRICTION_MINIMUM is too low for current VIX regime'), the RESEARCH_ENGINE MUST propose a permanent threshold mutation.",
+            "execution_flow": [
+                "1. IDENTIFICATION: Recognize that a string of failures maps to an explicitly defined parameter in RULES_DOC.",
+                "2. PATCH_GENERATION: Create a JSON patch array targeting the deep nested key in the schema (e.g., ['system_thresholds', 'ALPHA_FRICTION_MINIMUM']).",
+                "3. EMISSION: Output the patch array in the `EXECUTION_PAYLOAD` under the `rule_mutations` key. The orchestrator will natively intercept this and rewrite the rules.json file on the disk."
+            ]
         }
     ],
     "global_logic_gates": {
@@ -763,7 +785,7 @@
         },
         "liquidity_gate": {
             "id": "GATE_LIQ_01",
-            "authority": "CANONICAL — execution.json MUST reference this gate.",
+            "authority": "CANONICAL \u00e2\u20ac\u201d execution.json MUST reference this gate.",
             "block_if": [
                 "volume < 100000",
                 "implied_spread_percent > SPREAD_CEILING",
@@ -773,7 +795,7 @@
         },
         "regulatory_gate": {
             "id": "GATE_REG_01",
-            "authority": "CANONICAL — execution.json MUST reference this gate.",
+            "authority": "CANONICAL \u00e2\u20ac\u201d execution.json MUST reference this gate.",
             "block_if": [
                 "Risk_Regime == CRITICAL",
                 "health_score < HEALTH_SCORE_MINIMUM (see system_thresholds)",
@@ -844,8 +866,8 @@
         "calendar_shield_merge_logic": {
             "key": "active_events_window[].date",
             "rules": {
-                "preserve_future_events": "IF event.date >= current_date THEN PRESERVE — event is IMMUTABLE until its date has passed",
-                "prune_expired_events": "IF event.date < current_date THEN PRUNE — remove from active_events_window",
+                "preserve_future_events": "IF event.date >= current_date THEN PRESERVE \u00e2\u20ac\u201d event is IMMUTABLE until its date has passed",
+                "prune_expired_events": "IF event.date < current_date THEN PRUNE \u00e2\u20ac\u201d remove from active_events_window",
                 "append_new_events": "IF event NOT in active_events_window AND event.date >= current_date THEN APPEND",
                 "update_next_event": "SET next_event = MIN(active_events_window.date WHERE date >= current_date)",
                 "recalculate_on_merge": "After merge, recalculate status, shield_posture, and sizing_dampener from ENH_47 tier logic based on updated next_event.proximity_hours"
@@ -877,7 +899,7 @@
         "rule": "ENH_12_ATOMIC_PERSISTENCE"
     },
     "health_score_protocol": {
-        "authority": "CANONICAL — technical_validator.json MUST reference this protocol.",
+        "authority": "CANONICAL \u00e2\u20ac\u201d technical_validator.json MUST reference this protocol.",
         "base_score": 100,
         "penalties": [
             {
@@ -894,7 +916,7 @@
             {
                 "condition": "Trade_State == EXIT AND Drawdown_Gap < 1.5% AND volatility_override == FALSE",
                 "deduction": 30,
-                "label": "Alpha-Friction Violation (churn only — bypassed during Protective Exit Override)",
+                "label": "Alpha-Friction Violation (churn only \u00e2\u20ac\u201d bypassed during Protective Exit Override)",
                 "enh_ref": "ENH_FIN_02"
             },
             {
@@ -921,7 +943,7 @@
         ]
     },
     "signal_consistency_thresholds": {
-        "authority": "CANONICAL — technical_validator.json MUST reference these thresholds.",
+        "authority": "CANONICAL \u00e2\u20ac\u201d technical_validator.json MUST reference these thresholds.",
         "rules": [
             {
                 "condition": "rsi < 30",
@@ -947,7 +969,7 @@
         }
     },
     "system_thresholds": {
-        "authority": "CANONICAL — All sub-engines MUST reference named constants here instead of hardcoding values.",
+        "authority": "CANONICAL \u00e2\u20ac\u201d All sub-engines MUST reference named constants here instead of hardcoding values.",
         "RVOL_CONFIRMATION": {
             "value": 1.5,
             "usage": "Minimum rVol for trend/skew confirmation",
@@ -1026,15 +1048,7 @@
                 "technical_validator"
             ]
         },
-        "ALPHA_FRICTION_MINIMUM": {
-            "value": 0.025,
-            "usage": "2.5% minimum viable move for entry/exit (Logic: 1% cost + 1.5% buffer)",
-            "used_by": [
-                "bullish_gem",
-                "red_team_gem",
-                "ENH_FIN_02"
-            ]
-        },
+        "ALPHA_FRICTION_MINIMUM": 0.025,
         "LIQUIDITY_REQUIREMENTS": {
             "value": {
                 "min_dollar_volume_5d": 2000000,
@@ -1144,7 +1158,7 @@
         },
         "PROTECTIVE_EXIT_ATR": {
             "value": 4.0,
-            "usage": "ATR% threshold for Protective Exit Override — bypass friction gate during volatile breakdowns",
+            "usage": "ATR% threshold for Protective Exit Override \u00e2\u20ac\u201d bypass friction gate during volatile breakdowns",
             "used_by": [
                 "ENH_FIN_02",
                 "red_team_gem",
@@ -1262,21 +1276,21 @@
             ]
         },
         "MA50_OVEREXTENSION_PCT": {
-            "value": 0.20,
+            "value": 0.2,
             "usage": "Price > MA50 by this fraction = sell-the-news precursor risk (red_team_gem)",
             "used_by": [
                 "red_team_gem"
             ]
         },
         "LIQUIDITY_VOID_DEPTH_PCT": {
-            "value": 0.20,
+            "value": 0.2,
             "usage": "Order book depth below this fraction of 10-day avg = liquidity void (red_team_gem)",
             "used_by": [
                 "red_team_gem"
             ]
         },
         "GEX_PRICING_ERROR_TOLERANCE": {
-            "value": 0.10,
+            "value": 0.1,
             "usage": "Max fraction of option strikes with pricing errors before flagging data quality (gex_engine)",
             "used_by": [
                 "gex_engine"
@@ -1295,7 +1309,7 @@
         }
     },
     "basket_definition": {
-        "authority": "CANONICAL — All sub-engines MUST reference tickers from this section. Update here when adding/removing tickers.",
+        "authority": "CANONICAL \u00e2\u20ac\u201d All sub-engines MUST reference tickers from this section. Update here when adding/removing tickers.",
         "defense_tech": {
             "tickers": [
                 "RCAT",
@@ -1335,13 +1349,13 @@
             "warrant_dilution_ticker": "ONDS"
         },
         "regulatory_context": {
-            "authority": "CANONICAL — Defines the primary regulatory body and risk triggers for the current basket.",
+            "authority": "CANONICAL \u00e2\u20ac\u201d Defines the primary regulatory body and risk triggers for the current basket.",
             "agency_name": "DHS",
             "risk_event_trigger": "CR"
         }
     },
     "sector_taxonomy": {
-        "authority": "CANONICAL — SSoT sector_exposure fields MUST align with these categories.",
+        "authority": "CANONICAL \u00e2\u20ac\u201d SSoT sector_exposure fields MUST align with these categories.",
         "categories": [
             "defense_tech",
             "neuropsychiatry",
@@ -1350,7 +1364,7 @@
         "note": "Update SSoT portfolio_risk_geometry.sector_exposure when adding new sectors."
     },
     "temporal_events": {
-        "authority": "CANONICAL — All date-sensitive rules MUST reference events here. Update this section when deadlines change.",
+        "authority": "CANONICAL \u00e2\u20ac\u201d All date-sensitive rules MUST reference events here. Update this section when deadlines change.",
         "GOV_FUNDING_EXPIRY": {
             "value": "2026-02-13",
             "usage": "Government Funding / CR expiry date",
@@ -1375,7 +1389,7 @@
         },
         "ANNUAL_RESET_WINDOW": {
             "value": "January 01 - January 15",
-            "usage": "Primary institutional reset window — year-ahead capital allocation",
+            "usage": "Primary institutional reset window \u00e2\u20ac\u201d year-ahead capital allocation",
             "used_by": [
                 "ENH_46",
                 "research",
@@ -1389,7 +1403,7 @@
                 "August 10 - August 20",
                 "November 10 - November 20"
             ],
-            "usage": "Secondary tactical review windows — trimming growth winners for laggards/bonds",
+            "usage": "Secondary tactical review windows \u00e2\u20ac\u201d trimming growth winners for laggards/bonds",
             "used_by": [
                 "ENH_46",
                 "research",
@@ -1398,7 +1412,7 @@
         },
         "QUARTERLY_ROLL_WINDOWS": {
             "value": "Final 5 Trading Days of March, June, September, December",
-            "usage": "Index rebalancing and futures rolls — peak structural volatility",
+            "usage": "Index rebalancing and futures rolls \u00e2\u20ac\u201d peak structural volatility",
             "used_by": [
                 "ENH_46",
                 "execution",
@@ -1407,7 +1421,7 @@
         }
     },
     "infrastructure": {
-        "authority": "CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.",
+        "authority": "CANONICAL \u00e2\u20ac\u201d This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.",
         "RULES_DOC": {
             "path": "GoogleDrive://GEM_Trading_Rules/rules",
             "description": "Primary rules document containing mandates and thresholds (Google Doc)",

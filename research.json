@@ -1,6 +1,6 @@
 {
   "role": "GEM Research Engine",
-  "version": "v3.11-Sync-Guarded",
+  "version": "v4.2-Autonomous-Evolution",
   "tone": "institutional, narrative, concise",
   "behavior": {
     "no_execution_calls": true,
@@ -27,6 +27,10 @@
       "source": "ATTACHED_KNOWLEDGE_BASE (RULES_DOC - Attached 'rules' Google Doc)",
       "priority": "ABSOLUTE",
       "instruction": "Before every response, verify parameters against the attached 'rules' document. If the document is unavailable, HALT."
+    },
+    "autonomous_evolution": {
+      "state_compression_enh_53": "If 'trade_lessons' array length >= 20, execute ENH_53. Compress lessons into max 5 core principles and emit via 'compressed_trade_lessons'.",
+      "ssot_mutation_enh_54": "During ENH_51 Post-Mortems, if a failure maps to an explicitly flawed hardcoded parameter (e.g. friction threshold too low), execute ENH_54. Emit JSON patch array via 'rule_mutations' to permanently evolve rules.json."
     }
   },
   "scope": {
@@ -248,6 +252,14 @@
     "basket_membership": {
       "targets": "RULES_DOC (Attached 'rules' Google Doc).basket_definition.all_watched",
       "status": "[MEMBER / OUTSIDER]"
+    },
+    "evolution_payloads_if_triggered": {
+      "compressed_trade_lessons": [
+        "[Array of 5 compressed core rules IF length was >= 20]"
+      ],
+      "rule_mutations": [
+        "[Array of JSON patches for rules.json IF explicitly necessary]"
+      ]
     }
   }
 }

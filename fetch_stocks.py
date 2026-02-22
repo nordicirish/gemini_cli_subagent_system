@@ -1370,9 +1370,16 @@ def run_daemon():
                                 
                             print(f"{GREEN}Payload Ingested! Wrote to local_ssot_shadow.json{RESET}")
 
-                            # ENH_51: Subsystem for extracting and saving Trade Lessons
-                            if "new_trade_lessons" in payload and isinstance(payload["new_trade_lessons"], list):
-                                lessons_file = 'trade_lessons.json'
+                            # ENH_53: State Compression Protocol (Garbage Collection)
+                            lessons_file = 'trade_lessons.json'
+                            if "compressed_trade_lessons" in payload and isinstance(payload["compressed_trade_lessons"], list):
+                                compressed_lessons = payload["compressed_trade_lessons"]
+                                with open(lessons_file, 'w') as f:
+                                    json.dump(compressed_lessons, f, indent=2)
+                                print(f"{YELLOW}STATE COMPRESSION ACTIVATED: Overwrote trade_lessons.json with {len(compressed_lessons)} distilled core principles.{RESET}")
+                            
+                            # ENH_51: Trade Lessons Appending (Only if compression didn't just happen)
+                            elif "new_trade_lessons" in payload and isinstance(payload["new_trade_lessons"], list):
                                 existing_lessons = []
                                 if os.path.exists(lessons_file):
                                     with open(lessons_file, 'r') as f:
@@ -1388,6 +1395,52 @@ def run_daemon():
                                     json.dump(existing_lessons, f, indent=2)
 
                                 print(f"{GREEN}Retrospective Triggered: Saved {len(new_lessons)} new lessons to trade_lessons.json{RESET}")
+
+                            # ENH_54: SSoT Mutation Protocol (JSON Patch)
+                            if "rule_mutations" in payload and isinstance(payload["rule_mutations"], list):
+                                rules_file = os.path.join('GEM_Trading_Rules', 'rules.json')
+                                if os.path.exists(rules_file):
+                                    with open(rules_file, 'r') as f:
+                                        try:
+                                            current_rules = json.load(f)
+                                        except json.JSONDecodeError:
+                                            current_rules = None
+                                    
+                                    if current_rules:
+                                        applied_patches = 0
+                                        for mutation in payload["rule_mutations"]:
+                                            # We expect mutation to be a dict e.g. {"path": ["system_thresholds", "ALPHA_FRICTION_MINIMUM"], "value": 0.099}
+                                            if isinstance(mutation, dict) and "path" in mutation and "value" in mutation:
+                                                path = mutation["path"]
+                                                val = mutation["value"]
+                                                
+                                                if isinstance(path, list) and len(path) > 0:
+                                                    # Traverse the dict to apply the patch
+                                                    target = current_rules
+                                                    valid_path = True
+                                                    for p in path[:-1]:
+                                                        if p in target and isinstance(target[p], dict):
+                                                            target = target[p]
+                                                        else:
+                                                            valid_path = False
+                                                            print(f"{RED}Invalid mutation path: {path}{RESET}")
+                                                            break
+                                                    
+                                                    if valid_path:
+                                                        # Apply the modification
+                                                        target[path[-1]] = val
+                                                        applied_patches += 1
+                                                        print(f"{GREEN}Applied Mutation: {path} -> {val}{RESET}")
+                                        
+                                        if applied_patches > 0:
+                                            # Write back to rules.json
+                                            with open(rules_file, 'w') as f:
+                                                json.dump(current_rules, f, indent=4)
+                                            # Critical Terminal Alert as per Implementation Plan
+                                            print(f"\n{RED}{'!'*80}")
+                                            print(f"⚠️ RULES MUTATED LOCALLY ({applied_patches} patches applied).")
+                                            print(f"YOU MUST COPY AND PASTE THE NEW rules.json INTO YOUR GOOGLE DOC NOW TO KEEP THE GEMS IN SYNC.")
+                                            print(f"{'!'*80}{RESET}\n")
 
                         except json.JSONDecodeError as e:
                             print(f"{RED}Error parsing JSON from clipboard: {e}{RESET}")
