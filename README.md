@@ -54,7 +54,21 @@ Each JSON file in this repository is a **system instruction** designed to be loa
           └─────────────────────┘
 ```
 
-**Governance backbone:** The **Rule Enforcer** (`rule_enforcer_engine.json`) actively validates compliance, while `rules.json` (stored on Google Drive) serves as the static legislative body containing the 45+ ENH protocols, 20 MANDATEs, and system thresholds.
+**Governance backbone:** The **Rule Enforcer** (`rule_enforcer_engine.json`) actively validates compliance, while `rules.json` serves as the static legislative body containing the system thresholds, along with two distinct classes of architectural directives:
+
+### 🏛️ The Architectural Divide: Mandates vs. Protocols
+To prevent the LLM reasoning engines from hallucinating software structures while analyzing financial data, the system strictly separates **Software Architecture** from **Trading Logic**:
+
+1. **Mandates (`MANDATE_01` to `MANDATE_21`)**: These govern **System Behavior & Constraints**. These are non-negotiable instructions telling the Gemini model *how to act as a piece of software*. 
+   - *Example:* `MANDATE_09` (Always output un-truncated JSON), `MANDATE_13` (Weighted Consensus voting mechanics).
+2. **Rules / Protocols (`ENH_01` to `ENH_52`)**: These govern **Financial Execution & Domain Knowledge**. These are the fluid, quantitative strategies telling the system *how to trade*. 
+   - *Example:* `ENH_45` (Macro Shock Veto), `ENH_50` (Pre-Trade Formulation), `ENH_36` (Post-14:30 Liquidity Gates).
+
+### The Air-Gapped SSoT Architecture (v4.0+)
+Due to Google Gemini's web sandboxing (preventing direct external API calls) and Google Keep's synchronization latency, the system employs an **Air-Gapped Single Source of Truth**.
+*   **The Processor:** The sandboxed Gemini UI acts as a stateless, high-powered reasoning engine.
+*   **The Database:** Your local Python environment (`fetch_stocks.py`) maintains the persistent, live state (`local_ssot_shadow.json`).
+*   **The Bridge (You):** You serve as the high-speed bus connecting the two via your OS clipboard (`c` to copy from Python, `v` to ingest Gem payloads back into Python).
 
 ---
 
@@ -63,6 +77,16 @@ Each JSON file in this repository is a **system instruction** designed to be loa
 ### 🧠 Institutional Intelligence (v4.0+)
 
 The system now enforces **adversarial reasoning** and **volatility awareness** to prevent hallucinations.
+
+### 🧠 Console Architecture Principles (v4.1+)
+
+The system integrates core software engineering principles into its trading logic to enhance autonomous rigor and self-improvement:
+1. **Plan Node Default:** System dynamically generates a rigid "Trade Thesis" before execution and triggers re-planning if the thesis is violated.
+2. **Subagent Strategy:** Employs "Dynamic Micro-Gem Routing" for borderline decisions (S_A 0.65–0.75) to spawn focused sub-engines to break ties.
+3. **Self-Improvement Loop:** Conducts root-cause post-mortems on losses and natively appends `trade_lessons.json` to the clipboard payload so the system never repeats mistakes.
+4. **Verification Before Done:** The `TECHNICAL_VALIDATOR` is forced to "prove the setup" against quantitative restrictions seconds before executing a `FORCE_WRITE`.
+5. **Demand Elegance:** Explicitly rejects hacky or borderline setups relying on multiple overriding exceptions. Pushes for A+ convergence setups.
+6. **Autonomous Bug Fixing:** Functions as a zero-prompt risk manager. Pre-formats a TRIM/EXIT JSON output if quantitative guards fail.
 
 ### 1. Volatility Regime Awareness
 The Python feed actively monitors the **VIX** and tags the environment:
@@ -106,7 +130,7 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 
 | File | Purpose |
 |------|---------|
-| `fetch_stocks.py` | **Financial Dashboard** — Real-time terminal displaying price, VWAP, GEX, RSI, ATR, rVol, and health scores. Press 'c' to copy output to clipboard for pasting into Gem conversations. |
+| `fetch_stocks.py` | **Financial Dashboard** — Real-time terminal. Generates JSON prompt payloads (press `c`) and ingests Gem execution payloads from the clipboard (press `v`) to maintain the local SSoT. |
 | `compare_json.py` | Diff utility — compares two JSON instruction files to detect missing or added values |
 | `format_json.py` | Formatter — pretty-prints a JSON instruction file with consistent indentation |
 ### 4. Updating Gems (Maintenance)
@@ -138,13 +162,12 @@ The dashboard runs in a loop (30-second refresh), fetching live data from Yahoo 
 - **VWAP & Distance** — volume-weighted average price positioning
 - **GEX Profile** — net gamma exposure, gamma flip price, dealer posture
 - **Technicals** — RSI, ATR%, SMA 20/50/200, trend score
-- **rVol** — relative volume vs. 20-day average
 - **Health Score** — composite signal scoring
 
-The formatted output is **copied to your clipboard** when you press 'c'.
+The formatted JSON "State of the World" payload is **copied to your clipboard** when you press `c` in the terminal.
 
 ### 2. Paste Into a Gem Conversation
-Open the relevant Gemini Gem (e.g., the Terminal Orchestrator) and paste the dashboard output. The Gem parses the financial data and routes it through the appropriate engine pipeline.
+Open the relevant Gemini Gem (e.g., the Terminal Orchestrator) and paste the dashboard payload. The Gem parses the financial data and routes it through the appropriate engine pipeline.
 
 ### 3. The Council Deliberates
 For trade decisions, the system triggers the **Consensus Pipeline**:
@@ -168,8 +191,11 @@ The **Technical Validator** computes the weighted **Agreement Score (S_A)**:
 - `S_A 0.50–0.74` → **HOLD** / Route to Deep Research
 - `Fatal Flaw Score > 8` → **HARD VETO** (S_A forced to 0.0)
 
-### 5. SSoT State Commit
-Every turn concludes with a full SSoT JSON dump, maintaining state across the stateless web-based Gem sessions.
+### 5. Local State Ingestion (Air-Gap Bridge)
+Every turn concludes with the Gem outputting a precise JSON block named `EXECUTION_PAYLOAD`.
+1. Copy this JSON block from the Gemini UI.
+2. In your running `fetch_stocks.py` terminal, press **`v`**.
+3. The Python orchestrator natively parses the clipboard, validates the JSON, and writes the state to `local_ssot_shadow.json`.
 
 ---
 
@@ -249,17 +275,7 @@ These sections are **ticker-independent** but may need tuning for a different br
 
 All 22+ named constants live in `rules.json > system_thresholds`. Sub-engine files reference these by name — **never hardcode values in sub-engines**.
 
-### 4. Set Up Google Drive SSoT Backup
-The Gems are stateless web sessions — create a Google Drive document to persist your SSoT state across sessions:
-
-1. Create a new **Google Doc** named exactly **`GEM-Context-SSOT`**
-2. In Google Gemini, go to **Settings → Extensions** and **enable Google Drive integration**
-3. This allows the Gems to read the SSoT backup document at session start (`MANDATE_12_BOOT_SYNC`)
-
-> [!IMPORTANT]
-> The `GEM-Context-SSOT` document is how your portfolio state survives between Gem sessions. Without it, each new conversation starts with a blank state.
-
-### 5. Create the Gems
+### 4. Create the Gems
 For each JSON file, create a new Gem in Google Gemini:
 1. Go to [gemini.google.com/gems](https://gemini.google.com/gems)
 2. Click **"New Gem"**
@@ -267,8 +283,7 @@ For each JSON file, create a new Gem in Google Gemini:
 4. Name the Gem to match its role (e.g., *"GEM Terminal"*, *"GEM Rule Enforcer"*)
 5. **Knowledge Injection (CRITICAL - ZERO TOUCH SYNC):**
    - **ALL Gems**: You MUST attach the **`rules`** Google Doc (from `GEM_Trading_Rules/`) to the Gem's knowledge base using the Drive extension.
-   - **SSoT Controller ONLY**: You MUST ALSO attach the **`GEM-Context-SSOT`** Google Doc. (The Context Engine will ask the Controller for this state).
-   - **Automatic Sync**: The Gems are programmed to *automatically* check these attached documents for updates before every response. You do not need to manually reload them; just edit the Google Doc, and the Gem will see it instantly.
+   - **Automatic Sync**: The Gems are programmed to *automatically* check this attached document for updates before every response. You do not need to manually reload it; just edit the Google Doc, and the Gem will see it instantly.
    - **Do NOT upload static files**. Internal JSON instructions are now "Knowledge Bound" to these live Drive files.
 
 ### 6. Run the Dashboard
@@ -330,15 +345,16 @@ Protocol:
 4.  **Confirm Status**: "Synced with Google Doc 'rules' (SSoT)".
 ```
 
-### 🟧 Session Start Bridge Sync (Periodic Backup)
-Periodically save your SSoT to the Google Drive document:
+### 🟧 Local Pipeline Setup (The Clipboard Bridge)
+Since we're using the Air-Gapped Sandboxed architecture, your state is generated by Gemini but saved locally by Python.
 
-```
-Export Context Bridge Sync.
-```
+1. **Copy:** Press `c` in the terminal to package live prices, technicals, your local `local_ssot_shadow.json` portfolio state, and your `trade_lessons.json` history.
+2. **Send:** Paste this block into the Orcehstrator Gem.
+3. **Receive:** The Gem processes the state and outputs an `EXECUTION_PAYLOAD` block. Copy it.
+4. **Save:** Press `v` in the terminal. Python instantly updates your local SSoT shadow and logs any new trade lessons.
 
-### Full State Export (Manual SSoT Dump)
-Force a complete, untruncated SSoT JSON output for backup:
+### Full State Export (Manual Audit)
+If you ever want to force a raw JSON dump or regenerate a corrupted state, run:
 
 ```
 Execute FULL_STATE_OUTPUT protocol per SSoT_Storage.json. Generate the complete SSoT JSON
@@ -348,10 +364,8 @@ state_context, forensic_intelligence, portfolio_snapshot, and mapping_rules—mu
 Increment the sync_id before outputting.
 ```
 
-Copy the resulting JSON and paste it into your **`GEM-Context-SSOT`** Google Doc.
-
 ### Session Restore (Start of Day)
-Paste the saved SSoT JSON into the Gem conversation followed by:
+You no longer need to manually paste your entire state JSON into the chat to start your day. Just press `c` while `fetch_stocks.py` is running, and the active local SSoT and lessons history will be packaged right alongside the live market prices. Paste the block into the Gem and immediately prompt:
 
 ```
 Restore this as active GEM context.
@@ -364,6 +378,8 @@ Run this at the end of each trading session to perform a final audit and generat
 Session Close initiated. Perform a final forensic audit of today's trading session and
 synchronize all end-of-day data for active tickers. Incorporate final trade entries,
 including Units, WAC, and Remaining Cash.
+
+Once the audit is complete, emit an EXECUTION_PAYLOAD so I can sync it locally.
 
 Once the audit is complete, execute the FULL_STATE_OUTPUT protocol per SSoT_Storage.json.
 Generate the absolute, complete SSoT JSON in a single markdown code block with zero omissions

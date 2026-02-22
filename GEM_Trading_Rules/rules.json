@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v3.94-Liquidity_Shield",
+    "version": "v4.1-Console_Architecture",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -45,7 +45,11 @@
         "ENH_45: Macro Shock & Binary Veto Protocol",
         "ENH_46: Temporal Institutional Rebalancing Sentinel",
         "ENH_47: Macro Calendar Shield Protocol",
-        "ENH_48: Narrative Bridge Protocol"
+        "ENH_48: Narrative Bridge Protocol",
+        "ENH_49: Air-Gap Sandbox Bridge Protocol",
+        "ENH_50: Pre-Execution Formulation Protocol",
+        "ENH_51: Retrospective & Self-Improvement Protocol",
+        "ENH_52: Autonomous Risk Resolution Protocol"
     ],
     "mandate_registry": [
         "MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)",
@@ -106,6 +110,7 @@
             "protocol": "ENH_23",
             "enforcement_level": "MANDATORY",
             "instruction": "Ensures cross-module synergy and state synchronization. Mandates that the TECHNICAL_VALIDATOR (PRO) must sign off on any data extraction or SSoT update to prevent isolated engine hallucinations.",
+            "execution_validation": "Before the SSoT Controller executes FORCE_WRITE to commit a trade, the TECHNICAL_VALIDATOR must prove the setup against ENH_36 (Post-ATR) and GATE_LIQ_01 to ensure liquidity depth hasn't vanished seconds before execution.",
             "logic_source": "GEM_Rule_Enforcer_Engine",
             "routing_priority": "PRIMARY"
         },
@@ -138,7 +143,7 @@
             "id": "MANDATE_12_BOOT_SYNC",
             "trigger": "SESSION_START",
             "status": "STRICT_ENFORCE",
-            "instruction": "CONTEXT_ENGINE must call 'file_content_fetcher' for 'GEM-Context-SSOT' at session start. Pause terminal until sync is complete."
+            "instruction": "All engines must build their working memory natively from the 'State of the World' payload provided in the console prompt, which contains the active local_ssot_shadow and trade_lessons data."
         },
         {
             "id": "MANDATE_13",
@@ -160,7 +165,8 @@
                     "RULE_02: IF S_A < caution_threshold THEN ROUTE_TO: DEEP_RESEARCH_ROUTER",
                     "RULE_03: IF NEUTRAL_STRUCTURALIST_VERDICT == 'FRAGILE' THEN MAX_SIZE = 0.25 (Size Penalty)",
                     "RULE_04: IF VIX > 20 THEN RED_TEAM_PESSIMIST_WEIGHT = 0.55 AND NEUTRAL_STRUCTURALIST_WEIGHT = 0.25",
-                    "RULE_05: IF VIX > 20 AND RED_TEAM_FATAL_FLAW > 6 THEN S_A = 0.0 (Hard Veto)"
+                    "RULE_05: IF VIX > 20 AND RED_TEAM_FATAL_FLAW > 6 THEN S_A = 0.0 (Hard Veto)",
+                    "RULE_06: IF 0.65 <= S_A <= 0.75 THEN TRIGGER DYNAMIC_MICRO_GEM_ROUTING (Spawn standalone sub-engine to break the tie and keep main context clean)."
                 ]
             }
         },
@@ -177,7 +183,7 @@
         {
             "id": "MANDATE_16_STRUCTURAL_NEUTRALITY",
             "status": "ACTIVE",
-            "instruction": "The Neutral Structuralist must prioritize LIQUIDITY and GEX. Direction is secondary to structural capacity."
+            "instruction": "The Neutral Structuralist must prioritize LIQUIDITY and GEX. Direction is secondary to structural capacity. DEMAND ELEGANCE: If a setup relies on too many overriding exceptions, deny it (trade_state = NO_TRADE) and wait for an 'A+' setup where Macro, Structural, and Narrative align."
         },
         {
             "id": "MANDATE_17_REGIME_SYNC",
@@ -702,6 +708,48 @@
                         ]
                     }
                 }
+            ]
+        },
+        {
+            "id": "ENH_49",
+            "title": "Air-Gap Sandbox Bridge Protocol",
+            "instruction": "The Gem operates in a stateless, air-gapped sandbox. It has ZERO direct write access to local files, Google Docs, or Google Keep.",
+            "execution_flow": [
+                "1. INGESTION: Read the heavily structured 'State of the World' payload provided by the User in the prompt.",
+                "2. SYNTHESIS: Run all internal logic, Council voting (MANDATE_13), and structural checks.",
+                "3. EMISSION: Output the final, actionable decisions ONLY via a strict JSON code block named `EXECUTION_PAYLOAD`. This payload must be ready for the User to copy and paste directly into the local Python terminal for execution.",
+                "4. NO RAMBLING: Do not append conversational text after the `EXECUTION_PAYLOAD`. Keep the context window clean."
+            ]
+        },
+        {
+            "id": "ENH_50",
+            "title": "Pre-Execution Formulation Protocol",
+            "instruction": "Before the SSoT Controller can emit a trade_state = LONG, the system MUST generate a rigid Trade Thesis. If a position is active and moves against the thesis, the system MUST immediately pause 'hold' operations, drop into 're-plan mode', and reassess.",
+            "execution_flow": [
+                "1. THESIS_FORMULATION: Define entry criteria, invalidation level (stop loss), expected horizon, and the specific Macro/Narrative catalyst driving the trade.",
+                "2. RE-PLAN_TRIGGER: If price drops below VWAP on high relative volume (rVol > 1.2) or Net GEX flips negative, immediately pause operations.",
+                "3. REASSESSMENT: Do not blindly rely on the original logic. Re-evaluate the fundamental and structural thesis from scratch before continuing."
+            ]
+        },
+        {
+            "id": "ENH_51",
+            "title": "Retrospective & Self-Improvement Protocol",
+            "instruction": "Every time a trade hits a protective exit (realizing a loss) or the user manually overrides/vetoes a Gem suggestion, the RESEARCH_ENGINE MUST run a post-mortem to crystallize the lesson.",
+            "execution_flow": [
+                "1. ROOT_CAUSE_ANALYSIS: Identify exactly why the trade failed (e.g., 'Ignored a VIX spike above 20' or 'Bought in a Liquidity Void').",
+                "2. RULE_GENERATION: Write a new permanent behavioral rule or guardrail based on the failure.",
+                "3. EMISSION: Output the new rule in the `EXECUTION_PAYLOAD` under the `new_trade_lessons` array so the orchestrator can append it to `trade_lessons.json`."
+            ]
+        },
+        {
+            "id": "ENH_52",
+            "title": "Autonomous Risk Resolution Protocol",
+            "instruction": "If a portfolio asset begins violating its quantitative guards, the system MUST NOT passively wait for user prompting. It must proactively propose the resolution.",
+            "execution_flow": [
+                "1. DETECTION: Identify violation (e.g., Net_GEX turns negative and loses ma_50, or MACRO_SENTINEL flags HOSTILE).",
+                "2. ACTION_PROPOSAL: Propose a 'Bug Fix' (TRIM or EXIT order).",
+                "3. EVIDENCE_CITATION: Point directly at the failing parameters as the rationale for the action.",
+                "4. PRE_FORMATTING: Pre-format the exact JSON state output to resolve the risk immediately, requiring only a MANDATE_21_USER_CONFIRMATION to execute."
             ]
         }
     ],

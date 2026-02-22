@@ -1344,7 +1344,7 @@ def run_daemon():
                 remaining = sleep_needed - (t_time.time() - wait_start)
                 if remaining <= 0:
                     break
-                print(f"\r\033[?25l{CYAN}Next Update in {int(remaining)}s... Press 'c' to copy JSON, 'r' to reset cache.{RESET}    ", end="", flush=True)
+                print(f"\r\033[?25l{CYAN}Next Update in {int(remaining)}s... Press 'c' to copy JSON, 'v' to paste payload, 'r' to reset cache.{RESET}    ", end="", flush=True)
 
                 if msvcrt and msvcrt.kbhit():  # type: ignore[union-attr]
                     key = msvcrt.getch().decode('utf-8').lower()  # type: ignore[union-attr]
@@ -1352,7 +1352,65 @@ def run_daemon():
                         cache.clear()
                         print(f"\n{YELLOW}Cache cleared! Forcing heavy refresh...{RESET}")
                         break
+                    if key == 'v':
+                        print(f"\n{YELLOW}Reading clipboard for EXECUTION_PAYLOAD...{RESET}")
+                        try:
+                            clip_data = pyperclip.paste()
+                            # Clean markdown formatting if present
+                            if "```json" in clip_data.lower():
+                                # Try to extract just the json part
+                                match = re.search(r"```(?:json)?\s*(.*?)\s*```", clip_data, re.IGNORECASE | re.DOTALL)
+                                if match:
+                                    clip_data = match.group(1)
+                            
+                            payload = json.loads(clip_data.strip())
+                            
+                            with open('local_ssot_shadow.json', 'w') as f:
+                                json.dump(payload, f, indent=2)
+                                
+                            print(f"{GREEN}Payload Ingested! Wrote to local_ssot_shadow.json{RESET}")
+
+                            # ENH_51: Subsystem for extracting and saving Trade Lessons
+                            if "new_trade_lessons" in payload and isinstance(payload["new_trade_lessons"], list):
+                                lessons_file = 'trade_lessons.json'
+                                existing_lessons = []
+                                if os.path.exists(lessons_file):
+                                    with open(lessons_file, 'r') as f:
+                                        try:
+                                            existing_lessons = json.load(f)
+                                        except json.JSONDecodeError:
+                                            pass
+                                
+                                new_lessons = payload["new_trade_lessons"]
+                                existing_lessons.extend(new_lessons)
+
+                                with open(lessons_file, 'w') as f:
+                                    json.dump(existing_lessons, f, indent=2)
+
+                                print(f"{GREEN}Retrospective Triggered: Saved {len(new_lessons)} new lessons to trade_lessons.json{RESET}")
+
+                        except json.JSONDecodeError as e:
+                            print(f"{RED}Error parsing JSON from clipboard: {e}{RESET}")
+                        except Exception as e:
+                            print(f"{RED}Error processing clipboard data: {e}{RESET}")
+                        t_time.sleep(1.5)
+                        
                     if key == 'c':
+                        # Load supplemental local state for the payload
+                        supplemental_lessons = []
+                        if os.path.exists('trade_lessons.json'):
+                            try:
+                                with open('trade_lessons.json', 'r') as f:
+                                    supplemental_lessons = json.load(f)
+                            except: pass
+
+                        supplemental_ssot = {}
+                        if os.path.exists('local_ssot_shadow.json'):
+                            try:
+                                with open('local_ssot_shadow.json', 'r') as f:
+                                    supplemental_ssot = json.load(f)
+                            except: pass
+
                         final_output = {
                             "_meta": {
                                 "description": "LIVE MARKET DATA - DO NOT TREAT AS SIMULATED",
@@ -1363,6 +1421,8 @@ def run_daemon():
                             },
                             "timestamp": datetime.now(ZoneInfo("America/New_York")).strftime('%Y-%m-%d %H:%M:%S'),
                             "status": status,
+                            "trade_lessons": supplemental_lessons,
+                            "local_storage_state": supplemental_ssot,
                             "tickers": data
                         }
                         json_data = json.dumps(final_output, indent=2)
