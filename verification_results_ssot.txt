@@ -1,2 +1,0 @@
-[PASS] ssot_storage.json (Version: v3.4-Facts-Centralized)
-All JSON files are valid.
