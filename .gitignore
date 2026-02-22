@@ -17,3 +17,7 @@ build/
 # OS
 Thumbs.db
 .DS_Store
+
+# Local Air-Gapped State Files
+local_ssot_shadow.json
+trade_lessons.json

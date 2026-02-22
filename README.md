@@ -286,6 +286,13 @@ For each JSON file, create a new Gem in Google Gemini:
    - **Automatic Sync**: The Gems are programmed to *automatically* check this attached document for updates before every response. You do not need to manually reload it; just edit the Google Doc, and the Gem will see it instantly.
    - **Do NOT upload static files**. Internal JSON instructions are now "Knowledge Bound" to these live Drive files.
 
+### 5. Initialize Air-Gap State Files
+The system uses local JSON files to maintain your "State of the World" portfolio and history across sessions without encountering web latency. Before your first run, create these two empty files in the root directory:
+- `local_ssot_shadow.json` (Initialize with an empty object `{}`)
+- `trade_lessons.json` (Initialize with an empty array `[]`)
+
+*(Note: These files are included in `.gitignore` to prevent accidentally committing your personal trading portfolio and history).*
+
 ### 6. Run the Dashboard
 ```bash
 python fetch_stocks.py
