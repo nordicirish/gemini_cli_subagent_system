@@ -41,6 +41,7 @@ MACRO_TICKERS = [
     'VXX',
     'IEF',
     'UUP',
+    '^VIX',
 ]
 
 ALL_TICKERS = TICKERS + MACRO_TICKERS
@@ -1074,7 +1075,7 @@ def run_daemon():
                 mode_str = f"Tick Update (VWAP Batch: {batch[0]}...)"
 
             remaining_tickers = [s for s in ALL_TICKERS if s not in batch]
-            print(f"\n{BOLD}GEM Dashboard (v16.1 - Hardened + Trend){RESET}")
+            print(f"\n{BOLD}GEM Dashboard (v17.1 - Institutional [Optional Social]){RESET}")
             print(f"Time: {ny_now.strftime('%H:%M:%S')} | Status: {status_color}{status}{RESET}")
             print(f"Mode: {mode_str}")
             if remaining_tickers and not is_heavy:
@@ -1243,11 +1244,22 @@ def run_daemon():
                 if isinstance(gex_data, float): # Fallback if cache has old float format
                     gex_data = {'net_gex': gex_data}
 
+                # Derive dealer_posture from net_gex sign per
+                # GoogleDrive://GEM_Trading_Rules/rules > ENH_20 (Synthetic GEX Logic)
+                _raw_gex = float(gex_data.get('net_gex', 0.0))
+                if _raw_gex > 0:
+                    _dealer_posture = "LONG_GAMMA"
+                elif _raw_gex < 0:
+                    _dealer_posture = "SHORT_GAMMA"
+                else:
+                    _dealer_posture = "NEUTRAL"
+
                 data.append({
                     "ticker": sym,
                     "session": cache.session.get(sym),
                     "session_liquidity": cache.session_liquidity.get(sym),
-
+                    "status": "ACTIVE",
+                    
                     # Prices
                     "price": float(p),
                     "regular_close": float(techs.get("Last_Reg_Close", 0.0)),
@@ -1255,6 +1267,8 @@ def run_daemon():
                     "after_hours_price": float(cache.after_hours_price.get(sym, 0)),
 
                     # Returns
+                    # session_change_pct: required by ENH_FIN_02 Protective Exit Override logic
+                    "session_change_pct": float(gap),   # gap_percent relative to prev close
                     "gap_percent": float(gap),
                     "pre_market_change_percent": float(cache.pre_market_change.get(sym, 0)),
                     "after_hours_change_percent": float(cache.after_hours_change.get(sym, 0)),
@@ -1272,10 +1286,18 @@ def run_daemon():
                     "rsi": float(rsi_raw),
                     "vwap": float(vwap),
                     "distance_from_vwap": float(distance_from_vwap(sym)),
+                    # trend_score thresholds: GoogleDrive://GEM_Trading_Rules/rules > TREND_SCORE_UP_THRESHOLD (3) / TREND_SCORE_DOWN_THRESHOLD (-3)
                     "trend_score": int(techs.get("Trend_Score", 0)),
+                    
+                    # Macro Context & Volatility Regime (Rules > VOLATILITY_REGIME_THRESHOLDS)
+                    "vix_price": float(cache.prices.get('^VIX', 0.0)),
+                    "volatility_regime": "HIGH_VOL" if cache.prices.get('^VIX', 0.0) > 20.0 else "LOW_VOL" if cache.prices.get('^VIX', 0.0) < 12.0 and cache.prices.get('^VIX', 0.0) > 0 else "NORMAL",
 
-                    # Composite
-                    "gex_exposure": float(gex_data.get('net_gex', 0.0)),
+                    # GEX — field names per ENH_32 canonical schema in rules.json
+                    # net_gex_total = raw normalized GEX; gex_exposure = shares * net_gex_total (SSoT calc)
+                    "net_gex_total": _raw_gex,
+                    "gex_exposure": None,  # Computed by SSoT Gem: shares * net_gex_total
+                    "dealer_posture": _dealer_posture,  # GoogleDrive://GEM_Trading_Rules/rules > dealer_posture_logic
                     "gamma_flip_price": float(gex_data.get('flip_price', 0.0)),
                     "inventory_velocity_delta": float(gex_data.get('inventory_velocity_delta', 0.0)),
                     "gex_slope": float(gex_data.get('gex_slope', 0.0)),
@@ -1285,16 +1307,21 @@ def run_daemon():
                     "ma_200": float(techs.get("SMA_200") or 0.0),
                     "score": int(score),
                     "signal": classify_signal(sym),
+                    # trend label thresholds: GoogleDrive://GEM_Trading_Rules/rules > TREND_SCORE_UP_THRESHOLD / TREND_SCORE_DOWN_THRESHOLD
                     "trend": "UP" if ts >= 3 else "DOWN" if ts <= -3 else "FLAT",
+                    
+                    # Phase 6 Enhancements (Already computed inline above)
+
                     "note": note.strip()
                 })
 
 
 
             print("-" * table_width)
-            ief = macro_state['IEF']
+            ief = macro_state.get('IEF', {})
             ief_gap = float(ief['gap'])
             ief_price = float(ief['price'])
+            # IEF bond alert — threshold: GoogleDrive://GEM_Trading_Rules/rules > system_thresholds > IEF_YIELD_ALERT_THRESHOLD (-0.15)
             if ief_gap < -0.15:
                 print(f"   >>> BOND ALERT:  7-10Y Bond Price {ief_price:.2f} ({ief_gap:+.2f}%) {RED}[YIELDS RISING - RISK]{RESET}")
             else:
@@ -1303,6 +1330,7 @@ def run_daemon():
             vxx = macro_state['VXX']
             vxx_price = float(vxx['price'])
             vxx_gap = float(vxx['gap'])
+            # VXX fear alert — thresholds: GoogleDrive://GEM_Trading_Rules/rules > VXX_FEAR_THRESHOLD (20.0) and VXX_FEAR_GAP_PCT (2.0)
             if vxx_price > 20.0 and vxx_gap > 2.0:
                 print(f"   >>> FEAR ALERT:  VXX (Vol) is {vxx_price:.2f} (Gap {vxx_gap:+.2f}%) {RED}[CAUTION]{RESET}")
             else:

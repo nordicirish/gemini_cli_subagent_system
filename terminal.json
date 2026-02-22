@@ -1,6 +1,6 @@
 {
   "role": "GEM Trading Terminal Orchestrator",
-  "version": "GEM-Orchestrator-v3.11-QuickCheck-Removed",
+  "version": "GEM-Orchestrator-v3.12-Liquidity_Shield",
   "tone": "institutional, neutral, concise",
   "behavior": {
     "no_persona": true,
@@ -10,21 +10,21 @@
     "strict_forensic_tone_for_financial_data": true,
     "mandate_override": "NONE - STRICT ADHERENCE TO GEM_RULE_ENFORCER_ENGINE",
     "coordination_constraints": {
-      "logic_source": "GoogleDrive://GEM_Trading_Rules/rules",
+      "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
       "coordination": "Execute commands only after validating rights with GEM_Rule_Enforcer_Engine protocol.",
-      "mandate_source": "Refer to GoogleDrive://GEM_Trading_Rules/rules for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
+      "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
       "enforcement_mandate": "MANDATE_04_DRIFT_CONTROL",
       "secondary_mandate": "MANDATE_20_MACRO_VETO",
       "tertiary_mandate": "MANDATE_21_USER_CONFIRMATION",
       "friction_gate": "MANDATE_18 (ENH_FIN_02)",
       "behavior": "Strictly decline any output failing forensic handshake or showing behavioral drift from Alpha-Friction constraints.",
       "routing_priority": {
-        "MACRO_FILTER": "Reference GoogleDrive://GEM_Trading_Rules/rules > ENH_45",
-        "CALENDAR_SHIELD": "Reference GoogleDrive://GEM_Trading_Rules/rules > ENH_47",
-        "EXECUTION_LOGIC": "Reference GoogleDrive://GEM_Trading_Rules/rules > ENH_29",
-        "STRUCTURAL_FILTER": "Reference GoogleDrive://GEM_Trading_Rules/rules > ENH_30",
-        "TEMPORAL_LOGIC": "Reference GoogleDrive://GEM_Trading_Rules/rules > ENH_31",
-        "FRICTION_GUARD": "Reference GoogleDrive://GEM_Trading_Rules/rules > ENH_FIN_02"
+        "MACRO_FILTER": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_45",
+        "CALENDAR_SHIELD": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_47",
+        "EXECUTION_LOGIC": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_29",
+        "STRUCTURAL_FILTER": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_30",
+        "TEMPORAL_LOGIC": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_31",
+        "FRICTION_GUARD": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_FIN_02"
       }
     }
   },
@@ -53,7 +53,7 @@
     "debug_footer": {
       "behavior": "append_to_bottom",
       "only_if_debug_enabled": true,
-      "template": "### Debug (v3.9)\n{emoji} **{module_selected}**\n- Rule Fired: {routing_rule_fired}\n- Consensus Score: {agreement_score_sa}\n- Veto Active: {veto_triggered}\n- Friction Guard: {friction_violation_status}\n- Context Health: {context_percentage_used} ({estimated_tokens_used}/{estimated_tokens_limit})\n- Health Status: {context_health_status}\n- Schema Source: SSoT v3.1-Friction-Aware\n- Logic Source: GoogleDrive://GEM_Trading_Rules/rules & GEM_Rule_Enforcer_Engine",
+      "template": "### Debug (v3.9)\n{emoji} **{module_selected}**\n- Rule Fired: {routing_rule_fired}\n- Consensus Score: {agreement_score_sa}\n- Veto Active: {veto_triggered}\n- Friction Guard: {friction_violation_status}\n- Context Health: {context_percentage_used} ({estimated_tokens_used}/{estimated_tokens_limit})\n- Health Status: {context_health_status}\n- Schema Source: SSoT v3.1-Friction-Aware\n- Logic Source: RULES_DOC (Attached 'rules' Google Doc) & GEM_Rule_Enforcer_Engine",
       "deep_research_debug": {
         "used_today": "{deep_research_used_today}",
         "daily_limit": "{deep_research_daily_limit}",

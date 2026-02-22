@@ -8,10 +8,10 @@
     "no_extra_text": true,
     "enforce_thinking_mode": true,
     "ssot_sync": "MANDATORY_KEEP_WRITE",
-    "logic_source": "GoogleDrive://GEM_Trading_Rules/rules",
-    "coordination": "Submit findings to Context Engine. Reference GoogleDrive://GEM_Trading_Rules/rules > MANDATE_11.",
+    "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
+    "coordination": "Submit findings to Context Engine. Reference RULES_DOC (Attached 'rules' Google Doc) > MANDATE_11.",
     "data_source": "External Market Data + SSoT (Risk Regime)",
-    "mandate_source": "Refer to GoogleDrive://GEM_Trading_Rules/rules for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
+    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
     "anti_hallucination_guidelines": {
       "negative_constraints": [
         "DO NOT fabricate catalysts or events to fill narrative gaps.",
@@ -24,7 +24,7 @@
       "verification_gates": "IF source_url IS MISSING THEN REJECT_NARRATIVE"
     },
     "knowledge_binding": {
-      "source": "ATTACHED_KNOWLEDGE_BASE (GoogleDrive://GEM_Trading_Rules/rules)",
+      "source": "ATTACHED_KNOWLEDGE_BASE (RULES_DOC - Attached 'rules' Google Doc)",
       "priority": "ABSOLUTE",
       "instruction": "Before every response, verify parameters against the attached 'rules' document. If the document is unavailable, HALT."
     }
@@ -41,19 +41,19 @@
       "Narrative Bridge (ENH_48)"
     ],
     "ticker_level_narrative": "Forensic signal attribution",
-    "basket_context": "Reference GoogleDrive://GEM_Trading_Rules/rules > basket_definition (Canonical)",
+    "basket_context": "Reference RULES_DOC (Attached 'rules' Google Doc) > basket_definition (Canonical)",
     "benchmark_logic": {
       "primary": {
         "ticker": "SPY",
         "role": "Broad Market Beta",
         "data_source": "yfinance",
-        "field": "GoogleDrive://GEM_Trading_Rules/rules.benchmarks.primary_index"
+        "field": "RULES_DOC (Attached 'rules' Google Doc).benchmarks.primary_index"
       },
       "secondary": {
         "ticker": "RSP",
         "role": "Equal Weight Beta",
         "data_source": "yfinance",
-        "field": "GoogleDrive://GEM_Trading_Rules/rules.benchmarks.equal_weight_index + '_trend'"
+        "field": "RULES_DOC (Attached 'rules' Google Doc).benchmarks.equal_weight_index + '_trend'"
       }
     },
     "correlation_constraints": [
@@ -64,12 +64,12 @@
       "speculative_exhaustion": {
         "conditions": [
           {
-            "field": "GoogleDrive://GEM_Trading_Rules/rules.benchmarks.primary_index",
+            "field": "RULES_DOC (Attached 'rules' Google Doc).benchmarks.primary_index",
             "operator": ">",
             "compare_to": "52W_High"
           },
           {
-            "field": "GoogleDrive://GEM_Trading_Rules/rules.benchmarks.equal_weight_index + '_trend'",
+            "field": "RULES_DOC (Attached 'rules' Google Doc).benchmarks.equal_weight_index + '_trend'",
             "operator": "==",
             "value": "FLAT"
           }
@@ -125,7 +125,7 @@
           {
             "field": "ticker",
             "operator": "IN",
-            "reference": "GoogleDrive://GEM_Trading_Rules/rules.json > basket_definition > defense_tech > tickers"
+            "reference": "RULES_DOC (Attached 'rules' Google Doc) > basket_definition > defense_tech > tickers"
           },
           {
             "field": "Risk_Regime",
@@ -158,7 +158,7 @@
           {
             "field": "current_date",
             "operator": "WITHIN",
-            "reference": "GoogleDrive://GEM_Trading_Rules/rules.json > temporal_events (ANNUAL_RESET_WINDOW | MID_QUARTER_REVIEW_WINDOWS | QUARTERLY_ROLL_WINDOWS)"
+            "reference": "RULES_DOC (Attached 'rules' Google Doc) > temporal_events (ANNUAL_RESET_WINDOW | MID_QUARTER_REVIEW_WINDOWS | QUARTERLY_ROLL_WINDOWS)"
           }
         ],
         "logic": "ANY",
@@ -193,7 +193,7 @@
           {
             "field": "narrative_resonance",
             "operator": ">",
-            "threshold": "GoogleDrive://GEM_Trading_Rules/rules.json.system_thresholds.NARRATIVE_RESONANCE_THRESHOLD"
+            "threshold": "RULES_DOC (Attached 'rules' Google Doc).system_thresholds.NARRATIVE_RESONANCE_THRESHOLD"
           }
         ],
         "logic": "ALL",
@@ -201,7 +201,7 @@
           "tag": "VOLATILITY_WARNING",
           "enh_ref": "ENH_48",
           "action": "RE-RATE_TICKER_SENSITIVITY",
-          "targets": "GoogleDrive://GEM_Trading_Rules/rules.json.basket_definition.all_watched",
+          "targets": "RULES_DOC (Attached 'rules' Google Doc).basket_definition.all_watched",
           "note": "Prevents 'Hallucinated Calm'"
         }
       }
@@ -233,7 +233,7 @@
   "logic_gates": {
     "narrative_gate": {
       "condition": "IF narrative_score < NARRATIVE_RESONANCE_THRESHOLD THEN REJECT",
-      "threshold": "GoogleDrive://GEM_Trading_Rules/rules.json.system_thresholds.NARRATIVE_RESONANCE_THRESHOLD"
+      "threshold": "RULES_DOC (Attached 'rules' Google Doc).system_thresholds.NARRATIVE_RESONANCE_THRESHOLD"
     },
     "sector_gate": {
       "condition": "IF sector_trend == 'DISTRIBUTION' THEN REJECT_LONG",
@@ -246,7 +246,7 @@
     "narrative_verdict": "[STRONG_ALIGNMENT / WEAK_ALIGNMENT / DISCONNECTED]",
     "sector_context": "[ACCUMULATION / DISTRIBUTION / NUANCE]",
     "basket_membership": {
-      "targets": "GoogleDrive://GEM_Trading_Rules/rules.json.basket_definition.all_watched",
+      "targets": "RULES_DOC (Attached 'rules' Google Doc).basket_definition.all_watched",
       "status": "[MEMBER / OUTSIDER]"
     }
   }

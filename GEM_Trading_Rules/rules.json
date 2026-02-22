@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v3.91-MANDATE_21_CONFIRMATION",
+    "version": "v3.94-Liquidity_Shield",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -158,7 +158,9 @@
                 "governance_rules": [
                     "RULE_01: IF RED_TEAM_FATAL_FLAW > fatal_flaw_limit THEN S_A = 0.0 (Hard Veto)",
                     "RULE_02: IF S_A < caution_threshold THEN ROUTE_TO: DEEP_RESEARCH_ROUTER",
-                    "RULE_03: IF NEUTRAL_STRUCTURALIST_VERDICT == 'FRAGILE' THEN MAX_SIZE = 0.25 (Size Penalty)"
+                    "RULE_03: IF NEUTRAL_STRUCTURALIST_VERDICT == 'FRAGILE' THEN MAX_SIZE = 0.25 (Size Penalty)",
+                    "RULE_04: IF VIX > 20 THEN RED_TEAM_PESSIMIST_WEIGHT = 0.55 AND NEUTRAL_STRUCTURALIST_WEIGHT = 0.25",
+                    "RULE_05: IF VIX > 20 AND RED_TEAM_FATAL_FLAW > 6 THEN S_A = 0.0 (Hard Veto)"
                 ]
             }
         },
@@ -180,7 +182,7 @@
         {
             "id": "MANDATE_17_REGIME_SYNC",
             "status": "ACTIVE",
-            "instruction": "All sub-engines MUST adhere to regime-based weighting determined by the NEUTRAL_STRUCTURALIST. Influence coefficients (weights) are dynamic: 1.5x for Bullish in TRENDING/EXPANSION; Veto threshold per FATAL_FLAW_VETO_MEAN_REVERT for Red Team in MEAN-REVERTING/COMPRESSION.",
+            "instruction": "All sub-engines MUST adhere to regime-based weighting determined by the NEUTRAL_STRUCTURALIST. Influence coefficients (weights) are dynamic: 1.5x for Bullish in TRENDING/EXPANSION; Veto threshold per FATAL_FLAW_VETO_MEAN_REVERT for Red Team in MEAN-REVERTING/COMPRESSION. During HIGH_VOL (VIX > 20), the Red Team's weight should automatically increase to 0.55, effectively granting them 'Council Supremacy'.",
             "meta_arbiter_enforcement": {
                 "logic_source": "ENH_40",
                 "instruction": "The SSoT Controller MUST validate the final Agreement Score (S_A) against the Meta-Arbiter logic in ENH_40 before committing."
@@ -215,7 +217,7 @@
                             {
                                 "field": "session_change_pct",
                                 "operator": "<",
-                                "threshold": "PROTECTIVE_EXIT_SESSION_DROP (Dynamic: -2.0% Normal | -1.5% Stressed)"
+                                "threshold": "PROTECTIVE_EXIT_SESSION_DROP (Dynamic: -2.0% Normal | -1.0% Stressed)"
                             },
                             {
                                 "field": "rvol",
@@ -228,7 +230,7 @@
                                 "threshold": "SHOCK_CAUTION_THRESHOLD"
                             }
                         ],
-                        "logic": "ANY 2 of 4 (Macro Shock counts as a valid trigger)",
+                        "logic": "ANY 2 of 4 (Macro Shock counts as a valid trigger). Negative Delta Force: IF Net_GEX < 0 AND session_change_pct < -1.0%, SET volatility_override = TRUE and emit EXIT.",
                         "effect": "SET volatility_override = TRUE — friction gate bypassed, exit treated as protective, not churn"
                     }
                 },
@@ -258,7 +260,7 @@
         {
             "id": "MANDATE_20_MACRO_VETO",
             "status": "ACTIVE",
-            "instruction": "The MACRO_SENTINEL possesses absolute veto authority. If shock_intensity > SHOCK_ABORT_THRESHOLD, the SSoT Controller MUST set trade_state = NO_TRADE regardless of Council S_A score.",
+            "instruction": "The MACRO_SENTINEL possesses absolute veto authority. Macro Veto applies exclusively to New Risk Exposure. The SSoT Controller is authorized to emit EXIT or TRIM states during a Veto event if forensic indicators (HV BREAKOUT) suggest an imminent blow-off top or liquidity exhaustion.",
             "logic_source": "ENH_45"
         },
         {
@@ -440,9 +442,9 @@
                         "trade_state": "STRING (LONG | NO_TRADE | EXIT)",
                         "no_trade_reason": "STRING | NULL",
                         "sizing_units": "FLOAT (ATR-Adjusted Quantity)",
-                        "social_velocity_z_score": "FLOAT",
-                        "sentiment_divergence_flag": "BOOLEAN",
-                        "retail_crowding_status": "STRING (STABLE | FRAGILE)",
+                        "social_velocity_z_score": "FLOAT (OPTIONAL / Manual Override)",
+                        "sentiment_divergence_flag": "BOOLEAN (OPTIONAL)",
+                        "retail_crowding_status": "STRING (OPTIONAL | STABLE | FRAGILE)",
                         "hard_catalyst": {
                             "type": "STRING (NONE | EARNINGS | FDA | CONTRACT)",
                             "details": "STRING",
@@ -576,7 +578,8 @@
             "instruction": "Monitors exogenous data for Black Swan events. Triggers high-priority flag in forensic_intelligence.risk_alerts.",
             "logic_gates": [
                 "IF shock_intensity >= SHOCK_CAUTION_THRESHOLD -> SET alpha_sentry_mode = 'CAUTION'",
-                "IF shock_intensity >= SHOCK_ABORT_THRESHOLD -> SET alpha_sentry_mode = 'ABORT' AND trade_state = 'NO_TRADE'"
+                "IF shock_intensity >= SHOCK_ABORT_THRESHOLD -> SET alpha_sentry_mode = 'ABORT' AND trade_state = 'NO_TRADE'",
+                "IF GDP < Consensus AND PCE > Consensus -> SET macro_shock_intensity = 9.0 AND trade_state = 'NO_TRADE' for all non-safe-haven assets"
             ]
         },
         {
@@ -596,7 +599,8 @@
                 },
                 "MID_QUARTER_REVIEW": {
                     "window": "Reference rules.json > temporal_events > MID_QUARTER_REVIEW_WINDOWS",
-                    "action": "Tighten stops on losing positions; Permit new entries only with S_A > 0.85."
+                    "action": "Tighten stops on losing positions; Permit new entries only with S_A > 0.85.",
+                    "harvest_efficiency": "During the MID_QUARTER_REVIEW window (Feb 10–20), the sentinel must override the Alpha-Friction Protocol (ENH_FIN_02) for any position showing >1.5x RVol to lock in gains ahead of rebalancing-induced volatility."
                 },
                 "QUARTERLY_ROLL": {
                     "window": "Reference rules.json > temporal_events > QUARTERLY_ROLL_WINDOWS",
@@ -614,7 +618,7 @@
             "title": "Macro Calendar Shield Protocol",
             "version": "1.0",
             "status": "ACTIVE",
-            "instruction": "Forward-looking economic calendar awareness layer. Monitors proximity to scheduled macro releases (FOMC, CPI, NFP, etc.) and adjusts shield_posture and sizing_dampener to prevent entries into pre-event uncertainty windows.",
+            "instruction": "Forward-looking economic calendar awareness layer. Monitors proximity to scheduled macro releases (FOMC, CPI, NFP, etc.) and explicitly decouple Risk Initiation from Risk Harvesting. While NO_NEW_ENTRIES blocks opening positions, it MANDATES an 'Alpha-Harvest' review. If an existing position exhibits Distance from VWAP > 2.0% during a TIER 1/2 window, the system must trigger a TRIM order regardless of shield posture. On TIER 1 Macro Days, any asset failing to reclaim VWAP within 30 minutes of the open MUST be trimmed by 50%.",
             "parameters": {
                 "trigger_type": "Calendar_Proximity_Alignment",
                 "enforcement_level": "MANDATE_20_MACRO_VETO"
@@ -1144,6 +1148,102 @@
             "used_by": [
                 "macro_arbiter"
             ]
+        },
+        "VXX_FEAR_THRESHOLD": {
+            "value": 20.0,
+            "usage": "VXX price above this (combined with VXX_FEAR_GAP_PCT) triggers FEAR ALERT in dashboard",
+            "used_by": [
+                "fetch_stocks"
+            ]
+        },
+        "VXX_FEAR_GAP_PCT": {
+            "value": 2.0,
+            "usage": "VXX daily gap % that combines with VXX_FEAR_THRESHOLD for FEAR ALERT",
+            "used_by": [
+                "fetch_stocks"
+            ]
+        },
+        "IEF_YIELD_ALERT_THRESHOLD": {
+            "value": -0.15,
+            "usage": "IEF daily gap % below this triggers YIELDS RISING bond alert in dashboard",
+            "used_by": [
+                "fetch_stocks"
+            ]
+        },
+        "TREND_SCORE_UP_THRESHOLD": {
+            "value": 3,
+            "usage": "Trend score at or above this = UP trend label (fetch_stocks dashboard)",
+            "used_by": [
+                "fetch_stocks"
+            ]
+        },
+        "TREND_SCORE_DOWN_THRESHOLD": {
+            "value": -3,
+            "usage": "Trend score at or below this = DOWN trend label (fetch_stocks dashboard)",
+            "used_by": [
+                "fetch_stocks"
+            ]
+        },
+        "RISK_FREE_RATE": {
+            "value": 0.045,
+            "usage": "Annualized risk-free rate for Black-Scholes GEX calculation. Update quarterly.",
+            "used_by": [
+                "fetch_stocks",
+                "gex_engine"
+            ]
+        },
+        "SOCIAL_VELOCITY_ZSCORE_MIN": {
+            "value": 2.0,
+            "usage": "Minimum social velocity Z-score for momentum confirmation (bullish_gem)",
+            "used_by": [
+                "bullish_gem"
+            ]
+        },
+        "RETAIL_CROWDING_ZSCORE_LIMIT": {
+            "value": 3.0,
+            "usage": "Social Z-score above this = FRAGILE retail crowding status (neutral_gem)",
+            "used_by": [
+                "neutral_gem"
+            ]
+        },
+        "INTRADAY_FRICTION_VOL_FLOOR": {
+            "value": 2.5,
+            "usage": "Volatility % below this forbids INTRADAY horizon; requires SWING minimum (neutral_gem)",
+            "used_by": [
+                "neutral_gem"
+            ]
+        },
+        "MA50_OVEREXTENSION_PCT": {
+            "value": 0.20,
+            "usage": "Price > MA50 by this fraction = sell-the-news precursor risk (red_team_gem)",
+            "used_by": [
+                "red_team_gem"
+            ]
+        },
+        "LIQUIDITY_VOID_DEPTH_PCT": {
+            "value": 0.20,
+            "usage": "Order book depth below this fraction of 10-day avg = liquidity void (red_team_gem)",
+            "used_by": [
+                "red_team_gem"
+            ]
+        },
+        "GEX_PRICING_ERROR_TOLERANCE": {
+            "value": 0.10,
+            "usage": "Max fraction of option strikes with pricing errors before flagging data quality (gex_engine)",
+            "used_by": [
+                "gex_engine"
+            ]
+        },
+        "VOLATILITY_REGIME_THRESHOLDS": {
+            "value": {
+                "HIGH": 20.0,
+                "LOW": 12.0
+            },
+            "usage": "VIX levels defining High/Low volatility regimes. High > 20, Low < 12",
+            "used_by": [
+                "fetch_stocks",
+                "neutral_gem"
+            ]
         }
     },
     "basket_definition": {
@@ -1256,6 +1356,24 @@
                 "execution",
                 "research"
             ]
+        }
+    },
+    "infrastructure": {
+        "authority": "CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.",
+        "RULES_DOC": {
+            "path": "GoogleDrive://GEM_Trading_Rules/rules",
+            "description": "Primary rules document containing mandates and thresholds (Google Doc)",
+            "access_method": "ATTACHED_KNOWLEDGE_BASE"
+        },
+        "SSOT_DOC": {
+            "path": "GEM-Context-SSOT",
+            "description": "Single Source of Truth state file (Google Doc)",
+            "access_method": "GOOGLE_DRIVE_CENTRAL"
+        },
+        "RESEARCH_FOLDER": {
+            "path": "Trading_Research",
+            "description": "Folder containing research materials and PDF uploads",
+            "access_method": "GOOGLE_DRIVE_FOLDER"
         }
     }
 }

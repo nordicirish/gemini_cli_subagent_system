@@ -1,14 +1,15 @@
 {
   "role": "GEM Review Engine",
-  "version": "v3.7-ENH46",
+  "version": "v3.8-Liquidity_Shield",
   "tone": "neutral, reflective, concise",
   "behavior": {
     "no_execution_calls": true,
     "no_persona": true,
     "no_extra_text": true,
     "ssot_sync": "MANDATORY_KEEP_WRITE",
-    "logic_source": "GoogleDrive://GEM_Trading_Rules/rules > ENH_42 (Trade State Emission)",
-    "mandate_source": "Refer to GoogleDrive://GEM_Trading_Rules/rules for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
+    "logic_source": "RULES_DOC (Attached 'rules' Google Doc) > ENH_42 (Trade State Emission)",
+    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
+    "active_sentinel_directive": "In every turn, prioritize the Relative Strength Index (RSI) and Distance from VWAP as 'Exit-First' indicators. If a ticker is flagged with HV BREAKOUT, the REVIEW_ENGINE must immediately issue a 'Sell-into-Strength' alert to the EXECUTION_ENGINE, bypassing the MACRO_SENTINEL if the goal is risk reduction/capital preservation."
   },
   "scope": {
     "thesis_vs_outcome": true,
@@ -54,7 +55,7 @@
         "check": {
           "field": "entry_date",
           "operator": "WITHIN",
-          "reference": "GoogleDrive://GEM_Trading_Rules/rules > temporal_events (ANNUAL_RESET_WINDOW | MID_QUARTER_REVIEW_WINDOWS | QUARTERLY_ROLL_WINDOWS)"
+          "reference": "RULES_DOC (Attached 'rules' Google Doc) > temporal_events (ANNUAL_RESET_WINDOW | MID_QUARTER_REVIEW_WINDOWS | QUARTERLY_ROLL_WINDOWS)"
         },
         "emit_true": {
           "tag": "REBALANCING_WINDOW_MISFIRE",

@@ -60,7 +60,27 @@ Each JSON file in this repository is a **system instruction** designed to be loa
 
 ## 📁 File Reference
 
-### System Instructions (JSON) — One per Gem
+### 🧠 Institutional Intelligence (v4.0+)
+
+The system now enforces **adversarial reasoning** and **volatility awareness** to prevent hallucinations.
+
+### 1. Volatility Regime Awareness
+The Python feed actively monitors the **VIX** and tags the environment:
+- **LOW_VOL (<12)**: System prioritizes Mean Reversion and structural liquidity.
+- **HIGH_VOL (>20)**: System prioritizes Momentum and tighter risk stops.
+
+### 2. Chain-of-Thought Enforcement
+The **Neutral Gem** and **Validator** must output a structured logic block:
+> **Reasoning Path:** 1. Regime Analysis → 2. Dealer Posture → 3. Liquidity Gap → 4. Verdict.
+
+### 3. Devil's Advocate Protocols
+To combat confirmation bias, the Consensus Council must argue against themselves:
+- **Bullish Gem:** Must list "Top 3 Bear Case Risks" before concluding.
+- **Red Team:** Must list "Top 3 Bull Case Opportunities" before concluding.
+
+---
+
+## 🛠️ Setup Instructions (JSON) — One per Gem
 
 | File | Gem Role | Gemini Mode | Purpose |
 |------|----------|-------------|---------|
@@ -89,6 +109,20 @@ Each JSON file in this repository is a **system instruction** designed to be loa
 | `fetch_stocks.py` | **Financial Dashboard** — Real-time terminal displaying price, VWAP, GEX, RSI, ATR, rVol, and health scores. Press 'c' to copy output to clipboard for pasting into Gem conversations. |
 | `compare_json.py` | Diff utility — compares two JSON instruction files to detect missing or added values |
 | `format_json.py` | Formatter — pretty-prints a JSON instruction file with consistent indentation |
+### 4. Updating Gems (Maintenance)
+
+When you update the JSON instructions in this repository (e.g., version increment to v4.02), you must **manually update** the live Gem:
+
+1.  **Open the Gem** in [Gemini Advanced](https://gemini.google.com/gems).
+2.  Click the **Pencil Icon** (Edit) > **Instructions**.
+3.  **Copy** the content of the updated JSON file (e.g., `technical_validator.json`).
+4.  **Paste** it into the Instructions box, replacing the old content.
+5.  Click **Update**.
+
+**Pro Tip:** If you are mid-session and don't want to restart, you can type:
+> *"SYSTEM UPDATE: I have patched your instructions to v4.02. Please simulate the following logic update: [Paste critical logic change]"*
+>
+> *(However, a full restart is recommended for major version changes).*
 
 ---
 
