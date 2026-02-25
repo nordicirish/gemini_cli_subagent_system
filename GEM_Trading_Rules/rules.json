@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v4.2-Autonomous-Evolution",
+    "version": "v4.5-Delta-Merge",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -51,7 +51,8 @@
         "ENH_51: Retrospective & Self-Improvement Protocol",
         "ENH_52: Autonomous Risk Resolution Protocol",
         "ENH_53: State Compression Protocol",
-        "ENH_54: SSoT Mutation Protocol"
+        "ENH_54: SSoT Mutation Protocol",
+        "ENH_55: Web Verification Protocol"
     ],
     "mandate_registry": [
         "MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)",
@@ -129,7 +130,24 @@
         {
             "id": "MANDATE_09_STATE_EMISSION",
             "status": "STRICT_ENFORCE",
-            "instruction": "Every turn MUST terminate with the complete, untruncated SSoT JSON state. Trigger regeneration if truncated."
+            "instruction": "Every turn MUST terminate with SSoT JSON state. Full emission is PREFERRED. If output token limits prevent full emission, the Gem MAY emit a DELTA payload containing only the changed sections. The orchestrator will deep-merge the delta into the existing local_ssot_shadow.json.",
+            "required_top_level_keys": [
+                "state_context",
+                "trade_lessons",
+                "portfolio_snapshot",
+                "forensic_intelligence",
+                "runtime_flags",
+                "macro_calendar_shield"
+            ],
+            "delta_mode": {
+                "allowed": true,
+                "instruction": "When emitting a delta, include ONLY the sections that changed. The orchestrator merges per merge_engine rules: dicts are deep-merged (absent keys preserved), portfolio_snapshot is merged by ticker (MERGE_BY_TICKER_PRESERVE_UNTOUCHED_TICKERS).",
+                "minimum_required_keys": [
+                    "state_context"
+                ],
+                "note": "state_context.sync_id MUST always be present to track sync lineage."
+            },
+            "enforcement": "Full payload: all required_top_level_keys must be present. Delta payload: at minimum state_context with sync_id. The trade_lessons array MUST always reflect the current canonical set when included. Omission in delta mode means no change."
         },
         {
             "id": "MANDATE_10_SCHEMA_VALIDATION",
@@ -721,7 +739,32 @@
                 "2. SYNTHESIS: Run all internal logic, Council voting (MANDATE_13), and structural checks.",
                 "3. EMISSION: Output the final, actionable decisions ONLY via a strict JSON code block named `EXECUTION_PAYLOAD`. This payload must be ready for the User to copy and paste directly into the local Python terminal for execution.",
                 "4. NO RAMBLING: Do not append conversational text after the `EXECUTION_PAYLOAD`. Keep the context window clean."
-            ]
+            ],
+            "payload_keys": {
+                "trade_lessons_handling": {
+                    "description": "The orchestrator recognizes exactly three keys for trade_lessons management. Priority order (first match wins):",
+                    "keys": [
+                        {
+                            "key": "compressed_trade_lessons",
+                            "type": "ARRAY<STRING>",
+                            "action": "OVERWRITE trade_lessons.json entirely",
+                            "trigger": "ENH_53 State Compression (>= 20 lessons)"
+                        },
+                        {
+                            "key": "new_trade_lessons",
+                            "type": "ARRAY<STRING>",
+                            "action": "APPEND to existing trade_lessons.json",
+                            "trigger": "ENH_51 Retrospective (post-mortem lesson)"
+                        },
+                        {
+                            "key": "trade_lessons",
+                            "type": "ARRAY<STRING>",
+                            "action": "OVERWRITE trade_lessons.json with canonical SSoT state",
+                            "trigger": "Full SSoT state emission"
+                        }
+                    ]
+                }
+            }
         },
         {
             "id": "ENH_50",
@@ -772,6 +815,16 @@
                 "1. IDENTIFICATION: Recognize that a string of failures maps to an explicitly defined parameter in RULES_DOC.",
                 "2. PATCH_GENERATION: Create a JSON patch array targeting the deep nested key in the schema (e.g., ['system_thresholds', 'ALPHA_FRICTION_MINIMUM']).",
                 "3. EMISSION: Output the patch array in the `EXECUTION_PAYLOAD` under the `rule_mutations` key. The orchestrator will natively intercept this and rewrite the rules.json file on the disk."
+            ]
+        },
+        {
+            "id": "ENH_55",
+            "title": "Web Verification Protocol",
+            "instruction": "Enforces spatial trend awareness. For every ticker provided in the SSoT payload, the Gem MUST use the Google Finance extension to retrieve the YTD and 6-month price charts.",
+            "execution_flow": [
+                "1. EXTENSION_CALL: Trigger Google Finance to view the chart for each active or watched ticker.",
+                "2. VISUAL_CROSS_REFERENCE: Cross-reference the moving averages provided in the payload against the visual overarching algorithmic trend.",
+                "3. VERDICT_ADJUSTMENT: Identify overarching signs of algorithmic distribution or accumulation that short-term indicators miss, and adjust the final `trade_state` verdict accordingly."
             ]
         }
     ],
@@ -1064,7 +1117,7 @@
         "benchmarks": {
             "primary_index": "SPX",
             "equal_weight_index": "RSP",
-            "volatility_index": "VXX"
+            "volatility_index": "^VIX"
         },
         "SPREAD_CEILING": {
             "value": 5.0,
@@ -1211,16 +1264,16 @@
                 "macro_arbiter"
             ]
         },
-        "VXX_FEAR_THRESHOLD": {
+        "VIX_FEAR_THRESHOLD": {
             "value": 20.0,
-            "usage": "VXX price above this (combined with VXX_FEAR_GAP_PCT) triggers FEAR ALERT in dashboard",
+            "usage": "VIX exact value above this (combined with VIX_FEAR_GAP_PCT) triggers FEAR ALERT in dashboard",
             "used_by": [
                 "fetch_stocks"
             ]
         },
-        "VXX_FEAR_GAP_PCT": {
+        "VIX_FEAR_GAP_PCT": {
             "value": 2.0,
-            "usage": "VXX daily gap % that combines with VXX_FEAR_THRESHOLD for FEAR ALERT",
+            "usage": "VIX daily gap % that combines with VIX_FEAR_THRESHOLD for FEAR ALERT",
             "used_by": [
                 "fetch_stocks"
             ]

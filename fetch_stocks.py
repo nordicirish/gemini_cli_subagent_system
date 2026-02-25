@@ -38,14 +38,13 @@ TICKERS = [
 
 MACRO_TICKERS = [
     'SPY',
-    'VXX',
+    '^VIX',
     'IEF',
     'UUP',
-    '^VIX',
 ]
 
 ALL_TICKERS = TICKERS + MACRO_TICKERS
-INVERSE_MACRO = ['VXX', 'UUP']
+INVERSE_MACRO = ['^VIX', 'UUP', 'IEF']
 
 REFRESH_RATE_SECONDS = 30
 HISTORY_REFRESH_CYCLES = 10
@@ -176,6 +175,36 @@ def calculate_delta(S, K, T, r, sigma, option_type):
     except:
         return 0.0
 
+def get_premarket_volume_chart(symbol):
+    """
+    Dedicated fetch for pre-market volume (04:00-09:30 ET today) via Yahoo chart API.
+    This is more reliable than the batch quote endpoint which often omits preMarketVolume
+    during regular hours.
+    """
+    try:
+        ny_tz = ZoneInfo("America/New_York")
+        now = datetime.now(ny_tz)
+        # Build period for today's premarket window: 04:00 to 09:30 ET
+        pre_start = now.replace(hour=4, minute=0, second=0, microsecond=0)
+        pre_end = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        # Only fetch if we're past the premarket window
+        if now < pre_start:
+            return 0
+        # Cap end at market open or current time, whichever is earlier
+        if now < pre_end:
+            pre_end = now
+        ts1 = int(pre_start.timestamp())
+        ts2 = int(pre_end.timestamp())
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={ts1}&period2={ts2}&interval=1m&includePrePost=true"
+        r = yf_data.get(url, timeout=3)
+        data = r.json()
+        result = data['chart']['result'][0]
+        volumes = result['indicators']['quote'][0].get('volume', [])
+        total = sum(v for v in volumes if v is not None and v > 0)
+        return total
+    except:
+        return 0
+
 # -----------------------------
 # FETCHERS
 # -----------------------------
@@ -208,29 +237,30 @@ def get_live_chart_data(symbol, status):
 
         ny_tz = ZoneInfo("America/New_York")
         now = datetime.now(ny_tz)
-        today_date = now.date()
 
-        # Session boundaries for TODAY
-        # We must filter data for today's date to calculate daily volumes correctly
-        
-        # Create a list of (dt, vol) tuples for today
-        # timestamps are unix seconds (UTC)
-        
         pre_vol = 0
         reg_vol = 0
         post_vol = 0
         total_session_vol = 0 # Volume matching current status
 
-        cutoff_ts = 0
-        if status == "OPEN":
-            cutoff_dt = now.replace(hour=9, minute=30, second=0, microsecond=0)
-            cutoff_ts = cutoff_dt.timestamp()
-        elif status == "AFTER-HOURS":
-            cutoff_dt = now.replace(hour=16, minute=0, second=0, microsecond=0)
-            cutoff_ts = cutoff_dt.timestamp()
-
-        # Iterate and sum
         if volumes and timestamps:
+            # First pass: find the most recent date available in the dataset
+            latest_date = None
+            for ts in reversed(timestamps):
+                dt_ny = datetime.fromtimestamp(ts, ZoneInfo("UTC")).astimezone(ny_tz)
+                latest_date = dt_ny.date()
+                break # the last timestamp is the most recent date
+
+            cutoff_ts = 0
+            # Only use cutoff if today is the latest date (meaning the market is actively open)
+            if latest_date == now.date():
+                if status == "OPEN":
+                    cutoff_dt = now.replace(hour=9, minute=30, second=0, microsecond=0)
+                    cutoff_ts = cutoff_dt.timestamp()
+                elif status == "AFTER-HOURS":
+                    cutoff_dt = now.replace(hour=16, minute=0, second=0, microsecond=0)
+                    cutoff_ts = cutoff_dt.timestamp()
+
             for ts, v in zip(timestamps, volumes):
                 if v is None: 
                     continue
@@ -238,8 +268,8 @@ def get_live_chart_data(symbol, status):
                 dt_utc = datetime.fromtimestamp(ts, ZoneInfo("UTC"))
                 dt_ny = dt_utc.astimezone(ny_tz)
                 
-                # Filter for TODAY only (ignore previous days in the 5d range)
-                if dt_ny.date() != today_date:
+                # Filter for the most recent active trading day
+                if dt_ny.date() != latest_date:
                     continue
 
                 # Calculate specific session volumes
@@ -717,11 +747,14 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         price = float(reg_price)
 
     # --- Fallbacks ---
-    if price == 0:
+    needs_pre_vol = (pre_vol == 0 and cache.pre_market_volume.get(symbol, 0) == 0)
+    needs_post_vol = (status == "AFTER-HOURS" and post_vol == 0)
+
+    if price == 0 or needs_post_vol:
         api_price, api_vol, api_pre_vol, api_post_vol = get_live_chart_data(symbol, status)
-        if api_price > 0:
+        if price == 0 and api_price > 0:
             price = api_price
-        if api_vol > 0:
+        if vol == 0 and api_vol > 0:
             vol = api_vol
         
         # Fallback for pre-market volume if batch failed
@@ -729,6 +762,12 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
             pre_vol = api_pre_vol
         if api_post_vol > 0 and post_vol == 0:
             post_vol = api_post_vol
+
+    # Dedicated pre-market volume fetch (more reliable than batch quote during regular hours)
+    if needs_pre_vol:
+        chart_pre_vol = get_premarket_volume_chart(symbol)
+        if chart_pre_vol > 0:
+            pre_vol = chart_pre_vol
 
     if price == 0 and USE_FINNHUB:
         fh_c, fh_pc = get_finnhub_quote(symbol)
@@ -1103,7 +1142,7 @@ def run_daemon():
 
             macro_state = {
                 'IEF': {'price': 0.0, 'gap': 0.0, 'trend': 'FLAT'},
-                'VXX': {'price': 0.0, 'gap': 0.0}
+                '^VIX': {'price': 0.0, 'gap': 0.0}
             }
 
             for i, sym in enumerate(ALL_TICKERS):
@@ -1152,8 +1191,8 @@ def run_daemon():
                 if sym == 'IEF':
                     trend = "BULLISH (Safe)" if gap > 0 else "BEARISH (Risk)"
                     macro_state['IEF'] = {'price': p, 'gap': gap, 'trend': trend}
-                if sym == 'VXX':
-                    macro_state['VXX'] = {'price': p, 'gap': gap}
+                if sym == '^VIX':
+                    macro_state['^VIX'] = {'price': p, 'gap': gap}
 
                 if i % 2 == 1:
                     ROW_BG = BG_STRIPE
@@ -1180,11 +1219,18 @@ def run_daemon():
                     rsi_cell = f"{WHITE}{rsi_val:<{w_rsi}}{R_RST}"
 
                 # TREND LABEL (color-coded — updated thresholds for weighted SMA200)
+                # For INVERSE_MACRO tickers (VIX, IEF, UUP): rising price = bearish for equities,
+                # so we invert the COLORS (UP=RED, DOWN=GREEN) while keeping the label
+                # matching actual price direction.
                 ts = techs.get("Trend_Score", 0)
                 if ts >= 3:
-                    trend_label = f"{GREEN}{'UP':<{w_trd}}{R_RST}"
+                    # UP: good for normal tickers (GREEN), bad for inverse tickers (RED)
+                    up_color = RED if sym in INVERSE_MACRO else GREEN
+                    trend_label = f"{up_color}{'UP':<{w_trd}}{R_RST}"
                 elif ts <= -3:
-                    trend_label = f"{RED}{'DOWN':<{w_trd}}{R_RST}"
+                    # DOWN: bad for normal tickers (RED), good for inverse tickers (GREEN)
+                    dn_color = GREEN if sym in INVERSE_MACRO else RED
+                    trend_label = f"{dn_color}{'DOWN':<{w_trd}}{R_RST}"
                 else:
                     trend_label = f"{YELLOW}{'FLAT':<{w_trd}}{R_RST}"
 
@@ -1277,8 +1323,8 @@ def run_daemon():
                     # Volume
                     "volume": int(vol),
                     "rvol": float(calculate_rvol(sym)),
-                    "pre_market_volume": int(cache.pre_market_volume.get(sym, 0)),
-                    "after_hours_volume": int(cache.after_hours_volume.get(sym, 0)),
+                    "pre_market_volume": int(cache.pre_market_volume.get(sym, 0)) or "UNAVAILABLE",
+                    "after_hours_volume": int(cache.after_hours_volume.get(sym, 0)) or "UNAVAILABLE",
 
                     # Technicals
                     "atr_percent": float(atr_val),
@@ -1287,16 +1333,16 @@ def run_daemon():
                     "vwap": float(vwap),
                     "distance_from_vwap": float(distance_from_vwap(sym)),
                     # trend_score thresholds: GoogleDrive://GEM_Trading_Rules/rules > TREND_SCORE_UP_THRESHOLD (3) / TREND_SCORE_DOWN_THRESHOLD (-3)
-                    "trend_score": int(techs.get("Trend_Score", 0)),
+                    # For INVERSE_MACRO tickers: negated so rising price = negative (bearish for equities)
+                    "trend_score": int(-techs.get("Trend_Score", 0)) if sym in INVERSE_MACRO else int(techs.get("Trend_Score", 0)),
                     
                     # Macro Context & Volatility Regime (Rules > VOLATILITY_REGIME_THRESHOLDS)
                     "vix_price": float(cache.prices.get('^VIX', 0.0)),
                     "volatility_regime": "HIGH_VOL" if cache.prices.get('^VIX', 0.0) > 20.0 else "LOW_VOL" if cache.prices.get('^VIX', 0.0) < 12.0 and cache.prices.get('^VIX', 0.0) > 0 else "NORMAL",
 
                     # GEX — field names per ENH_32 canonical schema in rules.json
-                    # net_gex_total = raw normalized GEX; gex_exposure = shares * net_gex_total (SSoT calc)
                     "net_gex_total": _raw_gex,
-                    "gex_exposure": None,  # Computed by SSoT Gem: shares * net_gex_total
+                    "gex_exposure": _raw_gex,  # Normalized GEX exposure (position-level scaling done by SSoT Gem)
                     "dealer_posture": _dealer_posture,  # GoogleDrive://GEM_Trading_Rules/rules > dealer_posture_logic
                     "gamma_flip_price": float(gex_data.get('flip_price', 0.0)),
                     "inventory_velocity_delta": float(gex_data.get('inventory_velocity_delta', 0.0)),
@@ -1308,7 +1354,8 @@ def run_daemon():
                     "score": int(score),
                     "signal": classify_signal(sym),
                     # trend label thresholds: GoogleDrive://GEM_Trading_Rules/rules > TREND_SCORE_UP_THRESHOLD / TREND_SCORE_DOWN_THRESHOLD
-                    "trend": "UP" if ts >= 3 else "DOWN" if ts <= -3 else "FLAT",
+                    # For INVERSE_MACRO: JSON trend uses equity-perspective (negated score)
+                    "trend": ("UP" if (-ts if sym in INVERSE_MACRO else ts) >= 3 else "DOWN" if (-ts if sym in INVERSE_MACRO else ts) <= -3 else "FLAT"),
                     
                     # Phase 6 Enhancements (Already computed inline above)
 
@@ -1327,14 +1374,14 @@ def run_daemon():
             else:
                 print(f"   >>> BOND STATUS: 7-10Y Bond Price {ief_price:.2f} ({ief_gap:+.2f}%) {GREEN}[YIELDS STABLE]{RESET}")
 
-            vxx = macro_state['VXX']
-            vxx_price = float(vxx['price'])
-            vxx_gap = float(vxx['gap'])
-            # VXX fear alert — thresholds: GoogleDrive://GEM_Trading_Rules/rules > VXX_FEAR_THRESHOLD (20.0) and VXX_FEAR_GAP_PCT (2.0)
-            if vxx_price > 20.0 and vxx_gap > 2.0:
-                print(f"   >>> FEAR ALERT:  VXX (Vol) is {vxx_price:.2f} (Gap {vxx_gap:+.2f}%) {RED}[CAUTION]{RESET}")
+            vix = macro_state['^VIX']
+            vix_price = float(vix['price'])
+            vix_gap = float(vix['gap'])
+            # VIX fear alert — thresholds: GoogleDrive://GEM_Trading_Rules/rules > VIX_FEAR_THRESHOLD (20.0) and VIX_FEAR_GAP_PCT (2.0)
+            if vix_price > 20.0 and vix_gap > 2.0:
+                print(f"   >>> FEAR ALERT:  VIX (Vol) is {vix_price:.2f} (Gap {vix_gap:+.2f}%) {RED}[CAUTION]{RESET}")
             else:
-                print(f"   >>> FEAR STATUS: VXX (Vol) is {vxx_price:.2f} (Gap {vxx_gap:+.2f}%) {GREEN}[STABLE]{RESET}")
+                print(f"   >>> FEAR STATUS: VIX (Vol) is {vix_price:.2f} (Gap {vix_gap:+.2f}%) {GREEN}[STABLE]{RESET}")
 
             sleep_needed = REFRESH_RATE_SECONDS
             print("")
@@ -1363,12 +1410,81 @@ def run_daemon():
                                 if match:
                                     clip_data = match.group(1)
                             
+                            # Clean Gemini hallucinated citation tags that break JSON
+                            clip_data = re.sub(r'\[cite_start\]', '', clip_data)
+                            clip_data = re.sub(r'\[cite:\s*\d+(?:,\s*\d+)*\]', '', clip_data)
+                            
                             payload = json.loads(clip_data.strip())
                             
-                            with open('local_ssot_shadow.json', 'w') as f:
-                                json.dump(payload, f, indent=2)
+                            # --- Delta Merge Protocol (merge_engine: NON_DESTRUCTIVE_MERGE) ---
+                            # Load existing SSoT shadow state, then merge delta into it.
+                            # This allows Gems to emit partial payloads without losing untouched state.
+                            existing_ssot = {}
+                            if os.path.exists('local_ssot_shadow.json'):
+                                try:
+                                    with open('local_ssot_shadow.json', 'r') as f:
+                                        existing_ssot = json.load(f)
+                                except (json.JSONDecodeError, IOError):
+                                    existing_ssot = {}
+
+                            def _deep_merge(base, delta):
+                                """Recursively merge delta into base (non-destructive)."""
+                                merged = base.copy()
+                                for k, v in delta.items():
+                                    if k in merged and isinstance(merged[k], dict) and isinstance(v, dict):
+                                        merged[k] = _deep_merge(merged[k], v)
+                                    else:
+                                        merged[k] = v
+                                return merged
+
+                            def _merge_portfolio(existing_list, delta_list):
+                                """Merge portfolio_snapshot by ticker (MERGE_BY_TICKER_PRESERVE_UNTOUCHED_TICKERS)."""
+                                if not isinstance(existing_list, list):
+                                    return delta_list
+                                if not isinstance(delta_list, list):
+                                    return existing_list
+                                # Index existing by ticker
+                                by_ticker = {}
+                                for item in existing_list:
+                                    t = item.get('ticker')
+                                    if t:
+                                        by_ticker[t] = item
+                                # Apply delta updates (overwrite matching tickers, add new ones)
+                                for item in delta_list:
+                                    t = item.get('ticker')
+                                    if t:
+                                        if t in by_ticker:
+                                            # Merge fields: delta overwrites, existing fields preserved if not in delta
+                                            by_ticker[t] = _deep_merge(by_ticker[t], item)
+                                        else:
+                                            by_ticker[t] = item
+                                return list(by_ticker.values())
+
+                            if existing_ssot:
+                                # Special handling for portfolio_snapshot (array merge by ticker)
+                                if 'portfolio_snapshot' in payload and 'portfolio_snapshot' in existing_ssot:
+                                    merged_portfolio = _merge_portfolio(
+                                        existing_ssot.get('portfolio_snapshot', []),
+                                        payload['portfolio_snapshot']
+                                    )
+                                    # Remove from payload so _deep_merge doesn't overwrite it
+                                    payload_without_portfolio = {k: v for k, v in payload.items() if k != 'portfolio_snapshot'}
+                                    merged_ssot = _deep_merge(existing_ssot, payload_without_portfolio)
+                                    merged_ssot['portfolio_snapshot'] = merged_portfolio
+                                else:
+                                    merged_ssot = _deep_merge(existing_ssot, payload)
                                 
-                            print(f"{GREEN}Payload Ingested! Wrote to local_ssot_shadow.json{RESET}")
+                                # Count what changed
+                                delta_keys = [str(k) for k in payload.keys() if k not in ('_meta',)]
+                                print(f"{CYAN}Delta Merge: Updated [{', '.join(delta_keys)}] into existing SSoT shadow.{RESET}")
+                            else:
+                                merged_ssot = payload
+                                print(f"{CYAN}No existing SSoT shadow — full write.{RESET}")
+
+                            with open('local_ssot_shadow.json', 'w') as f:
+                                json.dump(merged_ssot, f, indent=2)
+                                
+                            print(f"{GREEN}Payload Ingested! Wrote merged state to local_ssot_shadow.json{RESET}")
 
                             # ENH_53: State Compression Protocol (Garbage Collection)
                             lessons_file = 'trade_lessons.json'
@@ -1395,6 +1511,12 @@ def run_daemon():
                                     json.dump(existing_lessons, f, indent=2)
 
                                 print(f"{GREEN}Retrospective Triggered: Saved {len(new_lessons)} new lessons to trade_lessons.json{RESET}")
+
+                            # SSoT canonical trade_lessons sync (overwrites local file with SSoT state)
+                            elif "trade_lessons" in payload and isinstance(payload["trade_lessons"], list):
+                                with open(lessons_file, 'w') as f:
+                                    json.dump(payload["trade_lessons"], f, indent=2)
+                                print(f"{GREEN}Trade Lessons Synced: Wrote {len(payload['trade_lessons'])} lessons from SSoT to trade_lessons.json{RESET}")
 
                             # ENH_54: SSoT Mutation Protocol (JSON Patch)
                             if "rule_mutations" in payload and isinstance(payload["rule_mutations"], list):
@@ -1478,9 +1600,13 @@ def run_daemon():
                             "local_storage_state": supplemental_ssot,
                             "tickers": data
                         }
-                        json_data = json.dumps(final_output, indent=2)
-                        pyperclip.copy(json_data)
-                        print(f"\n{YELLOW}JSON (wrapped) copied to clipboard!{RESET}")
+                        json_string = json.dumps(final_output, indent=2)
+                        
+                        # Prepend the Google Finance instruction to the payload as requested
+                        clipboard_content = f"Use the Google Finance extension to review the YTD and 6-Month charts for each ticker.\n\n```json\n{json_string}\n```"
+                        
+                        pyperclip.copy(clipboard_content)
+                        print(f"\n{YELLOW}JSON (with Google Finance prompt) copied to clipboard!{RESET}")
                         t_time.sleep(1)
                         break
                 t_time.sleep(0.1)

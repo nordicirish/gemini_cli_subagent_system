@@ -210,6 +210,7 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 | **Forensic Structural Filter** | `ENH_30` | 50% sizing reduction on dilution/warrant forensic flags |
 | **Post-ATR Execution Gate** | `ENH_36` | Blocks entries after 14:30 ET in low-volatility conditions |
 | **Correlation Guard** | `ENH_43` | Warns on >80% pairwise correlation or >35% sector exposure |
+| **Web Verification Protocol** | `ENH_55` | Forces sub-agents to visually verify mathematical trends using the Google Finance extension |
 | **State Emission** | `MANDATE_09` | Every turn must output complete, untruncated SSoT JSON |
 
 ---
@@ -242,7 +243,7 @@ Edit `fetch_stocks.py` to set your portfolio and macro benchmark tickers separat
 TICKERS = ['ONDS', 'UMAC', 'RCAT', 'DFTX', 'RKLB', 'PLTR']
 
 # Macro benchmarks & risk indicators
-MACRO_TICKERS = ['SPY', 'VXX', 'IEF', 'UUP']
+MACRO_TICKERS = ['SPY', '^VIX', 'IEF', 'UUP']
 
 # Combined list used by the dashboard
 ALL_TICKERS = TICKERS + MACRO_TICKERS
