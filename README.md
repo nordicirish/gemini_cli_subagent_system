@@ -2,7 +2,7 @@
 
 **A multi-agent AI trading intelligence framework built on Google Gemini Gems.**
 
-Each JSON file in this repository is a **system instruction** designed to be loaded into a separate [Google Gemini Gem](https://gemini.google.com/gems). Together, the Gems form an institutional-grade trading council that analyzes financial data, enforces risk protocols, and produces consensus-driven trade decisions. The Python scripts generate a real-time financial dashboard whose output is pasted into the Gem terminal conversation for analysis.
+Each JSON file in this repository is a **system instruction** designed to be loaded into a separate [Google Gemini Gem](https://gemini.google.com/gems). Together, the Gems form an institutional-grade trading council that analyzes financial data, enforces risk protocols, and produces consensus-driven trade decisions. The Python backend (`fetch_stocks.py`) drives a real-time, glassmorphic Web Dashboard UI, allowing quick JSON payload extraction and SSoT paste-syncing directly from the browser.
 
 ---
 
@@ -67,8 +67,8 @@ To prevent the LLM reasoning engines from hallucinating software structures whil
 ### The Air-Gapped SSoT Architecture (v4.0+)
 Due to Google Gemini's web sandboxing (preventing direct external API calls) and Google Keep's synchronization latency, the system employs an **Air-Gapped Single Source of Truth**.
 *   **The Processor:** The sandboxed Gemini UI acts as a stateless, high-powered reasoning engine.
-*   **The Database:** Your local Python environment (`fetch_stocks.py`) maintains the persistent, live state (`local_ssot_shadow.json`).
-*   **The Bridge (You):** You serve as the high-speed bus connecting the two via your OS clipboard (`c` to copy from Python, `v` to ingest Gem payloads back into Python).
+*   **The Database / Backend:** Your local Python environment (`fetch_stocks.py`) runs a FastAPI server holding the persistent, live state (`local_ssot_shadow.json`).
+*   **The UI:** A Vanilla JS frontend (`http://localhost:8000`) visualizes the data via an advanced glassmorphic dashboard.
 
 ---
 
@@ -130,7 +130,7 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 
 | File | Purpose |
 |------|---------|
-| `fetch_stocks.py` | **Financial Dashboard** — Real-time terminal. Generates JSON prompt payloads (press `c`) and ingests Gem execution payloads from the clipboard (press `v`) to maintain the local SSoT. |
+| `fetch_stocks.py` | **FastAPI Backend & Web Server** — Serves a real-time web dashboard at `http://localhost:8000`. Generates JSON prompt payloads and exposes an `/api/paste` route to ingest Gem execution payloads into the local SSoT. |
 | `compare_json.py` | Diff utility — compares two JSON instruction files to detect missing or added values |
 | `format_json.py` | Formatter — pretty-prints a JSON instruction file with consistent indentation |
 ### 4. Updating Gems (Maintenance)
@@ -152,19 +152,15 @@ When you update the JSON instructions in this repository (e.g., version incremen
 
 ## 🔄 Workflow: How It All Fits Together
 
-### 1. Generate Financial Data
+### 1. Launch the Web Dashboard
 ```bash
 python fetch_stocks.py
 ```
-The dashboard runs in a loop (30-second refresh), fetching live data from Yahoo Finance and Finnhub for your configured tickers. It displays a color-coded terminal table with:
+The background daemon runs in a loop, fetching live data while a **FastAPI** `uvicorn` server hosts the web UI at `http://localhost:8000`. The frontend is a modern, responsive interface featuring:
 
-- **Price & Change %** — session-aware (pre-market, regular, after-hours)
-- **VWAP & Distance** — volume-weighted average price positioning
-- **GEX Profile** — net gamma exposure, gamma flip price, dealer posture
-- **Technicals** — RSI, ATR%, SMA 20/50/200, trend score
-- **Health Score** — composite signal scoring
-
-The formatted JSON "State of the World" payload is **copied to your clipboard** when you press `c` in the terminal.
+- **Macro HUD**: Dynamic top-row tracking `VIX`, `IEF`, `SPY` and configurable trackers with custom system alerts.
+- **Live Equity Table**: Displays VWAP Distance, Net GEX, Trend Scores, RSI, and Health Scores.
+- **Copy/Paste Integrations**: Dedicated UI buttons to instantly copy the `GLOBAL_STATE` payload for Gemini, and paste Gemini outputs back to automatically mutate `local_ssot_shadow.json`.
 
 ### 2. Paste Into a Gem Conversation
 Open the relevant Gemini Gem (e.g., the Terminal Orchestrator) and paste the dashboard payload. The Gem parses the financial data and routes it through the appropriate engine pipeline.
@@ -194,8 +190,8 @@ The **Technical Validator** computes the weighted **Agreement Score (S_A)**:
 ### 5. Local State Ingestion (Air-Gap Bridge)
 Every turn concludes with the Gem outputting a precise JSON block named `EXECUTION_PAYLOAD`.
 1. Copy this JSON block from the Gemini UI.
-2. In your running `fetch_stocks.py` terminal, press **`v`**.
-3. The Python orchestrator natively parses the clipboard, validates the JSON, and writes the state to `local_ssot_shadow.json`.
+2. Click **"Paste Payload"** on your dashboard sidebar.
+3. The React/JS frontend routes the payload to the Python orchestrator, which natively parses the clipboard, validates the JSON, and seamlessly writes the state to `local_ssot_shadow.json` and `trade_lessons.json`.
 
 ---
 
@@ -298,7 +294,7 @@ The system uses local JSON files to maintain your "State of the World" portfolio
 ```bash
 python fetch_stocks.py
 ```
-The output copies to your clipboard when you press 'c' — paste it into the Terminal Orchestrator Gem to begin analysis.
+Open `http://localhost:8000` in your browser. Use the UI to copy payloads to the clipboard and paste them into the Terminal Orchestrator Gem to begin analysis.
 
 ---
 
@@ -354,12 +350,12 @@ Protocol:
 ```
 
 ### 🟧 Local Pipeline Setup (The Clipboard Bridge)
-Since we're using the Air-Gapped Sandboxed architecture, your state is generated by Gemini but saved locally by Python.
+Since we're using the Air-Gapped Sandboxed architecture, your state is generated by Gemini but saved locally via your Web Dashboard.
 
-1. **Copy:** Press `c` in the terminal to package live prices, technicals, your local `local_ssot_shadow.json` portfolio state, and your `trade_lessons.json` history.
-2. **Send:** Paste this block into the Orcehstrator Gem.
+1. **Copy:** Click the **"Copy JSON Data"** button on the dashboard sidebar to package live prices, technicals, your `local_ssot_shadow.json` portfolio state, and your `trade_lessons.json` history.
+2. **Send:** Paste this block into the Orchestrator Gem.
 3. **Receive:** The Gem processes the state and outputs an `EXECUTION_PAYLOAD` block. Copy it.
-4. **Save:** Press `v` in the terminal. Python instantly updates your local SSoT shadow and logs any new trade lessons.
+4. **Save:** Click the **"Paste Payload"** button on the dashboard sidebar. The frontend routes the JSON to `/api/paste`, mutating your local SSoT and logging any new trade lessons automatically.
 
 ### Full State Export (Manual Audit)
 If you ever want to force a raw JSON dump or regenerate a corrupted state, run:
@@ -373,7 +369,7 @@ Increment the sync_id before outputting.
 ```
 
 ### Session Restore (Start of Day)
-You no longer need to manually paste your entire state JSON into the chat to start your day. Just press `c` while `fetch_stocks.py` is running, and the active local SSoT and lessons history will be packaged right alongside the live market prices. Paste the block into the Gem and immediately prompt:
+You no longer need to manually paste your entire state JSON into the chat to start your day. Just click **"Copy JSON Data"** on the Web Dashboard, and the active local SSoT and lessons history will be packaged right alongside the live market prices. Paste the block into the Gem and immediately prompt:
 
 ```
 Restore this as active GEM context.

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GEM Trading Dashboard</title>
+    <meta name="description" content="GEM Trading Agent System — Real-time market intelligence dashboard">
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+
+        <!-- ─── Header ─── -->
+        <header class="glass-panel">
+            <div class="header-content">
+                <div class="brand">
+                    <div class="pulse-indicator" id="live-indicator"></div>
+                    <h1>GEM Dashboard <span class="version">v17.1</span></h1>
+                </div>
+                <div class="system-status">
+                    <div class="status-item">
+                        <span class="label">Status:</span>
+                        <span id="market-status" class="value waiting">AWAITING CONNECTION...</span>
+                    </div>
+                    <div class="status-item" id="refresh-status-container" style="display: none;">
+                        <span id="refresh-status" class="value text-yellow" style="font-weight: bold;">⚡ HEAVY REFRESH</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Updated:</span>
+                        <span id="last-updated" class="value">—</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- ─── Macro HUD + Alerts ─── -->
+        <section class="macro-hud" id="macro-hud">
+            <div id="dynamic-macro-cards" style="display: contents;">
+                <!-- Cards injected by JS -->
+            </div>
+            <div class="alerts-panel glass-panel" id="alerts-panel">
+                <div class="alerts-header">
+                    <span class="alerts-icon">⚡</span>
+                    <span>Alerts</span>
+                </div>
+                <div id="alerts-container">
+                    <p class="empty-state">No active alerts.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─── Main Content ─── -->
+        <main class="main-content">
+            <!-- Data Table -->
+            <div class="table-container glass-panel">
+                <table id="data-table">
+                    <thead>
+                        <tr>
+                            <th>Ticker</th>
+                            <th>Price</th>
+                            <th>Gap %</th>
+                            <th>Volume</th>
+                            <th>ATR %</th>
+                            <th>RSI</th>
+                            <th>VWAP</th>
+                            <th>Trend</th>
+                            <th class="score-col">Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <!-- Data rows injected by JS -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <!-- Data Operations -->
+                <div class="sidebar-card glass-panel">
+                    <h3><span class="icon">🔗</span> Data Operations</h3>
+                    <p class="subtitle">Interact with LLM</p>
+                    <div class="btn-row">
+                        <button id="copy-json-btn" class="glow-btn">📋 Copy JSON Data</button>
+                        <button id="paste-payload-btn" class="glow-btn outline">📥 Paste Execution Payload</button>
+                    </div>
+                    <div id="data-status" class="status-message"></div>
+                </div>
+
+                <!-- Management Buttons -->
+                <div class="sidebar-card glass-panel">
+                    <div class="btn-row">
+                        <button id="open-ticker-modal-btn" class="glow-btn outline">📊 Manage Tickers</button>
+                        <button id="open-indices-modal-btn" class="glow-btn outline">📈 Indices</button>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+    </div>
+
+    <!-- ─── Ticker Management Modal ─── -->
+    <div class="modal-overlay" id="ticker-modal-overlay">
+        <div class="modal glass-panel">
+            <div class="modal-header">
+                <h3>📊 Ticker Management</h3>
+                <button class="modal-close" id="close-ticker-modal">&times;</button>
+            </div>
+            <p class="subtitle">Edit tracked assets (comma or space separated)</p>
+            <textarea id="ticker-input" rows="4" placeholder="AAPL, MSFT, TSLA..."></textarea>
+            <button id="update-tickers-btn" class="glow-btn">Update Tickers</button>
+            <div id="ticker-status" class="status-message"></div>
+        </div>
+    </div>
+
+    <!-- ─── Indices Modal ─── -->
+    <div class="modal-overlay" id="indices-modal-overlay">
+        <div class="modal modal-wide glass-panel">
+            <div class="modal-header">
+                <h3>📈 Manage Indices</h3>
+                <button class="modal-close" id="close-indices-modal">&times;</button>
+            </div>
+            <p class="subtitle">Edit tracked macro indices (comma or space separated)</p>
+            <textarea id="indices-input" rows="3" placeholder="SPY, ^VIX, IEF..."></textarea>
+            <button id="update-indices-btn" class="glow-btn" style="margin-bottom: 8px;">Update Indices</button>
+            <div id="indices-status" class="status-message"></div>
+            
+            <hr style="border: 0; border-top: 1px solid var(--panel-border); margin: 16px 0;">
+            <p class="subtitle" style="margin-bottom: 8px;">Real-time macro indicator data</p>
+            <div class="indices-grid" id="indices-grid">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

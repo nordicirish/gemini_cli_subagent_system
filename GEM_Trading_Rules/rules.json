@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v4.5-Delta-Merge",
+    "version": "v4.8-Gap-Defense",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -52,7 +52,9 @@
         "ENH_52: Autonomous Risk Resolution Protocol",
         "ENH_53: State Compression Protocol",
         "ENH_54: SSoT Mutation Protocol",
-        "ENH_55: Web Verification Protocol"
+        "ENH_55: Web Verification Protocol",
+        "ENH_56: Gamma-Adjusted Buffer Protocol",
+        "ENH_57: Sovereign Hedge Rotation"
     ],
     "mandate_registry": [
         "MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)",
@@ -75,7 +77,10 @@
         "MANDATE_18: RESTRICTED_EXECUTION (Nordea/Retail Constraints)",
         "MANDATE_19: SCHEMA_MIRRORING (Context vs. SSoT Parity)",
         "MANDATE_20: MACRO_VETO_POWER (Binary Risk-Off Override)",
-        "MANDATE_21: USER_CONFIRMATION (Provisional Trade State)"
+        "MANDATE_21: USER_CONFIRMATION (Provisional Trade State)",
+        "MANDATE_22: RESIDUAL_FLOOR (Position Sizing)",
+        "MANDATE_23: DISTILLATION_VETO (Moat Audit)",
+        "MANDATE_24: GAP_DEFENSE (Protect overnight news gaps)"
     ],
     "behavioral_guardrails": [
         {
@@ -286,13 +291,28 @@
         {
             "id": "MANDATE_20_MACRO_VETO",
             "status": "ACTIVE",
-            "instruction": "The MACRO_SENTINEL possesses absolute veto authority. Macro Veto applies exclusively to New Risk Exposure. The SSoT Controller is authorized to emit EXIT or TRIM states during a Veto event if forensic indicators (HV BREAKOUT) suggest an imminent blow-off top or liquidity exhaustion.",
+            "instruction": "The MACRO_SENTINEL possesses absolute veto authority. Macro Veto applies exclusively to New Risk Exposure. The SSoT Controller is authorized to emit EXIT or TRIM states during a Veto event if forensic indicators (HV BREAKOUT) suggest an imminent blow-off top or liquidity exhaustion. Macro Veto is VOID for tickers with verified 8-K catalysts or ENH_31 clinical acceleration.",
             "logic_source": "ENH_45"
         },
         {
             "id": "MANDATE_21_USER_CONFIRMATION",
             "status": "ACTIVE",
             "instruction": "The LLM (and all sub-engines) must NOT assume that recommended trades will be actioned or concluded until the user explicitly confirms it. All trade states are PROVISIONAL until confirmed."
+        },
+        {
+            "id": "MANDATE_22_RESIDUAL_FLOOR",
+            "status": "PROPOSED",
+            "instruction": "Position sizing for binary clinical plays must be derived from the Residual Cash Value floor, acknowledging that technical stops are a 0% probability event in overnight gap-downs."
+        },
+        {
+            "id": "MANDATE_23_DISTILLATION_VETO",
+            "status": "PROPOSED",
+            "instruction": "Enforce a Moat Audit on SaaS assets; cap health_score at 60 if logic is portable via industrial-scale distillation."
+        },
+        {
+            "id": "MANDATE_24_GAP_DEFENSE",
+            "status": "ACTIVE",
+            "instruction": "Protect overnight news gaps. Trailing stops must be anchored to the 50% retracement of the opening gap to prevent 'Bull Traps' in Short Gamma regimes."
         }
     ],
     "enh_protocols": [
@@ -826,6 +846,16 @@
                 "2. VISUAL_CROSS_REFERENCE: Cross-reference the moving averages provided in the payload against the visual overarching algorithmic trend.",
                 "3. VERDICT_ADJUSTMENT: Identify overarching signs of algorithmic distribution or accumulation that short-term indicators miss, and adjust the final `trade_state` verdict accordingly."
             ]
+        },
+        {
+            "id": "ENH_56",
+            "title": "Gamma-Adjusted Buffer Protocol",
+            "instruction": "When SPY Net GEX is < -$5B, expand manual stop-loss zones by 100% of ATR to prevent mechanical stop-outs during dealer-led flushes."
+        },
+        {
+            "id": "ENH_57",
+            "title": "Sovereign Hedge Rotation",
+            "instruction": "Mandate 20% portfolio weight in clinical-stage biotechs with cash runways > 24 months during High-VIX regimes."
         }
     ],
     "global_logic_gates": {
@@ -1101,7 +1131,10 @@
                 "technical_validator"
             ]
         },
-        "ALPHA_FRICTION_MINIMUM": 0.025,
+        "ALPHA_FRICTION_MINIMUM": {
+            "value": 0.025,
+            "dynamic_logic": "IF VIX > 20 THEN 0.04 ELSE 0.025"
+        },
         "LIQUIDITY_REQUIREMENTS": {
             "value": {
                 "min_dollar_volume_5d": 2000000,
@@ -1419,7 +1452,7 @@
     "temporal_events": {
         "authority": "CANONICAL \u00e2\u20ac\u201d All date-sensitive rules MUST reference events here. Update this section when deadlines change.",
         "GOV_FUNDING_EXPIRY": {
-            "value": "2026-02-13",
+            "value": "MONITOR_CR_EXTENSION",
             "usage": "Government Funding / CR expiry date",
             "used_by": [
                 "sentiment_engine"

@@ -12,6 +12,12 @@ import pyperclip
 import re
 from scipy.stats import norm
 from yfinance.data import YfData
+import threading
+from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
 
 try:
     import msvcrt
@@ -49,7 +55,248 @@ INVERSE_MACRO = ['^VIX', 'UUP', 'IEF']
 REFRESH_RATE_SECONDS = 30
 HISTORY_REFRESH_CYCLES = 10
 
-# -----------------------------
+GLOBAL_STATE = {}
+app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+@app.get("/api/data")
+def get_data():
+    return JSONResponse(GLOBAL_STATE)
+
+@app.get("/api/tickers")
+def get_tickers():
+    return JSONResponse({"tickers": TICKERS, "macro": MACRO_TICKERS})
+
+@app.post("/api/tickers")
+async def update_tickers(req: Request):
+    global TICKERS, ALL_TICKERS
+    data = await req.json()
+    new_tickers = data.get("tickers", [])
+    valid_tickers = [t.upper() for t in new_tickers if t]
+    TICKERS = valid_tickers
+    ALL_TICKERS = TICKERS + MACRO_TICKERS
+    return JSONResponse({"status": "success", "tickers": TICKERS})
+
+@app.post("/api/macro")
+async def update_macro_tickers(req: Request):
+    global MACRO_TICKERS, ALL_TICKERS
+    data = await req.json()
+    new_macro = data.get("macro", [])
+    valid_macro = [t.upper() for t in new_macro if t]
+    MACRO_TICKERS = valid_macro
+    ALL_TICKERS = TICKERS + MACRO_TICKERS
+    return JSONResponse({"status": "success", "macro": MACRO_TICKERS})
+
+def _deep_merge(base, delta):
+    merged = base.copy()
+    for k, v in delta.items():
+        if k in merged and isinstance(merged[k], dict) and isinstance(v, dict):
+            merged[k] = _deep_merge(merged[k], v)
+        else:
+            merged[k] = v
+    return merged
+
+def _merge_portfolio(existing_list, delta_list):
+    if not isinstance(existing_list, list): return delta_list
+    if not isinstance(delta_list, list): return existing_list
+    by_ticker = {}
+    for item in existing_list:
+        t = item.get('ticker')
+        if t: by_ticker[t] = item
+    for item in delta_list:
+        t = item.get('ticker')
+        if t:
+            if t in by_ticker:
+                by_ticker[t] = _deep_merge(by_ticker[t], item)
+            else:
+                by_ticker[t] = item
+    return list(by_ticker.values())
+
+@app.post("/api/paste")
+async def handle_paste(req: Request):
+    try:
+        body = await req.json()
+        clip_data = body.get("payload", "")
+        
+        # Process the clipboard data string
+        if "```" in clip_data:
+            match = re.search(r"```(?:json)?\s*(.*?)\s*```", clip_data, re.IGNORECASE | re.DOTALL)
+            if match: clip_data = match.group(1)
+            
+        clip_data = re.sub(r'\[cite_start\]', '', clip_data)
+        clip_data = re.sub(r'\[cite:\s*\d+(?:,\s*\d+)*\]', '', clip_data)
+        clip_data = clip_data.strip()
+        
+        if not (clip_data.startswith('{') or clip_data.startswith('[')):
+            start_brace = clip_data.find('{')
+            start_bracket = clip_data.find('[')
+            start_idx = -1
+            if start_brace != -1 and start_bracket != -1: start_idx = min(start_brace, start_bracket)
+            elif start_brace != -1: start_idx = start_brace
+            else: start_idx = start_bracket
+            
+            if start_idx != -1:
+                end_brace = clip_data.rfind('}')
+                end_bracket = clip_data.rfind(']')
+                end_idx = max(end_brace, end_bracket)
+                if end_idx != -1 and end_idx > start_idx:
+                    clip_data = clip_data[start_idx:end_idx+1]
+        
+        payload = json.loads(clip_data.strip())
+        
+        # Merge local ssot
+        existing_ssot = {}
+        if os.path.exists('local_ssot_shadow.json'):
+            try:
+                with open('local_ssot_shadow.json', 'r') as f:
+                    existing_ssot = json.load(f)
+            except: pass
+            
+        if existing_ssot:
+            if 'portfolio_snapshot' in payload and 'portfolio_snapshot' in existing_ssot:
+                merged_portfolio = _merge_portfolio(
+                    existing_ssot.get('portfolio_snapshot', []),
+                    payload['portfolio_snapshot']
+                )
+                payload_without_portfolio = {k: v for k, v in payload.items() if k != 'portfolio_snapshot'}
+                merged_ssot = _deep_merge(existing_ssot, payload_without_portfolio)
+                merged_ssot['portfolio_snapshot'] = merged_portfolio
+            else:
+                merged_ssot = _deep_merge(existing_ssot, payload)
+        else:
+            merged_ssot = payload
+            
+        with open('local_ssot_shadow.json', 'w') as f:
+            json.dump(merged_ssot, f, indent=2)
+            
+        def _normalize_lessons(lessons_list):
+            normalized = []
+            for i, item in enumerate(lessons_list):
+                if isinstance(item, str):
+                    normalized.append({"id": i + 1, "rule": item})
+                elif isinstance(item, dict):
+                    # Keep existing keys (like context or rule), just ensure id is set/updated
+                    new_item = item.copy()
+                    new_item["id"] = i + 1
+                    if "rule" not in new_item and "lesson" in new_item:
+                        new_item["rule"] = new_item.pop("lesson")
+                    normalized.append(new_item)
+                else:
+                    normalized.append({"id": i + 1, "rule": str(item)})
+            return normalized
+
+        # Trade lessons
+        lessons_file = 'trade_lessons.json'
+        if "compressed_trade_lessons" in payload and isinstance(payload["compressed_trade_lessons"], list):
+            with open(lessons_file, 'w') as f:
+                json.dump({"trade_lessons": _normalize_lessons(payload["compressed_trade_lessons"])}, f, indent=2)
+        elif "new_trade_lessons" in payload and isinstance(payload["new_trade_lessons"], list):
+            existing_lessons = []
+            existing_data = None
+            if os.path.exists(lessons_file):
+                try:
+                    with open(lessons_file, 'r') as f:
+                        existing_data = json.load(f)
+                        if isinstance(existing_data, dict):
+                            existing_lessons = existing_data.get("trade_lessons", [])
+                        elif isinstance(existing_data, list):
+                            existing_lessons = existing_data
+                except: pass
+            
+            existing_lessons.extend(payload["new_trade_lessons"])
+            final_normalized = _normalize_lessons(existing_lessons)
+            
+            if isinstance(existing_data, dict):
+                existing_data["trade_lessons"] = final_normalized
+                output_data = existing_data
+            else:
+                output_data = {"trade_lessons": final_normalized}
+                
+            with open(lessons_file, 'w') as f:
+                json.dump(output_data, f, indent=2)
+        elif "trade_lessons" in payload and isinstance(payload["trade_lessons"], list):
+            incoming_lessons = payload["trade_lessons"]
+            existing_lessons = []
+            existing_data = None
+            if os.path.exists(lessons_file):
+                try:
+                    with open(lessons_file, 'r') as f:
+                        existing_data = json.load(f)
+                        if isinstance(existing_data, dict):
+                            existing_lessons = existing_data.get("trade_lessons", [])
+                        elif isinstance(existing_data, list):
+                            existing_lessons = existing_data
+                except json.JSONDecodeError:
+                    pass
+            
+            final_lessons = []
+            for item in incoming_lessons:
+                if isinstance(item, str):
+                    # Catch strings like "1-19: [PERMANENT_RECORDS]"
+                    match = re.match(r'^(\d+)-(\d+).*PERMANENT', item, re.IGNORECASE)
+                    if match:
+                        start_idx = int(match.group(1)) - 1
+                        end_idx = int(match.group(2))
+                        if existing_lessons:
+                            # Safely extract the slice
+                            final_lessons.extend(existing_lessons[max(0, start_idx):end_idx])
+                        continue
+                final_lessons.append(item)
+                
+                final_lessons.append(item)
+                
+            final_normalized = _normalize_lessons(final_lessons)
+                
+            if isinstance(existing_data, dict):
+                existing_data["trade_lessons"] = final_normalized
+                output_data = existing_data
+            else:
+                output_data = {"trade_lessons": final_normalized}
+                
+            with open(lessons_file, 'w') as f:
+                json.dump(output_data, f, indent=2)
+        # Rule mutations
+        if "rule_mutations" in payload and isinstance(payload["rule_mutations"], list):
+            rules_file = os.path.join('GEM_Trading_Rules', 'rules.json')
+            if os.path.exists(rules_file):
+                try:
+                    with open(rules_file, 'r') as f:
+                        current_rules = json.load(f)
+                except:
+                    current_rules = None
+                    
+                if current_rules:
+                    applied_patches = 0
+                    for mutation in payload["rule_mutations"]:
+                        if isinstance(mutation, dict) and "path" in mutation and "value" in mutation:
+                            path = mutation["path"]
+                            val = mutation["value"]
+                            if isinstance(path, list) and len(path) > 0:
+                                target = current_rules
+                                valid_path = True
+                                for p in path[:-1]:
+                                    if p in target and isinstance(target[p], dict):
+                                        target = target[p]
+                                    else:
+                                        valid_path = False
+                                        break
+                                if valid_path:
+                                    target[path[-1]] = val
+                                    applied_patches += 1
+                                    
+                    if applied_patches > 0:
+                        with open(rules_file, 'w') as f:
+                            json.dump(current_rules, f, indent=4)
+                        print(f"⚠️ RULES MUTATED LOCALLY ({applied_patches} patches applied).")
+                        
+        return JSONResponse({"status": "success", "message": "Payload ingested successfully"})
+    except Exception as e:
+        print(f"PASTE ERROR: {e}")
+        print(f"RAW PAYLOAD TYPE: {type(clip_data)}, LENGTH: {len(clip_data)}")
+        print(f"PAYLOAD TRUNCATED: {repr(clip_data[:500])}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=400)
+
+
 # COLOR CODES
 # -----------------------------
 os.system("")
@@ -1021,6 +1268,7 @@ def calculate_score(symbol):
 # MAIN LOOP
 # -----------------------------
 def run_daemon():
+    global GLOBAL_STATE
     print(f"{CYAN}Initializing GEM Dashboard v16.0 (Data Hardened + Trend)...{RESET}")
     tickers_obj = {sym: yf.Ticker(sym) for sym in ALL_TICKERS}
 
@@ -1064,6 +1312,14 @@ def run_daemon():
 
     try:
         while True:
+            # Sync tickers_obj with ALL_TICKERS
+            for sym in ALL_TICKERS:
+                if sym not in tickers_obj:
+                    tickers_obj[sym] = yf.Ticker(sym)
+            keys_to_remove = [sym for sym in list(tickers_obj.keys()) if sym not in ALL_TICKERS]
+            for sym in keys_to_remove:
+                del tickers_obj[sym]
+
             os.system('cls' if os.name == 'nt' else 'clear')
             print("\033[?25l", end="", flush=True)
             ny_now = datetime.now(ZoneInfo("America/New_York"))
@@ -1071,6 +1327,11 @@ def run_daemon():
 
             cache.cycles += 1
             is_heavy = (cache.cycles % HISTORY_REFRESH_CYCLES == 0)
+
+            # Immediately notify frontend that heavy fetching has begun
+            if is_heavy and GLOBAL_STATE.get("tickers"):
+                GLOBAL_STATE["is_heavy_refresh"] = True
+                GLOBAL_STATE["is_heavy_refresh"] = True
 
             BATCH_SIZE = 10
 
@@ -1386,229 +1647,44 @@ def run_daemon():
             sleep_needed = REFRESH_RATE_SECONDS
             print("")
 
+            # Build final_output for web dashboard
+            supplemental_lessons = []
+            if os.path.exists('trade_lessons.json'):
+                try:
+                    with open('trade_lessons.json', 'r') as f:
+                        supplemental_lessons = json.load(f)
+                except: pass
+
+            supplemental_ssot = {}
+            if os.path.exists('local_ssot_shadow.json'):
+                try:
+                    with open('local_ssot_shadow.json', 'r') as f:
+                        supplemental_ssot = json.load(f)
+                except: pass
+
+            final_output = {
+                "_meta": {
+                    "description": "LIVE MARKET DATA - DO NOT TREAT AS SIMULATED",
+                    "is_simulation": False,
+                    "source": "Real-time Exchange Feed",
+                    "reliability": "High",
+                    "timestamp_iso": datetime.now(ZoneInfo("America/New_York")).isoformat()
+                },
+                "timestamp": datetime.now(ZoneInfo("America/New_York")).strftime('%Y-%m-%d %H:%M:%S'),
+                "status": status,
+                "is_heavy_refresh": False,
+                "trade_lessons": supplemental_lessons,
+                "local_storage_state": supplemental_ssot,
+                "tickers": data
+            }
+            GLOBAL_STATE = final_output
+
             wait_start = t_time.time()
             while True:
                 remaining = sleep_needed - (t_time.time() - wait_start)
                 if remaining <= 0:
                     break
-                print(f"\r\033[?25l{CYAN}Next Update in {int(remaining)}s... Press 'c' to copy JSON, 'v' to paste payload, 'r' to reset cache.{RESET}    ", end="", flush=True)
-
-                if msvcrt and msvcrt.kbhit():  # type: ignore[union-attr]
-                    key = msvcrt.getch().decode('utf-8').lower()  # type: ignore[union-attr]
-                    if key == 'r':
-                        cache.clear()
-                        print(f"\n{YELLOW}Cache cleared! Forcing heavy refresh...{RESET}")
-                        break
-                    if key == 'v':
-                        print(f"\n{YELLOW}Reading clipboard for EXECUTION_PAYLOAD...{RESET}")
-                        try:
-                            clip_data = pyperclip.paste()
-                            # Clean markdown formatting if present
-                            if "```json" in clip_data.lower():
-                                # Try to extract just the json part
-                                match = re.search(r"```(?:json)?\s*(.*?)\s*```", clip_data, re.IGNORECASE | re.DOTALL)
-                                if match:
-                                    clip_data = match.group(1)
-                            
-                            # Clean Gemini hallucinated citation tags that break JSON
-                            clip_data = re.sub(r'\[cite_start\]', '', clip_data)
-                            clip_data = re.sub(r'\[cite:\s*\d+(?:,\s*\d+)*\]', '', clip_data)
-                            
-                            payload = json.loads(clip_data.strip())
-                            
-                            # --- Delta Merge Protocol (merge_engine: NON_DESTRUCTIVE_MERGE) ---
-                            # Load existing SSoT shadow state, then merge delta into it.
-                            # This allows Gems to emit partial payloads without losing untouched state.
-                            existing_ssot = {}
-                            if os.path.exists('local_ssot_shadow.json'):
-                                try:
-                                    with open('local_ssot_shadow.json', 'r') as f:
-                                        existing_ssot = json.load(f)
-                                except (json.JSONDecodeError, IOError):
-                                    existing_ssot = {}
-
-                            def _deep_merge(base, delta):
-                                """Recursively merge delta into base (non-destructive)."""
-                                merged = base.copy()
-                                for k, v in delta.items():
-                                    if k in merged and isinstance(merged[k], dict) and isinstance(v, dict):
-                                        merged[k] = _deep_merge(merged[k], v)
-                                    else:
-                                        merged[k] = v
-                                return merged
-
-                            def _merge_portfolio(existing_list, delta_list):
-                                """Merge portfolio_snapshot by ticker (MERGE_BY_TICKER_PRESERVE_UNTOUCHED_TICKERS)."""
-                                if not isinstance(existing_list, list):
-                                    return delta_list
-                                if not isinstance(delta_list, list):
-                                    return existing_list
-                                # Index existing by ticker
-                                by_ticker = {}
-                                for item in existing_list:
-                                    t = item.get('ticker')
-                                    if t:
-                                        by_ticker[t] = item
-                                # Apply delta updates (overwrite matching tickers, add new ones)
-                                for item in delta_list:
-                                    t = item.get('ticker')
-                                    if t:
-                                        if t in by_ticker:
-                                            # Merge fields: delta overwrites, existing fields preserved if not in delta
-                                            by_ticker[t] = _deep_merge(by_ticker[t], item)
-                                        else:
-                                            by_ticker[t] = item
-                                return list(by_ticker.values())
-
-                            if existing_ssot:
-                                # Special handling for portfolio_snapshot (array merge by ticker)
-                                if 'portfolio_snapshot' in payload and 'portfolio_snapshot' in existing_ssot:
-                                    merged_portfolio = _merge_portfolio(
-                                        existing_ssot.get('portfolio_snapshot', []),
-                                        payload['portfolio_snapshot']
-                                    )
-                                    # Remove from payload so _deep_merge doesn't overwrite it
-                                    payload_without_portfolio = {k: v for k, v in payload.items() if k != 'portfolio_snapshot'}
-                                    merged_ssot = _deep_merge(existing_ssot, payload_without_portfolio)
-                                    merged_ssot['portfolio_snapshot'] = merged_portfolio
-                                else:
-                                    merged_ssot = _deep_merge(existing_ssot, payload)
-                                
-                                # Count what changed
-                                delta_keys = [str(k) for k in payload.keys() if k not in ('_meta',)]
-                                print(f"{CYAN}Delta Merge: Updated [{', '.join(delta_keys)}] into existing SSoT shadow.{RESET}")
-                            else:
-                                merged_ssot = payload
-                                print(f"{CYAN}No existing SSoT shadow — full write.{RESET}")
-
-                            with open('local_ssot_shadow.json', 'w') as f:
-                                json.dump(merged_ssot, f, indent=2)
-                                
-                            print(f"{GREEN}Payload Ingested! Wrote merged state to local_ssot_shadow.json{RESET}")
-
-                            # ENH_53: State Compression Protocol (Garbage Collection)
-                            lessons_file = 'trade_lessons.json'
-                            if "compressed_trade_lessons" in payload and isinstance(payload["compressed_trade_lessons"], list):
-                                compressed_lessons = payload["compressed_trade_lessons"]
-                                with open(lessons_file, 'w') as f:
-                                    json.dump(compressed_lessons, f, indent=2)
-                                print(f"{YELLOW}STATE COMPRESSION ACTIVATED: Overwrote trade_lessons.json with {len(compressed_lessons)} distilled core principles.{RESET}")
-                            
-                            # ENH_51: Trade Lessons Appending (Only if compression didn't just happen)
-                            elif "new_trade_lessons" in payload and isinstance(payload["new_trade_lessons"], list):
-                                existing_lessons = []
-                                if os.path.exists(lessons_file):
-                                    with open(lessons_file, 'r') as f:
-                                        try:
-                                            existing_lessons = json.load(f)
-                                        except json.JSONDecodeError:
-                                            pass
-                                
-                                new_lessons = payload["new_trade_lessons"]
-                                existing_lessons.extend(new_lessons)
-
-                                with open(lessons_file, 'w') as f:
-                                    json.dump(existing_lessons, f, indent=2)
-
-                                print(f"{GREEN}Retrospective Triggered: Saved {len(new_lessons)} new lessons to trade_lessons.json{RESET}")
-
-                            # SSoT canonical trade_lessons sync (overwrites local file with SSoT state)
-                            elif "trade_lessons" in payload and isinstance(payload["trade_lessons"], list):
-                                with open(lessons_file, 'w') as f:
-                                    json.dump(payload["trade_lessons"], f, indent=2)
-                                print(f"{GREEN}Trade Lessons Synced: Wrote {len(payload['trade_lessons'])} lessons from SSoT to trade_lessons.json{RESET}")
-
-                            # ENH_54: SSoT Mutation Protocol (JSON Patch)
-                            if "rule_mutations" in payload and isinstance(payload["rule_mutations"], list):
-                                rules_file = os.path.join('GEM_Trading_Rules', 'rules.json')
-                                if os.path.exists(rules_file):
-                                    with open(rules_file, 'r') as f:
-                                        try:
-                                            current_rules = json.load(f)
-                                        except json.JSONDecodeError:
-                                            current_rules = None
-                                    
-                                    if current_rules:
-                                        applied_patches = 0
-                                        for mutation in payload["rule_mutations"]:
-                                            # We expect mutation to be a dict e.g. {"path": ["system_thresholds", "ALPHA_FRICTION_MINIMUM"], "value": 0.099}
-                                            if isinstance(mutation, dict) and "path" in mutation and "value" in mutation:
-                                                path = mutation["path"]
-                                                val = mutation["value"]
-                                                
-                                                if isinstance(path, list) and len(path) > 0:
-                                                    # Traverse the dict to apply the patch
-                                                    target = current_rules
-                                                    valid_path = True
-                                                    for p in path[:-1]:
-                                                        if p in target and isinstance(target[p], dict):
-                                                            target = target[p]
-                                                        else:
-                                                            valid_path = False
-                                                            print(f"{RED}Invalid mutation path: {path}{RESET}")
-                                                            break
-                                                    
-                                                    if valid_path:
-                                                        # Apply the modification
-                                                        target[path[-1]] = val
-                                                        applied_patches += 1
-                                                        print(f"{GREEN}Applied Mutation: {path} -> {val}{RESET}")
-                                        
-                                        if applied_patches > 0:
-                                            # Write back to rules.json
-                                            with open(rules_file, 'w') as f:
-                                                json.dump(current_rules, f, indent=4)
-                                            # Critical Terminal Alert as per Implementation Plan
-                                            print(f"\n{RED}{'!'*80}")
-                                            print(f"⚠️ RULES MUTATED LOCALLY ({applied_patches} patches applied).")
-                                            print(f"YOU MUST COPY AND PASTE THE NEW rules.json INTO YOUR GOOGLE DOC NOW TO KEEP THE GEMS IN SYNC.")
-                                            print(f"{'!'*80}{RESET}\n")
-
-                        except json.JSONDecodeError as e:
-                            print(f"{RED}Error parsing JSON from clipboard: {e}{RESET}")
-                        except Exception as e:
-                            print(f"{RED}Error processing clipboard data: {e}{RESET}")
-                        t_time.sleep(1.5)
-                        
-                    if key == 'c':
-                        # Load supplemental local state for the payload
-                        supplemental_lessons = []
-                        if os.path.exists('trade_lessons.json'):
-                            try:
-                                with open('trade_lessons.json', 'r') as f:
-                                    supplemental_lessons = json.load(f)
-                            except: pass
-
-                        supplemental_ssot = {}
-                        if os.path.exists('local_ssot_shadow.json'):
-                            try:
-                                with open('local_ssot_shadow.json', 'r') as f:
-                                    supplemental_ssot = json.load(f)
-                            except: pass
-
-                        final_output = {
-                            "_meta": {
-                                "description": "LIVE MARKET DATA - DO NOT TREAT AS SIMULATED",
-                                "is_simulation": False,
-                                "source": "Real-time Exchange Feed",
-                                "reliability": "High",
-                                "timestamp_iso": datetime.now(ZoneInfo("America/New_York")).isoformat()
-                            },
-                            "timestamp": datetime.now(ZoneInfo("America/New_York")).strftime('%Y-%m-%d %H:%M:%S'),
-                            "status": status,
-                            "trade_lessons": supplemental_lessons,
-                            "local_storage_state": supplemental_ssot,
-                            "tickers": data
-                        }
-                        json_string = json.dumps(final_output, indent=2)
-                        
-                        # Prepend the Google Finance instruction to the payload as requested
-                        clipboard_content = f"Use the Google Finance extension to review the YTD and 6-Month charts for each ticker.\n\n```json\n{json_string}\n```"
-                        
-                        pyperclip.copy(clipboard_content)
-                        print(f"\n{YELLOW}JSON (with Google Finance prompt) copied to clipboard!{RESET}")
-                        t_time.sleep(1)
-                        break
+                print(f"\r\033[?25l{CYAN}Next Update in {int(remaining)}s... Web Dashboard is active.{RESET}    ", end="", flush=True)
                 t_time.sleep(0.1)
 
     except KeyboardInterrupt:
@@ -1616,4 +1692,12 @@ def run_daemon():
         print(f"\n{YELLOW}Daemon Shutdown.{RESET}")
 
 if __name__ == "__main__":
-    run_daemon()
+    if not os.path.exists("static"):
+        os.makedirs("static")
+    app.mount("/", StaticFiles(directory="static", html=True), name="static")
+    
+    daemon_thread = threading.Thread(target=run_daemon, daemon=True)
+    daemon_thread.start()
+    
+    print(f"{CYAN}Starting FastAPI server on http://localhost:8000{RESET}")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
