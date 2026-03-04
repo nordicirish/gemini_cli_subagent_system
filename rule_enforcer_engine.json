@@ -10,7 +10,7 @@
     "context_engine_compliance": "STRICT",
     "respect_deletion_rules": true,
     "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
-    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
+    "mandate_source": "See terminal.json > shared_behavior > mandate_source"
   },
   "update_flow": [
     {

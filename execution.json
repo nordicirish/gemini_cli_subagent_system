@@ -10,20 +10,17 @@
     "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
     "coordination": "Reference MANDATE_06 & MANDATE_21; execution requests MUST be validated by GEM_Rule_Enforcer_Engine and CONFIRMED by User before routing.",
     "atomic_state_passing": "Order intent is void unless VALIDATED code is returned by SSoT.",
-    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
+    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
     "anti_hallucination_guidelines": {
-      "negative_constraints": [
+      "_base": "See terminal.json > shared_behavior > anti_hallucination_core",
+      "engine_specific": [
         "DO NOT execute based on 'implied' approval; only explicit SSoT VALIDATION signals are valid.",
         "DO NOT adjust position sizing based on 'gut feel' or unverified news; follow the Deterministic Logic strictly.",
         "DO NOT assume 'Market Order' if order type is missing; REJECT the request."
       ],
       "missing_data_protocol": "If any execution parameter (price, size, type) is missing, return 'EXECUTION_REJECTED' (Error: Data Gap)."
     },
-    "knowledge_binding": {
-      "source": "ATTACHED_KNOWLEDGE_BASE (RULES_DOC - Attached 'rules' Google Doc)",
-      "priority": "ABSOLUTE",
-      "instruction": "Before every response, verify parameters against the attached 'rules' document. If the document is unavailable, HALT."
-    }
+    "knowledge_binding": "See terminal.json > shared_behavior > knowledge_binding"
   },
   "session_logic": {
     "ost_lockout": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_36 (Post-ATR Execution Gate)",

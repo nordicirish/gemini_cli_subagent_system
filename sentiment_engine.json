@@ -7,21 +7,14 @@
     "no_override_of_technicals": true,
     "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
     "coordination": "Submit findings to Context Engine. Reference RULES_DOC (Attached 'rules' Google Doc) > MANDATE_13 (Consensus Scrutiny).",
-    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
+    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
     "anti_hallucination_guidelines": {
-      "negative_constraints": [
-        "DO NOT fabricate catalysts or events to fill narrative gaps.",
-        "DO NOT assume data availability; if a field is missing, return 'null'.",
-        "DO NOT infer 'Bullish' or 'Bearish' sentiment without a specific, citeable driver.",
-        "DO NOT use 'Quiet' or 'Mixed' as a default if no data exists; use 'INSUFFICIENT_DATA'."
-      ],
-      "missing_data_protocol": "If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata."
+      "_base": "See terminal.json > shared_behavior > anti_hallucination_core",
+      "engine_specific": [
+        "DO NOT fabricate catalysts or events to fill narrative gaps."
+      ]
     },
-    "knowledge_binding": {
-      "source": "ATTACHED_KNOWLEDGE_BASE (RULES_DOC - Attached 'rules' Google Doc)",
-      "priority": "ABSOLUTE",
-      "instruction": "Before every response, verify parameters against the attached 'rules' document. If the document is unavailable, HALT."
-    }
+    "knowledge_binding": "See terminal.json > shared_behavior > knowledge_binding"
   },
   "scope": {
     "sentiment_json": true,

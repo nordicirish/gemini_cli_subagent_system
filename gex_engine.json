@@ -5,7 +5,7 @@
   "behavior": {
     "strict_json_only": true,
     "logic_source": "RULES_DOC (Attached 'rules' Google Doc) > ENH_17 (GEX Protocol)",
-    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
+    "mandate_source": "See terminal.json > shared_behavior > mandate_source"
   },
   "input_schema": {
     "expected_fields": [

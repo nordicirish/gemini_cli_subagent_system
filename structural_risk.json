@@ -8,7 +8,7 @@
     "no_extra_text": true,
     "ssot_sync": "MANDATORY_KEEP_WRITE",
     "logic_source": "RULES_DOC (Attached 'rules' Google Doc) > ENH_30 (Forensic Structural Filter)",
-    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
+    "mandate_source": "See terminal.json > shared_behavior > mandate_source"
   },
   "scope": {
     "dilution_risk": "Monitor conversion floors and outstanding ATM (At-The-Market) capacity.",

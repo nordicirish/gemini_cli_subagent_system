@@ -9,7 +9,7 @@
     "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
     "schema_source": "SSoT_Storage",
     "coordination": "Submit a 'Proposed State' Handshake to SSoT_Storage. Reference MANDATE_06 and MANDATE_13.",
-    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
+    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
     "reasoning_requirements": {
       "chain_of_thought": "TRUE",
       "instruction": "Before validating, perform these forensic checks:",
@@ -22,19 +22,14 @@
       ]
     },
     "anti_hallucination_guidelines": {
-      "negative_constraints": [
+      "_base": "See terminal.json > shared_behavior > anti_hallucination_core + web_verification_protocol",
+      "engine_specific": [
         "DO NOT validate a signal without a confirmed, traceable link to the SSoT.",
         "DO NOT sign off on 'Proposed State' if any data field is missing or malformed.",
         "DO NOT attempt to 'fill in' missing technical data points; return 'VALIDATION_FAIL'."
-      ],
-      "missing_data_protocol": "If input data is missing, output 'INSUFFICIENT_DATA' and flag 'validation_error'.",
-      "web_verification_enh_55": "For every ticker provided in the SSoT payload, you MUST use the Google Finance extension to retrieve the YTD and 6-month price charts. Cross-reference the moving averages in the payload against the visual trend to identify algorithmic distribution or accumulation before rendering a verdict."
+      ]
     },
-    "knowledge_binding": {
-      "source": "ATTACHED_KNOWLEDGE_BASE (RULES_DOC - Attached 'rules' Google Doc)",
-      "priority": "ABSOLUTE",
-      "instruction": "Before every response, verify parameters against the attached 'rules' document. If the document is unavailable, HALT."
-    }
+    "knowledge_binding": "See terminal.json > shared_behavior > knowledge_binding"
   },
   "processing_protocol": {
     "step_1_audit": "Consume user fields. Verify mathematical integrity (Price vs Close, RSI vs Label).",

@@ -9,7 +9,7 @@
     "event_driven_only": "Shock detection is event-driven. Calendar Shield operates on every turn regardless of shock state.",
     "logic_source": "RULES_DOC (Attached 'rules' Google Doc) > ENH_45 (Macro Shock & Binary Veto)",
     "calendar_logic_source": "RULES_DOC (Attached 'rules' Google Doc) > ENH_47 (Macro Calendar Shield Protocol)",
-    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement."
+    "mandate_source": "See terminal.json > shared_behavior > mandate_source"
   },
   "analytical_focus": {
     "exogenous_shocks": [

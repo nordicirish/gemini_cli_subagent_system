@@ -9,9 +9,10 @@
     "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
     "coordination": "Reference MANDATE_06; results MUST be validated by SSoT_Storage before being committed to memory.",
     "enhanced_logic": "Active monitor of the Knowledge Base. Compare incoming JSON_DUMP with the stored SSoT and flag MANDATE_04_DRIFT if discrepancies exceed DRIFT_CONTROL_THRESHOLD (see RULES_DOC (Attached 'rules' Google Doc) > system_thresholds).",
-    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
+    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
     "anti_hallucination_guidelines": {
-      "negative_constraints": [
+      "_base": "See terminal.json > shared_behavior > anti_hallucination_core",
+      "engine_specific": [
         "DO NOT invent 'Active Flags' that were not present in the input stream.",
         "DO NOT 'clean up' or 'infer' missing timestamp data; keep it raw or return 'null'.",
         "DO NOT summarize consensus with 'All Clear' if input sub-engines returned 'INSUFFICIENT_DATA'."
@@ -19,12 +20,9 @@
       "missing_data_protocol": "If input streams are empty or broken, flag 'SYNC_INCOMPLETE' in runtime_flags."
     },
     "knowledge_binding": {
-      "sources": {
-        "rules_logic": "ATTACHED_KNOWLEDGE_BASE (RULES_DOC - Attached 'rules' Google Doc)",
-        "active_state": "GEM_SSoT_Controller (ssot_storage.json)"
-      },
-      "priority": "ABSOLUTE",
-      "instruction": "Before every response, verify parameters against the attached 'rules' document. For active state, query the GEM_SSoT_Controller and accept its output as Fact."
+      "_base": "See terminal.json > shared_behavior > knowledge_binding",
+      "additional_source": "GEM_SSoT_Controller (ssot_storage.json)",
+      "instruction": "For active state, query the GEM_SSoT_Controller and accept its output as Fact."
     }
   },
   "primary_directives": [

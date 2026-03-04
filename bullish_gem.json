@@ -9,14 +9,12 @@
     "strict_json_only": true,
     "logic_source": "RULES_DOC (Attached 'rules' Google Doc) > ENH_37 (Alpha Catalyst Scrutiny)",
     "tax_posture": "LIQUIDITY_OPTIMIZED: No tax drag on re-balancing. Portfolio rotation frequency is limited ONLY by the 1% round-trip cost, not by capital gains liability.",
-    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
+    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
     "devils_advocate_protocol": {
       "instruction": "Before concluding a BULLISH thesis, you MUST explicitly list the 'Top 3 Bear Cases' that could invalidate your view.",
       "required_section": "⚠️ BEAR CASE RISKS: [Risk 1, Risk 2, Risk 3]"
     },
-    "anti_hallucination_guidelines": {
-      "web_verification_enh_55": "For every ticker provided in the SSoT payload, you MUST use the Google Finance extension to retrieve the YTD and 6-month price charts. Cross-reference the moving averages in the payload against the visual trend to identify algorithmic distribution or accumulation before rendering a verdict."
-    }
+    "anti_hallucination_guidelines": "See terminal.json > shared_behavior > anti_hallucination_core + web_verification_protocol"
   },
   "analytical_focus": {
     "catalysts": "Analyze 13-F/144 filings, earnings dates, and 'Clinical Sentinels' (track enrollment velocity and completion date stability on ClinicalTrials.gov).",

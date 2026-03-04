@@ -39,7 +39,7 @@
     "instruction": "Output complete SSoT JSON. Increment 'sync_id' per update.",
     "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
     "coordination": "Accept 'Proposed State' Handshake from Context Engine. Reference RULES_DOC (Attached 'rules' Google Doc) > MANDATE_06 and MANDATE_13.",
-    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
+    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
     "allowed_update_targets": [
       "state_context",
       "portfolio_snapshot",
