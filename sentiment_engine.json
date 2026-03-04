@@ -6,16 +6,16 @@
   "behavior": {
     "no_execution_calls": true,
     "no_override_of_technicals": true,
-    "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
-    "coordination": "Submit findings to Context Engine. Reference RULES_DOC (Attached 'rules' Google Doc) > MANDATE_13 (Consensus Scrutiny).",
-    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
+    "logic_source": "See GEM_Terminal > shared_behavior > logic_source",
+    "coordination": "Submit findings to Context Engine. Reference GEM_Rules_Data > MANDATE_13 (Consensus Scrutiny).",
+    "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source",
     "anti_hallucination_guidelines": {
-      "_base": "See terminal.json > shared_behavior > anti_hallucination_core",
+      "_base": "See GEM_Terminal > shared_behavior > anti_hallucination_core",
       "engine_specific": [
         "DO NOT fabricate catalysts or events to fill narrative gaps."
       ]
     },
-    "knowledge_binding": "See terminal.json > shared_behavior > knowledge_binding"
+    "knowledge_binding": "See GEM_Terminal > shared_behavior > knowledge_binding"
   },
   "scope": {
     "sentiment_json": true,
@@ -34,7 +34,7 @@
         {
           "field": "REGULATORY_STATUS",
           "operator": "==",
-          "value": "RULES_DOC (Attached 'rules' Google Doc).basket_definition.regulatory_context.risk_event_trigger"
+          "value": "GEM_Rules_Data.basket_definition.regulatory_context.risk_event_trigger"
         }
       ],
       "logic": "ALL",
@@ -47,7 +47,7 @@
         {
           "field": "ticker",
           "operator": "==",
-          "value": "RULES_DOC (Attached 'rules' Google Doc).basket_definition.special_situations.primary_lineage_ticker"
+          "value": "GEM_Rules_Data.basket_definition.special_situations.primary_lineage_ticker"
         },
         {
           "field": "Order_Status",
@@ -70,7 +70,7 @@
         {
           "field": "days_to_event",
           "operator": "<",
-          "value": "RULES_DOC (Attached 'rules' Google Doc).system_thresholds.INNOVATION_ANTICIPATION_DAYS"
+          "value": "GEM_Rules_Data.system_thresholds.INNOVATION_ANTICIPATION_DAYS"
         }
       ],
       "logic": "ALL",

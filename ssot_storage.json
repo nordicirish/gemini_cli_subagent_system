@@ -1,8 +1,9 @@
 {
   "id": "SSOT_STORAGE",
   "role": "GEM SSoT Controller",
-  "version": "v4.91-Lessons-Handling",
-  "description": "Passive Data Schema and State Container. ALL EXECUTION LOGIC DEFERRED TO GEM_RULE_ENFORCER_ENGINE.",
+  "version": "v4.92-Architecture-Improvements",
+  "description": "Passive Data Schema and State Container. Schema definitions, persistence contracts, and deletion rules ONLY. ALL state operations (merge, commit, output) are owned by CONTEXT_ENGINE. ALL execution logic deferred to GEM_RULE_ENFORCER_ENGINE.",
+  "state_operations_owner": "GEM_Context_Engine",
   "knowledge_binding": {
     "source": "ATTACHED_KNOWLEDGE_BASE (SSOT_DOC - Attached 'rules' Google Doc)",
     "priority": "ABSOLUTE",
@@ -38,9 +39,9 @@
   "update_protocol": {
     "mode": "FULL_STATE_OUTPUT",
     "instruction": "Output complete SSoT JSON. Increment 'sync_id' per update.",
-    "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
-    "coordination": "Accept 'Proposed State' Handshake from Context Engine. Reference RULES_DOC (Attached 'rules' Google Doc) > MANDATE_06 and MANDATE_13.",
-    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
+    "logic_source": "See GEM_Terminal > shared_behavior > logic_source",
+    "coordination": "Accept 'Proposed State' Handshake from Context Engine. Reference GEM_Rules_Data > MANDATE_06 and MANDATE_13.",
+    "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source",
     "allowed_update_targets": [
       "state_context",
       "portfolio_snapshot",
@@ -93,11 +94,11 @@
   "portfolio_risk_geometry": {
     "avg_portfolio_corr": "FLOAT",
     "max_pairwise_corr": "FLOAT",
-    "sector_exposure": "Reference RULES_DOC (Attached 'rules' Google Doc) > sector_taxonomy (Canonical)",
+    "sector_exposure": "Reference GEM_Rules_Data > sector_taxonomy (Canonical)",
     "correlation_action": "STRING (MONITOR | REDUCE | NO_TRADE)"
   },
   "portfolio_snapshot": {
-    "schema_reference": "RULES_DOC (Attached 'rules' Google Doc) > ENH_32 (Canonical Schema)",
+    "schema_reference": "GEM_Rules_Data > ENH_32 (Canonical Schema)",
     "defaults": {
       "social_velocity_z_score": 0.0,
       "sentiment_divergence_flag": false,
@@ -114,10 +115,10 @@
     "GEX_POSTURE": "STRING",
     "SSR_STATUS": "BOOLEAN",
     "CONSENSUS_ACTIVE": true,
-    "drift_control_threshold": "Reference RULES_DOC (Attached 'rules' Google Doc) > system_thresholds > DRIFT_CONTROL_THRESHOLD (Canonical)",
+    "drift_control_threshold": "Reference GEM_Rules_Data > system_thresholds > DRIFT_CONTROL_THRESHOLD (Canonical)",
     "account_friction_settings": {
-      "round_trip_cost_basis": "Reference RULES_DOC (Attached 'rules' Google Doc) > system_thresholds > ROUND_TRIP_COST_BASIS (Canonical)",
-      "min_drawdown_threshold": "Reference RULES_DOC (Attached 'rules' Google Doc) > system_thresholds > ALPHA_FRICTION_MINIMUM (Canonical)",
+      "round_trip_cost_basis": "Reference GEM_Rules_Data > system_thresholds > ROUND_TRIP_COST_BASIS (Canonical)",
+      "min_drawdown_threshold": "Reference GEM_Rules_Data > system_thresholds > ALPHA_FRICTION_MINIMUM (Canonical)",
       "tax_structure": "DEFERRED_WITHDRAWAL"
     }
   },

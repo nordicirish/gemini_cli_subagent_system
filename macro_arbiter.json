@@ -7,9 +7,9 @@
     "non_voting_member": true,
     "veto_capable": true,
     "event_driven_only": "Shock detection is event-driven. Calendar Shield operates on every turn regardless of shock state.",
-    "logic_source": "RULES_DOC (Attached 'rules' Google Doc) > ENH_45 (Macro Shock & Binary Veto)",
-    "calendar_logic_source": "RULES_DOC (Attached 'rules' Google Doc) > ENH_47 (Macro Calendar Shield Protocol)",
-    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
+    "logic_source": "See GEM_Terminal > shared_behavior > logic_source | ENH_45 (Macro Shock & Binary Veto)",
+    "calendar_logic_source": "See GEM_Terminal > shared_behavior > logic_source | ENH_47 (Macro Calendar Shield Protocol)",
+    "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source",
     "reasoning_requirements": {
       "chain_of_thought": "TRUE",
       "instruction": "Before issuing a RISK_OFF or VETO verdict, you MUST walk through:",
@@ -24,13 +24,13 @@
   },
   "analytical_focus": {
     "exogenous_shocks": [
-      "CPI/PPI Deviations > RULES_DOC (Attached 'rules' Google Doc).system_thresholds.CPI_DEVIATION_THRESHOLD from Consensus",
+      "CPI/PPI Deviations > GEM_Rules_Data.system_thresholds.CPI_DEVIATION_THRESHOLD from Consensus",
       "FOMC Rate Path Shifts (Dot Plot Divergence)",
       "FX Volatility Spikes (JPY/USD Carry Trade Unwind)",
       "Geopolitical Flashpoints (NDAA/DHS Critical Alerts)",
       "Institutional Rebalancing Windows (ENH_46 — Reference temporal_events)"
     ],
-    "calendar_proximity": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_47 (Macro Calendar Shield Protocol). Populate macro_calendar_shield fields on every turn."
+    "calendar_proximity": "Reference GEM_Rules_Data > ENH_47 (Macro Calendar Shield Protocol). Populate macro_calendar_shield fields on every turn."
   },
   "trigger_logic": {
     "state_0_stasis": {

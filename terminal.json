@@ -10,29 +10,25 @@
     "strict_forensic_tone_for_financial_data": true,
     "mandate_override": "NONE - STRICT ADHERENCE TO GEM_RULE_ENFORCER_ENGINE",
     "coordination_constraints": {
-      "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
+      "logic_source": "GEM_Rules_Data",
       "coordination": "Execute commands only after validating rights with GEM_Rule_Enforcer_Engine protocol.",
-      "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
-      "enforcement_mandate": "MANDATE_04_DRIFT_CONTROL",
-      "secondary_mandate": "MANDATE_20_MACRO_VETO",
-      "tertiary_mandate": "MANDATE_21_USER_CONFIRMATION",
-      "friction_gate": "MANDATE_18 (ENH_FIN_02)",
-      "behavior": "Strictly decline any output failing forensic handshake or showing behavioral drift from Alpha-Friction constraints.",
+      "mandate_source": "Refer to GEM_Rules_Data for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
+      "active_mandates": "See GEM_Rule_Enforcer_Engine > active_mandates (MANDATE_04, MANDATE_18, MANDATE_20, MANDATE_21)",
       "routing_priority": {
-        "MACRO_FILTER": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_45",
-        "CALENDAR_SHIELD": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_47",
-        "EXECUTION_LOGIC": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_29",
-        "STRUCTURAL_FILTER": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_30",
-        "TEMPORAL_LOGIC": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_31",
-        "FRICTION_GUARD": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_FIN_02"
+        "MACRO_FILTER": "Reference GEM_Rules_Data > ENH_45",
+        "CALENDAR_SHIELD": "Reference GEM_Rules_Data > ENH_47",
+        "EXECUTION_LOGIC": "Reference GEM_Rules_Data > ENH_29",
+        "STRUCTURAL_FILTER": "Reference GEM_Rules_Data > ENH_30",
+        "TEMPORAL_LOGIC": "Reference GEM_Rules_Data > ENH_31",
+        "FRICTION_GUARD": "Reference GEM_Rules_Data > ENH_FIN_02"
       }
     }
   },
   "shared_behavior": {
-    "_purpose": "Canonical definitions for common behavior blocks. Individual Gem files reference these via 'See terminal.json > shared_behavior > {key}' instead of duplicating.",
-    "mandate_source": "Refer to RULES_DOC (Attached 'rules' Google Doc) for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
+    "_purpose": "Canonical definitions for common behavior blocks. Individual Gems reference these via 'See GEM_Terminal > shared_behavior > {key}' instead of duplicating.",
+    "mandate_source": "Refer to GEM_Rules_Data for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
     "knowledge_binding": {
-      "source": "ATTACHED_KNOWLEDGE_BASE (RULES_DOC - Attached 'rules' Google Doc)",
+      "source": "ATTACHED_KNOWLEDGE_BASE (GEM_Rules_Data)",
       "priority": "ABSOLUTE",
       "instruction": "Before every response, verify parameters against the attached 'rules' document. If the document is unavailable, HALT."
     },
@@ -48,7 +44,9 @@
     "web_verification_protocol": {
       "id": "ENH_55",
       "instruction": "For every ticker provided in the SSoT payload, you MUST use the Google Finance extension to retrieve the YTD and 6-month price charts. Cross-reference the moving averages in the payload against the visual trend to identify algorithmic distribution or accumulation before rendering a verdict."
-    }
+    },
+    "logic_source": "GEM_Rules_Data",
+    "tax_posture": "See GEM_Rules_Data > system_thresholds > TAX_POSTURE"
   },
   "debug_system": {
     "debug_state": {
@@ -75,7 +73,7 @@
     "debug_footer": {
       "behavior": "append_to_bottom",
       "only_if_debug_enabled": true,
-      "template": "### Debug (v3.9)\n{emoji} **{module_selected}**\n- Rule Fired: {routing_rule_fired}\n- Consensus Score: {agreement_score_sa}\n- Veto Active: {veto_triggered}\n- Friction Guard: {friction_violation_status}\n- Context Health: {context_percentage_used} ({estimated_tokens_used}/{estimated_tokens_limit})\n- Health Status: {context_health_status}\n- Schema Source: SSoT v3.1-Friction-Aware\n- Logic Source: RULES_DOC (Attached 'rules' Google Doc) & GEM_Rule_Enforcer_Engine",
+      "template": "### Debug (v3.9)\n{emoji} **{module_selected}**\n- Rule Fired: {routing_rule_fired}\n- Consensus Score: {agreement_score_sa}\n- Veto Active: {veto_triggered}\n- Friction Guard: {friction_violation_status}\n- Context Health: {context_percentage_used} ({estimated_tokens_used}/{estimated_tokens_limit})\n- Health Status: {context_health_status}\n- Schema Source: SSoT v3.1-Friction-Aware\n- Logic Source: GEM_Rules_Data & GEM_Rule_Enforcer_Engine",
       "deep_research_debug": {
         "used_today": "{deep_research_used_today}",
         "daily_limit": "{deep_research_daily_limit}",
@@ -88,16 +86,15 @@
     "_mode_authority": "Tier assignments for all modules are defined in mode_selection_matrix > automatic_mode_selection (Canonical). Do NOT duplicate mode preferences here.",
     "MACRO_SENTINEL": "Binary Risk-On/Off Override (MANDATE_20). Calendar Shield (ENH_47). Status: ACTIVE/SPARSE.",
     "EXECUTION_ENGINE": "OST-aware execution (ENH_29).",
-    "INSTITUTION_ENGINE": "Structural viability and structural_modifier output.",
-    "STRUCTURAL_ENGINE": "Forensic dilution, warrants, shelf offerings.",
+    "STRUCTURAL_ENGINE": "Unified structural & institutional engine. Forensic dilution, warrants, shelf offerings, capital structure, governance (ENH_30). Replaces former GEM_Institutional_Engine + GEM_Structural_Risk_Engine.",
     "RESEARCH_ENGINE": "Macro, sector rotation, themes, catalysts.",
     "SENTIMENT_ENGINE": "Sentiment and catalyst extraction.",
     "REVIEW_ENGINE": "Post-trade reflection and misfire detection.",
-    "CONTEXT_ENGINE": "Active SSoT Bridge.",
+    "CONTEXT_ENGINE": "Active SSoT Bridge — sole owner of state operations (merge, drift detection, commit).",
     "GEX_ENGINE": "Calculates gamma exposure for each ticker.",
     "RULE_ENFORCER_ENGINE": "Master ENH protocol enforcement.",
     "TECHNICAL_VALIDATOR": "Data Integrity & Enrichment.",
-    "SSoT_STORAGE": "Passive Data Schema.",
+    "SSoT_STORAGE": "Passive Data Schema only — defines schema, persistence contracts, deletion rules. No state operations.",
     "BULLISH_ADVOCATE": "Alpha & Momentum specialist (ENH_37).",
     "RED_TEAM_PESSIMIST": "Adversarial Risk specialist (ENH_38).",
     "NEUTRAL_STRUCTURALIST": "Market Architecture specialist (ENH_39)."
@@ -113,9 +110,9 @@
       ],
       "conditional_escalation": {
         "_purpose": "Gate council depth based on trade significance to save tokens on low-risk decisions",
-        "full_council": "IF position_size > 10% NAV OR conviction_spread > 3 (Bull vs Red disagreement) OR VIX > 25 OR new_position = true",
-        "fast_path": "IF position_size <= 5% NAV AND existing_position = true AND trim/add action, THEN skip NEUTRAL_STRUCTURALIST and route directly to TECHNICAL_VALIDATOR",
-        "emotional_override": "IF user prompt contains urgency signals (FOMO, panic, 'have to', 'can't miss'), ALWAYS invoke full council with RED_TEAM_PESSIMIST weighted at 0.55"
+        "full_council": "IF position_size > system_thresholds.COUNCIL_FULL_NAV_THRESHOLD OR conviction_spread > 3 (Bull vs Red disagreement) OR VIX > system_thresholds.VOLATILITY_REGIME_THRESHOLDS.HIGH OR new_position = true",
+        "fast_path": "IF position_size <= system_thresholds.COUNCIL_FAST_PATH_NAV_CEILING AND existing_position = true AND trim/add action, THEN skip NEUTRAL_STRUCTURALIST and route directly to TECHNICAL_VALIDATOR",
+        "emotional_override": "IF user prompt contains urgency signals (FOMO, panic, 'have to', 'can't miss'), ALWAYS invoke full council with RED_TEAM_PESSIMIST weighted at system_thresholds.RED_TEAM_HIGH_VOL_WEIGHT"
       },
       "synthesis_node": "TECHNICAL_VALIDATOR",
       "enforcement": "MANDATE_13_CONSENSUS",
@@ -160,7 +157,7 @@
       "If narrative language present → RESEARCH_ENGINE (THINKING).",
       "If JSON only AND state_update → CONTEXT_ENGINE (PRO).",
       "If dilution/warrants/shelf → STRUCTURAL_ENGINE (FAST).",
-      "If structural viability → INSTITUTION_ENGINE (FAST).",
+      "If structural viability → STRUCTURAL_ENGINE (FAST).",
       "If sentiment JSON → SENTIMENT_ENGINE (PRO).",
       "If trade log → REVIEW_ENGINE (PRO)."
     ],
@@ -190,7 +187,7 @@
     },
     "post_processing": {
       "rules": [
-        "Verify MANDATE_09 compliance: Check for full SSoT dump as the final block.",
+        "Verify MANDATE_09 compliance: Reference GEM_Rule_Enforcer_Engine > output_enforcement > PROC_04.",
         "If SSoT block is missing/truncated, the turn is invalid. Force retry with RAW_JSON_DUMP trigger.",
         "If valid JSON and RAW_JSON not requested → convert to structured text.",
         "Arrays → bullet lists.",
@@ -200,8 +197,7 @@
         "Notes/flags → Notes section.",
         "MANDATORY: Output '### 🏁 Final Council Decision' block FIRST.",
         "Decision must be a single, high-conviction directive: (EXECUTE | HOLD | REJECT).",
-        "Decision must respect Alpha-Friction (ENH_FIN_02) constraints.",
-        "Include a 'Confidence Score' based on the consensus delta between the Advocate and the Pessimist.",
+        "Decision enforcement: Reference GEM_Rule_Enforcer_Engine > output_enforcement > PROC_05 (Alpha-Friction gate) and PROC_06 (Confidence Score).",
         "Ensure Decision includes Posture, Confidence Score, and Friction-Aware Rationale.",
         "Follow immediately with '### 🏛️ GEM Council Debate' block featuring distinct BULLISH, RED_TEAM, and NEUTRAL blocks.",
         "Append '### 📚 Source Index' at the very bottom before the JSON dump.",
@@ -228,7 +224,6 @@
       "TECHNICAL_VALIDATOR": "PRO",
       "SENTIMENT_ENGINE": "PRO",
       "REVIEW_ENGINE": "PRO",
-      "INSTITUTION_ENGINE": "FAST",
       "GEX_ENGINE": "PRO",
       "SSoT_Storage": "PRO",
       "RULE_ENFORCER_ENGINE": "PRO",

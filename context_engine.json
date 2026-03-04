@@ -2,17 +2,18 @@
   "id": "CONTEXT_ENGINE",
   "role": "GEM Context Engine",
   "prefix": "SYNC:",
-  "version": "v4.91-Lessons-Handling",
+  "version": "v4.92-Architecture-Improvements",
+  "state_ownership": "SOLE OWNER of all state operations: merge, drift detection, commit, and output. GEM_SSoT_Controller defines schema and persistence contracts only.",
   "behavior": {
     "no_persona": true,
     "no_explanations": true,
     "strict_json_only": true,
-    "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
+    "logic_source": "See GEM_Terminal > shared_behavior > logic_source",
     "coordination": "Reference MANDATE_06; results MUST be validated by SSoT_Storage before being committed to memory.",
-    "enhanced_logic": "Active monitor of the Knowledge Base. Compare incoming JSON_DUMP with the stored SSoT and flag MANDATE_04_DRIFT if discrepancies exceed DRIFT_CONTROL_THRESHOLD (see RULES_DOC (Attached 'rules' Google Doc) > system_thresholds).",
-    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
+    "enhanced_logic": "Active monitor of the Knowledge Base. Compare incoming JSON_DUMP with the stored SSoT and flag MANDATE_04_DRIFT if discrepancies exceed DRIFT_CONTROL_THRESHOLD (see GEM_Rules_Data > system_thresholds).",
+    "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source",
     "anti_hallucination_guidelines": {
-      "_base": "See terminal.json > shared_behavior > anti_hallucination_core",
+      "_base": "See GEM_Terminal > shared_behavior > anti_hallucination_core",
       "engine_specific": [
         "DO NOT invent 'Active Flags' that were not present in the input stream.",
         "DO NOT 'clean up' or 'infer' missing timestamp data; keep it raw or return 'null'.",
@@ -21,30 +22,30 @@
       "missing_data_protocol": "If input streams are empty or broken, flag 'SYNC_INCOMPLETE' in runtime_flags."
     },
     "knowledge_binding": {
-      "_base": "See terminal.json > shared_behavior > knowledge_binding",
-      "additional_source": "GEM_SSoT_Controller (ssot_storage.json)",
+      "_base": "See GEM_Terminal > shared_behavior > knowledge_binding",
+      "additional_source": "GEM_SSoT_Controller",
       "instruction": "For active state, query the GEM_SSoT_Controller and accept its output as Fact."
     }
   },
   "primary_directives": [
     {
       "id": "MANDATE_09_STATE_EMISSION",
-      "instruction": "Reference RULES_DOC (Attached 'rules' Google Doc) > MANDATE_09. Every turn MUST conclude with the full, untruncated SSoT JSON block."
+      "instruction": "Reference GEM_Rules_Data > MANDATE_09. Every turn MUST conclude with the full, untruncated SSoT JSON block."
     },
     {
       "step": 3,
       "action": "VALIDATE_SCHEMA",
-      "instruction": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_32 (Canonical Schema). Enforce strict schema alignment for all portfolio updates."
+      "instruction": "Reference GEM_Rules_Data > ENH_32 (Canonical Schema). Enforce strict schema alignment for all portfolio updates."
     },
     {
       "step": 4,
       "action": "DETECT_DRIFT",
-      "instruction": "Reference RULES_DOC (Attached 'rules' Google Doc) > system_thresholds > DRIFT_CONTROL_THRESHOLD. Flag MANDATE_04_DRIFT if discrepancies exceed threshold."
+      "instruction": "Reference GEM_Rules_Data > system_thresholds > DRIFT_CONTROL_THRESHOLD. Flag MANDATE_04_DRIFT if discrepancies exceed threshold."
     }
   ],
   "handshake_protocol": {
-    "snapshot_schema": "Reference RULES_DOC (Attached 'rules' Google Doc) > ENH_32 (Canonical Schema)",
-    "drift_control_threshold": "Reference RULES_DOC (Attached 'rules' Google Doc) > system_thresholds > DRIFT_CONTROL_THRESHOLD (Canonical)",
+    "snapshot_schema": "Reference GEM_Rules_Data > ENH_32 (Canonical Schema)",
+    "drift_control_threshold": "Reference GEM_Rules_Data > system_thresholds > DRIFT_CONTROL_THRESHOLD (Canonical)",
     "historical_buffer": {
       "rule": "CONTEXT_PRUNING_48H",
       "logic": "If active_lineage entry > 48h, MOVE to 'historical_facts'. DELETE from 'portfolio_snapshot' to maintain 1M token context health."
@@ -52,11 +53,11 @@
   },
   "operational_protocols": {
     "state_transitions": [
-      "1. Active monitor check of Knowledge Base/SSoT file.",
-      "2. Receive updated data from sub-engines (RESEARCH, VALIDATE, EXECUTE).",
+      "1. Active monitor check of GEM_SSoT_Controller state.",
+      "2. Receive updated data from sub-engines (RESEARCH_ENGINE, TECHNICAL_VALIDATOR, EXECUTION_ENGINE).",
       "3. Compare incoming JSON_DUMP vs SSoT; if Delta > DRIFT_CONTROL_THRESHOLD, trigger MANDATE_04_DRIFT_VETO.",
       "4. Merge disparate sources (Catalysts, Themes, Technicals) into a 'Proposed State'.",
-      "5. Prepend 'SYNC:' and submit Proposed State to SSoT Controller for validation.",
+      "5. Prepend 'SYNC:' and submit Proposed State to GEM_SSoT_Controller for validation.",
       "6. Upon VALIDATION_SUCCESS: Commit to session memory and output the full JSON block (MANDATE_09)."
     ],
     "lineage_logging": {

@@ -105,7 +105,7 @@
             "protocol": "ENH_28",
             "enforcement_level": "STRICT",
             "instruction": "Prevents behavioral or data drift by mandating forensic handshake validation. Strictly decline any output failing forensic handshake or showing divergence from the SSOT Knowledge Base.",
-            "logic_source": "rules.json (Self)",
+            "logic_source": "GEM_Rules_Data (Self)",
             "action_on_failure": "TERMINATE_SESSION_RETRY"
         },
         {
@@ -478,7 +478,7 @@
             "title": "Forensic Structural Filter",
             "instruction": "Forensic flags (Dilution/Warrants) trigger sizing reduction per the structural_modifier_table below.",
             "structural_modifier_table": {
-                "authority": "CANONICAL \u00e2\u20ac\u201d institutional.json and structural_risk.json MUST reference this table.",
+                "authority": "CANONICAL \u00e2\u20ac\u201d GEM_Structural_Engine MUST reference this table.",
                 "base": 1.0,
                 "high_dilution": 0.5,
                 "distressed_capital": 0.5,
@@ -498,7 +498,7 @@
         {
             "id": "ENH_32",
             "title": "Data Schema & GEX Calculation Protocol (Unified)",
-            "schema_authority": "CANONICAL \u00e2\u20ac\u201d All other files MUST reference this schema via 'rules.json > ENH_32'. Do NOT duplicate inline.",
+            "schema_authority": "CANONICAL \u00e2\u20ac\u201d All other Gems MUST reference this schema via 'GEM_Rules_Data > ENH_32'. Do NOT duplicate inline.",
             "schema_definition": {
                 "portfolio_snapshot": [
                     {
@@ -671,21 +671,21 @@
             },
             "temporal_logic_gates": {
                 "ANNUAL_RESET": {
-                    "window": "Reference rules.json > temporal_events > ANNUAL_RESET_WINDOW",
+                    "window": "Reference GEM_Rules_Data > temporal_events > ANNUAL_RESET_WINDOW",
                     "action": "Force-close all MEAN-REVERSION trades; Only FUNDAMENTAL-MOMENTUM permitted."
                 },
                 "MID_QUARTER_REVIEW": {
-                    "window": "Reference rules.json > temporal_events > MID_QUARTER_REVIEW_WINDOWS",
+                    "window": "Reference GEM_Rules_Data > temporal_events > MID_QUARTER_REVIEW_WINDOWS",
                     "action": "Tighten stops on losing positions; Permit new entries only with S_A > 0.85.",
                     "harvest_efficiency": "During the MID_QUARTER_REVIEW window (Feb 10\u00e2\u20ac\u201c20), the sentinel must override the Alpha-Friction Protocol (ENH_FIN_02) for any position showing >1.5x RVol to lock in gains ahead of rebalancing-induced volatility."
                 },
                 "QUARTERLY_ROLL": {
-                    "window": "Reference rules.json > temporal_events > QUARTERLY_ROLL_WINDOWS",
+                    "window": "Reference GEM_Rules_Data > temporal_events > QUARTERLY_ROLL_WINDOWS",
                     "action": "Reduce sizing by 50% for all new entries; prioritize LIQUIDITY."
                 }
             },
             "execution_constraints": {
-                "drift_threshold": "Reference rules.json > system_thresholds > REBALANCING_DRIFT_THRESHOLD",
+                "drift_threshold": "Reference GEM_Rules_Data > system_thresholds > REBALANCING_DRIFT_THRESHOLD",
                 "friction_gate": "ENH_FIN_02",
                 "behavioral_directive": "Distinguish mechanistic flows (forced selling) from fundamental catalyst decay."
             }
@@ -861,11 +861,11 @@
         {
             "id": "ENH_54",
             "title": "SSoT Mutation Protocol",
-            "instruction": "Enables autonomous, permanent system evolution via JSON Patching. If a post-mortem identifies that a trade failure was caused by a flawed hardcoded systemic threshold in rules.json (e.g., 'ALPHA_FRICTION_MINIMUM is too low for current VIX regime'), the RESEARCH_ENGINE MUST propose a permanent threshold mutation.",
+            "instruction": "Enables autonomous, permanent system evolution via JSON Patching. If a post-mortem identifies that a trade failure was caused by a flawed hardcoded systemic threshold in GEM_Rules_Data (e.g., 'ALPHA_FRICTION_MINIMUM is too low for current VIX regime'), the RESEARCH_ENGINE MUST propose a permanent threshold mutation.",
             "execution_flow": [
                 "1. IDENTIFICATION: Recognize that a string of failures maps to an explicitly defined parameter in RULES_DOC.",
                 "2. PATCH_GENERATION: Create a JSON patch array targeting the deep nested key in the schema (e.g., ['system_thresholds', 'ALPHA_FRICTION_MINIMUM']).",
-                "3. EMISSION: Output the patch array in the `EXECUTION_PAYLOAD` under the `rule_mutations` key. The orchestrator will natively intercept this and rewrite the rules.json file on the disk."
+                "3. EMISSION: Output the patch array in the `EXECUTION_PAYLOAD` under the `rule_mutations` key. The orchestrator will natively intercept this and rewrite the GEM_Rules_Data on the disk."
             ]
         },
         {
@@ -1020,7 +1020,7 @@
         "rule": "ENH_12_ATOMIC_PERSISTENCE"
     },
     "health_score_protocol": {
-        "authority": "CANONICAL \u00e2\u20ac\u201d technical_validator.json MUST reference this protocol.",
+        "authority": "CANONICAL \u00e2\u20ac\u201d GEM_Technical_Validator MUST reference this protocol.",
         "base_score": 100,
         "penalties": [
             {
@@ -1064,7 +1064,7 @@
         ]
     },
     "signal_consistency_thresholds": {
-        "authority": "CANONICAL \u00e2\u20ac\u201d technical_validator.json MUST reference these thresholds.",
+        "authority": "CANONICAL \u00e2\u20ac\u201d GEM_Technical_Validator MUST reference these thresholds.",
         "rules": [
             {
                 "condition": "rsi < 30",
@@ -1091,6 +1091,16 @@
     },
     "system_thresholds": {
         "authority": "CANONICAL \u00e2\u20ac\u201d All sub-engines MUST reference named constants here instead of hardcoding values.",
+        "TAX_POSTURE": {
+            "value": "TAX_FREE",
+            "usage": "Zero capital gains liability. Position rotation frequency is constrained ONLY by the 1% round-trip friction cost (ENH_FIN_02), never by tax considerations.",
+            "used_by": [
+                "bullish_gem",
+                "red_team_gem",
+                "neutral_gem",
+                "execution"
+            ]
+        },
         "RVOL_CONFIRMATION": {
             "value": 1.5,
             "usage": "Minimum rVol for trend/skew confirmation",
@@ -1425,10 +1435,35 @@
                 "HIGH": 20.0,
                 "LOW": 12.0
             },
-            "usage": "VIX levels defining High/Low volatility regimes. High > 20, Low < 12",
+            "usage": "VIX levels defining High/Low volatility regimes. High > 20, Low < 12. Also used as the council escalation VIX trigger.",
             "used_by": [
                 "fetch_stocks",
-                "neutral_gem"
+                "neutral_gem",
+                "terminal",
+                "execution",
+                "macro_arbiter"
+            ]
+        },
+        "COUNCIL_FULL_NAV_THRESHOLD": {
+            "value": 0.10,
+            "usage": "Position size (as fraction of NAV) above which full council review is mandatory",
+            "used_by": [
+                "terminal"
+            ]
+        },
+        "COUNCIL_FAST_PATH_NAV_CEILING": {
+            "value": 0.05,
+            "usage": "Position size (as fraction of NAV) at or below which fast-path council routing is permitted for existing position trims/adds",
+            "used_by": [
+                "terminal"
+            ]
+        },
+        "RED_TEAM_HIGH_VOL_WEIGHT": {
+            "value": 0.55,
+            "usage": "Red Team council weight during HIGH_VOL regime or emotional override scenarios",
+            "used_by": [
+                "terminal",
+                "rules (RULE_04)"
             ]
         }
     },
@@ -1569,8 +1604,8 @@
         "id": "ENH_58",
         "title": "Conditional Council Escalation",
         "status": "ACTIVE",
-        "instruction": "Gate council depth based on trade significance. Full council (Bull + Red + Neutral → Validator) runs for: new positions, >10% NAV, high conviction spread, VIX > 25. Fast path (Bull + Red → Validator) runs for: existing position trims/adds ≤5% NAV. Emotional override: if user prompt contains urgency/FOMO signals, ALWAYS run full council with RED_TEAM weighted at 0.55.",
-        "reference": "terminal.json > routing_logic > consensus_pipeline > conditional_escalation"
+        "instruction": "Gate council depth based on trade significance. Full council (Bull + Red + Neutral → Validator) runs for: new positions, > COUNCIL_FULL_NAV_THRESHOLD NAV, high conviction spread, VIX > VOLATILITY_REGIME_THRESHOLDS.HIGH. Fast path (Bull + Red → Validator) runs for: existing position trims/adds ≤ COUNCIL_FAST_PATH_NAV_CEILING NAV. Emotional override: if user prompt contains urgency/FOMO signals, ALWAYS run full council with RED_TEAM weighted at RED_TEAM_HIGH_VOL_WEIGHT.",
+        "reference": "GEM_Terminal > routing_logic > consensus_pipeline > conditional_escalation"
     },
     "ENH_59_conviction_circuit_breaker": {
         "id": "ENH_59",

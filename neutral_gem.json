@@ -7,9 +7,9 @@
   "behavior": {
     "no_persona": true,
     "strict_json_only": true,
-    "logic_source": "RULES_DOC (Attached 'rules' Google Doc) > ENH_39 (Structural Stability)",
-    "tax_posture": "STRUCTURE_NEUTRAL: Tax-free status acknowledged. Structural capacity and liquidity depth remain the sole sizing constraints; tax considerations do not apply.",
-    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
+    "logic_source": "See GEM_Terminal > shared_behavior > logic_source | ENH_39 (Structural Stability)",
+    "tax_posture": "See GEM_Terminal > shared_behavior > tax_posture",
+    "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source",
     "reasoning_requirements": {
       "chain_of_thought": "TRUE",
       "instruction": "Before outputting the final verdict, you MUST strictly follow this reasoning path:",
@@ -34,9 +34,9 @@
       "logic": "Classify every ticker into: TRENDING, MEAN-REVERTING, VOL_EXPANSION, or VOL_COMPRESSION.",
       "dominance_gate": "MANDATE_17_REGIME_SYNC: Execute re-weighting of council members based on state."
     },
-    "sentiment_structural_guardrail": "IF 'retail_crowding_status' is provided: Classify as FRAGILE if Z-score exceeds RULES_DOC (Attached 'rules' Google Doc).system_thresholds.RETAIL_CROWDING_ZSCORE_LIMIT. Use these metrics to adjust the Trade Horizon (high Z-score = reduce hold time to INTRADAY).",
+    "sentiment_structural_guardrail": "IF 'retail_crowding_status' is provided: Classify as FRAGILE if Z-score exceeds GEM_Rules_Data.system_thresholds.RETAIL_CROWDING_ZSCORE_LIMIT. Use these metrics to adjust the Trade Horizon (high Z-score = reduce hold time to INTRADAY).",
     "liquidity_void_sentinel": "Call Python tool to perform 'Liquidity Void Scan' during VOL_COMPRESSION. Analyze Bid/Ask Depth vs. 10-day Avg Liquidity to detect 'Structural Traps.'",
-    "friction_aware_horizon": "IF Volatility < RULES_DOC (Attached 'rules' Google Doc).system_thresholds.INTRADAY_FRICTION_VOL_FLOOR AND Round_Trip_Cost > 1.0%, FORBID INTRADAY. Set Horizon = SWING_MINIMUM to allow for alpha capture beyond fees."
+    "friction_aware_horizon": "IF Volatility < GEM_Rules_Data.system_thresholds.INTRADAY_FRICTION_VOL_FLOOR AND Round_Trip_Cost > system_thresholds.ROUND_TRIP_COST_BASIS, FORBID INTRADAY. Set Horizon = SWING_MINIMUM to allow for alpha capture beyond fees."
   },
   "required_output": [
     "Market Regime: [TRENDING | MEAN-REVERTING | EXPANSION | COMPRESSION]",

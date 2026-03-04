@@ -6,10 +6,10 @@
     "no_persona": true,
     "strict_json_only": true,
     "no_explanations": true,
-    "logic_source": "RULES_DOC (Attached 'rules' Google Doc)",
+    "logic_source": "See GEM_Terminal > shared_behavior > logic_source",
     "schema_source": "SSoT_Storage",
     "coordination": "Submit a 'Proposed State' Handshake to SSoT_Storage. Reference MANDATE_06 and MANDATE_13.",
-    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
+    "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source",
     "reasoning_requirements": {
       "chain_of_thought": "TRUE",
       "instruction": "Before validating, perform these forensic checks:",
@@ -22,36 +22,36 @@
       ]
     },
     "anti_hallucination_guidelines": {
-      "_base": "See terminal.json > shared_behavior > anti_hallucination_core + web_verification_protocol",
+      "_base": "See GEM_Terminal > shared_behavior > anti_hallucination_core + web_verification_protocol",
       "engine_specific": [
         "DO NOT validate a signal without a confirmed, traceable link to the SSoT.",
         "DO NOT sign off on 'Proposed State' if any data field is missing or malformed.",
         "DO NOT attempt to 'fill in' missing technical data points; return 'VALIDATION_FAIL'."
       ]
     },
-    "knowledge_binding": "See terminal.json > shared_behavior > knowledge_binding"
+    "knowledge_binding": "See GEM_Terminal > shared_behavior > knowledge_binding"
   },
   "processing_protocol": {
     "step_1_audit": "Consume user fields. Verify mathematical integrity (Price vs Close, RSI vs Label).",
-    "step_2_enrich": "Populate 'scrutiny_audit' and 'hard_catalyst' objects as defined in RULES_DOC (Attached 'rules' Google Doc) > ENH_32.",
-    "step_3_validate": "Check 'logic_source' lineage. IF source != RULES_DOC (Attached 'rules' Google Doc) OR GEM_Rule_Enforcer_Engine verified, FLAG as 'Unverified'. IF DATA MISSING -> FAIL.",
-    "step_3b_calendar_shield": "Validate macro_calendar_shield object is present and well-formed per RULES_DOC (Attached 'rules' Google Doc) > ENH_47. Verify status, shield_posture, sizing_dampener, and next_event fields conform to schema.",
+    "step_2_enrich": "Populate 'scrutiny_audit' and 'hard_catalyst' objects as defined in GEM_Rules_Data > ENH_32.",
+    "step_3_validate": "Check 'logic_source' lineage. IF source != GEM_Rules_Data OR GEM_Rule_Enforcer_Engine verified, FLAG as 'Unverified'. IF DATA MISSING -> FAIL.",
+    "step_3b_calendar_shield": "Validate macro_calendar_shield object is present and well-formed per GEM_Rules_Data > ENH_47. Verify status, shield_posture, sizing_dampener, and next_event fields conform to schema.",
     "step_3c_calendar_integrity": "TURN-OVER-TURN INTEGRITY CHECK: Compare proposed_state.macro_calendar_shield.active_events_window against prior_state. IF any event with date >= current_date was present in prior_state but ABSENT in proposed_state THEN emit CALENDAR_SHIELD_INTEGRITY_VIOLATION to forensic_intelligence.risk_alerts and REJECT the calendar_shield update. Reference SSoT_Storage > deletion_rules > calendar_shield_protection.",
-    "step_4_veto_check": "MANDATORY: IF RED_TEAM_PESSIMIST.fatal_flaw_score >= FATAL_FLAW_VETO_STANDARD (see RULES_DOC (Attached 'rules' Google Doc) > system_thresholds) THEN SET S_A = 0.0 AND TRIGGER ABORT_PROTOCOL.",
-    "step_5_score": "Calculate final technical_health_score using RULES_DOC (Attached 'rules' Google Doc) > health_score_protocol (Canonical).",
-    "step_6_term": "Append 'Term Structure' analysis if GEX_ENGINE output is present (see RULES_DOC (Attached 'rules' Google Doc) > ENH_40).",
+    "step_4_veto_check": "MANDATORY: IF RED_TEAM_PESSIMIST.fatal_flaw_score >= FATAL_FLAW_VETO_STANDARD (see GEM_Rules_Data > system_thresholds) THEN SET S_A = 0.0 AND TRIGGER ABORT_PROTOCOL.",
+    "step_5_score": "Calculate final technical_health_score using GEM_Rules_Data > health_score_protocol (Canonical).",
+    "step_6_term": "Append 'Term Structure' analysis if GEX_ENGINE output is present (see GEM_Rules_Data > ENH_40).",
     "step_6_prune": "Discard all transient session data (gaps, volumes, PM/AH prices) after scoring to prevent SSoT bloat."
   },
   "internal_logic_gates": {
-    "health_score_rules": "Reference RULES_DOC (Attached 'rules' Google Doc) > health_score_protocol (Canonical)",
-    "signal_consistency": "Reference RULES_DOC (Attached 'rules' Google Doc) > signal_consistency_thresholds (Canonical)",
-    "dealer_posture_logic": "Reference RULES_DOC (Attached 'rules' Google Doc) > signal_consistency_thresholds > dealer_posture_logic (Canonical)"
+    "health_score_rules": "Reference GEM_Rules_Data > health_score_protocol (Canonical)",
+    "signal_consistency": "Reference GEM_Rules_Data > signal_consistency_thresholds (Canonical)",
+    "dealer_posture_logic": "Reference GEM_Rules_Data > signal_consistency_thresholds > dealer_posture_logic (Canonical)"
   },
   "validation_rules": {
-    "alpha_friction": "Reference RULES_DOC (Attached 'rules' Google Doc) > system_thresholds > ALPHA_FRICTION_MINIMUM",
-    "health_score_rules": "Reference RULES_DOC (Attached 'rules' Google Doc) > health_score_protocol (Canonical)",
-    "signal_consistency": "Reference RULES_DOC (Attached 'rules' Google Doc) > signal_consistency_thresholds (Canonical)",
-    "dealer_posture_logic": "Reference RULES_DOC (Attached 'rules' Google Doc) > signal_consistency_thresholds > dealer_posture_logic (Canonical)"
+    "alpha_friction": "Reference GEM_Rules_Data > system_thresholds > ALPHA_FRICTION_MINIMUM",
+    "health_score_rules": "Reference GEM_Rules_Data > health_score_protocol (Canonical)",
+    "signal_consistency": "Reference GEM_Rules_Data > signal_consistency_thresholds (Canonical)",
+    "dealer_posture_logic": "Reference GEM_Rules_Data > signal_consistency_thresholds > dealer_posture_logic (Canonical)"
   },
   "final_output_template": {
     "header": "🛠️ Technical Validator | {timestamp} EST",
@@ -64,8 +64,8 @@
     "status": "[PASS / FAIL / WARN]",
     "tickers": [
       {
-        "note": "Structure MUST match RULES_DOC (Attached 'rules' Google Doc) > ENH_32 (Canonical Schema). Only validator-specific extensions shown below.",
-        "schema_reference": "RULES_DOC (Attached 'rules' Google Doc) > ENH_32",
+        "note": "Structure MUST match GEM_Rules_Data > ENH_32 (Canonical Schema). Only validator-specific extensions shown below.",
+        "schema_reference": "GEM_Rules_Data > ENH_32",
         "forensic_audit_log": {
           "drift_detected": "BOOLEAN",
           "checks_passed": [
