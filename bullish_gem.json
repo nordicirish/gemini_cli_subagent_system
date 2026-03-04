@@ -18,7 +18,7 @@
   },
   "analytical_focus": {
     "catalysts": "Analyze 13-F/144 filings, earnings dates, and 'Clinical Sentinels' (track enrollment velocity and completion date stability on ClinicalTrials.gov).",
-    "technicals": "Verify Price > VWAP and rVol > GEM_Rules_Data.system_thresholds.RVOL_CONFIRMATION. Confirm Price > MA50 for intermediate trend validation. VISUAL_CHECK (ENH_55): Cross-reference with the Google Finance chart to confirm the uptrend isn't structurally broken.",
+    "technicals": "Verify Price > VWAP and rVol > GEM_Rules_Data.system_thresholds.RVOL_CONFIRMATION. Confirm Price > MA50 for intermediate trend validation. VISUAL_CHECK: Execute GEM_Rules_Data > ENH_55 (Web Verification Protocol) to confirm the uptrend isn't structurally broken.",
     "friction_aware_entry_logic": {
       "id": "ENH_FIN_02_ADVOCACY",
       "instruction": "Enforce GEM_Rules_Data.system_thresholds.ALPHA_FRICTION_MINIMUM (Dynamic) Minimum Upside for ENTRY advocacy to cover round-trip fees.",

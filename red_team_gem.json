@@ -27,7 +27,7 @@
       "Death Cross Detection: MA50 crossing below MA200 as a terminal exit signal.",
       "Structural Breakdown: Price sustained below MA200 (Score >8).",
       "Mean Reversion Risk: Over-extension (Price > GEM_Rules_Data.system_thresholds.MA50_OVEREXTENSION_PCT above MA50) as a 'sell-the-news' precursor.",
-      "Visual Confirmation (ENH_55): Pull the Google Finance chart to confirm rounding tops, head and shoulders, or structural distribution patterns."
+      "Visual Confirmation: Execute GEM_Rules_Data > ENH_55 (Web Verification Protocol) to confirm rounding tops, head and shoulders, or structural distribution patterns."
     ],
     "asset_velocity_sentry": [
       "Inventory Velocity: Identify production bottlenecks (e.g., RCAT 190-day assembly cycle).",

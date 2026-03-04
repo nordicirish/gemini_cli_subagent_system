@@ -64,11 +64,11 @@ To prevent the LLM reasoning engines from hallucinating software structures whil
 2. **Rules / Protocols (`ENH_01` to `ENH_52`)**: These govern **Financial Execution & Domain Knowledge**. These are the fluid, quantitative strategies telling the system *how to trade*. 
    - *Example:* `ENH_45` (Macro Shock Veto), `ENH_50` (Pre-Trade Formulation), `ENH_36` (Post-14:30 Liquidity Gates).
 
-### The Air-Gapped SSoT Architecture (v4.0+)
-Due to Google Gemini's web sandboxing (preventing direct external API calls) and Google Keep's synchronization latency, the system employs an **Air-Gapped Single Source of Truth**.
-*   **The Processor:** The sandboxed Gemini UI acts as a stateless, high-powered reasoning engine.
-*   **The Database / Backend:** Your local Python environment (`fetch_stocks.py`) runs a FastAPI server holding the persistent, live state (`local_ssot_shadow.json`).
-*   **The UI:** A Vanilla JS frontend (`http://localhost:8000`) visualizes the data via an advanced glassmorphic dashboard.
+### The Air-Gapped SSoT Architecture (v4.9x+)
+Due to Google Gemini's web sandboxing preventing direct external API calls, the system employs an **Air-Gapped Single Source of Truth via Prompt Payload Injection**.
+*   **The Processor:** The sandboxed Gemini Web UI acts as a stateless, high-powered reasoning engine. It does not require the SSoT file or trade lessons to be attached as Google Docs.
+*   **The Bridge:** The Python backend (`fetch_stocks.py`) injects your live state (`local_ssot_shadow.json`) and history (`trade_lessons.json`) directly into the markdown prompt it generates for you. 
+*   **The Sync:** Gemini outputs a strict `EXECUTION_PAYLOAD` JSON block. You copy this block and paste it into the Web Dashboard (`/api/paste`), seamlessly syncing the LLM's decisions back to your local files.
 
 ---
 
@@ -109,16 +109,16 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 | File | Gem Role | Gemini Mode | Purpose |
 |------|----------|-------------|---------|
 | `terminal.json` | **Orchestrator** | PRO | Master router — classifies user input and dispatches to the correct engine |
-| `rules.json` | **Legislative Body** | N/A | **SSoT**: Stored centrally at `GoogleDrive://GEM_Trading_Rules/rules.json`. DO NOT upload as static knowledge. |
-| `rule_enforcer_engine.json` | **Rule Enforcer** | PRO | Active Enforcer — Policing Agent that validates logic against `rules.json` |
-| `SSoT_Storage.json` | **SSoT Controller** | PRO | Passive data schema & state container (Single Source of Truth) |
+| `rules.json` | **Legislative Body** | N/A | **Static Rules**: The canonical source containing thresholds and ENH_ protocols. MUST be attached via Google Drive. |
+| `rule_enforcer_engine.json` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `GEM_Rules_Data` |
+| `SSoT_Storage.json` | **SSoT Controller** | PRO | Passive data schema logic. (State ops owned by Context Engine, execution logic deferred to Rule Enforcer) |
 | `context_engine.json` | **Context Engine** | PRO | Active SSoT bridge — drift detection, state merging, sync orchestration |
 | `bullish_gem.json` | **Bullish Advocate** | THINKING | Alpha & momentum specialist — identifies reasons to approve trades |
 | `red_team_gem.json` | **Red Team Pessimist** | THINKING | Adversarial risk specialist — identifies reasons to reject trades |
 | `neutral_gem.json` | **Neutral Structuralist** | PRO | Market architecture specialist — GEX, regime detection, liquidity |
 | `execution.json` | **Execution Engine** | PRO | ATR-adjusted position sizing, order generation, liquidity gates |
 | `gex_engine.json` | **GEX Engine** | PRO | Gamma exposure computation — net GEX, gamma flip, dealer posture |
-| `institutional.json` | **Institutional Engine** | FAST | Structural viability — dilution, warrants, capital structure, governance |
+
 | `macro_arbiter.json` | **Macro Sentinel** | PRO | Binary risk-on/risk-off veto — CPI, FOMC, FX, geopolitical shocks |
 | `sentiment_engine.json` | **Sentiment Engine** | PRO | Sentiment & catalyst extraction — news, social velocity, regulatory |
 | `structural_risk.json` | **Structural Risk Engine** | FAST | Forensic dilution detection — shelf offerings, warrant walls, PIPE |
@@ -206,7 +206,7 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 | **Forensic Structural Filter** | `ENH_30` | 50% sizing reduction on dilution/warrant forensic flags |
 | **Post-ATR Execution Gate** | `ENH_36` | Blocks entries after 14:30 ET in low-volatility conditions |
 | **Correlation Guard** | `ENH_43` | Warns on >80% pairwise correlation or >35% sector exposure |
-| **Web Verification Protocol** | `ENH_55` | Forces sub-agents to visually verify mathematical trends using the Google Finance extension |
+| **Web Verification Protocol** | `ENH_55` | Forces sub-agents to visually verify multi-timeframe mathematical trends (1D, 5D, 6M, YTD) using the Google Finance extension |
 | **State Emission** | `MANDATE_09` | Every turn must output complete, untruncated SSoT JSON |
 
 ---
@@ -278,10 +278,9 @@ For each JSON file, create a new Gem in Google Gemini:
 2. Click **"New Gem"**
 3. Paste the contents of the JSON file as the Gem's system instruction
 4. Name the Gem to match its role (e.g., *"GEM Terminal"*, *"GEM Rule Enforcer"*)
-5. **Knowledge Injection (CRITICAL - ZERO TOUCH SYNC):**
-   - **ALL Gems**: You MUST attach the **`rules`** Google Doc (from `GEM_Trading_Rules/`) to the Gem's knowledge base using the Drive extension.
-   - **Automatic Sync**: The Gems are programmed to *automatically* check this attached document for updates before every response. You do not need to manually reload it; just edit the Google Doc, and the Gem will see it instantly.
-   - **Do NOT upload static files**. Internal JSON instructions are now "Knowledge Bound" to these live Drive files.
+5. **Knowledge Injection (Web UI Sandbox Bridge):**
+   - **Required Attachments**: You MUST attach the **`rules`** Google Doc (from `GEM_Trading_Rules/`) to the Gem's knowledge base using the Drive extension. If using the Research Engine, attach the **Trading_Research** folder.
+   - **Payload Injection (No longer attached)**: The `GEM-Context-SSOT` and `trade_lessons` files are **no longer required as attached files**. The Python dashboard now injects `local_storage_state` and `trade_lessons` directly into the text prompt payload it generates for you. 
 
 ### 5. Initialize Air-Gap State Files
 The system uses local JSON files to maintain your "State of the World" portfolio and history across sessions without encountering web latency. Before your first run, create these two empty files in the root directory:
@@ -415,8 +414,8 @@ The `scrutiny_audit` object contains the full council vote record:
 
 ## 🏗️ Design Principles
 
-- **No Persona Contamination** — Every Gem identifies its engine role to prevent cross-role hallucination
-- **Logic/Data Separation** — `SSoT_Storage.json` holds state schema; `rules.json` holds static laws; `rule_enforcer_engine.json` holds enforcement logic
+- **Canonical Centralization** — Individual engines do not contain hardcoded logic or parameters (e.g. lists of exogenous shocks). All logic points natively to canonical protocols in `GEM_Rules_Data`.
+- **Logic/Data Separation** — `SSoT_Storage.json` holds state schema; `rules.json` holds static laws; `rule_enforcer_engine.json` exclusively handles execution logic.
 - **Non-Destructive Merging** — Field-level merge with `PRESERVE_IF_NOT_UPDATED` strategy
 - **Forensic Lineage** — Every state change includes timestamped source attribution
 - **Alpha-Friction Awareness** — All engines account for the 1% round-trip cost of the Nordea OST platform

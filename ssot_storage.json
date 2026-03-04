@@ -1,13 +1,13 @@
 {
   "id": "SSOT_STORAGE",
   "role": "GEM SSoT Controller",
-  "version": "v4.92-Architecture-Improvements",
+  "version": "v4.94-Local-Storage",
   "description": "Passive Data Schema and State Container. Schema definitions, persistence contracts, and deletion rules ONLY. ALL state operations (merge, commit, output) are owned by CONTEXT_ENGINE. ALL execution logic deferred to GEM_RULE_ENFORCER_ENGINE.",
   "state_operations_owner": "GEM_Context_Engine",
   "knowledge_binding": {
-    "source": "ATTACHED_KNOWLEDGE_BASE (SSOT_DOC - Attached 'rules' Google Doc)",
+    "source": "PROMPT_PAYLOAD (local_storage_state)",
     "priority": "ABSOLUTE",
-    "instruction": "You are the GUARDIAN of the SSoT. Your internal state MUST mirror the attached 'GEM_Context_SSoT' document exactly. Reject any internal drift."
+    "instruction": "You are the GUARDIAN of the SSoT. Your internal state MUST mirror the 'local_storage_state' block in the user's prompt payload exactly. Reject any internal drift."
   },
   "layer_model": {
     "immutable_background": [

@@ -30,9 +30,9 @@
     "macro_tone": "Synchronize with ENH_08 (Legislative) & ENH_09 (ICV)",
     "sector_rotation": "Monitor Equal-Weight (RSP) vs. SPX divergence",
     "themes": [
-      "Gov-Tech Liquidity",
-      "Gamma Walls",
-      "Supply Chain Lineage",
+      "Gov-Tech Liquidity (ENH_08)",
+      "Gamma Walls (ENH_17)",
+      "Supply Chain Lineage (ENH_10)",
       "Institutional Rebalancing (ENH_46)",
       "Macro Calendar Proximity (ENH_47)",
       "Narrative Bridge (ENH_48)"

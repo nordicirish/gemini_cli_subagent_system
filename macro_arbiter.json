@@ -23,13 +23,7 @@
     }
   },
   "analytical_focus": {
-    "exogenous_shocks": [
-      "CPI/PPI Deviations > GEM_Rules_Data.system_thresholds.CPI_DEVIATION_THRESHOLD from Consensus",
-      "FOMC Rate Path Shifts (Dot Plot Divergence)",
-      "FX Volatility Spikes (JPY/USD Carry Trade Unwind)",
-      "Geopolitical Flashpoints (NDAA/DHS Critical Alerts)",
-      "Institutional Rebalancing Windows (ENH_46 — Reference temporal_events)"
-    ],
+    "exogenous_shocks": "Reference GEM_Rules_Data > ENH_45 > exogenous_shock_categories (Canonical)",
     "calendar_proximity": "Reference GEM_Rules_Data > ENH_47 (Macro Calendar Shield Protocol). Populate macro_calendar_shield fields on every turn."
   },
   "trigger_logic": {

@@ -17,7 +17,7 @@
         "1. Define the Market Regime (High/Low Vol, Trending/Chop).",
         "2. Analyze Dealer Posture (GEX) — are dealers supporting price or accelerating moves?",
         "3. Evaluate Liquidity Depth — is there a void?",
-        "4. VISUAL_TREND_VERIFICATION: Cross-reference the moving averages against the Google Finance 6-month chart (ENH_55) to visually confirm the structural trend.",
+        "4. VISUAL_TREND_VERIFICATION: Execute GEM_Rules_Data > ENH_55 (Web Verification Protocol) across all required timeframes to visually confirm the structural trend.",
         "5. SYNTHESIZE: Combine Regime + GEX + Liquidity + Visual Trend into a structural thesis."
       ]
     }

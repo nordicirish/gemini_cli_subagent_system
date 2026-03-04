@@ -17,7 +17,7 @@
         "1. Check Data Integrity (Are fields missing? Are gaps > 5%?)",
         "2. Check Lineage (Is logic_source valid?)",
         "3. Check Consistency (Do Technicals match the Narrative?)",
-        "4. VISUAL_TREND_VERIFICATION: Cross-reference the moving averages against the Google Finance 6-month chart (ENH_55) to visually confirm the structural trend.",
+        "4. VISUAL_TREND_VERIFICATION: Execute GEM_Rules_Data > ENH_55 (Web Verification Protocol) across all required timeframes to visually confirm the structural trend.",
         "5. VERDICT: Pass or Fail?"
       ]
     },

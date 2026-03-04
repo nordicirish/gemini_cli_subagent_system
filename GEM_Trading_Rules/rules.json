@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v4.92-Architecture-Improvements",
+    "version": "v4.93-Local-SSOT-Storage",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -92,12 +92,12 @@
         {
             "id": "MANDATE_02_WRITE_AUTHORITY",
             "status": "ACTIVE",
-            "instruction": "This GEM is the sole authority allowed to 'Commit' changes to the terminal state in Google Docs. Exclusive permission to execute 'FORCE_WRITE' to the master 'GEM-Context-SSOT' entry is reserved for the SSoT GEM."
+            "instruction": "This GEM is the sole authority allowed to 'Commit' changes to the terminal state in the SSoT. Exclusive permission to execute updates to the user's SSoT state is reserved for the SSoT GEM."
         },
         {
             "id": "MANDATE_03_VALIDATION_PROTOCOL",
             "status": "ACTIVE",
-            "instruction": "Validate all requests against the Rules GEM using the live state parsed from the 'GEM-Context-SSOT' Google Doc. Block operations violating liquidity limits, risk regimes (MOMENTUM_BREAKOUT), or regulatory gates (NDAA Section 1709)."
+            "instruction": "Validate all requests against the Rules GEM using the live state parsed from the 'local_storage_state' key in the user's prompt payload. Block operations violating liquidity limits, risk regimes (MOMENTUM_BREAKOUT), or regulatory gates (NDAA Section 1709)."
         },
         {
             "id": "MANDATE_04_DRIFT_CONTROL",
@@ -136,7 +136,7 @@
         {
             "id": "MANDATE_09_STATE_EMISSION",
             "status": "STRICT_ENFORCE",
-            "instruction": "Every turn MUST terminate with SSoT JSON state. Full emission is PREFERRED. If output token limits prevent full emission, the Gem MAY emit a DELTA payload containing only the changed sections. The orchestrator will deep-merge the delta into the existing local_ssot_shadow.json.",
+            "instruction": "Every turn MUST terminate with SSoT JSON state. Full emission is PREFERRED. If output token limits prevent full emission, the Gem MAY emit a DELTA payload containing only the changed sections. The user will copy this payload into the fetch_stocks.py paste handler, which will deep-merge the delta into the existing local_ssot_shadow.json.",
             "required_top_level_keys": [
                 "state_context",
                 "trade_lessons",
@@ -395,7 +395,7 @@
         {
             "id": "ENH_12",
             "title": "Volatile State Cache (VSC) Fallback",
-            "instruction": "Revert to VSC if Google Docs bridge is unreachable. Mode: Read-Only, State-Locked."
+            "instruction": "Revert to SAFE_MODE if the 'local_storage_state' payload key is missing. Mode: Read-Only, State-Locked."
         },
         {
             "id": "ENH_16",
@@ -429,8 +429,8 @@
         },
         {
             "id": "ENH_22",
-            "title": "Docs Native Bridge Protocol",
-            "instruction": "SINGLE SOURCE OF TRUTH: GOOGLE DOCS SSoT.",
+            "title": "Payload Native Bridge Protocol",
+            "instruction": "SINGLE SOURCE OF TRUTH: 'local_storage_state' JSON block in the prompt payload.",
             "protocol": {
                 "sync_id": "STRING",
                 "market_status": "STRING",
@@ -441,12 +441,12 @@
         {
             "id": "ENH_23",
             "title": "Memory Initialization & Persistence",
-            "instruction": "Synchronize with GEM-Context-SSOT Doc context buffer on first turn."
+            "instruction": "Synchronize with the 'local_storage_state' payload block on first turn."
         },
         {
             "id": "ENH_24",
             "title": "Data Integrity & Schema Enforcement",
-            "instruction": "Use WAC and shares from GEM-Context-SSOT Doc for all P&L calculations."
+            "instruction": "Use WAC and shares from the 'local_storage_state' payload for all P&L calculations."
         },
         {
             "id": "ENH_25",
@@ -653,6 +653,13 @@
             "id": "ENH_45",
             "title": "Macro Shock & Binary Veto Protocol",
             "instruction": "Monitors exogenous data for Black Swan events. Triggers high-priority flag in forensic_intelligence.risk_alerts.",
+            "exogenous_shock_categories": [
+                "CPI/PPI Deviations > system_thresholds.CPI_DEVIATION_THRESHOLD from Consensus",
+                "FOMC Rate Path Shifts (Dot Plot Divergence)",
+                "FX Volatility Spikes (JPY/USD Carry Trade Unwind)",
+                "Geopolitical Flashpoints (NDAA/DHS Critical Alerts)",
+                "Institutional Rebalancing Windows (ENH_46 — Reference temporal_events)"
+            ],
             "logic_gates": [
                 "IF shock_intensity >= SHOCK_CAUTION_THRESHOLD -> SET alpha_sentry_mode = 'CAUTION'",
                 "IF shock_intensity >= SHOCK_ABORT_THRESHOLD -> SET alpha_sentry_mode = 'ABORT' AND trade_state = 'NO_TRADE'",
@@ -784,7 +791,7 @@
         {
             "id": "ENH_49",
             "title": "Air-Gap Sandbox Bridge Protocol",
-            "instruction": "The Gem operates in a stateless, air-gapped sandbox. It has ZERO direct write access to local files, Google Docs, or Google Keep.",
+            "instruction": "The Gem operates in a Web UI sandbox. It has ZERO direct write access to local files; all state updates MUST be emitted in the EXECUTION_PAYLOAD. The user will copy and paste this payload into the local fetch_stocks.py paste handler, which acts as the bridge to update local JSON files.",
             "execution_flow": [
                 "1. INGESTION: Read the heavily structured 'State of the World' payload provided by the User in the prompt.",
                 "2. SYNTHESIS: Run all internal logic, Council voting (MANDATE_13), and structural checks.",
@@ -834,7 +841,7 @@
             "execution_flow": [
                 "1. ROOT_CAUSE_ANALYSIS: Identify exactly why the trade failed (e.g., 'Ignored a VIX spike above 20' or 'Bought in a Liquidity Void').",
                 "2. RULE_GENERATION: Write a new permanent behavioral rule or guardrail based on the failure.",
-                "3. EMISSION: Output the new rule in the `EXECUTION_PAYLOAD` under the `new_trade_lessons` array so the orchestrator can append it to `trade_lessons.json`."
+                "3. EMISSION: Output the new rule in the `EXECUTION_PAYLOAD` under the `new_trade_lessons` array so the user's fetch_stocks.py paste handler can append it to `trade_lessons.json`."
             ]
         },
         {
@@ -871,11 +878,19 @@
         {
             "id": "ENH_55",
             "title": "Web Verification Protocol",
-            "instruction": "Enforces spatial trend awareness. For every ticker provided in the SSoT payload, the Gem MUST use the Google Finance extension to retrieve the YTD and 6-month price charts.",
+            "instruction": "Enforces spatial trend awareness across multiple timeframes. For every ticker provided in the SSoT payload, the Gem MUST use the Google Finance extension to retrieve price charts at all required timeframes.",
+            "chart_requirements": {
+                "1_day": "Verify VWAP relationship and intraday volume profile. Detect opening gap fills, failed breakouts, and distribution at key price levels.",
+                "5_day": "Detect multi-day base formation, support tests, or distribution patterns. Identify pre-market vs regular session divergence.",
+                "6_month": "Confirm intermediate trend alignment with MA50/MA200 signals. Identify accumulation or distribution phases.",
+                "ytd": "Validate macro trend thesis. Cross-reference moving averages in the payload against the visual overarching algorithmic trend."
+            },
             "execution_flow": [
-                "1. EXTENSION_CALL: Trigger Google Finance to view the chart for each active or watched ticker.",
-                "2. VISUAL_CROSS_REFERENCE: Cross-reference the moving averages provided in the payload against the visual overarching algorithmic trend.",
-                "3. VERDICT_ADJUSTMENT: Identify overarching signs of algorithmic distribution or accumulation that short-term indicators miss, and adjust the final `trade_state` verdict accordingly."
+                "1. EXTENSION_CALL: Trigger Google Finance to view the 1-day, 5-day, 6-month, and YTD charts for each active or watched ticker.",
+                "2. INTRADAY_CHECK: On the 1-day chart, confirm price relationship to VWAP and flag any distribution volume spikes or gap-fill failures.",
+                "3. MICROSTRUCTURE_CHECK: On the 5-day chart, identify multi-day basing patterns or breakdown continuation.",
+                "4. VISUAL_CROSS_REFERENCE: On the 6-month and YTD charts, cross-reference the moving averages provided in the payload against the visual overarching algorithmic trend.",
+                "5. VERDICT_ADJUSTMENT: Identify overarching signs of algorithmic distribution or accumulation that short-term indicators miss, and adjust the final `trade_state` verdict accordingly."
             ]
         },
         {
@@ -1588,7 +1603,7 @@
             "1. BOOT: Ingest 'State of the World' payload (SSoT + trade_lessons)",
             "2. MACRO SCAN: Run MACRO_SENTINEL for overnight shocks and calendar proximity",
             "3. PORTFOLIO AUDIT: For each active position, run TECHNICAL_VALIDATOR with fresh yfinance data",
-            "4. LESSON CHECK: Cross-reference trade_lessons.json against open positions for applicable warnings",
+            "4. LESSON CHECK: Cross-reference the 'trade_lessons' array in the prompt payload against open positions for applicable warnings",
             "5. THREAT MATRIX: Synthesize into priority-ranked action list (TRIM / HOLD / ADD / NEW RESEARCH)",
             "6. PRESENT: Emit structured daily briefing before accepting trade commands"
         ]
@@ -1597,8 +1612,8 @@
         "id": "ENH_57",
         "title": "Lesson Feedback Pipeline",
         "status": "ACTIVE",
-        "instruction": "After every REVIEW_ENGINE post-mortem where thesis_integrity != Confirmed, the Review Engine MUST emit a codified lesson into the output payload under 'new_trade_lessons'. The web console pipes this to trade_lessons.json via upsert-by-ID. The Research Engine MUST cross-reference trade_lessons.json at session boot to check for lessons that invalidate active theses.",
-        "routing": "REVIEW_ENGINE → new_trade_lessons → fetch_stocks.py paste handler → trade_lessons.json → RESEARCH_ENGINE boot check"
+        "instruction": "After every REVIEW_ENGINE post-mortem where thesis_integrity != Confirmed, the Review Engine MUST emit a codified lesson into the output payload under 'new_trade_lessons'. The user copies this payload to the fetch_stocks.py paste handler, which upserts it into trade_lessons.json. The Research Engine MUST cross-reference trade_lessons.json at session boot.",
+        "routing": "REVIEW_ENGINE → new_trade_lessons → User Paste → fetch_stocks.py paste handler → trade_lessons.json"
     },
     "ENH_58_conditional_council": {
         "id": "ENH_58",
@@ -1619,18 +1634,23 @@
         "authority": "CANONICAL \u00e2\u20ac\u201d This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.",
         "RULES_DOC": {
             "path": "GoogleDrive://GEM_Trading_Rules/rules",
-            "description": "Primary rules document containing mandates and thresholds (Google Doc)",
+            "description": "Primary rules document containing mandates and thresholds (Attached Knowledge Base)",
             "access_method": "ATTACHED_KNOWLEDGE_BASE"
         },
         "SSOT_DOC": {
-            "path": "GEM-Context-SSOT",
-            "description": "Single Source of Truth state file (Google Doc)",
-            "access_method": "GOOGLE_DRIVE_CENTRAL"
+            "path": "payload.local_storage_state",
+            "description": "Single Source of Truth state file (Injected via Prompt Payload)",
+            "access_method": "PROMPT_PAYLOAD"
+        },
+        "TRADE_LESSONS": {
+            "path": "payload.trade_lessons",
+            "description": "File containing codified post-trade lessons (Injected via Prompt Payload)",
+            "access_method": "PROMPT_PAYLOAD"
         },
         "RESEARCH_FOLDER": {
             "path": "Trading_Research",
             "description": "Folder containing research materials and PDF uploads",
-            "access_method": "GOOGLE_DRIVE_FOLDER"
+            "access_method": "ATTACHED_KNOWLEDGE_BASE"
         }
     }
 }
