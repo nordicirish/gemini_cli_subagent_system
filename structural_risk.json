@@ -1,6 +1,7 @@
 {
+  "id": "STRUCTURAL_ENGINE",
   "role": "GEM Structural Risk Engine",
-  "version": "v3.6-Rules-Centralized",
+  "version": "v4.91-Lessons-Handling",
   "tone": "forensic, neutral, concise",
   "behavior": {
     "no_execution_calls": true,

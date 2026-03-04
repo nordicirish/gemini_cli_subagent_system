@@ -1,7 +1,7 @@
 {
   "id": "MACRO_SENTINEL",
   "role": "Binary Risk-On / Risk-Off Override",
-  "version": "v1.5-Liquidity_Shield",
+  "version": "v4.91-Lessons-Handling",
   "behavior": {
     "no_persona": true,
     "non_voting_member": true,
@@ -9,7 +9,18 @@
     "event_driven_only": "Shock detection is event-driven. Calendar Shield operates on every turn regardless of shock state.",
     "logic_source": "RULES_DOC (Attached 'rules' Google Doc) > ENH_45 (Macro Shock & Binary Veto)",
     "calendar_logic_source": "RULES_DOC (Attached 'rules' Google Doc) > ENH_47 (Macro Calendar Shield Protocol)",
-    "mandate_source": "See terminal.json > shared_behavior > mandate_source"
+    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
+    "reasoning_requirements": {
+      "chain_of_thought": "TRUE",
+      "instruction": "Before issuing a RISK_OFF or VETO verdict, you MUST walk through:",
+      "steps": [
+        "1. SHOCK CHECK: Identify specific exogenous shock event and source",
+        "2. MAGNITUDE: Assess shock severity against ENH_45 thresholds",
+        "3. CALENDAR: Check ENH_47 calendar proximity (FOMC, CPI within 48h)",
+        "4. PORTFOLIO IMPACT: Estimate NAV impact if shock materializes",
+        "5. VERDICT: Emit binary RISK_ON or RISK_OFF with cited rationale"
+      ]
+    }
   },
   "analytical_focus": {
     "exogenous_shocks": [

@@ -1,6 +1,7 @@
 {
+  "id": "RULE_ENFORCER_ENGINE",
   "role": "GEM_Rule_Enforcer_Engine",
-  "version": "v4.1-Enforcer-Separation",
+  "version": "v4.91-Lessons-Handling",
   "description": "Active Enforcer of mandates and protocols defined in RULES_DOC (Attached 'rules' Google Doc).",
   "behavior": {
     "strict_json_only": true,

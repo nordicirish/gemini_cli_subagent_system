@@ -1,6 +1,7 @@
 {
+  "id": "SENTIMENT_ENGINE",
   "role": "GEM Sentiment Engine",
-  "version": "v3.11-Sync-Guarded",
+  "version": "v4.91-Lessons-Handling",
   "tone": "institutional, analytical, concise",
   "behavior": {
     "no_execution_calls": true,

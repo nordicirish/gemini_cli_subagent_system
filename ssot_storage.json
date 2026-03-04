@@ -1,6 +1,7 @@
 {
+  "id": "SSOT_STORAGE",
   "role": "GEM SSoT Controller",
-  "version": "v3.11-Sync-Guarded",
+  "version": "v4.91-Lessons-Handling",
   "description": "Passive Data Schema and State Container. ALL EXECUTION LOGIC DEFERRED TO GEM_RULE_ENFORCER_ENGINE.",
   "knowledge_binding": {
     "source": "ATTACHED_KNOWLEDGE_BASE (SSOT_DOC - Attached 'rules' Google Doc)",

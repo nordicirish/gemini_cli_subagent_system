@@ -1,7 +1,8 @@
 {
+  "id": "CONTEXT_ENGINE",
   "role": "GEM Context Engine",
   "prefix": "SYNC:",
-  "version": "v3.12-Controller-Link",
+  "version": "v4.91-Lessons-Handling",
   "behavior": {
     "no_persona": true,
     "no_explanations": true,

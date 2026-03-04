@@ -1,7 +1,7 @@
 {
   "role": "GEM Technical Validator",
   "prefix": "VALIDATE:",
-  "version": "v4.04-Web_Verification",
+  "version": "v4.91-Lessons-Handling",
   "behavior": {
     "no_persona": true,
     "strict_json_only": true,

@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v4.91-Lessons-Handling",
+    "version": "v4.92-Architecture-Improvements",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -1543,6 +1543,42 @@
                 "research"
             ]
         }
+    },
+    "ENH_56_daily_workflow": {
+        "id": "ENH_56",
+        "title": "Daily Workflow Protocol",
+        "status": "ACTIVE",
+        "trigger": "SESSION_START",
+        "steps": [
+            "1. BOOT: Ingest 'State of the World' payload (SSoT + trade_lessons)",
+            "2. MACRO SCAN: Run MACRO_SENTINEL for overnight shocks and calendar proximity",
+            "3. PORTFOLIO AUDIT: For each active position, run TECHNICAL_VALIDATOR with fresh yfinance data",
+            "4. LESSON CHECK: Cross-reference trade_lessons.json against open positions for applicable warnings",
+            "5. THREAT MATRIX: Synthesize into priority-ranked action list (TRIM / HOLD / ADD / NEW RESEARCH)",
+            "6. PRESENT: Emit structured daily briefing before accepting trade commands"
+        ]
+    },
+    "ENH_57_lesson_feedback_loop": {
+        "id": "ENH_57",
+        "title": "Lesson Feedback Pipeline",
+        "status": "ACTIVE",
+        "instruction": "After every REVIEW_ENGINE post-mortem where thesis_integrity != Confirmed, the Review Engine MUST emit a codified lesson into the output payload under 'new_trade_lessons'. The web console pipes this to trade_lessons.json via upsert-by-ID. The Research Engine MUST cross-reference trade_lessons.json at session boot to check for lessons that invalidate active theses.",
+        "routing": "REVIEW_ENGINE → new_trade_lessons → fetch_stocks.py paste handler → trade_lessons.json → RESEARCH_ENGINE boot check"
+    },
+    "ENH_58_conditional_council": {
+        "id": "ENH_58",
+        "title": "Conditional Council Escalation",
+        "status": "ACTIVE",
+        "instruction": "Gate council depth based on trade significance. Full council (Bull + Red + Neutral → Validator) runs for: new positions, >10% NAV, high conviction spread, VIX > 25. Fast path (Bull + Red → Validator) runs for: existing position trims/adds ≤5% NAV. Emotional override: if user prompt contains urgency/FOMO signals, ALWAYS run full council with RED_TEAM weighted at 0.55.",
+        "reference": "terminal.json > routing_logic > consensus_pipeline > conditional_escalation"
+    },
+    "ENH_59_conviction_circuit_breaker": {
+        "id": "ENH_59",
+        "title": "Conviction Bias Circuit Breaker",
+        "status": "ACTIVE",
+        "trigger": "IF all three council members (Bull, Red, Neutral) agree with conviction > 7/10",
+        "instruction": "When all council members show high conviction in the same direction, this is a contrarian warning signal. The TECHNICAL_VALIDATOR must flag 'CONVICTION_CLUSTER_WARNING' and require at least one additional data point (GEX, institutional flow, or calendar check) before proceeding. High unanimous conviction may indicate groupthink rather than genuine signal alignment.",
+        "action": "Append '⚠️ CONVICTION CLUSTER: All council unanimous >7/10. Seeking disconfirming evidence.' to output."
     },
     "infrastructure": {
         "authority": "CANONICAL \u00e2\u20ac\u201d This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.",

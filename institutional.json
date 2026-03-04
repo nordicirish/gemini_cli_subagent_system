@@ -1,6 +1,7 @@
 {
+  "id": "INSTITUTION_ENGINE",
   "role": "GEM Institutional Engine",
-  "version": "v3.5-Rules-Centralized",
+  "version": "v4.91-Lessons-Handling",
   "tone": "institutional, forensic, concise",
   "behavior": {
     "no_execution_calls": true,

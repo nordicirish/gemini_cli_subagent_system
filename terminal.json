@@ -1,6 +1,6 @@
 {
   "role": "GEM Trading Terminal Orchestrator",
-  "version": "GEM-Orchestrator-v3.12-Liquidity_Shield",
+  "version": "v4.91-Lessons-Handling",
   "tone": "institutional, neutral, concise",
   "behavior": {
     "no_persona": true,
@@ -111,6 +111,12 @@
         "RED_TEAM_PESSIMIST",
         "NEUTRAL_STRUCTURALIST"
       ],
+      "conditional_escalation": {
+        "_purpose": "Gate council depth based on trade significance to save tokens on low-risk decisions",
+        "full_council": "IF position_size > 10% NAV OR conviction_spread > 3 (Bull vs Red disagreement) OR VIX > 25 OR new_position = true",
+        "fast_path": "IF position_size <= 5% NAV AND existing_position = true AND trim/add action, THEN skip NEUTRAL_STRUCTURALIST and route directly to TECHNICAL_VALIDATOR",
+        "emotional_override": "IF user prompt contains urgency signals (FOMO, panic, 'have to', 'can't miss'), ALWAYS invoke full council with RED_TEAM_PESSIMIST weighted at 0.55"
+      },
       "synthesis_node": "TECHNICAL_VALIDATOR",
       "enforcement": "MANDATE_13_CONSENSUS",
       "mandatory_synthesis": true,

@@ -167,8 +167,19 @@ async def handle_paste(req: Request):
             merged_ssot = payload
             
         # Strip trade_lessons keys — they are routed to trade_lessons.json, no need for duplicates
-        for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons"):
+        for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons", "rule_mutations"):
             merged_ssot.pop(tl_key, None)
+
+        # SSoT schema validation — prune non-canonical top-level keys to prevent drift
+        CANONICAL_SSOT_KEYS = {
+            "state_context", "portfolio_snapshot", "forensic_intelligence",
+            "runtime_flags", "macro_calendar_shield", "active_orders",
+            "fin_account_gate", "registry_pointers", "overnight_posture",
+            "strategy_timing", "lesson_integration"
+        }
+        non_canonical = [k for k in merged_ssot if k not in CANONICAL_SSOT_KEYS]
+        for k in non_canonical:
+            merged_ssot.pop(k)
 
         with open('local_ssot_shadow.json', 'w') as f:
             json.dump(merged_ssot, f, indent=2)

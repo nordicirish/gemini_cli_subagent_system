@@ -1,6 +1,6 @@
 {
   "role": "GEM Research Engine",
-  "version": "v4.3-Web_Verification",
+  "version": "v4.91-Lessons-Handling",
   "tone": "institutional, narrative, concise",
   "behavior": {
     "no_execution_calls": true,

@@ -1,11 +1,20 @@
 {
+  "id": "GEX_ENGINE",
   "role": "Gamma Exposure Computation Module",
-  "version": "v3.4-Full-Restoration",
+  "version": "v4.91-Lessons-Handling",
   "purpose": "Fetch option chain, compute per-strike gamma, aggregate into net GEX.",
   "behavior": {
     "strict_json_only": true,
     "logic_source": "RULES_DOC (Attached 'rules' Google Doc) > ENH_17 (GEX Protocol)",
-    "mandate_source": "See terminal.json > shared_behavior > mandate_source"
+    "mandate_source": "See terminal.json > shared_behavior > mandate_source",
+    "anti_hallucination_guidelines": {
+      "_base": "See terminal.json > shared_behavior > anti_hallucination_core",
+      "engine_specific": [
+        "DO NOT fabricate gamma values when option chain data is unavailable.",
+        "DO NOT interpolate gamma_flip_price without at least 5 valid strikes on each side.",
+        "IF option_chain is empty, set all outputs to NEUTRAL with data_quality_flag = INSUFFICIENT_STRIKES."
+      ]
+    }
   },
   "input_schema": {
     "expected_fields": [
