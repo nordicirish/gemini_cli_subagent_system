@@ -202,9 +202,8 @@ dCopyBtn.addEventListener('click', async () => {
         const state = await res.json();
         
         const jsonString = JSON.stringify(state, null, 2);
-        const clipboardContent = `Use the Google Finance extension to review the YTD and 6-Month charts for each ticker.\n\n\`\`\`json\n${jsonString}\n\`\`\``;
         
-        await navigator.clipboard.writeText(clipboardContent);
+        await navigator.clipboard.writeText(jsonString);
         
         dDataStatus.textContent = 'JSON copied to clipboard!';
         dDataStatus.className = 'status-message text-green';

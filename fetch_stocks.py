@@ -166,6 +166,10 @@ async def handle_paste(req: Request):
         else:
             merged_ssot = payload
             
+        # Strip trade_lessons keys — they are routed to trade_lessons.json, no need for duplicates
+        for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons"):
+            merged_ssot.pop(tl_key, None)
+
         with open('local_ssot_shadow.json', 'w') as f:
             json.dump(merged_ssot, f, indent=2)
             
@@ -229,23 +233,35 @@ async def handle_paste(req: Request):
                 except json.JSONDecodeError:
                     pass
             
-            final_lessons = []
+            # Build lookup of existing lessons by id for upsert
+            existing_by_id = {}
+            for idx, lesson in enumerate(existing_lessons):
+                if isinstance(lesson, dict) and "id" in lesson:
+                    existing_by_id[lesson["id"]] = idx
+            
             for item in incoming_lessons:
                 if isinstance(item, str):
                     # Catch strings like "1-19: [PERMANENT_RECORDS]"
                     match = re.match(r'^(\d+)-(\d+).*PERMANENT', item, re.IGNORECASE)
                     if match:
-                        start_idx = int(match.group(1)) - 1
-                        end_idx = int(match.group(2))
-                        if existing_lessons:
-                            # Safely extract the slice
-                            final_lessons.extend(existing_lessons[max(0, start_idx):end_idx])
+                        # PERMANENT_RECORDS ranges are already in existing_lessons, skip
                         continue
-                final_lessons.append(item)
-                
-                final_lessons.append(item)
-                
-            final_normalized = _normalize_lessons(final_lessons)
+                    # Plain string lesson with no id — append as new
+                    existing_lessons.append(item)
+                elif isinstance(item, dict):
+                    item_id = item.get("id")
+                    if item_id is not None and item_id in existing_by_id:
+                        # Upsert: update existing lesson in place
+                        existing_lessons[existing_by_id[item_id]] = item
+                    else:
+                        # New lesson — append
+                        existing_lessons.append(item)
+                        if item_id is not None:
+                            existing_by_id[item_id] = len(existing_lessons) - 1
+                else:
+                    existing_lessons.append(item)
+            
+            final_normalized = _normalize_lessons(existing_lessons)
                 
             if isinstance(existing_data, dict):
                 existing_data["trade_lessons"] = final_normalized

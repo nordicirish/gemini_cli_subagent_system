@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v4.8-Gap-Defense",
+    "version": "v4.91-Lessons-Handling",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -54,7 +54,8 @@
         "ENH_54: SSoT Mutation Protocol",
         "ENH_55: Web Verification Protocol",
         "ENH_56: Gamma-Adjusted Buffer Protocol",
-        "ENH_57: Sovereign Hedge Rotation"
+        "ENH_57: Sovereign Hedge Rotation",
+        "ENH_58: ESA_Tax_Neutralization_Protocol"
     ],
     "mandate_registry": [
         "MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)",
@@ -222,9 +223,16 @@
         {
             "id": "MANDATE_18_RESTRICTED_EXECUTION",
             "status": "ACTIVE",
-            "account_class": "Nordea_Finland_OST",
-            "description": "Hard-codes platform limitations and Alpha-Friction logic for high-fee retail accounts.",
+            "account_class": "Nordea_Finland_ESA",
+            "tax_regime": "DEFERRED_UNTIL_WITHDRAWAL",
+            "description": "Hard-codes platform limitations and Alpha-Friction logic for high-fee retail accounts. Factoring Nordea ESA tax-deferred status for FIFO neutralization.",
             "logic_gates": [
+                {
+                    "gate_id": "ESA_01",
+                    "name": "Tax-Neutral Capital Velocity",
+                    "instruction": "Individual trades do NOT trigger taxable events. First-In, First-Out (FIFO) friction is neutralized for intraday rebalancing. Operational decisions (Adds/Trims) are dictated by VWAP geometry and VIX regimes rather than cost-basis preservation.",
+                    "effect": "Treat all shares of a ticker as a single liquidity block. Churn is permitted to maximize cash generation on sector volatility."
+                },
                 {
                     "gate_id": "ROM_01",
                     "name": "Restricted Order Mapping",
@@ -234,11 +242,11 @@
                 {
                     "gate_id": "ENH_FIN_02",
                     "name": "Alpha-Friction Protocol",
-                    "instruction": "Friction Guard: 1% Round-Trip + Re-entry Risk implies a 2.5% minimum viable move. Prevent churn. EXCEPTION: Bypass this gate when volatility_override is TRUE (protective exits) OR Macro_Sentinel is HOSTILE.",
-                    "logic": "IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < 0.025) AND Hard_Catalyst == NONE AND volatility_override == FALSE THEN OVERRIDE_ACTION = HOLD",
-                    "rationale": "Do not sell for a <2.5% drop (churn). But DO allow exits during volatile breakdowns OR macro stress events where losses are real and accelerating.",
+                    "instruction": "Friction Guard: 1% Round-Trip + Re-entry Risk. In ESA, minimum viable move is lowered to 2.0% (vs 2.5% standard) due to zero immediate tax leakage. Prevent churn unless volatility_override is TRUE or Macro_Sentinel is HOSTILE.",
+                    "logic": "IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < 0.020) AND Hard_Catalyst == NONE AND volatility_override == FALSE THEN OVERRIDE_ACTION = HOLD",
+                    "rationale": "In a tax-deferred environment, capital velocity is prioritized. Tactical trims on mechanical floors or VWAP magnets are viable at lower alpha spreads.",
                     "volatility_override": {
-                        "description": "Protective Exit Override \u00e2\u20ac\u201d bypasses friction gate during active breakdowns or macro stress to prevent holding through avoidable losses.",
+                        "description": "Protective Exit Override — bypasses friction gate during active breakdowns or macro stress to prevent holding through avoidable losses.",
                         "conditions": [
                             {
                                 "field": "atr_percent",
@@ -262,7 +270,7 @@
                             }
                         ],
                         "logic": "ANY 2 of 4 (Macro Shock counts as a valid trigger). Negative Delta Force: IF Net_GEX < 0 AND session_change_pct < -1.0%, SET volatility_override = TRUE and emit EXIT.",
-                        "effect": "SET volatility_override = TRUE \u00e2\u20ac\u201d friction gate bypassed, exit treated as protective, not churn"
+                        "effect": "SET volatility_override = TRUE — friction gate bypassed, exit treated as protective, not churn"
                     }
                 },
                 {
@@ -301,8 +309,19 @@
         },
         {
             "id": "MANDATE_22_RESIDUAL_FLOOR",
-            "status": "PROPOSED",
-            "instruction": "Position sizing for binary clinical plays must be derived from the Residual Cash Value floor, acknowledging that technical stops are a 0% probability event in overnight gap-downs."
+            "status": "ACTIVE",
+            "instruction": "Position sizing for binary clinical plays must be derived from the Residual Cash Value floor, acknowledging that technical stops are a 0% probability event in overnight gap-downs.",
+            "esa_tax_advantage_clause": {
+                "protocol": "HOUSE_MONEY_ACCELERATION",
+                "logic": "In the Nordea ESA environment, prioritize the 'Extraction of Principal' over 'Deferred Realization'. Individual sales to reclaim initial capital carry 0% tax friction.",
+                "execution": "Once a binary asset (e.g., DFTX) reaches the 'Principal Shield' target (Step 1), liquidate the corresponding quantity immediately. Reinvest 100% of the reclaimed capital into the next high-alpha thesis without reserving for capital gains tax."
+            },
+            "sizing_logic": {
+                "formula": "Max_Loss_Tolerance / (Entry_Price - Residual_Cash_Value)",
+                "residual_floor_definition": "The verifiable net cash per share on the balance sheet (e.g., $5.88 for DFTX).",
+                "risk_adjustment": "During High-VIX regimes (>20), the Residual Floor is the only valid support node; ignore all intermediate EMA/SMA levels for initial sizing."
+            },
+            "rationale": "Standard stop-losses are ill-suited for binary gaps. By sizing based on the cash floor and utilizing the ESA tax-shield for rapid principal recovery, the portfolio achieves 'House Money' status 30% faster than in taxable accounts."
         },
         {
             "id": "MANDATE_23_DISTILLATION_VETO",
@@ -312,7 +331,19 @@
         {
             "id": "MANDATE_24_GAP_DEFENSE",
             "status": "ACTIVE",
-            "instruction": "Protect overnight news gaps. Trailing stops must be anchored to the 50% retracement of the opening gap to prevent 'Bull Traps' in Short Gamma regimes."
+            "revision_date": "2026-03-03",
+            "instruction": "Protect overnight news gaps. Trailing stops must be anchored to the 50% retracement of the opening gap to prevent 'Bull Traps' in Short Gamma regimes.",
+            "esa_tax_advantage_clause": {
+                "protocol": "FRICTIONLESS_GAP_REENTRY",
+                "logic": "The Nordea ESA eliminates 'Wash Sale' inertia and FIFO capital gains leakage. If a position hits the 50% Gap Stop, exit immediately. If price later re-claims the Gap Midpoint on positive rVol, re-entry is mandatory.",
+                "execution": "Treat Gap Defense as a 'Binary Switch'. 100% exit at the 50% retracement; 100% re-entry at the 50% reclaim. Tax-deferred status allows for this mechanical churn to capture the full volatility curve without immediate cost-basis erosion."
+            },
+            "technical_parameters": {
+                "anchor_point": "Gap_Midpoint = (Previous_Close + Open_Price) / 2",
+                "defense_logic": "IF Current_Price < Gap_Midpoint AND VIX > 20 THEN SET status = 'IN_DISTRESS' AND emit TRIM_50",
+                "reclamation_logic": "IF Current_Price > Gap_Midpoint AND rVol > 1.5 THEN SET status = 'MOMENTUM_RESTORED' AND emit FULL_REINSTATEMENT"
+            },
+            "rationale": "In Short Gamma regimes, opening gaps are often 'faded' by dealers. By using the ESA tax-shield, we can mechanically exit and re-enter these gaps, effectively 'day-trading' the news cycle with 100% of the principal intact."
         }
     ],
     "enh_protocols": [
@@ -778,9 +809,9 @@
                         },
                         {
                             "key": "trade_lessons",
-                            "type": "ARRAY<STRING>",
-                            "action": "OVERWRITE trade_lessons.json with canonical SSoT state",
-                            "trigger": "Full SSoT state emission"
+                            "type": "ARRAY<OBJECT>",
+                            "action": "UPSERT by ID into trade_lessons.json: update existing lessons where id matches, append new ones",
+                            "trigger": "Full or partial SSoT state emission"
                         }
                     ]
                 }
@@ -856,68 +887,75 @@
             "id": "ENH_57",
             "title": "Sovereign Hedge Rotation",
             "instruction": "Mandate 20% portfolio weight in clinical-stage biotechs with cash runways > 24 months during High-VIX regimes."
+        },
+        {
+            "id": "ENH_58",
+            "title": "ESA Tax Neutralization Protocol",
+            "instruction": "Treat the entire ticker share count as a single tactical block. In Finnish ESA accounts, the order of shares sold (FIFO) is an accounting artifact; intraday trading friction is purely commission-based (1% round-trip), allowing for 2-3% scalps on mechanical floors."
         }
     ],
     "global_logic_gates": {
         "execution_gate": {
             "id": "ENH_36",
+            "esa_override": "ENABLED",
             "block_if": [
                 "current_time >= OST_LOCKOUT_TIME AND (atr_percent <= ATR_PERCENT_MINIMUM OR rvol <= RVOL_OST_GATE)"
             ],
-            "note": "Prevents over-trading in low-liquidity environments."
+            "permit_if": [
+                "account_class == 'Nordea_Finland_ESA' AND volatility_override == TRUE"
+            ],
+            "note": "ESA advantage allows for late-session 'Volatility Harvesting' provided rVol confirms institutional presence."
         },
         "liquidity_gate": {
             "id": "GATE_LIQ_01",
-            "authority": "CANONICAL \u00e2\u20ac\u201d execution.json MUST reference this gate.",
+            "authority": "CANONICAL",
             "block_if": [
                 "volume < 100000",
                 "implied_spread_percent > SPREAD_CEILING",
-                "abs(distance_from_vwap) > VWAP_EXECUTION_BLOCK (see system_thresholds)"
+                "abs(distance_from_vwap) > VWAP_EXECUTION_BLOCK"
             ],
-            "note": "Blocks execution in illiquid conditions."
+            "esa_refinement": "In deferred-tax environments, liquidity depth is the ONLY meaningful cost. Prioritize tickers with < 0.5% bid-ask spreads for high-frequency rebalancing."
         },
         "regulatory_gate": {
             "id": "GATE_REG_01",
-            "authority": "CANONICAL \u00e2\u20ac\u201d execution.json MUST reference this gate.",
+            "authority": "CANONICAL",
             "block_if": [
-                "Risk_Regime == CRITICAL",
-                "health_score < HEALTH_SCORE_MINIMUM (see system_thresholds)",
-                "dealer_posture == SHORT_GAMMA"
+                "Risk_Regime == 'CRITICAL' AND hard_catalyst == 'NONE'",
+                "health_score < HEALTH_SCORE_MINIMUM",
+                "dealer_posture == 'SHORT_GAMMA' AND Price < VWAP"
             ],
-            "enh_ref": "ENH_08",
-            "note": "Blocks execution under adverse regime or structural conditions."
+            "esa_posture": "Defensive logic is strictly maintained; tax-free trading does not justify ignoring a Short Gamma waterfall."
         },
         "consensus_gate": {
             "id": "ENH_40",
+            "note": "MANDATE_13 consensus is non-negotiable. Tax-deferred status increases trade frequency, but each trade must still clear the 0.75 S_A hurdle.",
             "conditions": [
                 {
                     "field": "S_A",
                     "operator": "<",
                     "value": 0.75
-                },
-                {
-                    "field": "ticker_volatility",
-                    "operator": ">",
-                    "value": 0.05
                 }
             ],
-            "logic": "ALL",
             "emit": {
                 "action": "BLOCK_EXECUTION"
-            },
-            "note": "Enforces MANDATE_13 Consensus for high-volatility assets."
+            }
         },
         "ssr_gate": {
             "id": "ENH_07",
-            "status": "ACTIVE"
+            "status": "ACTIVE",
+            "note": "Short Sale Restriction verification remains a primary trigger for 'Warrant Churn' detection."
         },
         "fin_account_gate": {
             "id": "ENH_FIN_01",
-            "provider": "Nordea_Finland_OST",
-            "round_trip_cost": "Reference system_thresholds > ROUND_TRIP_COST_BASIS",
+            "provider": "Nordea_Finland_ESA",
+            "tax_status": "DEFERRED_ESA",
+            "round_trip_cost": 0.01,
             "constraints": {
-                "min_alpha_threshold": "Reference system_thresholds > ALPHA_FRICTION_MINIMUM (Canonical)"
-            }
+                "min_alpha_threshold": 0.020,
+                "fifo_impact": "NULLIFIED",
+                "wash_sale_risk": "ZERO"
+            },
+            "instruction": "Priority is Capital Velocity. Re-entry into RS leaders (RCAT) at pivot nodes is encouraged. The 'Cost of Churn' is fixed at 1% commission; the 'Tax of Churn' is 0%."
         }
     },
     "deletion_policy": {
