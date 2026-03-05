@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v4.93-Local-SSOT-Storage",
+    "version": "v4.96-Lesson-Integrity",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -299,8 +299,8 @@
         {
             "id": "MANDATE_20_MACRO_VETO",
             "status": "ACTIVE",
-            "instruction": "The MACRO_SENTINEL possesses absolute veto authority. Macro Veto applies exclusively to New Risk Exposure. The SSoT Controller is authorized to emit EXIT or TRIM states during a Veto event if forensic indicators (HV BREAKOUT) suggest an imminent blow-off top or liquidity exhaustion. Macro Veto is VOID for tickers with verified 8-K catalysts or ENH_31 clinical acceleration.",
-            "logic_source": "ENH_45"
+            "instruction": "The MACRO_SENTINEL possesses absolute veto authority. Macro Veto applies exclusively to New Risk Exposure. The SSoT Controller is authorized to emit EXIT or TRIM states during a Veto event if forensic indicators (HV BREAKOUT) suggest an imminent blow-off top or liquidity exhaustion. Macro Veto is triggered by Absolute Regime (VIX > 20) OR Intraday Velocity (VIXY gap > +5.0%). Veto is VOID for tickers with verified 8-K catalysts or ENH_31 clinical acceleration.",
+            "logic_source": "ENH_45 / VIXY_VELOCITY_CRITICAL"
         },
         {
             "id": "MANDATE_21_USER_CONFIRMATION",
@@ -344,6 +344,11 @@
                 "reclamation_logic": "IF Current_Price > Gap_Midpoint AND rVol > 1.5 THEN SET status = 'MOMENTUM_RESTORED' AND emit FULL_REINSTATEMENT"
             },
             "rationale": "In Short Gamma regimes, opening gaps are often 'faded' by dealers. By using the ESA tax-shield, we can mechanically exit and re-enter these gaps, effectively 'day-trading' the news cycle with 100% of the principal intact."
+        },
+        {
+            "id": "MANDATE_25_STRICT_LESSON_EMISSION",
+            "status": "ACTIVE",
+            "instruction": "STRICT EMISSION RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) MUST conclude with a full SSoT JSON payload containing the updated trade_lessons object. Text-only lessons are classified as EQUILIBRIUM_LOSS and prohibited."
         }
     ],
     "enh_protocols": [
@@ -1213,7 +1218,8 @@
         "benchmarks": {
             "primary_index": "SPX",
             "equal_weight_index": "RSP",
-            "volatility_index": "^VIX"
+            "volatility_index": "^VIX",
+            "volatility_velocity_proxy": "VIXY"
         },
         "SPREAD_CEILING": {
             "value": 5.0,
@@ -1374,6 +1380,14 @@
                 "fetch_stocks"
             ]
         },
+        "VIXY_VELOCITY_CRITICAL": {
+            "value": 5.0,
+            "usage": "VIXY daily gap % at or above this triggers FEAR ALERT regardless of absolute VIX regime",
+            "used_by": [
+                "fetch_stocks",
+                "rules.json"
+            ]
+        },
         "IEF_YIELD_ALERT_THRESHOLD": {
             "value": -0.15,
             "usage": "IEF daily gap % below this triggers YIELDS RISING bond alert in dashboard",
@@ -1450,7 +1464,7 @@
                 "HIGH": 20.0,
                 "LOW": 12.0
             },
-            "usage": "VIX levels defining High/Low volatility regimes. High > 20, Low < 12. Also used as the council escalation VIX trigger.",
+            "usage": "VIX levels defining High/Low volatility regimes. High > 20, Low < 12. Also used as the council escalation VIX trigger. Relies on ^VIX for absolute trailing regime.",
             "used_by": [
                 "fetch_stocks",
                 "neutral_gem",

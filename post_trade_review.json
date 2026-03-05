@@ -73,7 +73,7 @@
   },
   "lesson_pipeline": {
     "trigger": "On every completed review where thesis_integrity != 'Confirmed'",
-    "action": "Extract a codified lesson and emit it as a new_trade_lessons entry in the output payload.",
+    "action": "Extract a codified lesson and emit it as a new_trade_lessons entry in the output payload. ENFORCE MANDATE_25_STRICT_LESSON_EMISSION: Any Lesson Revision MUST conclude with a full SSoT JSON payload containing the updated trade_lessons object. Text-only lessons are classified as EQUILIBRIUM_LOSS and prohibited.",
     "format": {
       "id": "NEXT_AVAILABLE",
       "rule": "[CODIFIED: ENH_XX] {Lesson text}"

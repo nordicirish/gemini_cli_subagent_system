@@ -82,24 +82,24 @@ The system now enforces **adversarial reasoning** and **volatility awareness** t
 
 The system integrates core software engineering principles into its trading logic to enhance autonomous rigor and self-improvement:
 1. **Plan Node Default:** System dynamically generates a rigid "Trade Thesis" before execution and triggers re-planning if the thesis is violated.
-2. **Subagent Strategy:** Employs "Dynamic Micro-Gem Routing" for borderline decisions (S_A 0.65–0.75) to spawn focused sub-engines to break ties.
-3. **Self-Improvement Loop:** Conducts root-cause post-mortems on losses and natively appends `trade_lessons.json` to the clipboard payload so the system never repeats mistakes.
-4. **Verification Before Done:** The `TECHNICAL_VALIDATOR` is forced to "prove the setup" against quantitative restrictions seconds before executing a `FORCE_WRITE`.
-5. **Demand Elegance:** Explicitly rejects hacky or borderline setups relying on multiple overriding exceptions. Pushes for A+ convergence setups.
-6. **Autonomous Bug Fixing:** Functions as a zero-prompt risk manager. Pre-formats a TRIM/EXIT JSON output if quantitative guards fail.
+1.  **Plan Node Default:** System dynamically generates a rigid "Trade Thesis" before execution and triggers re-planning if the thesis is violated.
+2.  **Subagent Strategy:** Employs "Dynamic Micro-Gem Routing" for borderline decisions (S_A 0.65–0.75) to spawn focused sub-engines to break ties.
+3.  **Self-Improvement Loop:** Conducts root-cause post-mortems on losses and natively appends `trade_lessons.json` to the clipboard payload so the system never repeats mistakes.
+4.  **Verification Before Done:** The `TECHNICAL_VALIDATOR` is forced to "prove the setup" against quantitative restrictions seconds before executing a `FORCE_WRITE`.
+5.  **Demand Elegance:** Explicitly rejects hacky or borderline setups relying on multiple overriding exceptions. Pushes for A+ convergence setups.
+6.  **Autonomous Bug Fixing:** Functions as a zero-prompt risk manager. Pre-formats a TRIM/EXIT JSON output if quantitative guards fail.
 
-### 1. Volatility Regime Awareness
-The Python feed actively monitors the **VIX** and tags the environment:
-- **LOW_VOL (<12)**: System prioritizes Mean Reversion and structural liquidity.
-- **HIGH_VOL (>20)**: System prioritizes Momentum and tighter risk stops.
+### Institutional Intelligence & Volatility Duality
+To solve for 15-minute index data delays while preventing algorithm decay from ETN contango roll-costs, the system implements a **Volatility Duality** architecture:
+1.  **Absolute Trailing Regime (`^VIX`)**: Used to dictate daily macro regimes and weightings (e.g. `HIGH_VOL` > 20).
+2.  **Real-Time Velocity Proxy (`VIXY`)**: The short-term ETF derivative used to calculate real-time intraday Rate-of-Change percentage. The Macro Sentinel aggressively vetoes exposure against surging `VIXY` > +5%.
 
-### 2. Chain-of-Thought Enforcement
+### Chain-of-Thought Enforcement
 The **Neutral Gem** and **Validator** must output a structured logic block:
 > **Reasoning Path:** 1. Regime Analysis → 2. Dealer Posture → 3. Liquidity Gap → 4. Verdict.
 
 ### 3. Devil's Advocate Protocols
 To combat confirmation bias, the Consensus Council must argue against themselves:
-- **Bullish Gem:** Must list "Top 3 Bear Case Risks" before concluding.
 - **Red Team:** Must list "Top 3 Bull Case Opportunities" before concluding.
 
 ---
@@ -158,7 +158,7 @@ python fetch_stocks.py
 ```
 The background daemon runs in a loop, fetching live data while a **FastAPI** `uvicorn` server hosts the web UI at `http://localhost:8000`. The frontend is a modern, responsive interface featuring:
 
-- **Macro HUD**: Dynamic top-row tracking `VIX`, `IEF`, `SPY` and configurable trackers with custom system alerts.
+- **Macro HUD**: Dynamic top-row tracking `^VIX`, `VIXY`, `IEF`, and `UUP` with custom system alerts.
 - **Live Equity Table**: Displays VWAP Distance, Net GEX, Trend Scores, RSI, and Health Scores.
 - **Copy/Paste Integrations**: Dedicated UI buttons to instantly copy the `GLOBAL_STATE` payload for Gemini, and paste Gemini outputs back to automatically mutate `local_ssot_shadow.json`.
 
@@ -200,7 +200,7 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 | Protocol | ID | Enforcement |
 |----------|----|-------------|
 | **Alpha-Friction Guard** | `ENH_FIN_02` | Blocks trades with <2.5% expected move (covers 1% round-trip fees - adjust as neededc) |
-| **Macro Veto** | `MANDATE_20` | Macro Sentinel can override all council decisions (shock > 8.0) |
+| **Macro Veto** | `MANDATE_20` | Sentinel vetoes entries against surging VIXY velocity (>+5.0%) or high absolute VIX (> 20) |
 | **Drift Control** | `MANDATE_04` | Forensic handshake validation prevents behavioral/data drift |
 | **ATR Position Sizing** | `ENH_29` / `ENH_41` | Volatility-adjusted position sizing — deterministic formula |
 | **Forensic Structural Filter** | `ENH_30` | 50% sizing reduction on dilution/warrant forensic flags |
@@ -239,7 +239,7 @@ Edit `fetch_stocks.py` to set your portfolio and macro benchmark tickers separat
 TICKERS = ['ONDS', 'UMAC', 'RCAT', 'DFTX', 'RKLB', 'PLTR']
 
 # Macro benchmarks & risk indicators
-MACRO_TICKERS = ['SPY', '^VIX', 'IEF', 'UUP']
+MACRO_TICKERS = ['IEF', '^VIX', 'VIXY', 'UUP']
 
 # Combined list used by the dashboard
 ALL_TICKERS = TICKERS + MACRO_TICKERS
@@ -337,15 +337,16 @@ Use this if the Gem seems confused or is citing old rules.
 
 ```text
 /reset
-CRITICAL INSTRUCTION: WIPE MEMORY & FORCE TOOL USE.
-Protocol:
-0.  **ACKNOWLEDGE**: You have access to the 'Google Drive' extension. It is ACTIVE.
-1.  **ACTION**: Search for Google Doc named "rules" in folder "GEM_Trading_Rules".
-2.  **CONSTRAINT**: Do NOT fabricate data. If you cannot read the file, STOP and say "TOOL FAILURE".
-3.  **VERIFICATION**:
-    -   Cite `version` string verbatim from the Google Doc.
-    -   Cite `system_thresholds > ALPHA_FRICTION_MINIMUM`.
-4.  **Confirm Status**: "Synced with Google Doc 'rules' (SSoT)".
+CRITICAL SYSTEM OVERRIDE: WIPE ALL PRIOR CONTEXT & FORCE SYNCHRONIZATION.
+
+Protocol Execution:
+1. ACKNOWLEDGE ARCHITECTURE: You are operating in a Web Sandbox environment. You MUST output all state changes as a strict JSON `EXECUTION_PAYLOAD` block so I can manually sync it via the local clipboard bridge.
+2. ACKNOWLEDGE SCHEMA: The system now uses the v4.9x Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
+3. ACTION (ZERO-TOUCH SYNC): Use your Google Drive extension to read the attached `rules` document (GEM_Trading_Rules/rules).
+4. VERIFICATION: Do NOT fabricate data. If you cannot read the file, STOP and output "TOOL FAILURE". 
+   - Cite the exact `version` string verbatim from the top of the Google Doc.
+   - Confirm which "ENH_" protocol governs the "Web Verification Protocol".
+5. Confirm Status: "System initialized: State is bound to v4.9x Payload Architecture and SSoT Rules are synced via Drive."
 ```
 
 ### 🟧 Local Pipeline Setup (The Clipboard Bridge)
@@ -384,7 +385,7 @@ including Units, WAC, and Remaining Cash.
 
 Once the audit is complete, emit an EXECUTION_PAYLOAD so I can sync it locally.
 
-Once the audit is complete, execute the FULL_STATE_OUTPUT protocol per SSoT_Storage.json.
+Once the audit is complete, execute the FULL_STATE_OUTPUT protocol per SSoT_Storage
 Generate the absolute, complete SSoT JSON in a single markdown code block with zero omissions
 and no placeholders (e.g., do not use "// ..."). Every key from both immutable_background and
 mutable_state must be fully populated. Increment the sync_id for this final EOD synchronization.

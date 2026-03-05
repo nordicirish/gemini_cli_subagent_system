@@ -43,14 +43,15 @@ TICKERS = [
 ]
 
 MACRO_TICKERS = [
-    'SPY',
+    'IEF',
     '^VIX',
+    'VIXY',
     'IEF',
     'UUP',
 ]
 
 ALL_TICKERS = TICKERS + MACRO_TICKERS
-INVERSE_MACRO = ['^VIX', 'UUP', 'IEF']
+INVERSE_MACRO = ['^VIX', 'VIXY', 'UUP', 'IEF']
 
 REFRESH_RATE_SECONDS = 30
 HISTORY_REFRESH_CYCLES = 10
@@ -112,6 +113,51 @@ def _merge_portfolio(existing_list, delta_list):
                 by_ticker[t] = item
     return list(by_ticker.values())
 
+def _process_deletions(state, delete_list):
+    """Parses SSoT DELETE_FIELD strings (e.g., 'portfolio_snapshot[RCAT]') and prunes keys from the state tree."""
+    if not isinstance(delete_list, list):
+        return
+    for path in delete_list:
+        if not isinstance(path, str): continue
+        if path.startswith("DELETE_FIELD:"): 
+            path = path.split("DELETE_FIELD:", 1)[1].strip()
+        
+        # Parse dot and bracket notation
+        tokens = re.findall(r'[^.\[\]]+|\[[^\]]+\]', path)
+        if not tokens: continue
+        
+        current = state
+        parent = None
+        last_key = None
+        
+        for idx, token in enumerate(tokens):
+            if token.startswith('[') and token.endswith(']'):
+                target_ticker = token[1:-1]
+                if isinstance(current, list):
+                    found = False
+                    for i, item in enumerate(current):
+                        if isinstance(item, dict) and item.get("ticker", "").upper() == target_ticker.upper():
+                            parent = current
+                            last_key = i
+                            current = item
+                            found = True
+                            break
+                    if not found: break  # Ticker not found, invalidate path
+                else: break  # Invalid path structure
+            else:
+                if isinstance(current, dict) and token in current:
+                    parent = current
+                    last_key = token
+                    current = current[token]
+                else: break  # Key not found
+                
+            if idx == len(tokens) - 1 and parent is not None and last_key is not None:
+                # Target acquired, execute deletion
+                if isinstance(parent, list):
+                    parent.pop(last_key)
+                elif isinstance(parent, dict):
+                    parent.pop(last_key, None)
+
 @app.post("/api/paste")
 async def handle_paste(req: Request):
     try:
@@ -152,34 +198,70 @@ async def handle_paste(req: Request):
                     existing_ssot = json.load(f)
             except: pass
             
+        # Check if existing SSoT uses the v4.9x Layer Model
+        has_layer_model = "mutable_state" in existing_ssot
+        
+        # If payload provides naked keys but existing uses Layer Model, wrap the payload in mutable_state
+        if has_layer_model and "mutable_state" not in payload and "immutable_background" not in payload:
+            payload = {"mutable_state": payload}
+
         if existing_ssot:
-            if 'portfolio_snapshot' in payload and 'portfolio_snapshot' in existing_ssot:
-                merged_portfolio = _merge_portfolio(
-                    existing_ssot.get('portfolio_snapshot', []),
-                    payload['portfolio_snapshot']
-                )
-                payload_without_portfolio = {k: v for k, v in payload.items() if k != 'portfolio_snapshot'}
+            existing_portfolio = existing_ssot.get("mutable_state", {}).get("portfolio_snapshot", []) if has_layer_model else existing_ssot.get("portfolio_snapshot", [])
+            payload_portfolio = payload.get("mutable_state", {}).get("portfolio_snapshot", []) if has_layer_model else payload.get("portfolio_snapshot", [])
+
+            if payload_portfolio and existing_portfolio:
+                merged_portfolio = _merge_portfolio(existing_portfolio, payload_portfolio)
+                
+                payload_without_portfolio = _deep_merge({}, payload)
+                if has_layer_model:
+                    if "portfolio_snapshot" in payload_without_portfolio.get("mutable_state", {}):
+                        payload_without_portfolio["mutable_state"].pop("portfolio_snapshot")
+                else:
+                    payload_without_portfolio.pop("portfolio_snapshot", None)
+                    
                 merged_ssot = _deep_merge(existing_ssot, payload_without_portfolio)
-                merged_ssot['portfolio_snapshot'] = merged_portfolio
+                
+                if has_layer_model:
+                    if "mutable_state" not in merged_ssot: merged_ssot["mutable_state"] = {}
+                    merged_ssot["mutable_state"]["portfolio_snapshot"] = merged_portfolio
+                else:
+                    merged_ssot["portfolio_snapshot"] = merged_portfolio
             else:
                 merged_ssot = _deep_merge(existing_ssot, payload)
         else:
             merged_ssot = payload
             
-        # Strip trade_lessons keys — they are routed to trade_lessons.json, no need for duplicates
+        # Strip trade_lessons keys from ROOT and MUTABLE_STATE — they are routed to trade_lessons.json
         for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons", "rule_mutations"):
             merged_ssot.pop(tl_key, None)
+            if "mutable_state" in merged_ssot:
+                merged_ssot["mutable_state"].pop(tl_key, None)
 
         # SSoT schema validation — prune non-canonical top-level keys to prevent drift
         CANONICAL_SSOT_KEYS = {
             "state_context", "portfolio_snapshot", "forensic_intelligence",
             "runtime_flags", "macro_calendar_shield", "active_orders",
             "fin_account_gate", "registry_pointers", "overnight_posture",
-            "strategy_timing", "lesson_integration"
+            "strategy_timing", "lesson_integration", "immutable_background", "mutable_state"
         }
         non_canonical = [k for k in merged_ssot if k not in CANONICAL_SSOT_KEYS]
         for k in non_canonical:
             merged_ssot.pop(k)
+
+        # Process Explicit Deletions
+        del_list = payload.get("DELETE_FIELD", [])
+        if not del_list and "mutable_state" in payload:
+            del_list = payload["mutable_state"].get("DELETE_FIELD", [])
+        if "DELETE_FIELD (optional)" in payload: del_list.extend(payload["DELETE_FIELD (optional)"])
+        if isinstance(del_list, list) and len(del_list) > 0:
+            target_state = merged_ssot.get("mutable_state", merged_ssot) if has_layer_model else merged_ssot
+            _process_deletions(target_state, del_list)
+            # Remove the literal deletion arrays from state if they merged over
+            if has_layer_model and "mutable_state" in merged_ssot:
+                merged_ssot["mutable_state"].pop("DELETE_FIELD", None)
+                merged_ssot["mutable_state"].pop("DELETE_FIELD (optional)", None)
+            merged_ssot.pop("DELETE_FIELD", None)
+            merged_ssot.pop("DELETE_FIELD (optional)", None)
 
         with open('local_ssot_shadow.json', 'w') as f:
             json.dump(merged_ssot, f, indent=2)
@@ -248,29 +330,54 @@ async def handle_paste(req: Request):
             existing_by_id = {}
             for idx, lesson in enumerate(existing_lessons):
                 if isinstance(lesson, dict) and "id" in lesson:
-                    existing_by_id[lesson["id"]] = idx
+                    existing_by_id[lesson["id"]] = lesson
             
+            kept_ids = set()
+            new_compiled_lessons = []
+
             for item in incoming_lessons:
                 if isinstance(item, str):
                     # Catch strings like "1-19: [PERMANENT_RECORDS]"
                     match = re.match(r'^(\d+)-(\d+).*PERMANENT', item, re.IGNORECASE)
                     if match:
-                        # PERMANENT_RECORDS ranges are already in existing_lessons, skip
-                        continue
-                    # Plain string lesson with no id — append as new
-                    existing_lessons.append(item)
+                        start_id = int(match.group(1))
+                        end_id = int(match.group(2))
+                        kept_ids.update(range(start_id, end_id + 1))
+                        # We don't append the string to the final array, we just track the IDs
+                    else:
+                        # Plain string lesson with no id — append as new
+                        new_compiled_lessons.append(item)
                 elif isinstance(item, dict):
                     item_id = item.get("id")
-                    if item_id is not None and item_id in existing_by_id:
-                        # Upsert: update existing lesson in place
-                        existing_lessons[existing_by_id[item_id]] = item
+                    if item_id is not None:
+                        kept_ids.add(item_id)
+                        if item_id in existing_by_id:
+                            # Upsert: update existing lesson in place
+                            existing_by_id[item_id].update(item)
+                            new_compiled_lessons.append(existing_by_id[item_id])
+                        else:
+                            # New lesson with ID — append
+                            new_compiled_lessons.append(item)
                     else:
-                        # New lesson — append
-                        existing_lessons.append(item)
-                        if item_id is not None:
-                            existing_by_id[item_id] = len(existing_lessons) - 1
+                         # New lesson without ID — append
+                         new_compiled_lessons.append(item)
                 else:
-                    existing_lessons.append(item)
+                    new_compiled_lessons.append(item)
+
+            # Re-inject preserved lessons from PERMANENT_RECORDS ranges that were NOT explicitly updated
+            preserved_lessons = []
+            for lesson in existing_lessons:
+                if isinstance(lesson, dict):
+                    lid = lesson.get("id")
+                    # If it's in kept_ids but NOT in the new_compiled_lessons (meaning it was verified by a range string)
+                    if lid in kept_ids and lid not in [l.get("id") for l in new_compiled_lessons if isinstance(l, dict)]:
+                        preserved_lessons.append(lesson)
+                elif isinstance(lesson, str):
+                    # Keep existing pure string lessons unless we are enforcing strict dicts
+                    preserved_lessons.append(lesson)
+
+            # Combine preserved range lessons with newly updated/added ones, sorted by ID if possible
+            existing_lessons = preserved_lessons + new_compiled_lessons
             
             final_normalized = _normalize_lessons(existing_lessons)
                 
@@ -374,6 +481,17 @@ yf_data = YfData()  # Initialize yfinance data handler (handles crumbs/cookies)
 # -----------------------------
 # UTILS
 # -----------------------------
+def safe_yf_get(url, timeout=3):
+    """Fallback fetcher for yfinance curl_cffi TLS errors."""
+    try:
+        r = yf_data.get(url, timeout=timeout)
+        if r.status_code == 200:
+            return r
+    except Exception:
+        pass
+    # Fallback to standard requests.Session if curl_cffi fails internally
+    return session.get(url, timeout=timeout)
+
 def get_market_status():
     ny_now = datetime.now(ZoneInfo("America/New_York"))
     t = ny_now.time()
@@ -470,7 +588,7 @@ def get_premarket_volume_chart(symbol):
         ts1 = int(pre_start.timestamp())
         ts2 = int(pre_end.timestamp())
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={ts1}&period2={ts2}&interval=1m&includePrePost=true"
-        r = yf_data.get(url, timeout=3)
+        r = safe_yf_get(url, timeout=3)
         data = r.json()
         result = data['chart']['result'][0]
         volumes = result['indicators']['quote'][0].get('volume', [])
@@ -494,8 +612,8 @@ def get_live_chart_data(symbol, status):
     try:
         # Use range=5d to bridge weekends/holidays and ensure we get today's data
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1m&includePrePost=true"
-        # Use yf_data.get() for authenticated request
-        r = yf_data.get(url, timeout=3)
+        # Use safe_yf_get to fallback if curl_cffi fails
+        r = safe_yf_get(url, timeout=3)
         data = r.json()
         result = data['chart']['result'][0]
         timestamps = result['timestamp']
@@ -596,8 +714,8 @@ def get_true_intraday_vwap(symbol, status):
         ts_now = int(now.timestamp())
 
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={ts_open}&period2={ts_now}&interval=1m&includePrePost={include_pre}"
-        # Use yf_data.get() for authenticated request
-        r = yf_data.get(url, timeout=3)
+        # Use safe_yf_get to fallback if curl_cffi fails
+        r = safe_yf_get(url, timeout=3)
         data = r.json()
         result = data['chart']['result'][0]
         indicators = result['indicators']['quote'][0]
@@ -619,8 +737,8 @@ def get_true_intraday_vwap(symbol, status):
 def fallback_vwap(symbol):
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=1m"
-        # Use yf_data.get() for authenticated request
-        r = yf_data.get(url, timeout=2)
+        # Use safe_yf_get to fallback if curl_cffi fails
+        r = safe_yf_get(url, timeout=2)
         data = r.json()
         result = data['chart']['result'][0]
         q = result['indicators']['quote'][0]
@@ -695,8 +813,8 @@ def polygon_volume(symbol):
 def get_previous_close(symbol):
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1d"
-        # Use yf_data.get() for authenticated request
-        r = yf_data.get(url, timeout=2)
+        # Use safe_yf_get to fallback if curl_cffi fails
+        r = safe_yf_get(url, timeout=2)
         data = r.json()
         result = data['chart']['result'][0]
         q = result['indicators']['quote'][0]
@@ -712,8 +830,8 @@ def get_batch_quotes(symbols):
     try:
         syms = ",".join(symbols)
         url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={syms}"
-        # Use yf_data.get() for authenticated request (handles crumbs/cookies)
-        r = yf_data.get(url, timeout=3)
+        # Use safe_yf_get for authenticated request (handles crumbs/cookies + fallback)
+        r = safe_yf_get(url, timeout=3)
         data = r.json()
         return {q['symbol']: q for q in data['quoteResponse']['result']}
     except:
@@ -1430,7 +1548,8 @@ def run_daemon():
 
             macro_state = {
                 'IEF': {'price': 0.0, 'gap': 0.0, 'trend': 'FLAT'},
-                '^VIX': {'price': 0.0, 'gap': 0.0}
+                '^VIX': {'price': 0.0, 'gap': 0.0},
+                'VIXY': {'price': 0.0, 'gap': 0.0}
             }
 
             for i, sym in enumerate(ALL_TICKERS):
@@ -1481,6 +1600,8 @@ def run_daemon():
                     macro_state['IEF'] = {'price': p, 'gap': gap, 'trend': trend}
                 if sym == '^VIX':
                     macro_state['^VIX'] = {'price': p, 'gap': gap}
+                if sym == 'VIXY':
+                    macro_state['VIXY'] = {'price': p, 'gap': gap}
 
                 if i % 2 == 1:
                     ROW_BG = BG_STRIPE
@@ -1627,6 +1748,7 @@ def run_daemon():
                     # Macro Context & Volatility Regime (Rules > VOLATILITY_REGIME_THRESHOLDS)
                     "vix_price": float(cache.prices.get('^VIX', 0.0)),
                     "volatility_regime": "HIGH_VOL" if cache.prices.get('^VIX', 0.0) > 20.0 else "LOW_VOL" if cache.prices.get('^VIX', 0.0) < 12.0 and cache.prices.get('^VIX', 0.0) > 0 else "NORMAL",
+                    "vixy_roc": round(float(macro_state.get('VIXY', {}).get('gap', 0.0)), 2),
 
                     # GEX — field names per ENH_32 canonical schema in rules.json
                     "net_gex_total": _raw_gex,
@@ -1664,12 +1786,15 @@ def run_daemon():
 
             vix = macro_state['^VIX']
             vix_price = float(vix['price'])
-            vix_gap = float(vix['gap'])
-            # VIX fear alert — thresholds: GoogleDrive://GEM_Trading_Rules/rules > VIX_FEAR_THRESHOLD (20.0) and VIX_FEAR_GAP_PCT (2.0)
-            if vix_price > 20.0 and vix_gap > 2.0:
-                print(f"   >>> FEAR ALERT:  VIX (Vol) is {vix_price:.2f} (Gap {vix_gap:+.2f}%) {RED}[CAUTION]{RESET}")
+
+            vixy = macro_state.get('VIXY', {'price': 0.0, 'gap': 0.0})
+            vixy_gap = float(vixy['gap'])
+
+            # VIX fear alert — absolute trailing regime (VIX > 20.0) OR real-time velocity (VIXY ROC > 5.0%)
+            if vix_price > 20.0 or vixy_gap > 5.0:
+                print(f"   >>> FEAR ALERT:  VIX is {vix_price:.2f} | VIXY Velocity {vixy_gap:+.2f}% {RED}[CAUTION]{RESET}")
             else:
-                print(f"   >>> FEAR STATUS: VIX (Vol) is {vix_price:.2f} (Gap {vix_gap:+.2f}%) {GREEN}[STABLE]{RESET}")
+                print(f"   >>> FEAR STATUS: VIX is {vix_price:.2f} | VIXY Velocity {vixy_gap:+.2f}% {GREEN}[STABLE]{RESET}")
 
             sleep_needed = REFRESH_RATE_SECONDS
             print("")
