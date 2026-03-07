@@ -190,6 +190,23 @@ async def handle_paste(req: Request):
         
         payload = json.loads(clip_data.strip())
         
+        # Helper to extract and remove lessons from payload regardless of nesting
+        def extract_and_remove(data, key):
+            val = None
+            if key in data:
+                val = data.pop(key, None)
+            elif "mutable_state" in data and isinstance(data["mutable_state"], dict) and key in data["mutable_state"]:
+                val = data["mutable_state"].pop(key, None)
+            elif "EXECUTION_PAYLOAD" in data and isinstance(data["EXECUTION_PAYLOAD"], dict) and key in data["EXECUTION_PAYLOAD"]:
+                val = data["EXECUTION_PAYLOAD"].pop(key, None)
+            return val
+
+        # Extract lesson data *before* merging
+        extracted_compressed = extract_and_remove(payload, "compressed_trade_lessons")
+        extracted_new = extract_and_remove(payload, "new_trade_lessons")
+        extracted_trade_lessons = extract_and_remove(payload, "trade_lessons")
+        extracted_mutations = extract_and_remove(payload, "rule_mutations")
+
         # Merge local ssot
         existing_ssot = {}
         if os.path.exists('local_ssot_shadow.json'):
@@ -231,11 +248,13 @@ async def handle_paste(req: Request):
         else:
             merged_ssot = payload
             
-        # Strip trade_lessons keys from ROOT and MUTABLE_STATE — they are routed to trade_lessons.json
+        # Strip trade_lessons keys from ROOT, MUTABLE_STATE, and EXECUTION_PAYLOAD — they are routed to trade_lessons.json
         for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons", "rule_mutations"):
             merged_ssot.pop(tl_key, None)
             if "mutable_state" in merged_ssot:
                 merged_ssot["mutable_state"].pop(tl_key, None)
+            if "EXECUTION_PAYLOAD" in merged_ssot:
+                merged_ssot["EXECUTION_PAYLOAD"].pop(tl_key, None)
 
         # SSoT schema validation — prune non-canonical top-level keys to prevent drift
         CANONICAL_SSOT_KEYS = {
@@ -284,10 +303,10 @@ async def handle_paste(req: Request):
 
         # Trade lessons
         lessons_file = 'trade_lessons.json'
-        if "compressed_trade_lessons" in payload and isinstance(payload["compressed_trade_lessons"], list):
+        if extracted_compressed and isinstance(extracted_compressed, list):
             with open(lessons_file, 'w') as f:
-                json.dump({"trade_lessons": _normalize_lessons(payload["compressed_trade_lessons"])}, f, indent=2)
-        elif "new_trade_lessons" in payload and isinstance(payload["new_trade_lessons"], list):
+                json.dump({"trade_lessons": _normalize_lessons(extracted_compressed)}, f, indent=2)
+        elif extracted_new and isinstance(extracted_new, list):
             existing_lessons = []
             existing_data = None
             if os.path.exists(lessons_file):
@@ -300,7 +319,7 @@ async def handle_paste(req: Request):
                             existing_lessons = existing_data
                 except: pass
             
-            existing_lessons.extend(payload["new_trade_lessons"])
+            existing_lessons.extend(extracted_new)
             final_normalized = _normalize_lessons(existing_lessons)
             
             if isinstance(existing_data, dict):
@@ -311,8 +330,8 @@ async def handle_paste(req: Request):
                 
             with open(lessons_file, 'w') as f:
                 json.dump(output_data, f, indent=2)
-        elif "trade_lessons" in payload and isinstance(payload["trade_lessons"], list):
-            incoming_lessons = payload["trade_lessons"]
+        elif extracted_trade_lessons and isinstance(extracted_trade_lessons, list):
+            incoming_lessons = extracted_trade_lessons
             existing_lessons = []
             existing_data = None
             if os.path.exists(lessons_file):
@@ -364,19 +383,25 @@ async def handle_paste(req: Request):
                 else:
                     new_compiled_lessons.append(item)
 
-            # Re-inject preserved lessons from PERMANENT_RECORDS ranges that were NOT explicitly updated
+            # Re-inject preserved lessons that were NOT explicitly updated
             preserved_lessons = []
             for lesson in existing_lessons:
                 if isinstance(lesson, dict):
                     lid = lesson.get("id")
-                    # If it's in kept_ids but NOT in the new_compiled_lessons (meaning it was verified by a range string)
-                    if lid in kept_ids and lid not in [l.get("id") for l in new_compiled_lessons if isinstance(l, dict)]:
+                    # Keep all existing lessons unless they were explicitly updated by the incoming payload
+                    updated = False
+                    if lid is not None:
+                        for new_lesson in new_compiled_lessons:
+                            if isinstance(new_lesson, dict) and new_lesson.get("id") == lid:
+                                updated = True
+                                break
+                    if not updated:
                         preserved_lessons.append(lesson)
                 elif isinstance(lesson, str):
                     # Keep existing pure string lessons unless we are enforcing strict dicts
                     preserved_lessons.append(lesson)
 
-            # Combine preserved range lessons with newly updated/added ones, sorted by ID if possible
+            # Combine preserved lessons with newly updated/added ones, sorted by ID if possible
             existing_lessons = preserved_lessons + new_compiled_lessons
             
             final_normalized = _normalize_lessons(existing_lessons)
@@ -390,7 +415,7 @@ async def handle_paste(req: Request):
             with open(lessons_file, 'w') as f:
                 json.dump(output_data, f, indent=2)
         # Rule mutations
-        if "rule_mutations" in payload and isinstance(payload["rule_mutations"], list):
+        if extracted_mutations and isinstance(extracted_mutations, list):
             rules_file = os.path.join('GEM_Trading_Rules', 'rules.json')
             if os.path.exists(rules_file):
                 try:

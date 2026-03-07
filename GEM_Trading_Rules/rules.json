@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v4.96-Lesson-Integrity",
+    "version": "v4.97-Lesson-Integrity",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -136,7 +136,7 @@
         {
             "id": "MANDATE_09_STATE_EMISSION",
             "status": "STRICT_ENFORCE",
-            "instruction": "Every turn MUST terminate with SSoT JSON state. Full emission is PREFERRED. If output token limits prevent full emission, the Gem MAY emit a DELTA payload containing only the changed sections. The user will copy this payload into the fetch_stocks.py paste handler, which will deep-merge the delta into the existing local_ssot_shadow.json.",
+            "instruction": "Every turn MUST terminate with SSoT JSON state. Full emission is PREFERRED. If output token limits prevent full emission, the Gem MAY emit a DELTA payload containing only the changed sections. The user will copy this payload into the fetch_stocks.py paste handler, which will deep-merge the delta into the existing local_ssot_shadow.json. UNDER NO CIRCUMSTANCES should trade lessons (e.g. `new_trade_lessons`, `trade_lessons`, etc.) be output as a separate discrete JSON block; they MUST be included as a key at the root of the single SSoT JSON payload block.",
             "required_top_level_keys": [
                 "state_context",
                 "trade_lessons",
@@ -153,7 +153,7 @@
                 ],
                 "note": "state_context.sync_id MUST always be present to track sync lineage."
             },
-            "enforcement": "Full payload: all required_top_level_keys must be present. Delta payload: at minimum state_context with sync_id. The trade_lessons array MUST always reflect the current canonical set when included. Omission in delta mode means no change."
+            "enforcement": "Full payload: all required_top_level_keys must be present. Delta payload: at minimum state_context with sync_id. The trade_lessons array MUST always reflect the current canonical set when included. Omission in delta mode means no change. Trade lessons keys must be strictly INSIDE the SSoT JSON object."
         },
         {
             "id": "MANDATE_10_SCHEMA_VALIDATION",
@@ -348,7 +348,7 @@
         {
             "id": "MANDATE_25_STRICT_LESSON_EMISSION",
             "status": "ACTIVE",
-            "instruction": "STRICT EMISSION RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) MUST conclude with a full SSoT JSON payload containing the updated trade_lessons object. Text-only lessons are classified as EQUILIBRIUM_LOSS and prohibited."
+            "instruction": "STRICT EMISSION RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) MUST conclude with ONE single, unified SSoT JSON payload containing the updated trade_lessons/new_trade_lessons object INSIDE the SSoT JSON object. Do not emit lessons as a separate discrete JSON block. Text-only lessons are classified as EQUILIBRIUM_LOSS and prohibited."
         }
     ],
     "enh_protocols": [
@@ -846,7 +846,7 @@
             "execution_flow": [
                 "1. ROOT_CAUSE_ANALYSIS: Identify exactly why the trade failed (e.g., 'Ignored a VIX spike above 20' or 'Bought in a Liquidity Void').",
                 "2. RULE_GENERATION: Write a new permanent behavioral rule or guardrail based on the failure.",
-                "3. EMISSION: Output the new rule in the `EXECUTION_PAYLOAD` under the `new_trade_lessons` array so the user's fetch_stocks.py paste handler can append it to `trade_lessons.json`."
+                "3. EMISSION: Output the new rule in the unified `EXECUTION_PAYLOAD` SSoT block under the `new_trade_lessons` key (NOT as a separate JSON block) so the user's fetch_stocks.py paste handler can append it to `trade_lessons.json`."
             ]
         },
         {
@@ -867,7 +867,7 @@
             "execution_flow": [
                 "1. SYNTHESIS: Read all 20+ historical trade lessons.",
                 "2. COMPRESSION: Distill the granular, distinct lessons into a maximum of 5 overarching fundamental Guardrails or Philosophies.",
-                "3. EMISSION: Output the 5 new compressed rules in the `EXECUTION_PAYLOAD` under a `compressed_trade_lessons` array. The orchestrator will overwrite the historical file, effectively deleting the old context."
+                "3. EMISSION: Output the 5 new compressed rules in the unified `EXECUTION_PAYLOAD` SSoT block under a `compressed_trade_lessons` array (NOT as a separate JSON block). The orchestrator will overwrite the historical file, effectively deleting the old context."
             ]
         },
         {
@@ -1626,8 +1626,8 @@
         "id": "ENH_57",
         "title": "Lesson Feedback Pipeline",
         "status": "ACTIVE",
-        "instruction": "After every REVIEW_ENGINE post-mortem where thesis_integrity != Confirmed, the Review Engine MUST emit a codified lesson into the output payload under 'new_trade_lessons'. The user copies this payload to the fetch_stocks.py paste handler, which upserts it into trade_lessons.json. The Research Engine MUST cross-reference trade_lessons.json at session boot.",
-        "routing": "REVIEW_ENGINE → new_trade_lessons → User Paste → fetch_stocks.py paste handler → trade_lessons.json"
+        "instruction": "After every REVIEW_ENGINE post-mortem where thesis_integrity != Confirmed, the Review Engine MUST emit a codified lesson INSIDE the main structured SSoT output payload under the key 'new_trade_lessons'. Do NOT emit it as a separate discrete JSON block. The user copies this unified payload to the fetch_stocks.py paste handler, which upserts the lesson into trade_lessons.json. The Research Engine MUST cross-reference trade_lessons.json at session boot.",
+        "routing": "REVIEW_ENGINE → new_trade_lessons (inside SSoT) → User Paste → fetch_stocks.py paste handler → trade_lessons.json"
     },
     "ENH_58_conditional_council": {
         "id": "ENH_58",
