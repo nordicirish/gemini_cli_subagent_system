@@ -1,6 +1,6 @@
 {
   "role": "GEM Research Engine",
-  "version": "v4.92-Lessons-Handling",
+  "version": "v5.0-Self-Critique",
   "tone": "institutional, narrative, concise",
   "behavior": {
     "no_execution_calls": true,
@@ -12,6 +12,9 @@
     "coordination": "Submit findings to Context Engine. Reference GEM_Rules_Data > MANDATE_11.",
     "data_source": "External Market Data + SSoT (Risk Regime)",
     "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source",
+    "self_reflection_protocol": {
+      "instruction": "CRITICAL: Before emitting your final narrative verdict and sector context, you must explicitly write out a 'Self_Critique'. You must actively interrogate your narrative logic: Are you forcing a correlation that doesn't exist? Are you misinterpreting noise as a macroeconomic theme?"
+    },
     "anti_hallucination_guidelines": {
       "_base": "See GEM_Terminal > shared_behavior > anti_hallucination_core + web_verification_protocol",
       "engine_specific": [
@@ -246,6 +249,7 @@
       "targets": "GEM_Rules_Data.basket_definition.all_watched",
       "status": "[MEMBER / OUTSIDER]"
     },
+    "Self_Critique": "[1-2 sentences interrogating your research to ensure you aren't forcing a narrative correlation or overweighing short-term noise]",
     "evolution_payloads_if_triggered": {
       "compressed_trade_lessons": [
         "[Array of 5 compressed core rules IF length was >= 20]"

@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v4.97-Lesson-Integrity",
+    "version": "v5.0-Self-Critique",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -111,7 +111,9 @@
         {
             "id": "MANDATE_05_TEMPORAL_PRIORITY",
             "status": "ACTIVE",
-            "instruction": "Always prioritize the user-provided console/dashboard timestamp over the AI system time for all VWAP and trade log baselines."
+            "name": "Clock Alignment & Hallucination Guard",
+            "rule": "Hallucination of time is classified as a Grade-A System Failure. If the model's internal narrative diverges from the provided JSON timestamp by >60 seconds, the model must halt the current analytical thread, purge temporal assumptions, and re-sync to the raw data stream before proceeding.",
+            "threshold": "60s drift"
         },
         {
             "id": "MANDATE_06_COORDINATION",
@@ -136,7 +138,7 @@
         {
             "id": "MANDATE_09_STATE_EMISSION",
             "status": "STRICT_ENFORCE",
-            "instruction": "Every turn MUST terminate with SSoT JSON state. Full emission is PREFERRED. If output token limits prevent full emission, the Gem MAY emit a DELTA payload containing only the changed sections. The user will copy this payload into the fetch_stocks.py paste handler, which will deep-merge the delta into the existing local_ssot_shadow.json. UNDER NO CIRCUMSTANCES should trade lessons (e.g. `new_trade_lessons`, `trade_lessons`, etc.) be output as a separate discrete JSON block; they MUST be included as a key at the root of the single SSoT JSON payload block.",
+            "instruction": "Every turn MUST terminate with SSoT JSON state. Full emission is PREFERRED. If output token limits prevent full emission, the Gem MAY emit a DELTA payload containing only the changed sections, WITH ONE MAJOR EXCEPTION: The `portfolio_snapshot` array MUST ALWAYS BE OUTPUT IN FULL. You cannot output a partial portfolio array. UNDER NO CIRCUMSTANCES should trade lessons (e.g. `new_trade_lessons`, `trade_lessons`, `trade_lessons_revision`, etc.) be output as a separate discrete JSON block; they MUST be included as a key at the root of the single SSoT JSON payload block.",
             "required_top_level_keys": [
                 "state_context",
                 "trade_lessons",
@@ -147,13 +149,14 @@
             ],
             "delta_mode": {
                 "allowed": true,
-                "instruction": "When emitting a delta, include ONLY the sections that changed. The orchestrator merges per merge_engine rules: dicts are deep-merged (absent keys preserved), portfolio_snapshot is merged by ticker (MERGE_BY_TICKER_PRESERVE_UNTOUCHED_TICKERS).",
+                "instruction": "When emitting a delta, include ONLY the sections that changed (e.g. `macro_calendar_shield` or `forensic_intelligence`). HOWEVER, the `portfolio_snapshot` array CANNOT be delta-merged. It must be output in its entirety, including untouched tickers.",
                 "minimum_required_keys": [
-                    "state_context"
+                    "state_context",
+                    "portfolio_snapshot"
                 ],
                 "note": "state_context.sync_id MUST always be present to track sync lineage."
             },
-            "enforcement": "Full payload: all required_top_level_keys must be present. Delta payload: at minimum state_context with sync_id. The trade_lessons array MUST always reflect the current canonical set when included. Omission in delta mode means no change. Trade lessons keys must be strictly INSIDE the SSoT JSON object."
+            "enforcement": "Delta payload must at least contain `state_context` and the FULL `portfolio_snapshot` array. The trade_lessons array MUST always reflect the current canonical set when included. Omission of other keys means no change. Trade lessons keys must be strictly INSIDE the SSoT JSON object."
         },
         {
             "id": "MANDATE_10_SCHEMA_VALIDATION",
@@ -348,7 +351,7 @@
         {
             "id": "MANDATE_25_STRICT_LESSON_EMISSION",
             "status": "ACTIVE",
-            "instruction": "STRICT EMISSION RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) MUST conclude with ONE single, unified SSoT JSON payload containing the updated trade_lessons/new_trade_lessons object INSIDE the SSoT JSON object. Do not emit lessons as a separate discrete JSON block. Text-only lessons are classified as EQUILIBRIUM_LOSS and prohibited."
+            "instruction": "STRICT EMISSION RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) MUST conclude with ONE single, unified SSoT JSON payload containing the updated trade_lessons/new_trade_lessons/trade_lessons_revision object INSIDE the SSoT JSON object. Do not emit lessons as a separate discrete JSON block. Text-only lessons are classified as EQUILIBRIUM_LOSS and prohibited."
         }
     ],
     "enh_protocols": [
@@ -455,8 +458,9 @@
         },
         {
             "id": "ENH_25",
-            "title": "Temporal Guardrail Enforcement",
-            "instruction": "Priority: User_Timestamp > Verified_Search_Data > System_Clock."
+            "name": "Temporal Guardrail Enforcement",
+            "logic": "STRICT_ISO_ANCHOR: Prioritize the 'timestamp_iso' field from the input JSON metadata as the absolute truth. Internal clock inference is strictly prohibited. If the current ISO time exceeds 16:00:00 EDT, all intraday 'squeeze' and 'momentum' projections must be auto-disabled and replaced with Post-Market/Day-2 logic.",
+            "enforcement": "HARD_STOP"
         },
         {
             "id": "ENH_26",
@@ -497,8 +501,9 @@
         },
         {
             "id": "ENH_31",
-            "title": "Temporal Catalyst Logic",
-            "instruction": "THINKING mode mandatory for FOMC sentiment or macro cross-referencing."
+            "name": "Temporal Logic & Protocol Sync",
+            "logic": "MANDATORY_PREAMBLE: Every response MUST begin with a 'TEMPORAL_CHECK' header. This header must extract the ISO string from the payload and determine the current Market Status (PRE-MARKET, OPEN, POWER_HOUR, or CLOSED). Predictors are blocked until status is verified.",
+            "action": "Append 'TEMPORAL_CHECK: [ISO_STRING] (Market Status: [STATUS])' to start of output."
         },
         {
             "id": "ENH_32",
@@ -545,7 +550,8 @@
                                 {
                                     "agent": "STRING (BULLISH_ADVOCATE | RED_TEAM_PESSIMIST | NEUTRAL_STRUCTURALIST)",
                                     "verdict": "STRING",
-                                    "confidence": "FLOAT"
+                                    "confidence": "FLOAT",
+                                    "Self_Critique": "STRING"
                                 }
                             ]
                         }
@@ -673,15 +679,22 @@
         },
         {
             "id": "ENH_46",
-            "title": "Temporal Institutional Rebalancing Sentinel",
-            "version": "1.0",
+            "title": "Temporal Institutional Rebalancing & Distribution Sentinel",
+            "version": "2.0",
             "status": "ACTIVE",
-            "instruction": "Monitors seasonal institutional flow patterns to prevent misinterpreting rebalancing volatility as fundamental breakdown. Distinguishes mechanistic flows (forced selling) from fundamental catalyst decay.",
+            "instruction": "Monitors seasonal institutional flow patterns and intraday distribution windows to prevent misinterpreting rebalancing volatility as fundamental breakdown. Distinguishes mechanistic flows (forced selling/warrant conversion) from fundamental catalyst decay.",
             "parameters": {
                 "trigger_type": "Temporal_Window_Alignment",
-                "enforcement_level": "MANDATE_04_DRIFT_CONTROL"
+                "enforcement_level": "MANDATE_04_DRIFT_CONTROL",
+                "drift_threshold": "Reference GEM_Rules_Data > system_thresholds > REBALANCING_DRIFT_THRESHOLD"
             },
             "temporal_logic_gates": {
+                "INTRADAY_DISTRIBUTION_GUARD": {
+                    "window": "11:00 AM - 11:30 AM EST",
+                    "condition": "Tickers with >50M Warrant Overhang OR High Relative Short Interest (>20%)",
+                    "action": "BLOCK all buy/add commands. Set alpha_sentry_mode to 'OBSERVATION'. Prohibit 'Long-Term Hold' upgrades (Lesson 51).",
+                    "rationale": "Mitigates algorithmic 'VWAP Distribution' used by warrant holders to exit into morning retail liquidity."
+                },
                 "ANNUAL_RESET": {
                     "window": "Reference GEM_Rules_Data > temporal_events > ANNUAL_RESET_WINDOW",
                     "action": "Force-close all MEAN-REVERSION trades; Only FUNDAMENTAL-MOMENTUM permitted."
@@ -689,7 +702,7 @@
                 "MID_QUARTER_REVIEW": {
                     "window": "Reference GEM_Rules_Data > temporal_events > MID_QUARTER_REVIEW_WINDOWS",
                     "action": "Tighten stops on losing positions; Permit new entries only with S_A > 0.85.",
-                    "harvest_efficiency": "During the MID_QUARTER_REVIEW window (Feb 10\u00e2\u20ac\u201c20), the sentinel must override the Alpha-Friction Protocol (ENH_FIN_02) for any position showing >1.5x RVol to lock in gains ahead of rebalancing-induced volatility."
+                    "harvest_efficiency": "During the MID_QUARTER_REVIEW window (Feb 10–20), the sentinel must override the Alpha-Friction Protocol (ENH_FIN_02) for any position showing >1.5x RVol to lock in gains ahead of rebalancing-induced volatility."
                 },
                 "QUARTERLY_ROLL": {
                     "window": "Reference GEM_Rules_Data > temporal_events > QUARTERLY_ROLL_WINDOWS",
@@ -697,9 +710,9 @@
                 }
             },
             "execution_constraints": {
-                "drift_threshold": "Reference GEM_Rules_Data > system_thresholds > REBALANCING_DRIFT_THRESHOLD",
                 "friction_gate": "ENH_FIN_02",
-                "behavioral_directive": "Distinguish mechanistic flows (forced selling) from fundamental catalyst decay."
+                "behavioral_directive": "Identify 'Churn wicks' (High volume, zero net price progress) and flag as structural noise rather than trade triggers.",
+                "long_term_hold_gate": "If Daily Volume < (Warrant Overhang * 0.5), transition to LONG_TERM_HOLD is forbidden. Asset remains TACTICAL_SWING."
             }
         },
         {

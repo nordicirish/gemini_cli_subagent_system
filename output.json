@@ -1,0 +1,321 @@
+{
+  "immutable_background": {
+    "role": "GEM Trading Terminal Orchestrator",
+    "version": "v4.98-Recessionary-Decoupling",
+    "tone": "institutional, neutral, concise",
+    "behavior": {
+      "no_persona": true,
+      "no_explanations": true,
+      "no_extra_text": true,
+      "no_mixing_modules": true,
+      "strict_forensic_tone_for_financial_data": true,
+      "mandate_override": "NONE - STRICT ADHERENCE TO GEM_RULE_ENFORCER_ENGINE",
+      "coordination_constraints": {
+        "logic_source": "GEM_Rules_Data",
+        "coordination": "Execute commands only after validating rights with GEM_Rule_Enforcer_Engine protocol.",
+        "mandate_source": "Refer to GEM_Rules_Data for all thresholds, and GEM_Rule_Enforcer_Engine for enforcement.",
+        "active_mandates": "MANDATE_04, MANDATE_18, MANDATE_20, MANDATE_21",
+        "routing_priority": {
+          "MACRO_FILTER": "ENH_45",
+          "CALENDAR_SHIELD": "ENH_47",
+          "EXECUTION_LOGIC": "ENH_29",
+          "STRUCTURAL_FILTER": "ENH_30",
+          "TEMPORAL_LOGIC": "ENH_31",
+          "FRICTION_GUARD": "ENH_FIN_02"
+        }
+      }
+    },
+    "shared_behavior": {
+      "mandate_source": "GEM_Rules_Data",
+      "knowledge_binding": {
+        "source": "ATTACHED_KNOWLEDGE_BASE (GEM_Rules_Data)",
+        "priority": "ABSOLUTE",
+        "instruction": "Verify parameters against rules document before every response."
+      },
+      "anti_hallucination_core": {
+        "negative_constraints": [
+          "DO NOT fabricate catalysts.",
+          "DO NOT assume data availability.",
+          "DO NOT infer sentiment without citation."
+        ],
+        "missing_data_protocol": "Return 'INSUFFICIENT_DATA' if fields are missing."
+      },
+      "web_verification_protocol": "Reference ENH_55",
+      "tax_posture": "Nordea_Finland_ESA / TAX_POSTURE"
+    }
+  },
+  "mutable_state": {
+    "state_context": {
+      "terminal_id": "TERMINAL_ALPHA_01",
+      "orchestrator_version": "v4.98-Recessionary-Decoupling",
+      "sync_id": "GEM-PRE-MARKET-RECON-20260310",
+      "timestamp_utc": "2026-03-09T15:44:08Z",
+      "market_session": "PRE-MARKET",
+      "risk_regime": "ACTIVE_COMBAT_ORCHESTRATION",
+      "alpha_sentry_mode": "WAR_CORE_HOLD",
+      "logic_source": "Macro_Intelligence_Integrated",
+      "sync_status": "LOCKED",
+      "rules_version": "v4.98",
+      "market_status": "OPEN",
+      "strategy": "CAPITALIZE_ON_SECTOR_DECOUPLING",
+      "account_profile": "Nordea_Finland_ESA",
+      "last_updated": "2026-03-09T12:45:00Z",
+      "vix_regime": "HIGH_VOL_25.53",
+      "timestamp_iso": "2026-03-10T08:37:33Z"
+    },
+    "portfolio_snapshot": [
+      {
+        "ticker": "UMAC",
+        "shares": 1005,
+        "wac": 16.27,
+        "price": 17.04,
+        "ma_50": 14.34,
+        "net_gex_total": 0.0067,
+        "health_score": 98,
+        "dealer_posture": "SHORT_GAMMA",
+        "trade_state": "LONG",
+        "status": "MARKET_LEADER",
+        "action": "CONVICTION HOLD",
+        "note": "Shares corrected to 1005. Q4 run-rate thesis validates $17+ pricing.",
+        "vwap": 16.9
+      },
+      {
+        "ticker": "RCAT",
+        "shares": 1102,
+        "wac": 14.81,
+        "price": 13.95,
+        "ma_50": 12.59,
+        "net_gex_total": 0.0045,
+        "health_score": 85,
+        "dealer_posture": "SHORT_GAMMA",
+        "trade_state": "LONG",
+        "status": "GAP_DISTRESS",
+        "action": "HOLD",
+        "note": "Trading below VWAP; Success Memo (10 U.S.C. \u00a7 4022) provides hold exception.",
+        "vwap": 14.49
+      },
+      {
+        "ticker": "DFTX",
+        "shares": 392,
+        "wac": 17.38,
+        "price": 18.46,
+        "ma_50": 16.09,
+        "health_score": 99,
+        "dealer_posture": "LONG_GAMMA",
+        "trade_state": "LONG",
+        "status": "SOVEREIGN_HEDGE",
+        "action": "CONVICTION HOLD",
+        "note": "Primary volatility buffer; +3.7% pre-market lift confirms decoupling."
+      },
+      {
+        "ticker": "ONDS",
+        "price": 9.56,
+        "vwap": 9.5,
+        "status": "VWAP_RECLAIMED",
+        "action": "WATCH. Prime status re-rating in progress."
+      }
+    ],
+    "remaining_cash_usd": 44.99,
+    "forensic_intelligence": {
+      "active_flags": [
+        "RCAT_GAP_DOWN",
+        "UMAC_RS_EXTREME",
+        "DFTX_LONG_GAMMA_FLIP"
+      ],
+      "risk_alerts": [
+        "RCAT: Breach of $13.90 may trigger secondary algorithmic flush.",
+        "VIXY: Velocity remains below the 5% Veto threshold (Lesson 32)."
+      ],
+      "vix_threshold": "30.72 - CRITICAL regime.",
+      "smart_money_status": "Consolidating in sub-system suppliers (UMAC) over speculative prototype vendors.",
+      "legislative_shadow": "10 U.S.C. \u00c2\u00a7 4022(f) production authority protects Teal from Gauntlet leaderboard exclusion.",
+      "probability_score": "0.78",
+      "target_time_window": "2:45 PM - 3:15 PM EDT"
+    },
+    "runtime_flags": {
+      "engine_mode": "PRO",
+      "volatility_override": true,
+      "risk_scaling_enabled": true,
+      "manual_execution_active": true,
+      "earnings_carry_active": true,
+      "esa_tax_shield_active": true,
+      "vix_regime": "CRITICAL"
+    },
+    "macro_calendar_shield": {
+      "shield_active": true,
+      "shield_posture": "NO_NEW_ENTRIES",
+      "sizing_dampener": 0.5,
+      "active_events_window": [
+        {
+          "date": "2026-03-09",
+          "event": "UMAC Q4 Earnings Call",
+          "time": "08:30:00",
+          "impact": "CRITICAL"
+        },
+        {
+          "date": "2026-03-09",
+          "event": "USWRE Emil Michael Post-Earnings Interview",
+          "time": "09:00:00",
+          "impact": "HIGH"
+        }
+      ]
+    },
+    "active_orders": {
+      "UMAC_STOP": "Manual Market Sell if < $15.85 (Sight Trigger)",
+      "RCAT_STOP": "Manual Market Sell if < $15.10 (Sight Trigger)",
+      "RCAT_RECLAIM": "Buy Limit if > $16.85 VWAP Reclaim (Quantity 500)"
+    },
+    "EXECUTION_PAYLOAD": {
+      "state_context": {
+        "sync_id": "DECOUPLING-VALIDATION-SYNC-20260309",
+        "timestamp_utc": "2026-03-09T13:11:12Z",
+        "market_status": "PRE-OPEN",
+        "risk_regime": "ACTIVE_COMBAT_ORCHESTRATION",
+        "strategy": "CARRY_RELIANT_ALPHA",
+        "last_updated": "2026-03-09T13:11:12Z"
+      },
+      "forensic_intelligence": {
+        "active_flags": [
+          "RECESSIONARY_DECOUPLING_ACTIVE",
+          "SOVEREIGN_MANDATE_SHIELD",
+          "LIQUIDITY_CORRELATION_RISK"
+        ],
+        "risk_alerts": [
+          "VIX 31.85: 'Exemption' logic applies to Direction, not Volatility. Expect wide whipsaws.",
+          "UMAC: +11% Gap confirms capital flight into the drone supply chain."
+        ]
+      }
+    },
+    "FORENSIC_SYNC": {
+      "conclusion": "UMAC'S scaling is 85% attributable to RCAT's production roadmaps.",
+      "active_catalyst": "10 U.S.C. \u00a7 4022(f) statutory lock-in.",
+      "monday_posture": "UMAC Basis ($16.27) provides a 10% safety buffer for the gap-up."
+    },
+    "TECHNICAL_PAYLOAD": {
+      "motor_mapping": {
+        "RCAT_F10_LEAD": "UM 3220 High-Torque Brushless",
+        "RCAT_F7_LEAD": "UM 2807 Blue UAS Certified",
+        "supply_chain_status": "LOCKED via 10 U.S.C. \u00a7 4022(f)"
+      },
+      "revenue_multiplier": "120,000 units needed for Gauntlet Phase 1 (11 winners + RCAT)."
+    },
+    "TECHNICAL_SYNC": {
+      "motor_type": "High-Performance Brushless DC",
+      "manufacturing_site": "Orlando, Florida (70,000 sq ft facility)",
+      "statutory_compliance": "NDAA Section 848 / Blue UAS Framework",
+      "market_posture": "DECOUPLED SAFE HAVEN"
+    },
+    "COMPETITIVE_SYNC": {
+      "primary_rival": "GreenSight (New Hampshire)",
+      "market_structure": "Managed Domestic Duopoly",
+      "budget_impact": "Split of $1.1B Group 1 FPV propulsion allocation.",
+      "UMAC_edge": "Pre-existing 70,000 sq ft scale and RCAT 'Success Memo' lock-in."
+    },
+    "MERGER_PAYLOAD": {
+      "status": "VALIDATED_PRIME_TRANSITION",
+      "primary_asset": "Mistral Inc. (Bethesda, MD)",
+      "backlog_value": "$1B+ IDIQ Contracts",
+      "new_segments": [
+        "Loitering Munitions",
+        "SOCOM ISR",
+        "HLS Public Safety"
+      ],
+      "strategic_action": "Treat $9.00 - $9.40 as a Structural Reload Zone."
+    },
+    "DILUTION_AUDIT": {
+      "status": "CONTROLLED_EXPANSION",
+      "cash_buffer": "$1.5B Pro-forma",
+      "warrant_ceiling": "$20.00 (73M units)",
+      "merger_structure": "Subsidiary Merger (ONDS as Parent)",
+      "strategic_note": "Accretive revenue from Mistral backlog offsets share issuance."
+    },
+    "_meta": {
+      "description": "END OF DAY FINAL DATA - ABSOLUTE SYNC",
+      "is_simulation": false,
+      "source": "Real-time Exchange Feed",
+      "reliability": "Absolute",
+      "timestamp_iso": "2026-03-09T16:00:21.575120-04:00"
+    },
+    "timestamp": "2026-03-09 16:00:21",
+    "status": "CLOSED",
+    "is_heavy_refresh": false,
+    "local_storage_state": {
+      "immutable_background": {
+        "role": "GEM Trading Terminal Orchestrator",
+        "version": "v4.99-EOD-Final",
+        "tone": "institutional, neutral, concise",
+        "behavior": {
+          "no_persona": true,
+          "no_explanations": true,
+          "no_extra_text": true,
+          "no_mixing_modules": true,
+          "strict_forensic_tone_for_financial_data": true,
+          "mandate_override": "NONE",
+          "coordination_constraints": {
+            "logic_source": "GEM_Rules_Data",
+            "active_mandates": "MANDATE_04, MANDATE_18, MANDATE_20, MANDATE_21"
+          }
+        }
+      },
+      "mutable_state": {
+        "state_context": {
+          "terminal_id": "TERMINAL_ALPHA_01",
+          "sync_id": "GEM-400PM-EOD-FINAL-SYNC",
+          "timestamp_utc": "2026-03-09T20:00:21Z",
+          "market_session": "POST-MARKET",
+          "risk_regime": "ACTIVE_COMBAT_ORCHESTRATION",
+          "alpha_sentry_mode": "WAR_CORE_HOLD",
+          "logic_source": "Macro_Intelligence_Integrated",
+          "sync_status": "LOCKED",
+          "vix_regime": "DECOMPRESSING_25.46"
+        },
+        "portfolio_snapshot": [
+          {
+            "ticker": "UMAC",
+            "shares": 1005,
+            "wac": 16.27,
+            "price": 18.08,
+            "status": "LEAD_HORSE",
+            "action": "MANUAL HOLD. Sight stop $15.85 remains active."
+          },
+          {
+            "ticker": "RCAT",
+            "shares": 1102,
+            "wac": 14.81,
+            "price": 14.08,
+            "vwap": 14.38,
+            "status": "SSR_PROTECTED",
+            "action": "HOLD",
+            "note": "MOC Sell Imbalance prevented squeeze; SRR winner status remains core thesis."
+          },
+          {
+            "ticker": "DFTX",
+            "shares": 392,
+            "wac": 17.38,
+            "price": 18.25,
+            "status": "SOVEREIGN_HEDGE",
+            "action": "HOLD",
+            "note": "Volatility buffer; uncorrelated alpha."
+          }
+        ],
+        "remaining_cash_usd": 44.99,
+        "forensic_intelligence": {
+          "active_flags": [
+            "SPY_V_RECLAIM",
+            "RCAT_MOC_FLUSH",
+            "UMAC_RS_EXTREME"
+          ],
+          "risk_alerts": [
+            "VIX 25.46: Still elevated but off peaks.",
+            "MOC Sell Imbalance on RCAT confirmed."
+          ],
+          "smart_money_status": "Rotating into profitable sub-system providers (UMAC)."
+        },
+        "active_orders": {
+          "RCAT_SQUEEZE_TARGET": "Limit Sell @ $14.59 (Day 2 Carryover)",
+          "UMAC_TRAIL": "Mental Stop @ $15.85"
+        }
+      }
+    }
+  }
+}

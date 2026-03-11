@@ -38,8 +38,8 @@ USE_FINNHUB = True
 USE_POLYGON = False  # keep false unless you want Polygon volume fallback
 
 TICKERS = [
-    'ONDS', 'UMAC', 'RCAT', 'DFTX',
-    'RKLB', 'PLTR',
+    'ONDS', 'UMAC', 'RCAT', 'DFTX'
+    
 ]
 
 MACRO_TICKERS = [
@@ -48,6 +48,7 @@ MACRO_TICKERS = [
     'VIXY',
     'IEF',
     'UUP',
+    'SPY'
 ]
 
 ALL_TICKERS = TICKERS + MACRO_TICKERS
@@ -173,7 +174,9 @@ async def handle_paste(req: Request):
         clip_data = re.sub(r'\[cite:\s*\d+(?:,\s*\d+)*\]', '', clip_data)
         clip_data = clip_data.strip()
         
-        if not (clip_data.startswith('{') or clip_data.startswith('[')):
+        clip_data = clip_data.strip()
+        
+        if not (clip_data.startswith('{') or clip_data.startswith('[')) or not (clip_data.endswith('}') or clip_data.endswith(']')):
             start_brace = clip_data.find('{')
             start_bracket = clip_data.find('[')
             start_idx = -1
@@ -204,7 +207,24 @@ async def handle_paste(req: Request):
         # Extract lesson data *before* merging
         extracted_compressed = extract_and_remove(payload, "compressed_trade_lessons")
         extracted_new = extract_and_remove(payload, "new_trade_lessons")
-        extracted_trade_lessons = extract_and_remove(payload, "trade_lessons")
+        extracted_trade_lessons = extract_and_remove(payload, "trade_lessons") or []
+        if isinstance(extracted_trade_lessons, dict) and "trade_lessons" in extracted_trade_lessons:
+            extracted_trade_lessons = extracted_trade_lessons["trade_lessons"]
+        if not isinstance(extracted_trade_lessons, list):
+            extracted_trade_lessons = []
+            
+        extracted_rev_trade_lessons = extract_and_remove(payload, "trade_lessons_revision") or []
+        if isinstance(extracted_rev_trade_lessons, dict) and "trade_lessons" in extracted_rev_trade_lessons:
+            extracted_rev_trade_lessons = extracted_rev_trade_lessons["trade_lessons"]
+        elif isinstance(extracted_rev_trade_lessons, dict) and "trade_lessons_revision" in extracted_rev_trade_lessons:
+            extracted_rev_trade_lessons = extracted_rev_trade_lessons["trade_lessons_revision"]
+        if not isinstance(extracted_rev_trade_lessons, list):
+            extracted_rev_trade_lessons = []
+            
+        extracted_trade_lessons.extend(extracted_rev_trade_lessons)
+        if not extracted_trade_lessons:
+            extracted_trade_lessons = None
+            
         extracted_mutations = extract_and_remove(payload, "rule_mutations")
 
         # Merge local ssot
@@ -249,7 +269,7 @@ async def handle_paste(req: Request):
             merged_ssot = payload
             
         # Strip trade_lessons keys from ROOT, MUTABLE_STATE, and EXECUTION_PAYLOAD — they are routed to trade_lessons.json
-        for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons", "rule_mutations"):
+        for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons", "rule_mutations", "trade_lessons_revision"):
             merged_ssot.pop(tl_key, None)
             if "mutable_state" in merged_ssot:
                 merged_ssot["mutable_state"].pop(tl_key, None)
@@ -261,11 +281,20 @@ async def handle_paste(req: Request):
             "state_context", "portfolio_snapshot", "forensic_intelligence",
             "runtime_flags", "macro_calendar_shield", "active_orders",
             "fin_account_gate", "registry_pointers", "overnight_posture",
-            "strategy_timing", "lesson_integration", "immutable_background", "mutable_state"
+            "strategy_timing", "lesson_integration", "immutable_background", "mutable_state",
+            "remaining_cash_usd"
         }
+        
+        # Prune from root
         non_canonical = [k for k in merged_ssot if k not in CANONICAL_SSOT_KEYS]
         for k in non_canonical:
             merged_ssot.pop(k)
+            
+        # Prune from mutable_state if using Layer Model
+        if has_layer_model and "mutable_state" in merged_ssot:
+            non_canonical_mutable = [k for k in merged_ssot["mutable_state"] if k not in CANONICAL_SSOT_KEYS]
+            for k in non_canonical_mutable:
+                merged_ssot["mutable_state"].pop(k)
 
         # Process Explicit Deletions
         del_list = payload.get("DELETE_FIELD", [])
@@ -1155,17 +1184,27 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         except:
             pass
 
+    # Attempt to fetch missing pre/post prices from fast_info as a first-line fallback
+    try:
+        fi = t_obj.fast_info
+        if not pre_price and getattr(fi, 'pre_market_price', None):
+            pre_price = float(fi.pre_market_price)
+        if not post_price and getattr(fi, 'post_market_price', None):
+            post_price = float(fi.post_market_price)
+    except:
+        pass
+
     # --- Session-aware price selection ---
     if status == "PRE-MARKET" and pre_price:
         price = float(pre_price)
-    elif status == "AFTER-HOURS" and post_price:
+    elif status in ("AFTER-HOURS", "CLOSED") and post_price:
         price = float(post_price)
     elif reg_price:
         price = float(reg_price)
 
     # --- Fallbacks ---
     needs_pre_vol = (pre_vol == 0 and cache.pre_market_volume.get(symbol, 0) == 0)
-    needs_post_vol = (status == "AFTER-HOURS" and post_vol == 0)
+    needs_post_vol = (status in ("AFTER-HOURS", "CLOSED") and post_vol == 0)
 
     if price == 0 or needs_post_vol:
         api_price, api_vol, api_pre_vol, api_post_vol = get_live_chart_data(symbol, status)
@@ -1199,7 +1238,7 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         if price == 0:
             if status == "PRE-MARKET" and getattr(fi, 'pre_market_price', None):
                 price = float(fi.pre_market_price)
-            elif status == "AFTER-HOURS" and getattr(fi, 'post_market_price', None):
+            elif status in ("AFTER-HOURS", "CLOSED") and getattr(fi, 'post_market_price', None):
                 price = float(fi.post_market_price)
             elif getattr(fi, 'last_price', None):
                 price = float(fi.last_price)
@@ -1226,7 +1265,7 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
 
         if status == "PRE-MARKET" and (pre_price is None or pre_price == 0):
             pre_price = price
-        elif status == "AFTER-HOURS" and (post_price is None or post_price == 0):
+        elif status in ("AFTER-HOURS", "CLOSED") and (post_price is None or post_price == 0):
             post_price = price
 
         techs = cache.technicals.get(symbol, {})
@@ -1829,7 +1868,11 @@ def run_daemon():
             if os.path.exists('trade_lessons.json'):
                 try:
                     with open('trade_lessons.json', 'r') as f:
-                        supplemental_lessons = json.load(f)
+                        data = json.load(f)
+                        if isinstance(data, dict) and "trade_lessons" in data:
+                            supplemental_lessons = data["trade_lessons"]
+                        elif isinstance(data, list):
+                            supplemental_lessons = data
                 except: pass
 
             supplemental_ssot = {}

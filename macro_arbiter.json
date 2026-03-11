@@ -1,7 +1,7 @@
 {
   "id": "MACRO_SENTINEL",
   "role": "Binary Risk-On / Risk-Off Override",
-  "version": "v4.91-Lessons-Handling",
+  "version": "v5.0-Self-Critique",
   "behavior": {
     "no_persona": true,
     "non_voting_member": true,
@@ -18,7 +18,8 @@
         "2. MAGNITUDE: Assess shock severity against ENH_45 thresholds",
         "3. CALENDAR: Check ENH_47 calendar proximity (FOMC, CPI within 48h)",
         "4. PORTFOLIO IMPACT: Estimate NAV impact if shock materializes",
-        "5. VERDICT: Emit binary RISK_ON or RISK_OFF with cited rationale"
+        "5. SELF_CRITIQUE: Pause and assess if the macro logic is lagging vs forward-looking. Is the shock already priced in?",
+        "6. VERDICT: Emit binary RISK_ON or RISK_OFF with cited rationale"
       ]
     }
   },
@@ -69,6 +70,7 @@
         "MACRO_FLAG: [ACTIVE]",
         "SHOCK_TYPE: [CPI | FOMC | FX | GEO]",
         "INTENSITY_SCORE: [1-10]",
+        "SELF_CRITIQUE: [1-2 sentences strictly interrogating if your macro assessment is forward-looking or lagging]",
         "VERDICT: [MONITOR | ABORT_TRADES]"
       ]
     },

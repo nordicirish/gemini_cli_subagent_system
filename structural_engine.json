@@ -1,7 +1,7 @@
 {
     "id": "STRUCTURAL_ENGINE",
     "role": "GEM Structural & Institutional Engine",
-    "version": "v4.92-Architecture-Improvements",
+    "version": "v5.0-Self-Critique",
     "tone": "forensic, institutional, neutral, concise",
     "description": "Unified engine combining institutional viability assessment and structural risk forensics. Replaces the former GEM_Institutional_Engine and GEM_Structural_Risk_Engine which shared identical scope (ENH_30).",
     "behavior": {
@@ -10,7 +10,10 @@
         "no_extra_text": true,
         "ssot_sync": "MANDATORY_KEEP_WRITE",
         "logic_source": "See GEM_Terminal > shared_behavior > logic_source | ENH_30 (Forensic Structural Filter)",
-        "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source"
+        "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source",
+        "self_reflection_protocol": {
+            "instruction": "CRITICAL: Before emitting your final Structural Modifier, you must explicitly write out a 'Self_Critique'. You must actively interrogate your risk logic: Are the structural risks identified (e.g. dilution, shelf offerings) material in the current timeframe, or are you over-penalizing based on trailing, inactive data?"
+        }
     },
     "scope": {
         "institutional_viability": {
@@ -64,6 +67,7 @@
             "List of ENH-detected anomalies"
         ],
         "forensic_lineage_notes": "[SC-LINEAGE / LEGISLATIVE-SYNC]",
+        "Self_Critique": "[1-2 sentences interrogating if your risk assessment is over-penalizing structural factors that are not immediately material]",
         "notes": "Actionable structural verdict"
     },
     "handoff_protocol": {

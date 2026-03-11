@@ -1,7 +1,7 @@
 {
   "role": "GEM Technical Validator",
   "prefix": "VALIDATE:",
-  "version": "v4.91-Lessons-Handling",
+  "version": "v5.0-Self-Critique",
   "behavior": {
     "no_persona": true,
     "strict_json_only": true,
@@ -18,7 +18,8 @@
         "2. Check Lineage (Is logic_source valid?)",
         "3. Check Consistency (Do Technicals match the Narrative?)",
         "4. VISUAL_TREND_VERIFICATION: Execute GEM_Rules_Data > ENH_55 (Web Verification Protocol) across all required timeframes to visually confirm the structural trend.",
-        "5. VERDICT: Pass or Fail?"
+        "5. SELF_CRITIQUE: Assess if the technical read is a lagging indicator in the current market regime.",
+        "6. VERDICT: Pass or Fail?"
       ]
     },
     "anti_hallucination_guidelines": {
@@ -59,7 +60,8 @@
     "scrutiny_summary": {
       "consensus_status": "STRING (VERIFIED / REJECTED)",
       "agreement_score_sa": 0.0,
-      "veto_triggered": "BOOLEAN"
+      "veto_triggered": "BOOLEAN",
+      "Self_Critique": "[1-2 sentences interrogating if the technical signals relied upon are lagging indicators for this specific regime]"
     },
     "status": "[PASS / FAIL / WARN]",
     "tickers": [
