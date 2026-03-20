@@ -98,7 +98,9 @@ header.glass-panel {
 .alerts-panel {
     padding: 16px 20px;
     border-radius: var(--radius-lg);
-    min-width: 260px;
+    flex: 0 0 300px;
+    width: 300px;
+    max-width: 100%;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -289,7 +291,7 @@ h1 {
 /* ─── Macro HUD ─── */
 .macro-hud {
     display: flex;
-    gap: 14px;
+    gap: 16px;
     align-items: stretch;
 }
 
@@ -302,6 +304,7 @@ h1 {
     gap: 6px;
     position: relative;
     overflow: hidden;
+    text-align: center;
 }
 
 .macro-card::before {
@@ -329,6 +332,7 @@ h1 {
     text-transform: uppercase;
     letter-spacing: 1.5px;
     font-weight: 600;
+    margin-bottom: auto;
 }
 
 .macro-val {
@@ -672,6 +676,12 @@ textarea:focus {
     .sidebar-card {
         flex: 1;
         min-width: 280px;
+    }
+    .macro-hud {
+        flex-wrap: wrap;
+    }
+    .alerts-panel {
+        flex: 1 1 100%;
     }
 }
 

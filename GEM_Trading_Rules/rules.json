@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v5.0-Self-Critique",
+    "version": "v5.1-Gap-Awareness",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -55,7 +55,8 @@
         "ENH_55: Web Verification Protocol",
         "ENH_56: Gamma-Adjusted Buffer Protocol",
         "ENH_57: Sovereign Hedge Rotation",
-        "ENH_58: ESA_Tax_Neutralization_Protocol"
+        "ENH_58: ESA_Tax_Neutralization_Protocol",
+        "ENH_59: Decoupled Momentum Metrics Protocol"
     ],
     "mandate_registry": [
         "MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)",
@@ -925,6 +926,17 @@
             "id": "ENH_58",
             "title": "ESA Tax Neutralization Protocol",
             "instruction": "Treat the entire ticker share count as a single tactical block. In Finnish ESA accounts, the order of shares sold (FIFO) is an accounting artifact; intraday trading friction is purely commission-based (1% round-trip), allowing for 2-3% scalps on mechanical floors."
+        },
+        {
+            "id": "ENH_59",
+            "title": "Decoupled Momentum Metrics Protocol (Gap vs. Session Change)",
+            "status": "ACTIVE",
+            "instruction": "The system explicitly decouples 'True Opening Gap' from 'Live Session Change' to accurately model overnight catalysts vs. intraday momentum.",
+            "metrics": {
+                "gap_percent": "The 'True Gap' (locked at regular market open). Formula: ((Open - Previous Close) / Previous Close) * 100. Values > 1.0% or < -1.0% indicate a strong overnight catalyst (e.g. news/earnings gap).",
+                "session_change_pct": "The 'Net Session Change' (fluctuates intraday). Formula: ((Current Price - Previous Close) / Previous Close) * 100. Reflects live intraday return/trend."
+            },
+            "logic_application": "Use `gap_percent` strictly to evaluate the magnitude of overnight structural gaps. Use `session_change_pct` for all intraday trend evaluations, systemic volatility overrides (e.g. Protective Exit threshold in ENH_FIN_02), and RVOL confirmation."
         }
     ],
     "global_logic_gates": {

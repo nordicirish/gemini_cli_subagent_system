@@ -38,17 +38,17 @@ USE_FINNHUB = True
 USE_POLYGON = False  # keep false unless you want Polygon volume fallback
 
 TICKERS = [
-    'ONDS', 'UMAC', 'RCAT', 'DFTX'
+    'ONDS', 'UMAC', 'RCAT', 'DFTX', 'GLD'
     
 ]
 
 MACRO_TICKERS = [
-    'IEF',
     '^VIX',
     'VIXY',
     'IEF',
     'UUP',
-    'SPY'
+    'SPY',
+    'GDX'
 ]
 
 ALL_TICKERS = TICKERS + MACRO_TICKERS
@@ -193,6 +193,22 @@ async def handle_paste(req: Request):
         
         payload = json.loads(clip_data.strip())
         
+        # Map common payload aliases to canonical keys
+        def map_aliases(data):
+            if not isinstance(data, dict): return
+            if "portfolio" in data and "portfolio_snapshot" not in data:
+                data["portfolio_snapshot"] = data.pop("portfolio")
+            if "terminal_state" in data and "state_context" not in data:
+                data["state_context"] = data.pop("terminal_state")
+            if "forensic_alerts" in data and "forensic_intelligence" not in data:
+                data["forensic_intelligence"] = data.pop("forensic_alerts")
+        
+        map_aliases(payload)
+        if isinstance(payload.get("mutable_state"), dict):
+            map_aliases(payload["mutable_state"])
+        if isinstance(payload.get("EXECUTION_PAYLOAD"), dict):
+            map_aliases(payload["EXECUTION_PAYLOAD"])
+            
         # Helper to extract and remove lessons from payload regardless of nesting
         def extract_and_remove(data, key):
             val = None
@@ -282,7 +298,7 @@ async def handle_paste(req: Request):
             "runtime_flags", "macro_calendar_shield", "active_orders",
             "fin_account_gate", "registry_pointers", "overnight_posture",
             "strategy_timing", "lesson_integration", "immutable_background", "mutable_state",
-            "remaining_cash_usd"
+            "remaining_cash_usd", "_meta"
         }
         
         # Prune from root
@@ -511,6 +527,7 @@ class MarketDataCache:
         self.technicals: dict[str, dict] = {}
         self.prices: dict[str, float] = {}
         self.gaps: dict[str, float] = {}
+        self.session_change: dict[str, float] = {}
         self.vwaps: dict[str, float] = {}
         self.volumes: dict[str, int] = {}
         self.gex: dict[str, dict] = {}
@@ -1169,6 +1186,7 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
     pre_price = None
     post_price = None
     reg_price = None
+    reg_open = None
     pre_vol = 0
     post_vol = 0
 
@@ -1177,6 +1195,7 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
             pre_price = quote_data.get('preMarketPrice')
             post_price = quote_data.get('postMarketPrice')
             reg_price = quote_data.get('regularMarketPrice')
+            reg_open = quote_data.get('regularMarketOpen')
             vol = int(quote_data.get('regularMarketVolume', 0) or 0)
             pre_vol = int(quote_data.get('preMarketVolume', 0) or 0)
             post_vol = int(quote_data.get('postMarketVolume', 0) or 0)
@@ -1273,7 +1292,15 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
 
         # --- Session-aware returns ---
         if reg_close > 0:
-            cache.gaps[symbol] = ((price - reg_close) / reg_close) * 100
+            cache.session_change[symbol] = ((price - reg_close) / reg_close) * 100
+            
+            true_gap_price = price
+            if status in ("OPEN", "CLOSED") and reg_open:
+                true_gap_price = float(reg_open)
+            elif status == "PRE-MARKET" and pre_price:
+                true_gap_price = float(pre_price)
+                
+            cache.gaps[symbol] = ((true_gap_price - reg_close) / reg_close) * 100
 
         if pre_price is not None:
             cache.pre_market_price[symbol] = pre_price
@@ -1427,9 +1454,10 @@ def calculate_score(symbol):
     # -----------------------------
     rvol = calculate_rvol(symbol)
     gap = cache.gaps.get(symbol, 0)
+    session_change = cache.session_change.get(symbol, 0)
     if rvol > 2:
         # High volume confirms the direction of the move
-        if gap >= 0:
+        if session_change >= 0:
             score += 1  # High vol on up-move = bullish
         else:
             score -= 1  # High vol on down-move = bearish (distribution)
@@ -1602,7 +1630,7 @@ def run_daemon():
             sep_line = "-" * table_width
             print(sep_line)
             header_str = (
-                f"{'TICKER':<{w_sym}} {'PRICE':<{w_prc}} {'GAP%':<{w_gap}} {'VOL':<{w_vol}} "
+                f"{'TICKER':<{w_sym}} {'PRICE':<{w_prc}} {'CHG%':<{w_gap}} {'VOL':<{w_vol}} "
                 f"{'ATR%':<{w_atr}} {'RSI':<{w_rsi}} {'VWAP':<{w_vwp}} {'TREND':<{w_trd}} {'SCORE':^{w_scr}}"
             )
             print(header_str)
@@ -1650,6 +1678,7 @@ def run_daemon():
 
                 p = float(cache.prices.get(sym, 0))
                 gap = float(cache.gaps.get(sym, 0))
+                session_change = float(cache.session_change.get(sym, 0))
                 vol = cache.volumes.get(sym, 0)
                 vwap = cache.vwaps.get(sym, 0)
                 techs = cache.technicals.get(sym, {})
@@ -1660,12 +1689,12 @@ def run_daemon():
                     continue
 
                 if sym == 'IEF':
-                    trend = "BULLISH (Safe)" if gap > 0 else "BEARISH (Risk)"
-                    macro_state['IEF'] = {'price': p, 'gap': gap, 'trend': trend}
+                    trend = "BULLISH (Safe)" if session_change > 0 else "BEARISH (Risk)"
+                    macro_state['IEF'] = {'price': p, 'gap': session_change, 'trend': trend}
                 if sym == '^VIX':
-                    macro_state['^VIX'] = {'price': p, 'gap': gap}
+                    macro_state['^VIX'] = {'price': p, 'gap': session_change}
                 if sym == 'VIXY':
-                    macro_state['VIXY'] = {'price': p, 'gap': gap}
+                    macro_state['VIXY'] = {'price': p, 'gap': session_change}
 
                 if i % 2 == 1:
                     ROW_BG = BG_STRIPE
@@ -1674,13 +1703,13 @@ def run_daemon():
                     ROW_BG = BG_NORMAL
                     R_RST = RESET
 
-                gap_val = f"{gap:+.2f}%"
-                if gap > 0:
-                    gap_cell = f"{GREEN}{gap_val:<{w_gap}}{R_RST}"
-                elif gap < 0:
-                    gap_cell = f"{RED}{gap_val:<{w_gap}}{R_RST}"
+                chg_val = f"{session_change:+.2f}%"
+                if session_change > 0:
+                    chg_cell = f"{GREEN}{chg_val:<{w_gap}}{R_RST}"
+                elif session_change < 0:
+                    chg_cell = f"{RED}{chg_val:<{w_gap}}{R_RST}"
                 else:
-                    gap_cell = f"{WHITE}{gap_val:<{w_gap}}{R_RST}"
+                    chg_cell = f"{WHITE}{chg_val:<{w_gap}}{R_RST}"
 
                 rsi_raw = techs.get('RSI', 0)
                 rsi_val = f"{rsi_raw:.1f}"
@@ -1740,7 +1769,7 @@ def run_daemon():
                     score_cell = score_disp
 
                 row_content = (
-                    f"{sym:<{w_sym}} {p:<{w_prc}.2f} {gap_cell} {vol_str:<{w_vol}} {atr_str:<{w_atr}} "
+                    f"{sym:<{w_sym}} {p:<{w_prc}.2f} {chg_cell} {vol_str:<{w_vol}} {atr_str:<{w_atr}} "
                     f"{rsi_cell} {vwap_str:<{w_vwp}} {trend_label} {score_cell}"
                 )
 
@@ -1787,7 +1816,7 @@ def run_daemon():
 
                     # Returns
                     # session_change_pct: required by ENH_FIN_02 Protective Exit Override logic
-                    "session_change_pct": float(gap),   # gap_percent relative to prev close
+                    "session_change_pct": float(cache.session_change.get(sym, 0)),
                     "gap_percent": float(gap),
                     "pre_market_change_percent": float(cache.pre_market_change.get(sym, 0)),
                     "after_hours_change_percent": float(cache.after_hours_change.get(sym, 0)),
@@ -1868,11 +1897,11 @@ def run_daemon():
             if os.path.exists('trade_lessons.json'):
                 try:
                     with open('trade_lessons.json', 'r') as f:
-                        data = json.load(f)
-                        if isinstance(data, dict) and "trade_lessons" in data:
-                            supplemental_lessons = data["trade_lessons"]
-                        elif isinstance(data, list):
-                            supplemental_lessons = data
+                        lessons_data = json.load(f)
+                        if isinstance(lessons_data, dict) and "trade_lessons" in lessons_data:
+                            supplemental_lessons = lessons_data["trade_lessons"]
+                        elif isinstance(lessons_data, list):
+                            supplemental_lessons = lessons_data
                 except: pass
 
             supplemental_ssot = {}

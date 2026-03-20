@@ -19,7 +19,10 @@ const MACRO_LABELS = {
     'SPY': 'S&P 500',
     '^VIX': 'Volatility',
     'IEF': 'Treasury Bond',
-    'UUP': 'US Dollar'
+    'UUP': 'US Dollar',
+    'GLD': 'Gold',
+    'GDX': 'Gold Miners',
+    'VIXY': 'Short-Term VIX'
 };
 
 const dCopyBtn = document.getElementById('copy-json-btn');
@@ -261,7 +264,10 @@ function renderTable(tickers) {
     if (!tickers || !tickers.length) return;
 
     // Filter out Macro trackers from main table to keep it focused on equities
-    const MACRO_TICKERS = ['SPY', '^VIX', 'UUP', 'IEF'];
+    // Uses the dynamically fetched list from the backend instead of hardcoding
+    const MACRO_TICKERS = currentMacroTickers && currentMacroTickers.length > 0 
+        ? currentMacroTickers 
+        : ['SPY', '^VIX', 'UUP', 'IEF', 'GLD', 'GDX'];
     
     const html = tickers.map(row => {
         if (!row) return '';
