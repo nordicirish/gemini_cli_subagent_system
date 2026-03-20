@@ -391,40 +391,65 @@ async def handle_paste(req: Request):
                     pass
             
             # Build lookup of existing lessons by id for upsert
+            # Build lookup of existing lessons by id and text
             existing_by_id = {}
+            existing_by_text = {}
             for idx, lesson in enumerate(existing_lessons):
-                if isinstance(lesson, dict) and "id" in lesson:
-                    existing_by_id[lesson["id"]] = lesson
+                if isinstance(lesson, dict):
+                    if "id" in lesson:
+                        existing_by_id[lesson["id"]] = lesson
+                    rule_text = lesson.get("rule", lesson.get("lesson", "")).strip().lower()
+                    if rule_text: existing_by_text[rule_text] = lesson
+                elif isinstance(lesson, str):
+                    rule_text = lesson.strip().lower()
+                    if rule_text: existing_by_text[rule_text] = lesson
             
             kept_ids = set()
             new_compiled_lessons = []
 
             for item in incoming_lessons:
                 if isinstance(item, str):
-                    # Catch strings like "1-19: [PERMANENT_RECORDS]"
                     match = re.match(r'^(\d+)-(\d+).*PERMANENT', item, re.IGNORECASE)
                     if match:
                         start_id = int(match.group(1))
                         end_id = int(match.group(2))
                         kept_ids.update(range(start_id, end_id + 1))
-                        # We don't append the string to the final array, we just track the IDs
                     else:
-                        # Plain string lesson with no id — append as new
+                        rule_text = item.strip().lower()
+                        if rule_text and rule_text in existing_by_text:
+                            continue
                         new_compiled_lessons.append(item)
+                        if rule_text: existing_by_text[rule_text] = item
                 elif isinstance(item, dict):
                     item_id = item.get("id")
+                    rule_text = item.get("rule", item.get("lesson", "")).strip().lower()
+                    
                     if item_id is not None:
                         kept_ids.add(item_id)
                         if item_id in existing_by_id:
-                            # Upsert: update existing lesson in place
+                            # Upsert by ID
                             existing_by_id[item_id].update(item)
                             new_compiled_lessons.append(existing_by_id[item_id])
-                        else:
-                            # New lesson with ID — append
-                            new_compiled_lessons.append(item)
-                    else:
-                         # New lesson without ID — append
-                         new_compiled_lessons.append(item)
+                            
+                            # Update text registry too
+                            if rule_text: existing_by_text[rule_text] = existing_by_id[item_id]
+                            continue
+                            
+                    # If no ID match, check by text
+                    if rule_text and rule_text in existing_by_text:
+                        # Existing lesson found by text match
+                        existing = existing_by_text[rule_text]
+                        if isinstance(existing, dict):
+                            # Restore its original ID to prevent disruption
+                            orig_id = existing.get("id")
+                            existing.update(item)
+                            if orig_id is not None:
+                                existing["id"] = orig_id
+                        continue
+                        
+                    # It's completely new
+                    new_compiled_lessons.append(item)
+                    if rule_text: existing_by_text[rule_text] = item
                 else:
                     new_compiled_lessons.append(item)
 
@@ -433,7 +458,6 @@ async def handle_paste(req: Request):
             for lesson in existing_lessons:
                 if isinstance(lesson, dict):
                     lid = lesson.get("id")
-                    # Keep all existing lessons unless they were explicitly updated by the incoming payload
                     updated = False
                     if lid is not None:
                         for new_lesson in new_compiled_lessons:
@@ -443,10 +467,9 @@ async def handle_paste(req: Request):
                     if not updated:
                         preserved_lessons.append(lesson)
                 elif isinstance(lesson, str):
-                    # Keep existing pure string lessons unless we are enforcing strict dicts
                     preserved_lessons.append(lesson)
 
-            # Combine preserved lessons with newly updated/added ones, sorted by ID if possible
+            # Combine preserved lessons with newly updated/added ones
             existing_lessons = preserved_lessons + new_compiled_lessons
             
             final_normalized = _normalize_lessons(existing_lessons)
