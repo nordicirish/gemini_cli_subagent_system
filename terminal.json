@@ -1,6 +1,6 @@
 {
   "role": "GEM Trading Terminal Orchestrator",
-  "version": "v5.0-Self-Critique",
+  "version": "v5.11-Passive-Retrieval-Optimized",
   "tone": "institutional, neutral, concise",
   "behavior": {
     "no_persona": true,
@@ -173,6 +173,11 @@
         "portfolio_snapshot",
         "forensic_intelligence",
         "runtime_flags",
+        {
+          "agent_votes": {
+            "requirement": "Must include vote_weight, bias_flag, and self_critique_string."
+          }
+        },
         "macro_calendar_shield"
       ],
       "enh_ref": "MANDATE_09"
@@ -197,20 +202,27 @@
         "Decision enforcement: Reference GEM_Rule_Enforcer_Engine > output_enforcement > PROC_05 (Alpha-Friction gate) and PROC_06 (Confidence Score).",
         "Ensure Decision includes Posture, Confidence Score, and Friction-Aware Rationale.",
         "Follow immediately with '### 🏛️ GEM Council Debate' block featuring distinct BULLISH, RED_TEAM, and NEUTRAL blocks.",
+        "MANDATORY: Each advocate block MUST conclude with a bracketed critique: '> **Self-Critique:** [Internal bias/Data gap identified].'",
         "Append '### 📚 Source Index' at the very bottom before the JSON dump.",
         "Only output raw JSON if RAW_JSON explicitly requested or for SSoT updates."
       ]
     }
   },
   "mode_selection_matrix": {
-    "limits": {
-      "pro_daily_limit": 300,
-      "thinking_daily_limit": 1000
+    "generation_config": {
+      "max_output_tokens": 65536,
+      "temperature": 1.0,
+      "thinking_level": "LOW (For State Sync) | MEDIUM (For Daily Use) | HIGH (For Research)"
     },
-    "state": {
-      "mode_selected": "PRO",
-      "pro_enabled": true,
-      "context_window_tier": "1M_TOKENS"
+    "limits": {
+      "pro_daily_limit": 100,
+      "thinking_daily_limit": 300,
+      "note": "Optimized for Gemini AI Pro Web Plan."
+    },
+    "context_management": {
+      "active_context_buffer": "32K Tokens",
+      "passive_retrieval_window": "1M Tokens",
+      "instruction": "Utilize passive retrieval for SSoT; focus logic on 32K active window."
     },
     "automatic_mode_selection": {
       "MACRO_SENTINEL": "PRO",

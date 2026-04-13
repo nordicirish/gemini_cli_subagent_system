@@ -1,6 +1,6 @@
 {
     "role": "GEM_Rules_Data",
-    "version": "v5.1-Gap-Awareness",
+    "version": "v5.2-FIFO-WAC-Aware",
     "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
     "enh_xx_registry": [
         "ENH_01: Keep-First Portfolio Reconciliation",
@@ -56,7 +56,8 @@
         "ENH_56: Gamma-Adjusted Buffer Protocol",
         "ENH_57: Sovereign Hedge Rotation",
         "ENH_58: ESA_Tax_Neutralization_Protocol",
-        "ENH_59: Decoupled Momentum Metrics Protocol"
+        "ENH_59: Decoupled Momentum Metrics Protocol",
+        "ENH_60: Strict FIFO WAC Recalculation"
     ],
     "mandate_registry": [
         "MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)",
@@ -234,7 +235,7 @@
                 {
                     "gate_id": "ESA_01",
                     "name": "Tax-Neutral Capital Velocity",
-                    "instruction": "Individual trades do NOT trigger taxable events. First-In, First-Out (FIFO) friction is neutralized for intraday rebalancing. Operational decisions (Adds/Trims) are dictated by VWAP geometry and VIX regimes rather than cost-basis preservation.",
+                    "instruction": "Individual trades do NOT trigger taxable events. Wash-Sale tax friction is neutralized for intraday rebalancing. Operational decisions (Adds/Trims) are dictated by VWAP geometry and VIX regimes rather than tax-preservation inertia.",
                     "effect": "Treat all shares of a ticker as a single liquidity block. Churn is permitted to maximize cash generation on sector volatility."
                 },
                 {
@@ -340,7 +341,7 @@
             "esa_tax_advantage_clause": {
                 "protocol": "FRICTIONLESS_GAP_REENTRY",
                 "logic": "The Nordea ESA eliminates 'Wash Sale' inertia and FIFO capital gains leakage. If a position hits the 50% Gap Stop, exit immediately. If price later re-claims the Gap Midpoint on positive rVol, re-entry is mandatory.",
-                "execution": "Treat Gap Defense as a 'Binary Switch'. 100% exit at the 50% retracement; 100% re-entry at the 50% reclaim. Tax-deferred status allows for this mechanical churn to capture the full volatility curve without immediate cost-basis erosion."
+                "execution": "Treat Gap Defense as a 'Binary Switch'. 100% exit at the 50% retracement; 100% re-entry at the 50% reclaim. Tax-deferred status allows for this mechanical churn to capture the full volatility curve without immediate tax-friction erosion."
             },
             "technical_parameters": {
                 "anchor_point": "Gap_Midpoint = (Previous_Close + Open_Price) / 2",
@@ -925,7 +926,7 @@
         {
             "id": "ENH_58",
             "title": "ESA Tax Neutralization Protocol",
-            "instruction": "Treat the entire ticker share count as a single tactical block. In Finnish ESA accounts, the order of shares sold (FIFO) is an accounting artifact; intraday trading friction is purely commission-based (1% round-trip), allowing for 2-3% scalps on mechanical floors."
+            "instruction": "Intraday trading friction is purely commission-based (1% round-trip), allowing for 2-3% scalps on mechanical floors. While Finnish ESA accounts eliminate Wash-Sale tax penalties, the mathematical reality of FIFO still applies to the cost basis (refer to ENH_60)."
         },
         {
             "id": "ENH_59",
@@ -937,6 +938,14 @@
                 "session_change_pct": "The 'Net Session Change' (fluctuates intraday). Formula: ((Current Price - Previous Close) / Previous Close) * 100. Reflects live intraday return/trend."
             },
             "logic_application": "Use `gap_percent` strictly to evaluate the magnitude of overnight structural gaps. Use `session_change_pct` for all intraday trend evaluations, systemic volatility overrides (e.g. Protective Exit threshold in ENH_FIN_02), and RVOL confirmation."
+        },
+        {
+            "id": "ENH_60",
+            "title": "Strict FIFO WAC Recalculation",
+            "status": "ACTIVE",
+            "instruction": "The broker dictates strict First-In, First-Out (FIFO) accounting. The oldest purchased shares are ALWAYS sold first during any position trim or partial exit.",
+            "impact_on_ssot": "When emitting a TRIM_50 or partial SELL order, the SSoT Controller MUST mathematically recognize that the oldest shares (and their specific cost basis) are removed from the position. If a position was built over multiple tranches, selling the oldest shares first will definitively alter and skew the Weighted Average Cost (WAC) of the remaining shares toward the newer tranches.",
+            "execution": "Never assume the WAC remains static after a fractional trim. Adjust the forward `wac` projection to reflect the elimination of the oldest lot."
         }
     ],
     "global_logic_gates": {

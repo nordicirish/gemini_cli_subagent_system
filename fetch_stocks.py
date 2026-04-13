@@ -54,6 +54,16 @@ MACRO_TICKERS = [
 ALL_TICKERS = TICKERS + MACRO_TICKERS
 INVERSE_MACRO = ['^VIX', 'VIXY', 'UUP', 'IEF']
 
+MACRO_LABELS = {
+    'SPY': 'S&P 500',
+    '^VIX': 'Volatility',
+    'IEF': 'Treasury Bond',
+    'UUP': 'US Dollar',
+    'GLD': 'Gold',
+    'GDX': 'Gold Miners',
+    'VIXY': 'Short-Term VIX'
+}
+
 REFRESH_RATE_SECONDS = 30
 HISTORY_REFRESH_CYCLES = 10
 
@@ -67,7 +77,7 @@ def get_data():
 
 @app.get("/api/tickers")
 def get_tickers():
-    return JSONResponse({"tickers": TICKERS, "macro": MACRO_TICKERS})
+    return JSONResponse({"tickers": TICKERS, "macro": MACRO_TICKERS, "macro_labels": MACRO_LABELS})
 
 @app.post("/api/tickers")
 async def update_tickers(req: Request):
@@ -348,35 +358,15 @@ async def handle_paste(req: Request):
 
         # Trade lessons
         lessons_file = 'trade_lessons.json'
+        incoming_lessons = []
         if extracted_compressed and isinstance(extracted_compressed, list):
-            with open(lessons_file, 'w') as f:
-                json.dump({"trade_lessons": _normalize_lessons(extracted_compressed)}, f, indent=2)
-        elif extracted_new and isinstance(extracted_new, list):
-            existing_lessons = []
-            existing_data = None
-            if os.path.exists(lessons_file):
-                try:
-                    with open(lessons_file, 'r') as f:
-                        existing_data = json.load(f)
-                        if isinstance(existing_data, dict):
-                            existing_lessons = existing_data.get("trade_lessons", [])
-                        elif isinstance(existing_data, list):
-                            existing_lessons = existing_data
-                except: pass
-            
-            existing_lessons.extend(extracted_new)
-            final_normalized = _normalize_lessons(existing_lessons)
-            
-            if isinstance(existing_data, dict):
-                existing_data["trade_lessons"] = final_normalized
-                output_data = existing_data
-            else:
-                output_data = {"trade_lessons": final_normalized}
-                
-            with open(lessons_file, 'w') as f:
-                json.dump(output_data, f, indent=2)
-        elif extracted_trade_lessons and isinstance(extracted_trade_lessons, list):
-            incoming_lessons = extracted_trade_lessons
+            incoming_lessons.extend(extracted_compressed)
+        if extracted_new and isinstance(extracted_new, list):
+            incoming_lessons.extend(extracted_new)
+        if extracted_trade_lessons and isinstance(extracted_trade_lessons, list):
+            incoming_lessons.extend(extracted_trade_lessons)
+
+        if incoming_lessons:
             existing_lessons = []
             existing_data = None
             if os.path.exists(lessons_file):
@@ -814,14 +804,17 @@ def get_true_intraday_vwap(symbol, status):
         result = data['chart']['result'][0]
         indicators = result['indicators']['quote'][0]
         closes = indicators.get('close', [])
+        highs = indicators.get('high', [])
+        lows = indicators.get('low', [])
         volumes = indicators.get('volume', [])
 
-        valid = [(c, v) for c, v in zip(closes, volumes) if c is not None and v is not None and v > 0]
+        valid = [(h, l, c, v) for h, l, c, v in zip(highs, lows, closes, volumes)
+                 if c is not None and h is not None and l is not None and v is not None and v > 0]
         if not valid:
             return 0.0
 
-        total_vp = sum(c * v for c, v in valid)
-        total_v = sum(v for _, v in valid)
+        total_vp = sum(((h + l + c) / 3) * v for h, l, c, v in valid)
+        total_v = sum(v for _, _, _, v in valid)
         if total_v > 0:
             return total_vp / total_v
         return 0.0
@@ -837,13 +830,16 @@ def fallback_vwap(symbol):
         result = data['chart']['result'][0]
         q = result['indicators']['quote'][0]
         closes = q.get('close', [])
+        highs = q.get('high', [])
+        lows = q.get('low', [])
         volumes = q.get('volume', [])
         vp = 0.0
         tv = 0.0
-        for c, v in zip(closes, volumes):
-            if c is None or v is None or v <= 0:
+        for h, l, c, v in zip(highs, lows, closes, volumes):
+            if c is None or h is None or l is None or v is None or v <= 0:
                 continue
-            vp += c * v
+            typical_price = (h + l + c) / 3
+            vp += typical_price * v
             tv += v
         if tv > 0:
             return vp / tv
@@ -916,6 +912,31 @@ def get_previous_close(symbol):
         valid = [c for c in closes if c is not None]
         if len(valid) >= 2:
             return float(valid[-2])
+    except:
+        pass
+    return None
+
+def _get_chart_open(symbol):
+    """Fetch today's true regular-session opening price from 1-minute chart data.
+    More reliable than batch quote's regularMarketOpen for small-cap stocks."""
+    try:
+        ny_tz = ZoneInfo("America/New_York")
+        now = datetime.now(ny_tz)
+        open_dt = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        # Fetch a small window around market open
+        end_dt = now.replace(hour=9, minute=35, second=0, microsecond=0)
+        if now < end_dt:
+            end_dt = now
+        ts1 = int(open_dt.timestamp())
+        ts2 = int(end_dt.timestamp())
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={ts1}&period2={ts2}&interval=1m&includePrePost=false"
+        r = safe_yf_get(url, timeout=3)
+        data = r.json()
+        result = data['chart']['result'][0]
+        opens = result['indicators']['quote'][0].get('open', [])
+        valid_opens = [o for o in opens if o is not None and o > 0]
+        if valid_opens:
+            return float(valid_opens[0])
     except:
         pass
     return None
@@ -1210,6 +1231,7 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
     post_price = None
     reg_price = None
     reg_open = None
+    batch_prev_close = None
     pre_vol = 0
     post_vol = 0
 
@@ -1219,6 +1241,7 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
             post_price = quote_data.get('postMarketPrice')
             reg_price = quote_data.get('regularMarketPrice')
             reg_open = quote_data.get('regularMarketOpen')
+            batch_prev_close = quote_data.get('regularMarketPreviousClose')
             vol = int(quote_data.get('regularMarketVolume', 0) or 0)
             pre_vol = int(quote_data.get('preMarketVolume', 0) or 0)
             post_vol = int(quote_data.get('postMarketVolume', 0) or 0)
@@ -1313,6 +1336,11 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         techs = cache.technicals.get(symbol, {})
         reg_close = techs.get("Last_Reg_Close", 0.0)
 
+        # Prefer batch quote's regularMarketPreviousClose (most authoritative source)
+        # fast_info.previous_close can be stale/inconsistent for small-cap stocks
+        if batch_prev_close and float(batch_prev_close) > 0:
+            reg_close = float(batch_prev_close)
+
         # --- Session-aware returns ---
         if reg_close > 0:
             cache.session_change[symbol] = ((price - reg_close) / reg_close) * 100
@@ -1322,8 +1350,25 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
                 true_gap_price = float(reg_open)
             elif status == "PRE-MARKET" and pre_price:
                 true_gap_price = float(pre_price)
-                
-            cache.gaps[symbol] = ((true_gap_price - reg_close) / reg_close) * 100
+
+            raw_gap = ((true_gap_price - reg_close) / reg_close) * 100
+            session_chg = cache.session_change[symbol]
+
+            # Sanity check: if gap diverges wildly from session_change,
+            # the regularMarketOpen is likely stale (Yahoo data quality issue
+            # common with small-cap stocks early in the session).
+            # A genuine gap should not be more than 2x the magnitude of session
+            # change in the OPPOSITE direction when the market has been open.
+            if status == "OPEN" and reg_open and abs(raw_gap) > 3.0:
+                # If gap is negative but price is UP (or vice versa), open is suspect
+                if (raw_gap < -3.0 and session_chg > 0) or (raw_gap > 3.0 and session_chg < 0):
+                    # Stale open detected — try to get true open from chart API
+                    chart_open = _get_chart_open(symbol)
+                    if chart_open and chart_open > 0:
+                        true_gap_price = chart_open
+                        raw_gap = ((true_gap_price - reg_close) / reg_close) * 100
+                    
+            cache.gaps[symbol] = raw_gap
 
         if pre_price is not None:
             cache.pre_market_price[symbol] = pre_price
@@ -1875,6 +1920,7 @@ def run_daemon():
                     "gex_slope": float(gex_data.get('gex_slope', 0.0)),
                     "flip_proximity_percent": float(gex_data.get('flip_proximity_percent', 0.0)),
                     "strike_oi_magnet": float(gex_data.get('strike_oi_magnet', 0.0)),
+                    "ma_20": float(techs.get("SMA_20") or 0.0),
                     "ma_50": float(techs.get("SMA_50") or 0.0),
                     "ma_200": float(techs.get("SMA_200") or 0.0),
                     "score": int(score),
@@ -1939,15 +1985,14 @@ def run_daemon():
                     "description": "LIVE MARKET DATA - DO NOT TREAT AS SIMULATED",
                     "is_simulation": False,
                     "source": "Real-time Exchange Feed",
-                    "reliability": "High",
-                    "timestamp_iso": datetime.now(ZoneInfo("America/New_York")).isoformat()
+                    "reliability": "High"
                 },
                 "timestamp": datetime.now(ZoneInfo("America/New_York")).strftime('%Y-%m-%d %H:%M:%S'),
                 "status": status,
                 "is_heavy_refresh": False,
-                "trade_lessons": supplemental_lessons,
+                "tickers": data,
                 "local_storage_state": supplemental_ssot,
-                "tickers": data
+                "trade_lessons": supplemental_lessons
             }
             GLOBAL_STATE = final_output
 

@@ -15,15 +15,7 @@ const dIStatus = document.getElementById('indices-status');
 const dDynamicMacroCards = document.getElementById('dynamic-macro-cards');
 
 let currentMacroTickers = [];
-const MACRO_LABELS = {
-    'SPY': 'S&P 500',
-    '^VIX': 'Volatility',
-    'IEF': 'Treasury Bond',
-    'UUP': 'US Dollar',
-    'GLD': 'Gold',
-    'GDX': 'Gold Miners',
-    'VIXY': 'Short-Term VIX'
-};
+let MACRO_LABELS = {};
 
 const dCopyBtn = document.getElementById('copy-json-btn');
 const dPasteBtn = document.getElementById('paste-payload-btn');
@@ -131,6 +123,7 @@ async function fetchTickers() {
         dtInput.value = data.tickers.join(', ');
         dIndicesInput.value = data.macro.join(', ');
         currentMacroTickers = data.macro;
+        if (data.macro_labels) MACRO_LABELS = data.macro_labels;
     } catch (e) {
         console.error("Failed to fetch tickers", e);
     }
