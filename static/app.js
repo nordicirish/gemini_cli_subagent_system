@@ -18,6 +18,7 @@ let currentMacroTickers = [];
 let MACRO_LABELS = {};
 
 const dCopyBtn = document.getElementById('copy-json-btn');
+const dCopyAllBtn = document.getElementById('copy-all-btn');
 const dPasteBtn = document.getElementById('paste-payload-btn');
 const dDataStatus = document.getElementById('data-status');
 
@@ -191,8 +192,73 @@ dUpdateIndicesBtn.addEventListener('click', async () => {
     }
 });
 
-// Copy Data Handler
+// Copy Turn Data Handler (lightweight per-turn LLM payload — no SSOT, no lessons)
 dCopyBtn.addEventListener('click', async () => {
+    try {
+        const res = await fetch(`${API_BASE}/data`);
+        const state = await res.json();
+        
+        // Build lightweight ticker snapshots
+        const slimTickers = (state.tickers || []).map(t => ({
+            ticker: t.ticker,
+            price: t.price,
+            gap_percent: t.gap_percent,
+            vwap: t.vwap,
+            rsi: t.rsi,
+            atr_percent: t.atr_percent,
+            net_gex_total: t.net_gex_total,
+            dealer_posture: t.dealer_posture,
+            score: t.score,
+            trend: t.trend,
+            signal: t.signal
+        }));
+        
+        // Extract compact mutable_state from full SSOT
+        const ssot = state.local_storage_state || {};
+        const ms = ssot.mutable_state || {};
+        const fi = ms.forensic_intelligence || {};
+        const portfolioFull = ms.portfolio_snapshot || [];
+        
+        const slimPortfolio = portfolioFull.map(p => {
+            const entry = { ticker: p.ticker };
+            if (p.shares !== undefined) entry.shares = p.shares;
+            if (p.wac !== undefined) entry.wac = p.wac;
+            if (p.status) entry.status = p.status;
+            if (p.limit !== undefined) entry.limit = p.limit;
+            if (p.action) entry.action = p.action;
+            if (p.trade_state) entry.trade_state = p.trade_state;
+            return entry;
+        });
+        
+        const turnPayload = {
+            _meta: state._meta,
+            timestamp: state.timestamp,
+            status: state.status,
+            tickers: slimTickers,
+            mutable_state: {
+                unallocated_cash_eur: fi.unallocated_cash_eur || 0,
+                total_liquidity_eur: fi.total_liquidity_eur || 0,
+                risk_regime: (ms.state_context || {}).risk_regime || '',
+                portfolio_snapshot: slimPortfolio
+            }
+        };
+        
+        const jsonString = JSON.stringify(turnPayload, null, 2);
+        await navigator.clipboard.writeText(jsonString);
+        
+        dDataStatus.textContent = 'Turn data copied (lightweight)!';
+        dDataStatus.className = 'status-message text-green';
+        setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
+    } catch (e) {
+        console.error(e);
+        dDataStatus.textContent = 'Failed to copy data.';
+        dDataStatus.className = 'status-message text-red';
+        setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
+    }
+});
+
+// Copy All Data Handler (SSOT + Ticker Data + Trade Lessons)
+dCopyAllBtn.addEventListener('click', async () => {
     try {
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
@@ -201,7 +267,7 @@ dCopyBtn.addEventListener('click', async () => {
         
         await navigator.clipboard.writeText(jsonString);
         
-        dDataStatus.textContent = 'JSON copied to clipboard!';
+        dDataStatus.textContent = 'All data copied (SSOT + Tickers + Lessons)!';
         dDataStatus.className = 'status-message text-green';
         setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
     } catch (e) {
