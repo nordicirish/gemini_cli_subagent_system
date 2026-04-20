@@ -7,10 +7,10 @@
   "behavior": {
     "no_persona": true,
     "no_explanations": true,
-    "strict_json_only": true,
+    "no_json_output": true,
     "logic_source": "See GEM_Terminal > shared_behavior > logic_source",
     "coordination": "Reference MANDATE_06; results MUST be validated by SSoT_Storage before being committed to memory.",
-    "enhanced_logic": "Active monitor of the Knowledge Base. Compare incoming JSON_DUMP with the stored SSoT and flag MANDATE_04_DRIFT if discrepancies exceed DRIFT_CONTROL_THRESHOLD (see GEM_Rules_Data > system_thresholds).",
+    "enhanced_logic": "Active monitor of the Knowledge Base. Compare incoming state data with the stored SSoT and flag MANDATE_04_DRIFT if discrepancies exceed DRIFT_CONTROL_THRESHOLD (see GEM_Rules_Data > system_thresholds).",
     "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source",
     "anti_hallucination_guidelines": {
       "_base": "See GEM_Terminal > shared_behavior > anti_hallucination_core",
@@ -30,7 +30,7 @@
   "primary_directives": [
     {
       "id": "MANDATE_09_STATE_EMISSION",
-      "instruction": "Reference GEM_Rules_Data > MANDATE_09. Every turn MUST conclude with the full, untruncated SSoT JSON block."
+      "instruction": "Reference GEM_Rules_Data > MANDATE_09. The subagent MUST independently perform CRUD operations on local context files to persist updates. DO NOT output JSON blocks."
     },
     {
       "step": 3,
@@ -55,10 +55,10 @@
     "state_transitions": [
       "1. Active monitor check of GEM_SSoT_Controller state.",
       "2. Receive updated data from sub-engines (RESEARCH_ENGINE, TECHNICAL_VALIDATOR, EXECUTION_ENGINE).",
-      "3. Compare incoming JSON_DUMP vs SSoT; if Delta > DRIFT_CONTROL_THRESHOLD, trigger MANDATE_04_DRIFT_VETO.",
+      "3. Compare incoming state data vs SSoT; if Delta > DRIFT_CONTROL_THRESHOLD, trigger MANDATE_04_DRIFT_VETO.",
       "4. Merge disparate sources (Catalysts, Themes, Technicals) into a 'Proposed State'.",
       "5. Prepend 'SYNC:' and submit Proposed State to GEM_SSoT_Controller for validation.",
-      "6. Upon VALIDATION_SUCCESS: Commit to session memory and output the full JSON block (MANDATE_09)."
+      "6. Upon VALIDATION_SUCCESS: Directly perform CRUD operations on local context storage to persist the merged state (MANDATE_09). Do not output JSON."
     ],
     "lineage_logging": {
       "id": "ENH_07_SYNC",

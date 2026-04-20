@@ -17,10 +17,7 @@ const dDynamicMacroCards = document.getElementById('dynamic-macro-cards');
 let currentMacroTickers = [];
 let MACRO_LABELS = {};
 
-const dCopyBtn = document.getElementById('copy-json-btn');
-const dCopyAllBtn = document.getElementById('copy-all-btn');
-const dPasteBtn = document.getElementById('paste-payload-btn');
-const dDataStatus = document.getElementById('data-status');
+
 
 // Modal elements
 const dTickerModalOverlay = document.getElementById('ticker-modal-overlay');
@@ -192,123 +189,7 @@ dUpdateIndicesBtn.addEventListener('click', async () => {
     }
 });
 
-// Copy Turn Data Handler (lightweight per-turn LLM payload — no SSOT, no lessons)
-dCopyBtn.addEventListener('click', async () => {
-    try {
-        const res = await fetch(`${API_BASE}/data`);
-        const state = await res.json();
-        
-        // Build lightweight ticker snapshots
-        const slimTickers = (state.tickers || []).map(t => ({
-            ticker: t.ticker,
-            price: t.price,
-            gap_percent: t.gap_percent,
-            vwap: t.vwap,
-            rsi: t.rsi,
-            atr_percent: t.atr_percent,
-            net_gex_total: t.net_gex_total,
-            dealer_posture: t.dealer_posture,
-            score: t.score,
-            trend: t.trend,
-            signal: t.signal
-        }));
-        
-        // Extract compact mutable_state from full SSOT
-        const ssot = state.local_storage_state || {};
-        const ms = ssot.mutable_state || {};
-        const fi = ms.forensic_intelligence || {};
-        const portfolioFull = ms.portfolio_snapshot || [];
-        
-        const slimPortfolio = portfolioFull.map(p => {
-            const entry = { ticker: p.ticker };
-            if (p.shares !== undefined) entry.shares = p.shares;
-            if (p.wac !== undefined) entry.wac = p.wac;
-            if (p.status) entry.status = p.status;
-            if (p.limit !== undefined) entry.limit = p.limit;
-            if (p.action) entry.action = p.action;
-            if (p.trade_state) entry.trade_state = p.trade_state;
-            return entry;
-        });
-        
-        const turnPayload = {
-            _meta: state._meta,
-            timestamp: state.timestamp,
-            status: state.status,
-            tickers: slimTickers,
-            mutable_state: {
-                unallocated_cash_eur: fi.unallocated_cash_eur || 0,
-                total_liquidity_eur: fi.total_liquidity_eur || 0,
-                risk_regime: (ms.state_context || {}).risk_regime || '',
-                portfolio_snapshot: slimPortfolio
-            }
-        };
-        
-        const jsonString = JSON.stringify(turnPayload, null, 2);
-        await navigator.clipboard.writeText(jsonString);
-        
-        dDataStatus.textContent = 'Turn data copied (lightweight)!';
-        dDataStatus.className = 'status-message text-green';
-        setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
-    } catch (e) {
-        console.error(e);
-        dDataStatus.textContent = 'Failed to copy data.';
-        dDataStatus.className = 'status-message text-red';
-        setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
-    }
-});
 
-// Copy All Data Handler (SSOT + Ticker Data + Trade Lessons)
-dCopyAllBtn.addEventListener('click', async () => {
-    try {
-        const res = await fetch(`${API_BASE}/data`);
-        const state = await res.json();
-        
-        const jsonString = JSON.stringify(state, null, 2);
-        
-        await navigator.clipboard.writeText(jsonString);
-        
-        dDataStatus.textContent = 'All data copied (SSOT + Tickers + Lessons)!';
-        dDataStatus.className = 'status-message text-green';
-        setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
-    } catch (e) {
-        console.error(e);
-        dDataStatus.textContent = 'Failed to copy data.';
-        dDataStatus.className = 'status-message text-red';
-        setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
-    }
-});
-
-// Paste Payload Handler
-dPasteBtn.addEventListener('click', async () => {
-    dPasteBtn.disabled = true;
-    dPasteBtn.textContent = 'Ingesting...';
-    try {
-        const text = await navigator.clipboard.readText();
-        if (!text) throw new Error("Clipboard empty");
-        
-        const res = await fetch(`${API_BASE}/paste`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ payload: text })
-        });
-        
-        const data = await res.json();
-        if (data.status === 'success') {
-            dDataStatus.textContent = 'Payload successfully ingested!';
-            dDataStatus.className = 'status-message text-green';
-        } else {
-            throw new Error(data.message);
-        }
-    } catch (e) {
-        console.error("Paste Error: ", e);
-        dDataStatus.textContent = e.message || 'Failed to paste/parse payload.';
-        dDataStatus.className = 'status-message text-red';
-    } finally {
-        setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
-        dPasteBtn.disabled = false;
-        dPasteBtn.textContent = 'Paste Execution Payload';
-    }
-});
 
 // Format large numbers (Volume)
 function formatVol(vol) {
@@ -370,6 +251,18 @@ function renderTable(tickers) {
         } else {
             trendHtml = `<span class="trend-tag flat">— Flat</span>`;
         }
+        
+        // Dealer Posture tag
+        let dealerHtml = '';
+        if (row.dealer_posture) {
+            let dpLower = row.dealer_posture.toLowerCase();
+            let dClass = 'flat';
+            if (dpLower.includes('long') || dpLower.includes('bull')) dClass = 'up';
+            else if (dpLower.includes('short') || dpLower.includes('bear')) dClass = 'down';
+            dealerHtml = `<span class="trend-tag ${dClass}">${row.dealer_posture}</span>`;
+        } else {
+            dealerHtml = `<span class="trend-tag flat">Neutral</span>`;
+        }
 
         // Hide macro tickers from main table
         if(MACRO_TICKERS.includes(sym)) return '';
@@ -384,6 +277,7 @@ function renderTable(tickers) {
                 <td class="${rsiColor}">${row.rsi.toFixed(1)}</td>
                 <td>${row.vwap > 0 ? row.vwap.toFixed(2) : '—'}</td>
                 <td>${trendHtml}</td>
+                <td>${dealerHtml}</td>
                 <td class="score-col">
                     <span class="score-badge ${scoreBadge}">${scoreStr}</span>${noteHtml}
                 </td>
@@ -492,3 +386,160 @@ async function pollData() {
 
 // Start
 init();
+
+// --- Chat UI Logic ---
+const dChatPanel = document.getElementById('chat-panel');
+const dChatPanelWrapper = document.getElementById('chat-panel-wrapper');
+const dChatToggleBtn = document.getElementById('chat-toggle-btn');
+const dChatExpandBtn = document.getElementById('chat-expand-btn');
+const dChatInput = document.getElementById('chat-input');
+const dSendChatBtn = document.getElementById('send-chat-btn');
+const dChatMessages = document.getElementById('chat-messages');
+
+// Collapse / expand the chat panel body
+let chatCollapsed = false;
+dChatToggleBtn.addEventListener('click', () => {
+    chatCollapsed = !chatCollapsed;
+    const body = dChatPanel.querySelector('.chat-messages');
+    const input = dChatPanel.querySelector('.chat-input-area');
+    if (chatCollapsed) {
+        body.style.display = 'none';
+        input.style.display = 'none';
+        dChatToggleBtn.textContent = '▼ Expand';
+    } else {
+        body.style.display = '';
+        input.style.display = '';
+        dChatToggleBtn.textContent = '▲ Collapse';
+        dChatInput.focus();
+    }
+});
+
+// Full-width expand toggle
+let chatExpanded = false;
+dChatExpandBtn.addEventListener('click', () => {
+    chatExpanded = !chatExpanded;
+    if (chatExpanded) {
+        dChatPanelWrapper.classList.add('chat-panel-wrapper--expanded');
+        dChatExpandBtn.textContent = '⊠ Shrink';
+        dChatExpandBtn.title = 'Shrink chat';
+    } else {
+        dChatPanelWrapper.classList.remove('chat-panel-wrapper--expanded');
+        dChatExpandBtn.textContent = '⊞ Expand';
+        dChatExpandBtn.title = 'Expand chat to full width';
+    }
+});
+
+function appendMessage(role, content) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `message ${role}-message`;
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'msg-content';
+    
+    if (role === 'ai') {
+        if (typeof marked !== 'undefined') {
+            contentDiv.innerHTML = marked.parse(content);
+        } else {
+            contentDiv.textContent = content;
+        }
+    } else {
+        contentDiv.textContent = content;
+    }
+    
+    msgDiv.appendChild(contentDiv);
+    dChatMessages.appendChild(msgDiv);
+    dChatMessages.scrollTop = dChatMessages.scrollHeight;
+}
+
+let _typingTimerInterval = null;
+
+function showTypingIndicator() {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message ai-message typing-indicator-container';
+    msgDiv.id = 'typing-indicator';
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'msg-content typing-indicator';
+    contentDiv.innerHTML = `
+        <div class="typing-dots">
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+        </div>
+        <span class="typing-label">Processing<span class="typing-ellipsis"></span></span>
+        <span class="typing-timer" id="typing-timer">0s</span>
+    `;
+
+    msgDiv.appendChild(contentDiv);
+    dChatMessages.appendChild(msgDiv);
+    dChatMessages.scrollTop = dChatMessages.scrollHeight;
+
+    // Animate ellipsis
+    let ellipsisDots = 0;
+    const ellipsisEl = contentDiv.querySelector('.typing-ellipsis');
+
+    // Elapsed timer
+    let elapsed = 0;
+    const timerEl = contentDiv.querySelector('#typing-timer');
+    _typingTimerInterval = setInterval(() => {
+        elapsed++;
+        if (timerEl) timerEl.textContent = `${elapsed}s`;
+        ellipsisDots = (ellipsisDots + 1) % 4;
+        if (ellipsisEl) ellipsisEl.textContent = '.'.repeat(ellipsisDots);
+    }, 1000);
+}
+
+function removeTypingIndicator() {
+    if (_typingTimerInterval) {
+        clearInterval(_typingTimerInterval);
+        _typingTimerInterval = null;
+    }
+    const indicator = document.getElementById('typing-indicator');
+    if (indicator) indicator.remove();
+}
+
+async function sendChatMessage() {
+    const msg = dChatInput.value.trim();
+    if (!msg) return;
+    
+    dChatInput.value = '';
+    dSendChatBtn.disabled = true;
+    
+    appendMessage('user', msg);
+    showTypingIndicator();
+    
+    try {
+        const res = await fetch(`${API_BASE}/chat`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ message: msg })
+        });
+        
+        const data = await res.json();
+        removeTypingIndicator();
+        
+        if (data.status === 'success') {
+            appendMessage('ai', data.response);
+        } else {
+            appendMessage('ai', `**Error:** ${data.message}`);
+        }
+    } catch (e) {
+        console.error("Chat Error: ", e);
+        removeTypingIndicator();
+        appendMessage('ai', `**Error:** Failed to connect to server.`);
+    } finally {
+        dSendChatBtn.disabled = false;
+        dChatInput.focus();
+    }
+}
+
+dSendChatBtn.addEventListener('click', sendChatMessage);
+dChatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+    }
+});
+
+
+

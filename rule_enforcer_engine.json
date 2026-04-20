@@ -4,7 +4,7 @@
   "version": "v4.92-Architecture-Improvements",
   "description": "Active Enforcer of mandates and protocols defined in GEM_Rules_Data.",
   "behavior": {
-    "strict_json_only": true,
+    "no_json_output": true,
     "no_explanations": true,
     "enforce_delta_updates": false,
     "respect_persistence_contract": true,
@@ -115,7 +115,7 @@
     {
       "id": "PROC_04",
       "name": "MANDATE_09 Compliance",
-      "instruction": "Verify every turn concludes with the full SSoT JSON dump as the final block. If SSoT block is missing or truncated, the turn is INVALID — force retry with RAW_JSON_DUMP trigger."
+      "instruction": "Enforce that the subagent directly edits local context storage (trade_lessons.json and local_ssot_shadow.json) and NEVER emits JSON dumps to the user."
     },
     {
       "id": "PROC_05",

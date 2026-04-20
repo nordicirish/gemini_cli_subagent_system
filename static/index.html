@@ -5,8 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GEM Trading Dashboard</title>
     <meta name="description" content="GEM Trading Agent System — Real-time market intelligence dashboard">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=3">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -65,6 +66,7 @@
                             <th>RSI</th>
                             <th>VWAP</th>
                             <th>Trend</th>
+                            <th>Dealer Posture</th>
                             <th class="score-col">Score</th>
                         </tr>
                     </thead>
@@ -76,17 +78,7 @@
 
             <!-- Sidebar -->
             <aside class="sidebar">
-                <!-- Data Operations -->
-                <div class="sidebar-card glass-panel">
-                    <h3><span class="icon">🔗</span> Data Operations</h3>
-                    <p class="subtitle">Interact with LLM</p>
-                    <div class="btn-row">
-                        <button id="copy-json-btn" class="glow-btn">📋 Copy Turn Data</button>
-                        <button id="copy-all-btn" class="glow-btn">📋 Copy Session Init</button>
-                        <button id="paste-payload-btn" class="glow-btn outline">📥 Paste Execution Payload</button>
-                    </div>
-                    <div id="data-status" class="status-message"></div>
-                </div>
+
 
                 <!-- Management Buttons -->
                 <div class="sidebar-card glass-panel">
@@ -97,6 +89,28 @@
                 </div>
             </aside>
         </main>
+
+        <!-- ─── Inline Chat Panel ─── -->
+        <div class="chat-panel-wrapper" id="chat-panel-wrapper" style="display:flex; justify-content:center; padding:8px 24px 48px 24px;">
+            <section class="chat-panel glass-panel" id="chat-panel" style="width:100%; max-width:680px; min-width:0; flex-direction:column; display:flex; min-height:420px; overflow:hidden; border-radius:12px;">
+                <div class="chat-header" style="padding:14px 24px;">
+                    <h3>🤖 GEM Orchestrator</h3>
+                    <div class="chat-header-btns">
+                        <button class="chat-toggle-btn" id="chat-expand-btn" title="Expand chat to full width">⊞ Expand</button>
+                        <button class="chat-toggle-btn" id="chat-toggle-btn">▲ Collapse</button>
+                    </div>
+                </div>
+                <div class="chat-messages" id="chat-messages" style="padding:20px 24px;">
+                    <div class="message ai-message">
+                        <div class="msg-content">Welcome to the GEM Trading System! How can I assist you today?</div>
+                    </div>
+                </div>
+                <div class="chat-input-area" style="padding:16px 24px; display:flex; gap:12px; align-items:flex-end;">
+                    <textarea id="chat-input" placeholder="Ask the council..." rows="3" style="flex:1; min-height:80px; max-height:200px; resize:vertical; margin-bottom:0;"></textarea>
+                    <button id="send-chat-btn" class="glow-btn" style="width:auto !important; min-width:80px; max-width:120px; flex-shrink:0; padding:12px 20px; height:auto; align-self:flex-end;">Send</button>
+                </div>
+            </section>
+        </div>
 
     </div>
 
@@ -134,6 +148,8 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+
+
+    <script src="app.js?v=3"></script>
 </body>
 </html>

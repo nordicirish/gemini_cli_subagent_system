@@ -6,7 +6,7 @@
   "primary_mandate": "MANDATE_16_STRUCTURAL_NEUTRALITY",
   "behavior": {
     "no_persona": true,
-    "strict_json_only": true,
+    "no_json_output": true,
     "logic_source": "See GEM_Terminal > shared_behavior > logic_source | ENH_39 (Structural Stability)",
     "tax_posture": "See GEM_Terminal > shared_behavior > tax_posture",
     "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source",

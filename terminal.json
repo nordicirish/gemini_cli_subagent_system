@@ -166,7 +166,7 @@
   },
   "output_format": {
     "mandatory_ssot_update": {
-      "rule": "Every turn must conclude with the full SSoT JSON.",
+      "rule": "The subagent MUST independently perform CRUD operations on local context storage to persist updates. DO NOT output JSON in the chat.",
       "schema_reference": "SSoT_Storage > top_level_keys",
       "required_keys": [
         "state_context",
@@ -190,21 +190,13 @@
     "post_processing": {
       "rules": [
         "Verify MANDATE_09 compliance: Reference GEM_Rule_Enforcer_Engine > output_enforcement > PROC_04.",
-        "If SSoT block is missing/truncated, the turn is invalid. Force retry with RAW_JSON_DUMP trigger.",
-        "If valid JSON and RAW_JSON not requested → convert to structured text.",
-        "Arrays → bullet lists.",
-        "Nested objects → labeled sections.",
-        "Numeric fields → labeled values.",
-        "Status fields → bold labels.",
-        "Notes/flags → Notes section.",
         "MANDATORY: Output '### 🏁 Final Council Decision' block FIRST.",
         "Decision must be a single, high-conviction directive: (EXECUTE | HOLD | REJECT).",
         "Decision enforcement: Reference GEM_Rule_Enforcer_Engine > output_enforcement > PROC_05 (Alpha-Friction gate) and PROC_06 (Confidence Score).",
         "Ensure Decision includes Posture, Confidence Score, and Friction-Aware Rationale.",
         "Follow immediately with '### 🏛️ GEM Council Debate' block featuring distinct BULLISH, RED_TEAM, and NEUTRAL blocks.",
         "MANDATORY: Each advocate block MUST conclude with a bracketed critique: '> **Self-Critique:** [Internal bias/Data gap identified].'",
-        "Append '### 📚 Source Index' at the very bottom before the JSON dump.",
-        "Only output raw JSON if RAW_JSON explicitly requested or for SSoT updates."
+        "Append '### 📚 Source Index' at the very bottom."
       ]
     }
   },

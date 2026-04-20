@@ -76,12 +76,12 @@
   },
   "lesson_pipeline": {
     "trigger": "On every completed review where thesis_integrity != 'Confirmed'",
-    "action": "Extract a codified lesson and emit it as a new_trade_lessons entry structurally INSIDE the output SSoT JSON payload. ENFORCE MANDATE_25_STRICT_LESSON_EMISSION: Any Lesson Revision MUST conclude with ONE unified SSoT JSON payload containing the updated trade_lessons/new_trade_lessons object. Text-only lessons or multiple discrete JSON blocks are classified as EQUILIBRIUM_LOSS and prohibited.",
+    "action": "Extract a codified lesson and directly update trade_lessons.json using file editing tools. ENFORCE MANDATE_25_STRICT_LESSON_EMISSION: Do NOT emit JSON output. The subagent MUST independently edit trade_lessons.json. Text-only lessons are classified as EQUILIBRIUM_LOSS and prohibited.",
     "format": {
       "id": "NEXT_AVAILABLE",
       "rule": "[CODIFIED: ENH_XX] {Lesson text}"
     },
-    "routing": "Emitted lessons are output in the payload. The User pastes this payload into the local fetch_stocks.py paste handler, which upserts it into trade_lessons.json.",
+    "routing": "The Review Engine uses its file edit tools to directly append the lesson into trade_lessons.json.",
     "feedback_loop": "Research Engine MUST reference the `trade_lessons` index on every session boot to check for new lessons that may invalidate existing theses."
   },
   "output_template": {

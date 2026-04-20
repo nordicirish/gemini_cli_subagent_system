@@ -140,7 +140,7 @@
         {
             "id": "MANDATE_09_STATE_EMISSION",
             "status": "STRICT_ENFORCE",
-            "instruction": "Every turn MUST terminate with SSoT JSON state. Full emission is PREFERRED. If output token limits prevent full emission, the Gem MAY emit a DELTA payload containing only the changed sections, WITH ONE MAJOR EXCEPTION: The `portfolio_snapshot` array MUST ALWAYS BE OUTPUT IN FULL. You cannot output a partial portfolio array. UNDER NO CIRCUMSTANCES should trade lessons (e.g. `new_trade_lessons`, `trade_lessons`, `trade_lessons_revision`, etc.) be output as a separate discrete JSON block; they MUST be included as a key at the root of the single SSoT JSON payload block.",
+            "instruction": "The subagent MUST independently perform CRUD operations on local context storage (trade_lessons.json and local_ssot_shadow.json) to persist updates. It MUST NOT output JSON updates to the user. UNDER NO CIRCUMSTANCES should trade lessons or state payloads be emitted in the chat. Use your tool-calling capabilities to update files directly.",
             "required_top_level_keys": [
                 "state_context",
                 "trade_lessons",
@@ -353,7 +353,7 @@
         {
             "id": "MANDATE_25_STRICT_LESSON_EMISSION",
             "status": "ACTIVE",
-            "instruction": "STRICT EMISSION RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) MUST conclude with ONE single, unified SSoT JSON payload containing the updated trade_lessons/new_trade_lessons/trade_lessons_revision object INSIDE the SSoT JSON object. Do not emit lessons as a separate discrete JSON block. Text-only lessons are classified as EQUILIBRIUM_LOSS and prohibited."
+            "instruction": "STRICT FILE UPDATE RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) MUST NOT emit JSON output. The subagent MUST independently edit trade_lessons.json using its file editing tools. Text-only lessons are classified as EQUILIBRIUM_LOSS and prohibited."
         }
     ],
     "enh_protocols": [
@@ -810,13 +810,13 @@
         },
         {
             "id": "ENH_49",
-            "title": "Air-Gap Sandbox Bridge Protocol",
-            "instruction": "The Gem operates in a Web UI sandbox. It has ZERO direct write access to local files; all state updates MUST be emitted in the EXECUTION_PAYLOAD. The user will copy and paste this payload into the local fetch_stocks.py paste handler, which acts as the bridge to update local JSON files.",
+            "title": "Autonomous Subagent Protocol",
+            "instruction": "The system operates as an autonomous subagent. It MUST independently maintain the local context storage (trade_lessons.json and local_ssot_shadow.json) by performing CRUD operations directly using file editing tools. It MUST NOT output JSON updates to the user.",
             "execution_flow": [
-                "1. INGESTION: Read the heavily structured 'State of the World' payload provided by the User in the prompt.",
+                "1. INGESTION: Read the heavily structured 'State of the World' payload provided by the User in the prompt or directly read the local JSON files.",
                 "2. SYNTHESIS: Run all internal logic, Council voting (MANDATE_13), and structural checks.",
-                "3. EMISSION: Output the final, actionable decisions ONLY via a strict JSON code block named `EXECUTION_PAYLOAD`. This payload must be ready for the User to copy and paste directly into the local Python terminal for execution.",
-                "4. NO RAMBLING: Do not append conversational text after the `EXECUTION_PAYLOAD`. Keep the context window clean."
+                "3. UPDATE: Use file editing tools to apply final, actionable decisions directly to the local JSON files.",
+                "4. NO EMISSION: Do not emit JSON payloads or conversational filler to the user. Maintain the context storage silently."
             ],
             "payload_keys": {
                 "trade_lessons_handling": {
@@ -861,7 +861,7 @@
             "execution_flow": [
                 "1. ROOT_CAUSE_ANALYSIS: Identify exactly why the trade failed (e.g., 'Ignored a VIX spike above 20' or 'Bought in a Liquidity Void').",
                 "2. RULE_GENERATION: Write a new permanent behavioral rule or guardrail based on the failure.",
-                "3. EMISSION: Output the new rule in the unified `EXECUTION_PAYLOAD` SSoT block under the `new_trade_lessons` key (NOT as a separate JSON block) so the user's fetch_stocks.py paste handler can append it to `trade_lessons.json`."
+                "3. UPDATE: The subagent MUST independently update trade_lessons.json by directly appending the new rule using its file editing tools."
             ]
         },
         {
@@ -882,7 +882,7 @@
             "execution_flow": [
                 "1. SYNTHESIS: Read all 20+ historical trade lessons.",
                 "2. COMPRESSION: Distill the granular, distinct lessons into a maximum of 5 overarching fundamental Guardrails or Philosophies.",
-                "3. EMISSION: Output the 5 new compressed rules in the unified `EXECUTION_PAYLOAD` SSoT block under a `compressed_trade_lessons` array (NOT as a separate JSON block). The orchestrator will overwrite the historical file, effectively deleting the old context."
+                "3. UPDATE: The subagent MUST independently update trade_lessons.json by directly overwriting it with the 5 new compressed rules using its file editing tools, effectively deleting the old context."
             ]
         },
         {
@@ -892,7 +892,7 @@
             "execution_flow": [
                 "1. IDENTIFICATION: Recognize that a string of failures maps to an explicitly defined parameter in RULES_DOC.",
                 "2. PATCH_GENERATION: Create a JSON patch array targeting the deep nested key in the schema (e.g., ['system_thresholds', 'ALPHA_FRICTION_MINIMUM']).",
-                "3. EMISSION: Output the patch array in the `EXECUTION_PAYLOAD` under the `rule_mutations` key. The orchestrator will natively intercept this and rewrite the GEM_Rules_Data on the disk."
+                "3. UPDATE: The subagent MUST independently update GEM_Rules_Data on the disk directly using its file editing tools."
             ]
         },
         {
@@ -1660,8 +1660,8 @@
         "id": "ENH_57",
         "title": "Lesson Feedback Pipeline",
         "status": "ACTIVE",
-        "instruction": "After every REVIEW_ENGINE post-mortem where thesis_integrity != Confirmed, the Review Engine MUST emit a codified lesson INSIDE the main structured SSoT output payload under the key 'new_trade_lessons'. Do NOT emit it as a separate discrete JSON block. The user copies this unified payload to the fetch_stocks.py paste handler, which upserts the lesson into trade_lessons.json. The Research Engine MUST cross-reference trade_lessons.json at session boot.",
-        "routing": "REVIEW_ENGINE → new_trade_lessons (inside SSoT) → User Paste → fetch_stocks.py paste handler → trade_lessons.json"
+        "instruction": "After every REVIEW_ENGINE post-mortem where thesis_integrity != Confirmed, the Review Engine MUST directly append the codified lesson into trade_lessons.json using its file editing tools. Do NOT emit JSON to the user. The Research Engine MUST cross-reference trade_lessons.json at session boot.",
+        "routing": "REVIEW_ENGINE → tool_call (file edit) → trade_lessons.json"
     },
     "ENH_58_conditional_council": {
         "id": "ENH_58",

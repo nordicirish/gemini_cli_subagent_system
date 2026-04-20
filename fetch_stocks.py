@@ -37,19 +37,30 @@ POLYGON_API_KEY = config.get("POLYGON_API_KEY")
 USE_FINNHUB = True
 USE_POLYGON = False  # keep false unless you want Polygon volume fallback
 
-TICKERS = [
-    'ONDS', 'UMAC', 'RCAT', 'DFTX', 'GLD'
-    
-]
+# ─── Persistent user config ───────────────────────────────────────────────────
+USER_CONFIG_FILE = 'user_config.json'
 
-MACRO_TICKERS = [
-    '^VIX',
-    'VIXY',
-    'IEF',
-    'UUP',
-    'SPY',
-    'GDX'
-]
+_DEFAULT_TICKERS = ['ONDS', 'UMAC', 'RCAT', 'DFTX', 'GLD']
+_DEFAULT_MACRO   = ['^VIX', 'VIXY', 'IEF', 'UUP', 'SPY', 'GDX']
+
+def _load_user_config():
+    if os.path.exists(USER_CONFIG_FILE):
+        try:
+            with open(USER_CONFIG_FILE, 'r') as f:
+                cfg = json.load(f)
+                return cfg.get('tickers', _DEFAULT_TICKERS), cfg.get('macro', _DEFAULT_MACRO)
+        except Exception:
+            pass
+    return list(_DEFAULT_TICKERS), list(_DEFAULT_MACRO)
+
+def _save_user_config():
+    try:
+        with open(USER_CONFIG_FILE, 'w') as f:
+            json.dump({'tickers': TICKERS, 'macro': MACRO_TICKERS}, f, indent=2)
+    except Exception as e:
+        print(f'[Config] Failed to save user_config.json: {e}')
+
+TICKERS, MACRO_TICKERS = _load_user_config()
 
 ALL_TICKERS = TICKERS + MACRO_TICKERS
 INVERSE_MACRO = ['^VIX', 'VIXY', 'UUP', 'IEF']
@@ -87,6 +98,7 @@ async def update_tickers(req: Request):
     valid_tickers = [t.upper() for t in new_tickers if t]
     TICKERS = valid_tickers
     ALL_TICKERS = TICKERS + MACRO_TICKERS
+    _save_user_config()
     return JSONResponse({"status": "success", "tickers": TICKERS})
 
 @app.post("/api/macro")
@@ -97,6 +109,7 @@ async def update_macro_tickers(req: Request):
     valid_macro = [t.upper() for t in new_macro if t]
     MACRO_TICKERS = valid_macro
     ALL_TICKERS = TICKERS + MACRO_TICKERS
+    _save_user_config()
     return JSONResponse({"status": "success", "macro": MACRO_TICKERS})
 
 def _deep_merge(base, delta):
@@ -1625,7 +1638,7 @@ def run_daemon():
             for sym in keys_to_remove:
                 del tickers_obj[sym]
 
-            os.system('cls' if os.name == 'nt' else 'clear')
+            pass # os.system removed for CLI compatibility
             print("\033[?25l", end="", flush=True)
             ny_now = datetime.now(ZoneInfo("America/New_York"))
             status = get_market_status()
