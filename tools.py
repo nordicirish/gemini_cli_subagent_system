@@ -94,6 +94,35 @@ def read_trade_lessons() -> str:
     except Exception as e:
         return f"Error reading trade lessons: {str(e)}"
 
+def update_trade_lessons(lessons_json: str) -> str:
+    """
+    Appends or updates the trade_lessons.json file with new insights.
+    Accepts a JSON array or a single lesson object.
+    """
+    path = 'trade_lessons.json'
+    try:
+        if isinstance(lessons_json, str):
+            new_data = json.loads(lessons_json)
+        else:
+            new_data = lessons_json
+            
+        current_data = []
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                current_data = json.load(f)
+        
+        if isinstance(new_data, list):
+            current_data.extend(new_data)
+        else:
+            current_data.append(new_data)
+            
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(current_data, f, indent=2)
+            
+        return "Trade lessons updated successfully."
+    except Exception as e:
+        return f"Error updating trade lessons: {str(e)}"
+
 def get_market_data() -> str:
     """
     Returns the latest live market data for all tickers and macro benchmarks.

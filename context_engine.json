@@ -93,5 +93,5 @@
     },
     "notes": []
   },
-  "preferred_tier": "PRO"
+  "preferred_tier": "LOCAL_4B (Gemma4 e4b via Ollama)"
 }

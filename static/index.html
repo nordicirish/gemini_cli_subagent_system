@@ -4,152 +4,148 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GEM Trading Dashboard</title>
-    <meta name="description" content="GEM Trading Agent System — Real-time market intelligence dashboard">
-    <link rel="stylesheet" href="styles.css?v=3">
+    <link rel="stylesheet" href="styles.css?v=40">
+    <link rel="stylesheet" href="modern_ui.css?v=40">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
-<body>
+<body class="dark-theme">
     <div class="app-container">
-
-        <!-- ─── Header ─── -->
-        <header class="glass-panel">
+        <!-- Header -->
+        <header class="glass-panel" style="z-index: 10000; position: relative;">
             <div class="header-content">
                 <div class="brand">
                     <div class="pulse-indicator" id="live-indicator"></div>
-                    <h1>GEM Dashboard <span class="version">v17.1</span></h1>
+                    <h1>GEM Dashboard <span class="version">v17.2</span></h1>
                 </div>
                 <div class="system-status">
                     <div class="status-item">
-                        <span class="label">Status:</span>
-                        <span id="market-status" class="value waiting">AWAITING CONNECTION...</span>
-                    </div>
-                    <div class="status-item" id="refresh-status-container" style="display: none;">
-                        <span id="refresh-status" class="value text-yellow" style="font-weight: bold;">⚡ HEAVY REFRESH</span>
+                        <span class="label">MARKET</span>
+                        <span id="market-status" class="value">CONNECTING...</span>
                     </div>
                     <div class="status-item">
-                        <span class="label">Updated:</span>
+                        <span class="label">UPDATED</span>
                         <span id="last-updated" class="value">—</span>
                     </div>
+                    <button id="launch-chat-btn" class="glow-btn chat-launcher">
+                        <span>✦ Consult Orchestrator</span>
+                    </button>
                 </div>
             </div>
         </header>
 
-        <!-- ─── Macro HUD + Alerts ─── -->
-        <section class="macro-hud" id="macro-hud">
-            <div id="dynamic-macro-cards" style="display: contents;">
-                <!-- Cards injected by JS -->
-            </div>
-            <div class="alerts-panel glass-panel" id="alerts-panel">
-                <div class="alerts-header">
-                    <span class="alerts-icon">⚡</span>
-                    <span>Alerts</span>
+        <!-- Main Dashboard Layout -->
+        <div class="dashboard-grid">
+            <!-- Left Column: Macro & Table -->
+            <div class="dashboard-left">
+                <!-- Macro Cards Section -->
+                <div id="dynamic-macro-cards" class="macro-grid">
+                    <!-- Cards injected by JS -->
                 </div>
-                <div id="alerts-container">
-                    <p class="empty-state">No active alerts.</p>
-                </div>
-            </div>
-        </section>
 
-        <!-- ─── Main Content ─── -->
-        <main class="main-content">
-            <!-- Data Table -->
-            <div class="table-container glass-panel">
-                <table id="data-table">
-                    <thead>
-                        <tr>
-                            <th>Ticker</th>
-                            <th>Price</th>
-                            <th>Gap %</th>
-                            <th>Volume</th>
-                            <th>ATR %</th>
-                            <th>RSI</th>
-                            <th>VWAP</th>
-                            <th>Trend</th>
-                            <th>Dealer Posture</th>
-                            <th class="score-col">Score</th>
-                        </tr>
-                    </thead>
-                    <tbody id="table-body">
-                        <!-- Data rows injected by JS -->
-                    </tbody>
-                </table>
+                <!-- Table Section -->
+                <div class="table-container glass-panel">
+                    <table class="modern-table">
+                        <thead>
+                            <tr>
+                                <th>TICKER</th>
+                                <th>PRICE</th>
+                                <th>GAP %</th>
+                                <th>VOLUME</th>
+                                <th>ATR %</th>
+                                <th>RSI</th>
+                                <th>VWAP</th>
+                                <th>TREND</th>
+                                <th>DEALER POSTURE</th>
+                                <th>SCORE</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-body">
+                            <!-- Data rows injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
-            <!-- Sidebar -->
-            <aside class="sidebar">
-
-
-                <!-- Management Buttons -->
-                <div class="sidebar-card glass-panel">
-                    <div class="btn-row">
-                        <button id="open-ticker-modal-btn" class="glow-btn outline">📊 Manage Tickers</button>
-                        <button id="open-indices-modal-btn" class="glow-btn outline">📈 Indices</button>
+            <!-- Right Column: Alerts & Controls -->
+            <div class="dashboard-right">
+                <div id="alerts-panel" class="sidebar-card alerts-card glass-panel">
+                    <h3>⚡ ALERTS</h3>
+                    <div class="alerts-content">
+                        <div class="alert-item info">BOND ALERT: Yields rising rapidly. High Risk Environment.</div>
                     </div>
                 </div>
-            </aside>
-        </main>
 
-        <!-- ─── Inline Chat Panel ─── -->
-        <div class="chat-panel-wrapper" id="chat-panel-wrapper" style="display:flex; justify-content:center; padding:8px 24px 48px 24px;">
-            <section class="chat-panel glass-panel" id="chat-panel" style="width:100%; max-width:680px; min-width:0; flex-direction:column; display:flex; min-height:420px; overflow:hidden; border-radius:12px;">
-                <div class="chat-header" style="padding:14px 24px;">
-                    <h3>🤖 GEM Orchestrator</h3>
-                    <div class="chat-header-btns">
-                        <button class="chat-toggle-btn" id="chat-expand-btn" title="Expand chat to full width">⊞ Expand</button>
-                        <button class="chat-toggle-btn" id="chat-toggle-btn">▲ Collapse</button>
+                <div class="sidebar-card glass-panel controls-card">
+                    <div class="control-row">
+                        <button id="open-ticker-modal-btn" class="glow-btn outline block-btn">📊 MANAGE TICKERS</button>
+                        <button id="open-indices-modal-btn" class="glow-btn outline block-btn">📈 INDICES</button>
                     </div>
                 </div>
-                <div class="chat-messages" id="chat-messages" style="padding:20px 24px;">
-                    <div class="message ai-message">
-                        <div class="msg-content">Welcome to the GEM Trading System! How can I assist you today?</div>
-                    </div>
-                </div>
-                <div class="chat-input-area" style="padding:16px 24px; display:flex; gap:12px; align-items:flex-end;">
-                    <textarea id="chat-input" placeholder="Ask the council..." rows="3" style="flex:1; min-height:80px; max-height:200px; resize:vertical; margin-bottom:0;"></textarea>
-                    <button id="send-chat-btn" class="glow-btn" style="width:auto !important; min-width:80px; max-width:120px; flex-shrink:0; padding:12px 20px; height:auto; align-self:flex-end;">Send</button>
-                </div>
-            </section>
+            </div>
         </div>
-
     </div>
 
-    <!-- ─── Ticker Management Modal ─── -->
+    <!-- Modern Chat Overlay (Keep outside grid) -->
+    <div class="modern-chat-overlay" id="chat-window">
+        <div class="modern-chat-panel">
+            <div class="modern-chat-header">
+                <div class="modern-header-left">
+                    <div class="modern-logo-box">✦</div>
+                    <div class="modern-title-group">
+                        <h2>Gemini 3.1 Pro</h2>
+                        <span>COUNCIL ORCHESTRATOR</span>
+                    </div>
+                </div>
+                <div class="modern-header-right">
+                    <button class="modern-ctrl-btn" id="chat-close-btn">×</button>
+                </div>
+            </div>
+
+            <div class="modern-chat-messages" id="chat-messages">
+                <div class="modern-message ai">
+                    Welcome to the council. How can I help you analyze the markets today?
+                </div>
+            </div>
+
+            <div class="modern-input-area">
+                <textarea id="chat-input" placeholder="Ask Gemini..." rows="1"></textarea>
+                <div class="modern-input-footer">
+                    <div class="modern-input-tools">
+                        <span style="color: #8b949e; font-size: 0.8rem;">Tools: SSE-Logs | Market-Engine</span>
+                    </div>
+                    <button class="modern-send-btn" id="send-chat-btn">▲</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
     <div class="modal-overlay" id="ticker-modal-overlay">
         <div class="modal glass-panel">
             <div class="modal-header">
-                <h3>📊 Ticker Management</h3>
+                <h3>📊 Manage Tickers</h3>
                 <button class="modal-close" id="close-ticker-modal">&times;</button>
             </div>
-            <p class="subtitle">Edit tracked assets (comma or space separated)</p>
-            <textarea id="ticker-input" rows="4" placeholder="AAPL, MSFT, TSLA..."></textarea>
-            <button id="update-tickers-btn" class="glow-btn">Update Tickers</button>
-            <div id="ticker-status" class="status-message"></div>
+            <textarea id="ticker-input" rows="4"></textarea>
+            <button id="update-tickers-btn" class="glow-btn">Update Universe</button>
         </div>
     </div>
 
-    <!-- ─── Indices Modal ─── -->
     <div class="modal-overlay" id="indices-modal-overlay">
         <div class="modal modal-wide glass-panel">
             <div class="modal-header">
                 <h3>📈 Manage Indices</h3>
                 <button class="modal-close" id="close-indices-modal">&times;</button>
             </div>
-            <p class="subtitle">Edit tracked macro indices (comma or space separated)</p>
-            <textarea id="indices-input" rows="3" placeholder="SPY, ^VIX, IEF..."></textarea>
-            <button id="update-indices-btn" class="glow-btn" style="margin-bottom: 8px;">Update Indices</button>
-            <div id="indices-status" class="status-message"></div>
-            
-            <hr style="border: 0; border-top: 1px solid var(--panel-border); margin: 16px 0;">
-            <p class="subtitle" style="margin-bottom: 8px;">Real-time macro indicator data</p>
-            <div class="indices-grid" id="indices-grid">
-                <!-- Populated by JS -->
-            </div>
+            <textarea id="indices-input" rows="3"></textarea>
+            <button id="update-indices-btn" class="glow-btn">Update Indices</button>
+            <div class="indices-grid" id="indices-grid"></div>
         </div>
     </div>
 
-
-
-    <script src="app.js?v=3"></script>
+    <script src="dashboard_core.js?v=40"></script>
+    <script src="modern_ui.js?v=40"></script>
+    <script src="modals.js?v=40"></script>
 </body>
 </html>

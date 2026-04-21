@@ -11,20 +11,26 @@ def main():
     framework = AgentFramework()
     
     # Map of all our sub-agents (engines and advocates)
+    # LOCAL_1B  → Ollama gemma4:e2b  (fast deterministic agents)
+    # LOCAL_4B  → Ollama gemma4:e4b  (analytical agents)
+    # PRO/THINKING/FAST → Gemini cloud (reasoning, web search, orchestration)
     sub_agent_configs = {
-        "Macro Sentinel": {"file": "macro_arbiter.json", "mode": "PRO"},
-        "Bullish Advocate": {"file": "bullish_gem.json", "mode": "THINKING"},
-        "Red Team Pessimist": {"file": "red_team_gem.json", "mode": "THINKING"},
-        "Neutral Structuralist": {"file": "neutral_gem.json", "mode": "PRO"},
-        "Execution Engine": {"file": "execution.json", "mode": "PRO"},
-        "Structural Engine": {"file": "structural_engine.json", "mode": "FAST"},
-        "Technical Validator": {"file": "technical_validator.json", "mode": "PRO"},
-        "Research Engine": {"file": "research.json", "mode": "THINKING"},
-        "Sentiment Engine": {"file": "sentiment_engine.json", "mode": "PRO"},
-        "Context Engine": {"file": "context_engine.json", "mode": "PRO"},
-        "GEX Engine": {"file": "gex_engine.json", "mode": "PRO"},
-        "Review Engine": {"file": "post_trade_review.json", "mode": "PRO"},
-        "Rule Enforcer Engine": {"file": "rule_enforcer_engine.json", "mode": "PRO"}
+        # --- Gemini cloud agents (deep reasoning / web search required) ---
+        "Macro Sentinel":        {"file": "macro_arbiter.json",        "mode": "PRO"},
+        "Bullish Advocate":      {"file": "bullish_gem.json",          "mode": "THINKING"},
+        "Red Team Pessimist":    {"file": "red_team_gem.json",         "mode": "THINKING"},
+        "Neutral Structuralist": {"file": "neutral_gem.json",          "mode": "PRO"},
+        "Research Engine":       {"file": "research.json",             "mode": "THINKING"},
+        "Sentiment Engine":      {"file": "sentiment_engine.json",     "mode": "PRO"},
+        "Review Engine":         {"file": "post_trade_review.json",    "mode": "PRO"},
+        # --- Local Gemma agents (gemma4:e2b — fast, deterministic) ---
+        "Structural Engine":     {"file": "structural_engine.json",    "mode": "LOCAL_1B"},
+        "Rule Enforcer Engine":  {"file": "rule_enforcer_engine.json", "mode": "LOCAL_1B"},
+        # --- Local Gemma agents (gemma4:e4b — analytical, structured data) ---
+        "Context Engine":        {"file": "context_engine.json",       "mode": "LOCAL_4B"},
+        "Execution Engine":      {"file": "execution.json",            "mode": "LOCAL_4B"},
+        "Technical Validator":   {"file": "technical_validator.json",  "mode": "LOCAL_4B"},
+        "GEX Engine":            {"file": "gex_engine.json",           "mode": "LOCAL_4B"},
     }
     
     # Create the tools list

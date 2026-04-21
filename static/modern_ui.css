@@ -1,0 +1,205 @@
+/* MODERN UI STYLES - GRID & REFINEMENTS */
+
+:root {
+    --chat-bg: rgba(10, 11, 14, 0.98);
+    --accent-blue: #58a6ff;
+    --text-primary: #f0f6fc;
+    --text-secondary: #8b949e;
+    --border-color: rgba(255, 255, 255, 0.12);
+    --panel-bg: rgba(15, 18, 24, 0.6);
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 20px;
+    padding: 0 40px 40px 40px;
+    margin-top: 20px;
+}
+
+.dashboard-left {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.dashboard-right {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Macro Grid */
+.macro-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px;
+}
+
+.macro-card {
+    background: var(--panel-bg);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    padding: 24px;
+    text-align: center;
+    transition: transform 0.2s;
+}
+
+.macro-label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+}
+
+.macro-val {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: white;
+}
+
+.macro-sub {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+.macro-sub.up { color: #00ff7f; }
+.macro-sub.down { color: #ff453a; }
+
+/* Sidebar Cards */
+.sidebar-card {
+    background: var(--panel-bg);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border-color);
+    border-radius: 24px;
+    padding: 24px;
+}
+
+.alerts-card h3 {
+    margin-top: 0;
+    font-size: 0.9rem;
+    color: #ff9f0a;
+    letter-spacing: 1px;
+}
+
+.alert-item {
+    border-left: 3px solid #ff453a;
+    padding: 12px 16px;
+    background: rgba(255, 69, 58, 0.05);
+    border-radius: 4px 12px 12px 4px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+/* Controls */
+.control-row {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.block-btn {
+    width: 100%;
+    padding: 14px;
+    text-align: center;
+    justify-content: center;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+/* Table Refinements */
+.modern-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0 8px;
+}
+
+.modern-table th {
+    padding: 16px;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.modern-table td {
+    padding: 20px 16px;
+    background: rgba(255,255,255,0.02);
+}
+
+.modern-table tr td:first-child { border-radius: 12px 0 0 12px; }
+.modern-table tr td:last-child { border-radius: 0 12px 12px 0; }
+
+.ticker-cell {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: white;
+}
+
+.price-cell {
+    font-weight: 600;
+    color: white;
+}
+
+.tag {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.tag.flat { background: rgba(255, 159, 10, 0.1); color: #ff9f0a; }
+.tag.up { background: rgba(0, 255, 127, 0.1); color: #00ff7f; }
+.tag.down { background: rgba(255, 69, 58, 0.1); color: #ff453a; }
+
+.posture-tag {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+.posture-tag.up { color: #00ff7f; background: rgba(0, 255, 127, 0.1); }
+.posture-tag.down { color: #ff453a; background: rgba(255, 69, 58, 0.1); }
+.posture-tag.neutral { color: var(--text-secondary); background: rgba(255,255,255,0.05); }
+
+.score-badge.up { background: #00ff7f; color: #000; }
+.score-badge.down { background: #ff453a; color: #000; }
+.score-badge.flat { background: rgba(255,255,255,0.1); color: white; }
+
+/* Keep Chat Styles from previous turns */
+.modern-chat-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(12px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+}
+.modern-chat-overlay.active { display: flex; }
+.modern-chat-panel {
+    width: 900px; height: 85vh; background: var(--chat-bg);
+    border: 1px solid var(--border-color); border-radius: 40px;
+    padding: 40px; display: flex; flex-direction: column;
+}
+.modern-chat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+.modern-logo-box { width: 48px; height: 48px; background: linear-gradient(135deg, #58a6ff, #bc85ff); border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; color: white; }
+.modern-ctrl-btn { width: 48px; height: 48px; border-radius: 14px; border: 1px solid var(--border-color); background: rgba(255,255,255,0.05); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; }
+.modern-chat-messages { flex: 1; overflow-y: auto; margin-bottom: 30px; display: flex; flex-direction: column; gap: 30px; }
+.modern-message { max-width: 85%; font-size: 1.1rem; line-height: 1.6; }
+.modern-message.ai { align-self: flex-start; color: var(--text-primary); background: rgba(255,255,255,0.03); padding: 20px 0; }
+.modern-message.user { align-self: flex-end; background: rgba(88, 166, 255, 0.1); padding: 20px 30px; border-radius: 30px 30px 4px 30px; border: 1px solid rgba(88, 166, 255, 0.2); color: white; }
+.modern-input-area { background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 30px; padding: 20px 30px; }
+.modern-input-area textarea { width: 100%; background: transparent; border: none; outline: none; color: white; font-size: 1.15rem; resize: none; min-height: 40px; }
+.modern-send-btn { width: 48px; height: 48px; border-radius: 50%; background: #58a6ff; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; }
+.thinking-msg { font-style: italic; color: var(--accent-blue) !important; animation: pulse 1.5s infinite; } @keyframes pulse { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }

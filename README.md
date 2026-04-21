@@ -4,7 +4,7 @@
 
 Each JSON file is a **system instruction** for a dedicated AI sub-agent. Together, these agents form an institutional-grade trading council that analyses live market data, enforces risk protocols, and produces consensus-driven trade decisions — all accessible via a real-time, glassmorphic Web Dashboard with a built-in AI chat interface.
 
-> **No clipboard operations required.** The system is fully automated. The AI Orchestrator reads live market data, writes to the local SSoT, and appends trade lessons autonomously via tool calls.
+> **No manual intervention required.** The system is fully autonomous. The AI Orchestrator reads live market data, writes to the local SSoT, appends trade lessons, and coordinates multiple council agents in parallel via automated tool calls.
 
 ---
 
@@ -61,13 +61,13 @@ The system runs as a single Python process with two concurrent components:
 
 The chat interface in the dashboard connects directly to a **Gemini 3.1 Pro** (or best available) model configured as the Terminal Orchestrator. It has access to the following **tool functions**:
 
-| Tool | Description |
-|------|-------------|
 | `read_ssot()` | Reads the current SSoT (`local_ssot_shadow.json`) |
 | `update_ssot(payload)` | Merges an execution payload into the SSoT |
 | `read_trade_lessons()` | Reads all historical trade lessons |
+| `update_trade_lessons(lesson)` | **NEW**: Appends a new insight to the lessons library autonomously |
 | `get_market_data()` | Returns the latest live ticker and macro data |
 | `ask_<subagent>(query)` | Delegates a query to a specialised sub-agent |
+| `ask_council(queries)` | **NEW**: Parallel Dispatcher — runs multiple agents simultaneously (3x speedup) |
 
 Sub-agents marked as **Research**, **Sentiment**, and **Context** engines additionally have access to **Google Search** for live web data.
 
@@ -126,9 +126,10 @@ The system uses a **tiered fallback model** strategy defined in `agent_framework
 
 | Mode | Model Priority | Used By |
 |------|---------------|---------|
-| `PRO` | `gemini-3.1-pro-preview` → `gemini-3-pro-preview` → `gemini-2.5-pro` | Orchestrator, most engines |
-| `THINKING` | `gemini-3.1-pro-preview` → `gemini-3-pro-preview` → `gemini-2.5-pro` | Council advocates, Research |
-| `FAST` | `gemini-3-flash-preview` → `gemini-2.5-flash` | Structural Engine |
+| `PRO` | `gemini-3.1-pro-preview` → `gemini-2.5-pro` | Orchestrator, complex engines |
+| `THINKING` | `gemini-3.1-pro-preview` → `gemini-2.5-pro` | Council advocates, Research |
+| `FAST` | `gemini-2.5-flash` → `gemini-2.0-flash` | Utility engines (Sentiment, Review, etc.) |
+| `LOCAL` | `Gemma 4 e4b` (via Ollama) | Context, Execution, Rule Enforcement |
 
 If a model returns a `429 Resource Exhausted` error, the system automatically waits 32 seconds and retries before falling back to the next model.
 
@@ -141,7 +142,7 @@ The dashboard is served at **http://localhost:8000** and includes:
 - **Real-time market table** — Ticker, Price, Gap %, Volume, ATR %, RSI, VWAP, Trend, Dealer Posture, Score
 - **Macro HUD** — Live cards for tracked macro indices (VIX, SPY, IEF, UUP, GDX, etc.)
 - **Alerts panel** — Surfaced signal alerts from the data daemon
-- **GEM Orchestrator Chat** — Full AI chat interface connected to the Terminal Orchestrator. Supports markdown responses, typing indicators, and collapse/expand toggle.
+- **GEM Orchestrator Chat** — Full AI chat interface. Supports **Markdown rendering**, parallel "Council Debate" synthesis, and dynamic "Thinking..." indicators.
 - **Manage Tickers modal** — Add/remove tracked equity tickers (saved to `user_config.json`)
 - **Indices modal** — Add/remove tracked macro indices (saved to `user_config.json`)
 
@@ -178,7 +179,7 @@ The `local_ssot_shadow.json` file is the system's persistent memory. The AI Orch
 
 ### Trade Lessons
 
-The `trade_lessons.json` file is a growing library of codified trade post-mortems. The Review Engine appends new lessons after each completed trade. All agents read this file to avoid repeating past mistakes.
+The `trade_lessons.json` file is a growing library of codified trade post-mortems. The system now **automatically appends new lessons** via the `update_trade_lessons` tool after the Orchestrator identifies long-term insights during a council session.
 
 ### User Config
 

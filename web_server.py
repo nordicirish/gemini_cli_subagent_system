@@ -1,8 +1,10 @@
 import os
 import sys
 import uvicorn
+import asyncio
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
 
 from agent_framework import AgentFramework
 import agent_framework
@@ -11,25 +13,60 @@ import tools
 # Import the existing FastAPI app from fetch_stocks
 from fetch_stocks import app, run_daemon
 
+# --- LOGGING SYSTEM ---
+# This queue will hold system messages to be streamed to the UI via SSE
+_system_logs_queue = None
+main_loop = None
+
+def get_log_queue():
+    global _system_logs_queue
+    if _system_logs_queue is None:
+        _system_logs_queue = asyncio.Queue(maxsize=100)
+    return _system_logs_queue
+
+def log_to_queue(message: str):
+    """Callback for AgentFramework to push logs to the async queue."""
+    global main_loop
+    if main_loop:
+        try:
+            queue = get_log_queue()
+            main_loop.call_soon_threadsafe(queue.put_nowait, message)
+        except asyncio.QueueFull:
+            try:
+                queue.get_nowait()
+                main_loop.call_soon_threadsafe(queue.put_nowait, message)
+            except:
+                pass
+        except Exception:
+            pass
+    else:
+        # Before the UI is connected or loop is captured, just print
+        print(f"[System] {message}")
+
+
 # --- ORCHESTRATOR INITIALIZATION ---
 print("Initializing GEM Trading Web UI Server...")
 
-framework = AgentFramework()
+# Initialize framework with the queue callback
+framework = AgentFramework(log_callback=log_to_queue)
 
 sub_agent_configs = {
-    "Macro Sentinel": {"file": "macro_arbiter.json", "mode": "PRO"},
-    "Bullish Advocate": {"file": "bullish_gem.json", "mode": "THINKING"},
-    "Red Team Pessimist": {"file": "red_team_gem.json", "mode": "THINKING"},
-    "Neutral Structuralist": {"file": "neutral_gem.json", "mode": "PRO"},
-    "Execution Engine": {"file": "execution.json", "mode": "PRO"},
-    "Structural Engine": {"file": "structural_engine.json", "mode": "FAST"},
-    "Technical Validator": {"file": "technical_validator.json", "mode": "PRO"},
-    "Research Engine": {"file": "research.json", "mode": "THINKING"},
-    "Sentiment Engine": {"file": "sentiment_engine.json", "mode": "PRO"},
-    "Context Engine": {"file": "context_engine.json", "mode": "PRO"},
-    "GEX Engine": {"file": "gex_engine.json", "mode": "PRO"},
-    "Review Engine": {"file": "post_trade_review.json", "mode": "PRO"},
-    "Rule Enforcer Engine": {"file": "rule_enforcer_engine.json", "mode": "PRO"}
+    # --- Gemini cloud agents (deep reasoning / web search required) ---
+    "Macro Sentinel":        {"file": "macro_arbiter.json",        "mode": "PRO"},
+    "Bullish Advocate":      {"file": "bullish_gem.json",          "mode": "THINKING"},
+    "Red Team Pessimist":    {"file": "red_team_gem.json",         "mode": "THINKING"},
+    "Neutral Structuralist": {"file": "neutral_gem.json",          "mode": "PRO"},
+    "Research Engine":       {"file": "research.json",             "mode": "THINKING"},
+    "Sentiment Engine":      {"file": "sentiment_engine.json",     "mode": "FAST"},
+    "Review Engine":         {"file": "post_trade_review.json",    "mode": "FAST"},
+    # --- Local Gemma agents (gemma4:e2b — fast, deterministic) ---
+    "Structural Engine":     {"file": "structural_engine.json",    "mode": "LOCAL_1B"},
+    "Rule Enforcer Engine":  {"file": "rule_enforcer_engine.json", "mode": "LOCAL_1B"},
+    # --- Local Gemma agents (gemma4:e4b — analytical, structured data) ---
+    "Context Engine":        {"file": "context_engine.json",       "mode": "LOCAL_4B"},
+    "Execution Engine":      {"file": "execution.json",            "mode": "LOCAL_4B"},
+    "Technical Validator":   {"file": "technical_validator.json",  "mode": "LOCAL_4B"},
+    "GEX Engine":            {"file": "gex_engine.json",           "mode": "LOCAL_4B"},
 }
 
 terminal_tools = [
@@ -41,13 +78,23 @@ terminal_tools = [
 
 for name, config in sub_agent_configs.items():
     if os.path.exists(config["file"]):
-        if name in ["Research Engine", "Sentiment Engine", "Context Engine"]:
+        if name in ["Research Engine", "Sentiment Engine"]:
+            # These engines focus on Web Research ONLY (No custom tools allowed by Gemini)
             sub_tools = [{"google_search": {}}]
+        elif name == "Context Engine":
+            # The SSoT owner gets custom tools ONLY (No google_search)
+            sub_tools = [tools.read_ssot, tools.update_ssot, tools.read_trade_lessons, tools.update_trade_lessons, tools.get_market_data]
         else:
+            # All other engines get custom Read-Only tools
             sub_tools = [tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
             
         tool_func = framework.create_agent_tool(name, config["file"], config["mode"], agent_tools=sub_tools)
         terminal_tools.append(tool_func)
+
+# Create a parallel dispatcher tool that can call other tools
+agents_map = {f. __name__: f for f in terminal_tools}
+parallel_tool = framework.create_parallel_council_tool(agents_map)
+terminal_tools.append(parallel_tool)
 
 if not os.path.exists("terminal.json"):
     print("Error: terminal.json not found!")
@@ -62,25 +109,26 @@ if os.path.exists(rules_path):
     terminal_instruction += f"\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{rules_content}"
 
 # Ping to find a working model
-terminal_models = agent_framework.MODEL_MAPPING["PRO"]
+# Use THINKING models for the Orchestrator to ensure deep reasoning and council debate
+terminal_models = agent_framework.MODEL_MAPPING["THINKING"]
 valid_model = None
 for model_name in terminal_models:
-    print(f"Testing Terminal model {model_name}...")
+    framework.log(f"Testing Terminal model {model_name}...")
     try:
         framework.client.models.generate_content(
             model=model_name,
             contents="ping"
         )
         valid_model = model_name
-        print(f"Successfully verified {model_name}!")
+        framework.log(f"Successfully verified {model_name}!")
         break
     except Exception as e:
         error_str = str(e).lower()
         if "429" in error_str or "quota" in error_str:
-            print(f"Model {model_name} is rate limited (429), but it exists! Setting as valid model.")
+            framework.log(f"Model {model_name} is rate limited (429), but it exists! Setting as valid model.")
             valid_model = model_name
             break
-        print(f"Failed with {model_name}: {e}")
+        framework.log(f"Failed with {model_name}: {e}")
 
 if not valid_model:
     print("ERROR: All fallback models failed to verify. Exiting.")
@@ -96,11 +144,15 @@ global_chat = framework.client.chats.create(
     )
 )
 
+# Start background warmup for local models
+import threading
+threading.Thread(target=framework.warmup_local_models, daemon=True).start()
+
 print("\n" + "="*60)
-print("💎 GEM WEB UI ORCHESTRATOR READY 💎")
+print("--- GEM WEB UI ORCHESTRATOR READY ---")
 print("="*60)
 
-# --- FASTAPI CHAT ENDPOINT ---
+# --- FASTAPI ENDPOINTS ---
 
 class ChatRequest(BaseModel):
     message: str
@@ -111,20 +163,48 @@ def chat_endpoint(req: ChatRequest):
         if not req.message.strip():
             return {"status": "error", "message": "Empty message."}
             
-        # Running as a standard def offloads this to FastAPI's threadpool.
-        # This prevents blocking the main event loop and allows the tools to use asyncio.run()
+        # Collect history length before sending
+        history_len_before = len(global_chat.get_history())
         response = global_chat.send_message(req.message)
-        return {"status": "success", "response": response.text}
+        
+        # Aggregate all model responses from this interaction
+        all_new_messages = global_chat.get_history()[history_len_before:]
+        full_response = ""
+        for msg in all_new_messages:
+            if msg.role == 'model':
+                for part in msg.parts:
+                    if part.text:
+                        full_response += part.text + "\n\n"
+        
+        if not full_response.strip():
+            full_response = response.text or "No textual response received."
+            
+        return {"status": "success", "response": full_response.strip()}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+@app.get("/api/system_logs")
+async def system_logs_endpoint():
+    """SSE endpoint to stream system logs to the frontend."""
+    global main_loop
+    main_loop = asyncio.get_running_loop()
+    
+    queue = get_log_queue()
+    
+    async def event_generator():
+        while True:
+            # Wait for a new log message
+            log_msg = await queue.get()
+            # Format as SSE
+            yield f"data: {log_msg}\n\n"
+            
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 # --- MOUNT STATIC AND RUN ---
 if __name__ == "__main__":
     if not os.path.exists("static"):
         os.makedirs("static")
     app.mount("/", StaticFiles(directory="static", html=True), name="static")
-    
-    # Note: Daemon thread is already started in tools.py on import.
     
     # Auto-select an available port starting from 8000
     import socket

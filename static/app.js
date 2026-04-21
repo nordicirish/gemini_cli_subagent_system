@@ -1,4 +1,5 @@
 const API_BASE = '/api';
+console.log("GEM App Loaded v6 - Toggle Hardwired");
 
 // DOM Elements
 const dTableBody = document.getElementById('table-body');
@@ -38,27 +39,27 @@ function openModal(overlay) { overlay.classList.add('active'); }
 function closeModal(overlay) { overlay.classList.remove('active'); }
 
 // Ticker Modal
-dOpenModalBtn.addEventListener('click', () => {
+if (dOpenModalBtn) dOpenModalBtn.addEventListener('click', () => {
     openModal(dTickerModalOverlay);
     dtInput.focus();
 });
-dCloseModalBtn.addEventListener('click', () => closeModal(dTickerModalOverlay));
-dTickerModalOverlay.addEventListener('click', (e) => {
+if (dCloseModalBtn) dCloseModalBtn.addEventListener('click', () => closeModal(dTickerModalOverlay));
+if (dTickerModalOverlay) dTickerModalOverlay.addEventListener('click', (e) => {
     if (e.target === dTickerModalOverlay) closeModal(dTickerModalOverlay);
 });
 
 // Indices Modal
-dOpenIndicesBtn.addEventListener('click', () => {
+if (dOpenIndicesBtn) dOpenIndicesBtn.addEventListener('click', () => {
     renderIndicesModal();
     openModal(dIndicesModalOverlay);
 });
-dCloseIndicesBtn.addEventListener('click', () => closeModal(dIndicesModalOverlay));
-dIndicesModalOverlay.addEventListener('click', (e) => {
+if (dCloseIndicesBtn) dCloseIndicesBtn.addEventListener('click', () => closeModal(dIndicesModalOverlay));
+if (dIndicesModalOverlay) dIndicesModalOverlay.addEventListener('click', (e) => {
     if (e.target === dIndicesModalOverlay) closeModal(dIndicesModalOverlay);
 });
 
 // Escape to close any open modal
-document.addEventListener('keydown', (e) => {
+if (document) document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         closeModal(dTickerModalOverlay);
         closeModal(dIndicesModalOverlay);
@@ -111,6 +112,60 @@ async function init() {
     await fetchTickers();
     pollData();
     setInterval(pollData, 3000); // 3 sec polling
+    setupSystemMonitor();
+}
+
+// System Monitor Logic
+function setupSystemMonitor() {
+    const monitorLogs = document.getElementById('monitor-logs');
+    const monitor = document.getElementById('system-monitor');
+    const monitorToggle = document.getElementById('monitor-toggle');
+    if (!monitorLogs || !monitor || !monitorToggle) return;
+
+    monitorToggle.onclick = (e) => {
+        console.log("Monitor toggled");
+        e.preventDefault();
+        e.stopPropagation();
+        monitor.classList.toggle('open');
+    };
+    function addLog(message) {
+        const logEntry = document.createElement('div');
+        logEntry.className = 'log-entry';
+        
+        // Dynamic color coding based on message content
+        if (message.includes('Delegating')) logEntry.classList.add('delegation');
+        else if (message.includes('Responded')) logEntry.classList.add('response');
+        else if (message.includes('Attempting with model') || message.includes('Successfully verified')) logEntry.classList.add('system');
+        else if (message.includes('503 UNAVAILABLE') || message.includes('Wait')) logEntry.classList.add('retry');
+        else if (message.includes('Error') || message.includes('failed')) logEntry.classList.add('error');
+        else if (message.includes('Warning')) logEntry.classList.add('warning');
+        else logEntry.classList.add('system');
+
+        logEntry.textContent = message;
+        monitorLogs.appendChild(logEntry);
+        
+        // Auto-scroll
+        monitorLogs.scrollTop = monitorLogs.scrollHeight;
+        
+        // Keep logs lean (max 100 entries)
+        if (monitorLogs.childElementCount > 100) {
+            monitorLogs.removeChild(monitorLogs.firstChild);
+        }
+    }
+
+    // Connect to SSE endpoint
+    const eventSource = new EventSource(`${API_BASE}/system_logs`);
+    
+    eventSource.onmessage = (event) => {
+        if (event.data) {
+            addLog(event.data);
+        }
+    };
+
+    eventSource.onerror = (error) => {
+        console.error("SSE Error:", error);
+        // EventSource will automatically attempt to reconnect
+    };
 }
 
 // Fetch current ticker list
@@ -128,7 +183,7 @@ async function fetchTickers() {
 }
 
 // Update tickers list via POST
-dUpdateBtn.addEventListener('click', async () => {
+if (dUpdateBtn) dUpdateBtn.addEventListener('click', async () => {
     const raw = dtInput.value;
     const items = raw.split(/[\s,]+/).map(t => t.trim()).filter(t => t);
     
@@ -158,7 +213,7 @@ dUpdateBtn.addEventListener('click', async () => {
 });
 
 // Update indices list via POST
-dUpdateIndicesBtn.addEventListener('click', async () => {
+if (dUpdateIndicesBtn) dUpdateIndicesBtn.addEventListener('click', async () => {
     const raw = dIndicesInput.value;
     const items = raw.split(/[\s,]+/).map(t => t.trim()).filter(t => t);
     
@@ -382,53 +437,98 @@ async function pollData() {
         dStatus.textContent = 'DISCONNECTED';
         dStatus.style.color = 'var(--red)';
     }
-}
-
-// Start
-init();
-
-// --- Chat UI Logic ---
+}/* // --- Gemini Chat Logic --- (REPLACED BY MODERN_UI.JS)
+const dChatWindow = document.getElementById('chat-window');
 const dChatPanel = document.getElementById('chat-panel');
-const dChatPanelWrapper = document.getElementById('chat-panel-wrapper');
-const dChatToggleBtn = document.getElementById('chat-toggle-btn');
-const dChatExpandBtn = document.getElementById('chat-expand-btn');
+const dChatDragHandle = document.getElementById('chat-drag-handle');
+const dChatMinimizeBtn = document.getElementById('chat-minimize-btn');
+const dChatCloseBtn = document.getElementById('chat-close-btn');
+const dChatCloseOverlay = document.getElementById('chat-close-overlay');
+const dLaunchChatBtn = document.getElementById('launch-chat-btn');
 const dChatInput = document.getElementById('chat-input');
 const dSendChatBtn = document.getElementById('send-chat-btn');
 const dChatMessages = document.getElementById('chat-messages');
 
-// Collapse / expand the chat panel body
-let chatCollapsed = false;
-dChatToggleBtn.addEventListener('click', () => {
-    chatCollapsed = !chatCollapsed;
-    const body = dChatPanel.querySelector('.chat-messages');
-    const input = dChatPanel.querySelector('.chat-input-area');
-    if (chatCollapsed) {
-        body.style.display = 'none';
-        input.style.display = 'none';
-        dChatToggleBtn.textContent = '▼ Expand';
-    } else {
-        body.style.display = '';
-        input.style.display = '';
-        dChatToggleBtn.textContent = '▲ Collapse';
-        dChatInput.focus();
+// Global monitor toggle removed (moved to setupSystemMonitor)
+
+// Launcher
+dLaunchChatBtn.onclick = () => {
+    console.log("Launcher clicked");
+    dChatWindow.classList.toggle('active');
+    if (dChatWindow.classList.contains('active')) dChatInput.focus();
+};
+
+// Close actions
+const closeChat = () => {
+    console.log("Closing chat");
+    dChatWindow.classList.remove('active');
+};
+dChatCloseBtn.onclick = closeChat;
+dChatCloseOverlay.onclick = closeChat;
+
+// --- Drag and Drop (Offset from center) ---
+let isDragging = false;
+let startX, startY;
+let currentXOffset = 0;
+let currentYOffset = 0;
+
+if (dChatDragHandle) dChatDragHandle.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.gemini-header-right')) return;
+    isDragging = true;
+    startX = e.clientX - currentXOffset;
+    startY = e.clientY - currentYOffset;
+    dChatPanel.style.transition = 'none';
+});
+
+if (document) document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    currentXOffset = e.clientX - startX;
+    currentYOffset = e.clientY - startY;
+    dChatPanel.style.transform = `translate(${currentXOffset}px, ${currentYOffset}px)`;
+});
+
+if (document) document.addEventListener('mouseup', () => {
+    isDragging = false;
+    dChatPanel.style.transition = '';
+});
+
+// --- Resizing ---
+let isResizing = false;
+let currentResizer = null;
+let startWidth, startHeight;
+
+const resizers = document.querySelectorAll('.gemini-resize-handle');
+resizers.forEach(resizer => {
+    if (resizer) resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        currentResizer = e.target;
+        startX = e.clientX;
+        startY = e.clientY;
+        startWidth = dChatPanel.offsetWidth;
+        startHeight = dChatPanel.offsetHeight;
+        e.preventDefault();
+    });
+});
+
+if (document) document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    
+    if (currentResizer.classList.contains('resizer-r') || currentResizer.classList.contains('resizer-br')) {
+        const width = startWidth + (e.clientX - startX);
+        if (width > 400) dChatPanel.style.width = width + 'px';
+    }
+    
+    if (currentResizer.classList.contains('resizer-b') || currentResizer.classList.contains('resizer-br')) {
+        const height = startHeight + (e.clientY - startY);
+        if (height > 300) dChatPanel.style.height = height + 'px';
     }
 });
 
-// Full-width expand toggle
-let chatExpanded = false;
-dChatExpandBtn.addEventListener('click', () => {
-    chatExpanded = !chatExpanded;
-    if (chatExpanded) {
-        dChatPanelWrapper.classList.add('chat-panel-wrapper--expanded');
-        dChatExpandBtn.textContent = '⊠ Shrink';
-        dChatExpandBtn.title = 'Shrink chat';
-    } else {
-        dChatPanelWrapper.classList.remove('chat-panel-wrapper--expanded');
-        dChatExpandBtn.textContent = '⊞ Expand';
-        dChatExpandBtn.title = 'Expand chat to full width';
-    }
+if (document) document.addEventListener('mouseup', () => {
+    isResizing = false;
 });
 
+// --- Chat Messaging ---
 function appendMessage(role, content) {
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${role}-message`;
@@ -466,7 +566,7 @@ function showTypingIndicator() {
             <div class="typing-dot"></div>
             <div class="typing-dot"></div>
         </div>
-        <span class="typing-label">Processing<span class="typing-ellipsis"></span></span>
+        <span class="typing-label">Thinking<span class="typing-ellipsis"></span></span>
         <span class="typing-timer" id="typing-timer">0s</span>
     `;
 
@@ -474,13 +574,11 @@ function showTypingIndicator() {
     dChatMessages.appendChild(msgDiv);
     dChatMessages.scrollTop = dChatMessages.scrollHeight;
 
-    // Animate ellipsis
     let ellipsisDots = 0;
     const ellipsisEl = contentDiv.querySelector('.typing-ellipsis');
-
-    // Elapsed timer
     let elapsed = 0;
     const timerEl = contentDiv.querySelector('#typing-timer');
+    
     _typingTimerInterval = setInterval(() => {
         elapsed++;
         if (timerEl) timerEl.textContent = `${elapsed}s`;
@@ -503,6 +601,7 @@ async function sendChatMessage() {
     if (!msg) return;
     
     dChatInput.value = '';
+    dChatInput.style.height = 'auto'; // Reset height
     dSendChatBtn.disabled = true;
     
     appendMessage('user', msg);
@@ -533,13 +632,20 @@ async function sendChatMessage() {
     }
 }
 
-dSendChatBtn.addEventListener('click', sendChatMessage);
-dChatInput.addEventListener('keydown', (e) => {
+if (dSendChatBtn) dSendChatBtn.addEventListener('click', sendChatMessage);
+if (dChatInput) dChatInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         sendChatMessage();
     }
 });
 
+// Auto-resize textarea
+if (dChatInput) dChatInput.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = (this.scrollHeight) + 'px';
+});
 
 
+init();
+\n*/
