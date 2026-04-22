@@ -394,8 +394,6 @@ Session Close initiated. Perform a final forensic audit of today's trading sessi
 synchronize all end-of-day data for active tickers. Incorporate final trade entries,
 including Units, WAC, and Remaining Cash.
 
-Once the audit is complete, emit an EXECUTION_PAYLOAD so I can sync it locally.
-
 Once the audit is complete, execute the FULL_STATE_OUTPUT protocol per SSoT_Storage
 Generate the absolute, complete SSoT JSON in a single markdown code block with zero omissions
 and no placeholders (e.g., do not use "// ..."). Every key from both immutable_background and

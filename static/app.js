@@ -384,6 +384,15 @@ function renderTable(tickers) {
                 <td class="${rsiColor}">${row.rsi.toFixed(1)}</td>
                 <td>${row.vwap > 0 ? row.vwap.toFixed(2) : '—'}</td>
                 <td>${trendHtml}</td>
+                <td>${(() => {
+                    const dp = row.dealer_posture || 'NEUTRAL';
+                    let dpClass = 'dealer-neutral';
+                    let dpLabel = dp;
+                    if (dp === 'LONG_GAMMA') { dpClass = 'dealer-long'; dpLabel = 'LONG γ'; }
+                    else if (dp === 'SHORT_GAMMA') { dpClass = 'dealer-short'; dpLabel = 'SHORT γ'; }
+                    else { dpClass = 'dealer-neutral'; dpLabel = 'NEUTRAL'; }
+                    return `<span class="dealer-badge ${dpClass}">${dpLabel}</span>`;
+                })()}</td>
                 <td class="score-col">
                     <span class="score-badge ${scoreBadge}">${scoreStr}</span>${noteHtml}
                 </td>

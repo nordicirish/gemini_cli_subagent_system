@@ -488,6 +488,23 @@ tbody tr:hover td {
 .trend-tag.up-inv   { background: var(--red-dim);   color: var(--red); }
 .trend-tag.down-inv { background: var(--green-dim); color: var(--green); }
 
+/* ─── Dealer Posture Badge ─── */
+.dealer-badge {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-family: var(--font-sans);
+    white-space: nowrap;
+}
+
+.dealer-badge.dealer-long    { background: var(--green-dim); color: var(--green); }
+.dealer-badge.dealer-short   { background: var(--red-dim);   color: var(--red); }
+.dealer-badge.dealer-neutral { background: var(--yellow-dim); color: var(--yellow); }
+
 /* ─── Sidebar ─── */
 .sidebar {
     display: flex;
