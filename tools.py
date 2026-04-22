@@ -19,7 +19,11 @@ class ThreadAwareStdout:
     def write(self, data):
         if self.daemon_thread_id and threading.get_ident() == self.daemon_thread_id:
             return len(data) # suppress
-        return self.original_stdout.write(data)
+        try:
+            return self.original_stdout.write(data)
+        except UnicodeEncodeError:
+            # Fallback for Windows terminals that don't support emojis
+            return self.original_stdout.write(data.encode('ascii', 'replace').decode('ascii'))
             
     def flush(self):
         if self.daemon_thread_id and threading.get_ident() == self.daemon_thread_id:

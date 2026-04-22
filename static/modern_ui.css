@@ -17,6 +17,21 @@
     margin-top: 20px;
 }
 
+.warning-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(255, 171, 0, 0.15);
+    border: 1px solid rgba(255, 171, 0, 0.3);
+    border-radius: 12px;
+    padding: 12px 24px;
+    margin: 0 40px 20px 40px;
+    color: #ffab00;
+    font-size: 0.9rem;
+    font-weight: 500;
+    backdrop-filter: blur(10px);
+}
+
 .dashboard-left {
     display: flex;
     flex-direction: column;

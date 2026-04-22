@@ -10,20 +10,21 @@ from google.genai import types
 # Model definitions
 # ---------------------------------------------------------------------------
 MODEL_MAPPING = {
-    "PRO":      ["gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.0-flash"],
-    "THINKING": ["gemini-3.1-pro-preview", "gemini-2.5-pro"],
-    "FAST":     ["gemini-2.5-flash", "gemini-2.0-flash"],
-    "LOCAL_1B": ["gemma4:e4b"],   # Consolidated to e4b for memory efficiency
-    "LOCAL_4B": ["gemma4:e4b"],   # Analytical agents
-}
-
-# If Ollama is unreachable, fall back to these Gemini modes
-LOCAL_FALLBACK = {
-    "LOCAL_1B": "FAST",
-    "LOCAL_4B": "PRO",
+    "PRO":      ["gemini-3.1-pro", "gemini-2.5-pro", "gemma-4-31b-it", "gemini-2.5-flash"],
+    "GEMMA":    ["gemma-4-31b-it", "gemini-2.5-flash"],
+    "FAST":     ["gemini-2.5-flash", "gemma-4-31b-it"],
+    "THINKING": ["gemini-3.1-pro", "gemini-2.5-pro"],
+    "LOCAL_1B": ["gemma4:e4b"],
+    "LOCAL_4B": ["gemma4:e4b"],
 }
 
 LOCAL_MODES = {"LOCAL_1B", "LOCAL_4B"}
+
+# Fallback logic for local modes
+LOCAL_FALLBACK = {
+    "LOCAL_1B": "GEMMA", # If local fails, try cloud Gemma
+    "LOCAL_4B": "GEMMA"  # If local fails, try cloud Gemma
+}
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +85,7 @@ class LocalOllamaClient:
         response = requests.post(
             f"{self.base_url}/api/chat",
             json=payload,
-            timeout=5, # Aggressive timeout for snappy UI
+            timeout=120, # Increased for model loading/VRAM swap
         )
         response.raise_for_status()
         return response.json()["message"]["content"]
@@ -100,10 +101,14 @@ class AgentFramework:
         self.log_callback = log_callback
 
         # Cloud client (Gemini)
-        self.client = genai.Client()
+        api_key = self._local_config.get("GEMINI_API_KEY")
+        if api_key:
+            self.client = genai.Client(api_key=api_key)
+        else:
+            self.client = genai.Client()
 
         # Local client (Ollama)
-        ollama_base = self._local_config.get("LOCAL_API_BASE", "http://localhost:11434")
+        ollama_base = self._local_config.get("LOCAL_API_BASE", "http://127.0.0.1:11434")
         self.ollama = LocalOllamaClient(base_url=ollama_base)
 
         # Cached availability — checked once at first LOCAL call
@@ -128,13 +133,25 @@ class AgentFramework:
         except Exception:
             return {}
 
+    def _get_cloud_models(self, mode: str) -> list:
+        """Return the list of models for a cloud mode, respecting config.json overrides."""
+        base_list = MODEL_MAPPING.get(mode, MODEL_MAPPING["PRO"])
+        # Override with config.json if present
+        overrides = {
+            "gemini-3.1-pro": self._local_config.get("MODEL_PRO_1", "gemini-3.1-pro"),
+            "gemini-2.5-pro": self._local_config.get("MODEL_PRO_2", "gemini-2.5-pro"),
+            "gemma-4-31b-it": self._local_config.get("MODEL_GEMMA", "gemma-4-31b-it"),
+            "gemini-2.5-flash": self._local_config.get("MODEL_FLASH", "gemini-2.5-flash"),
+        }
+        return [overrides.get(m, m) for m in base_list]
+
     def _get_local_model(self, mode: str) -> str:
         """Return the Ollama model name for a LOCAL mode, respecting config.json overrides."""
         if mode == "LOCAL_1B":
-            return self._local_config.get("LOCAL_MODEL_1B", "gemma4:e2b")
+            return self._local_config.get("LOCAL_MODEL_1B", "gemma4:e4b")
         if mode == "LOCAL_4B":
             return self._local_config.get("LOCAL_MODEL_4B", "gemma4:e4b")
-        return MODEL_MAPPING[mode][0]
+        return self._get_cloud_models(mode)[0]
 
     def _check_ollama(self) -> bool:
         """Check Ollama availability once per session and cache the result."""
@@ -236,17 +253,16 @@ class AgentFramework:
                     self.log(f"[Local] {model_name} responded.")
                     return _LocalResponse(text)
                 except Exception as e:
-                    self.log(f"[Local] FATAL: Ollama call failed ({e}). Disabling local models for this session to prevent stalls.")
-                    self._ollama_available = False
-                    # Force immediate fallback
+                    self.log(f"[Local] Connection issue ({e}). Falling back to Gemini for this turn.")
+                    # We do NOT set _ollama_available = False so we can try again later
 
             # Graceful fallback — use Gemini equivalent
             fallback_mode = LOCAL_FALLBACK.get(mode, "PRO")
             self.log(f"[Local] Routing {mode} → Gemini {fallback_mode} for this session.")
             return self.generate_response_with_fallback(prompt, instruction, fallback_mode, tools)
 
-        # --- Cloud (Gemini) path ---
-        models = MODEL_MAPPING.get(mode, MODEL_MAPPING["PRO"])
+        # --- Cloud path (Gemini/Gemma) ---
+        models = self._get_cloud_models(mode)
         last_error = None
 
         for model_name in models:

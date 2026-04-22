@@ -15,22 +15,24 @@ def main():
     # LOCAL_4B  → Ollama gemma4:e4b  (analytical agents)
     # PRO/THINKING/FAST → Gemini cloud (reasoning, web search, orchestration)
     sub_agent_configs = {
-        # --- Gemini cloud agents (deep reasoning / web search required) ---
+        # --- Tier 1 (PRO Chain: 3.1 Pro -> 2.5 Pro -> Gemma 4 -> Flash) ---
         "Macro Sentinel":        {"file": "macro_arbiter.json",        "mode": "PRO"},
-        "Bullish Advocate":      {"file": "bullish_gem.json",          "mode": "THINKING"},
-        "Red Team Pessimist":    {"file": "red_team_gem.json",         "mode": "THINKING"},
-        "Neutral Structuralist": {"file": "neutral_gem.json",          "mode": "PRO"},
-        "Research Engine":       {"file": "research.json",             "mode": "THINKING"},
-        "Sentiment Engine":      {"file": "sentiment_engine.json",     "mode": "PRO"},
         "Review Engine":         {"file": "post_trade_review.json",    "mode": "PRO"},
-        # --- Local Gemma agents (gemma4:e2b — fast, deterministic) ---
-        "Structural Engine":     {"file": "structural_engine.json",    "mode": "LOCAL_1B"},
-        "Rule Enforcer Engine":  {"file": "rule_enforcer_engine.json", "mode": "LOCAL_1B"},
-        # --- Local Gemma agents (gemma4:e4b — analytical, structured data) ---
-        "Context Engine":        {"file": "context_engine.json",       "mode": "LOCAL_4B"},
-        "Execution Engine":      {"file": "execution.json",            "mode": "LOCAL_4B"},
-        "Technical Validator":   {"file": "technical_validator.json",  "mode": "LOCAL_4B"},
-        "GEX Engine":            {"file": "gex_engine.json",           "mode": "LOCAL_4B"},
+        
+        # --- Tier 2 (GEMMA Chain: Gemma 4 -> Flash) ---
+        "Bullish Advocate":      {"file": "bullish_gem.json",          "mode": "GEMMA"},
+        "Red Team Pessimist":    {"file": "red_team_gem.json",         "mode": "GEMMA"},
+        "Neutral Structuralist": {"file": "neutral_gem.json",          "mode": "GEMMA"},
+        "Sentiment Engine":      {"file": "sentiment_engine.json",     "mode": "GEMMA"},
+        "Structural Engine":     {"file": "structural_engine.json",    "mode": "GEMMA"},
+        "Rule Enforcer Engine":  {"file": "rule_enforcer_engine.json", "mode": "GEMMA"},
+        "Context Engine":        {"file": "context_engine.json",       "mode": "GEMMA"},
+        "Execution Engine":      {"file": "execution.json",            "mode": "GEMMA"},
+        "Technical Validator":   {"file": "technical_validator.json",  "mode": "GEMMA"},
+        "GEX Engine":            {"file": "gex_engine.json",           "mode": "GEMMA"},
+        
+        # --- Tier 3 (FAST Chain: Flash -> Gemma 4) ---
+        "Research Engine":       {"file": "research.json",             "mode": "FAST"},
     }
     
     # Create the tools list
@@ -76,8 +78,7 @@ def main():
     # Start the conversation loop
     # We maintain a manual chat history to pass to generate_content, 
     # We use the fallback logic to find a valid model for the Orchestrator
-    # client.chats.create does not ping the API, so we must ping it manually
-    terminal_models = agent_framework.MODEL_MAPPING["PRO"]
+    terminal_models = framework._get_cloud_models("PRO")
     valid_model = None
     for model_name in terminal_models:
         print(f"Testing Terminal model {model_name}...")

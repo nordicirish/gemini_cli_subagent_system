@@ -39,6 +39,18 @@ const Dashboard = {
             const res = await fetch('/api/data');
             const state = await res.json();
             
+            // Handle System Status Warnings
+            const banner = document.getElementById('system-warning-banner');
+            const bannerText = document.getElementById('system-warning-text');
+            if (state.system_status && state.system_status.mode === 'LOCAL_ONLY') {
+                if (banner) {
+                    banner.style.display = 'flex';
+                    if (bannerText) bannerText.textContent = state.system_status.warning || 'Running in LOCAL-ONLY mode.';
+                }
+            } else if (banner) {
+                banner.style.display = 'none';
+            }
+
             if (state && state.tickers) {
                 this.renderTable(state.tickers);
                 this.renderMacroHud(state.tickers);
