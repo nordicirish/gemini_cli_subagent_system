@@ -178,6 +178,8 @@
       - RULE_01: IF RED_TEAM_FATAL_FLAW > fatal_flaw_limit THEN S_A = 0.0 (Hard Veto)
       - RULE_02: IF S_A < caution_threshold THEN ROUTE_TO: DEEP_RESEARCH_ROUTER
       - RULE_03: IF NEUTRAL_STRUCTURALIST_VERDICT == 'FRAGILE' THEN MAX_SIZE = 0.25 (Size Penalty)
+      - RULE_04: **PERSISTENT_DEADLOCK_VETO**: If the Council remains deadlocked (0.65 <= S_A < 0.75) for 2 consecutive analytical turns on the same asset, the Orchestrator MUST terminate and set `trade_state` to **NO_TRADE**.
+    - **rationale**: Persistent ambiguity is a primary signal of a 'C' setup. MANDATE_16 (DEMAND ELEGANCE) requires capital preservation for high-conviction 'A+' opportunities.
       - RULE_04: IF VIX > 20 THEN RED_TEAM_PESSIMIST_WEIGHT = 0.55 AND NEUTRAL_STRUCTURALIST_WEIGHT = 0.25
       - RULE_05: IF VIX > 20 AND RED_TEAM_FATAL_FLAW > 6 THEN S_A = 0.0 (Hard Veto)
       - RULE_06: IF 0.65 <= S_A <= 0.75 THEN TRIGGER DYNAMIC_MICRO_GEM_ROUTING (Spawn standalone sub-engine to break the tie and keep main context clean).
@@ -267,10 +269,14 @@
   - **rationale**: Standard stop-losses are ill-suited for binary gaps. By sizing based on the cash floor and utilizing the ESA tax-shield for rapid principal recovery, the portfolio achieves 'House Money' status 30% faster than in taxable accounts.
 - - **id**: MANDATE_23_TORQUE_TRIAGE
   - **status**: ACTIVE
-  - **instruction**: Following a Research Engine update, the Orchestrator MUST triage agent involvement based on the **Torque Score**:
-    - **IF Torque < 5 (Minor)**: Dispatch **Neutral Structuralist** only for capacity/runway verification.
-    - **IF Torque >= 5 (Major)**: Dispatch **Full Council** (Bullish Advocate + Red Team + Neutral Structuralist) for a complete thesis re-rating and trade verdict.
-  - **objective**: Maximize analytical throughput while minimizing latency and token consumption on non-binary events.
+  - **instruction**: Following a Research Engine update, the Orchestrator MUST triage agent involvement:
+    - **IF Torque < 5 (Minor)**: Dispatch **Neutral Structuralist** AND **Technical Validator** to verify if price action contradicts the low-torque signal.
+    - **IF Torque >= 5 (Major)**: Dispatch **Full Council** (Bullish + Red Team + Structuralist + Technical Validator) for a consensus audit.
+  - **objective**: Ensure every analysis is grounded in quantitative reality via the Technical Validator.
+- - **id**: ENH_59
+  - **title**: Conviction Cluster Warning (Groupthink Circuit-Breaker)
+  - **logic**: If the Bullish Advocate, Red Team, and Structuralist all return a 'High Conviction' agreement (>0.85), the **Technical Validator** is MANDATED to perform a contrarian audit.
+  - **action**: The Validator must hunt for a "Price-Volume Divergence" that invalidates the Council's consensus.
 - - **id**: MANDATE_24_GAP_DEFENSE
   - **status**: ACTIVE
   - **revision_date**: 2026-03-03
@@ -455,7 +461,11 @@
     - MACRO_SENTINEL_Output
   - **processing_rules**:
     - **regime_weighting**: IF Regime == TRENDING|EXPANSION THEN BULL_WEIGHT = 1.5x; IF Regime == MEAN-REVERTING|COMPRESSION THEN RED_VETO_THRESHOLD = 6.5
-    - **sizing_logic**: Position Size Multiplier = (Agreement_Score_SA * Structural_Stability_Coefficient)
+    - **sizing_logic**:
+      - 1. Calculate `Base_Risk` (1.0% NAV).
+      - 2. Calculate **Portfolio Heat Score (0-100)**: Concentration (HHI) + Correlation + Volatility.
+      - 3. Apply **Heat Dampener**: `Size_Mult = 1 - (Portfolio_Heat / 150)`.
+      - 4. Final Risk = `Base_Risk * Regime_Modifier * S_A * Size_Mult`.
     - **horizon_mapping**: IF GEX_Slope == ACCELERATING THEN HORIZON = INTRADAY; IF Net_GEX == STABLE_POSITIVE THEN HORIZON = SWING; IF Dealer_Posture == RE-ACCUMULATING THEN HORIZON = POSITION
     - **macro_overlay**: IF MACRO_SENTINEL.state > 0 THEN Sizing_Multiplier = Sizing_Multiplier * 0.5
     - **veto_integration**: IF MANDATE_20 == TRIGGERED THEN S_A = 0.0
@@ -468,8 +478,12 @@
       - IF Net_GEX_Total < 0 AND ATR_Percent > (Threshold * 1.5) -> STOP_LOSS_TIGHTEN
   - **enforcement**: MANDATORY. This layer must validate the final S_A Agreement Score before the SSoT Controller executes a FORCE_WRITE.
 - - **id**: ENH_41
-  - **title**: Deterministic Position Sizing
-  - **instruction**: Position size MUST be calculated as: (Base_Risk_Pct * Regime_Multiplier * Agreement_Score_SA). If Liquidity_Depth == VOID, Size = 0.
+  - **title**: Deterministic Position Sizing (Portfolio Heat Adjusted)
+  - **logic**:
+    - **Base_Risk**: 1.0% of Net Liquidity.
+    - **Portfolio_Heat**: Weighted score (0-100) of Concentration + Correlation + Volatility.
+    - **Heat_Dampener**: `1 - (Portfolio_Heat / 150)`.
+    - **Final_Risk**: `Base_Risk * Regime_Modifier * S_A * Heat_Dampener`.
 - - **id**: ENH_42
   - **title**: Trade State Emission
   - **instruction**: Every turn MUST emit an explicit 'trade_state' [LONG | NO_TRADE | EXIT]. A 'NO_TRADE' state requires a mandatory 'no_trade_reason'.
@@ -1228,7 +1242,11 @@
 - **id**: ENH_57
 - **title**: Lesson Feedback Pipeline
 - **status**: ACTIVE
-- **instruction**: After every REVIEW_ENGINE post-mortem where thesis_integrity != Confirmed, the Review Engine MUST directly append the codified lesson into trade_lessons.json using its file editing tools. Do NOT emit JSON to the user. The Research Engine MUST cross-reference trade_lessons.json at session boot.
+- **instruction**: After every REVIEW_ENGINE post-mortem where thesis_integrity != Confirmed, the Review Engine:
+    - 1. Identify failure points and generate a lesson for `trade_lessons.json`.
+    - 2. Assign a **Severity Score (1-10)** to the lesson based on realized or potential P&L impact.
+    - 3. If Severity >= 8, flag the lesson for **FAST-TRACK PROMOTION** per ENH_61.
+    The subagent MUST independently update trade_lessons.json using its file editing tools. Do NOT emit JSON to the user. The Research Engine MUST cross-reference trade_lessons.json at session boot.
 - **routing**: REVIEW_ENGINE → tool_call (file edit) → trade_lessons.json
 
 ## Enh 58 Conditional Council
@@ -1250,7 +1268,7 @@
 - **id**: ENH_61
 - **title**: Permanent Rule Promotion Protocol
 - **status**: ACTIVE
-- **trigger**: IF lesson_citation_count >= 5 OR (ANNUAL_RESET_WINDOW AND thesis_integrity == 'Validated_Recurring')
+- **trigger**: IF lesson_citation_count >= 5 OR **lesson_severity_score >= 8** OR (ANNUAL_RESET_WINDOW AND thesis_integrity == 'Validated_Recurring')
 - **instruction**: The CONTEXT_ENGINE, in coordination with the REVIEW_ENGINE, is authorized to **PROPOSE** a promotion of temporary insights from 'trade_lessons.json' to 'rules.md'. 
 - **approval_gate**: **MANDATORY - MANDATE_21**. The system MUST output the proposed rule change and rationale in the chat and WAIT for explicit user confirmation before executing the write to 'rules.md'.
 - **validation**: TECHNICAL_VALIDATOR must verify the proposed rule does not conflict with existing MANDATE_* directives before the proposal is emitted.

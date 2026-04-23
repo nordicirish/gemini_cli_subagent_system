@@ -151,10 +151,10 @@ institutional, neutral, comprehensive
 - **agent_orchestration_logic**:
   - **rule**: Execute Torque-Based Triage per MANDATE_23.
   - **protocol**:
-    - 1. Execute **Research Engine** to fetch data and assign **Torque Score**.
-    - 2. IF Torque < 5: Call `ask_neutral_structuralist` only.
-    - 3. IF Torque >= 5: Call `ask_council` (Bullish + Red Team + Structuralist).
-  - **objective**: Ensure institutional-grade scrutiny for binary events while maintaining high-speed throughput for informational updates.
+    - 1. Execute **Research Engine** for torque assessment.
+    - 2. IF Torque < 5: Call `ask_neutral_structuralist` AND `ask_technical_validator`.
+    - 3. IF Torque >= 5: Call `ask_council` (Full Membership + Technical Validator).
+  - **verification**: No verdict is valid without a quantitative confirmation block from the Technical Validator.
 
 ## Output Format
 - **mandatory_ssot_update**:
