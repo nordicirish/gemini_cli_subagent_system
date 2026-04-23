@@ -89,7 +89,7 @@
       ],
       "temporal_safeguard": {
         "rule": "Events in active_events_window with date >= current_date are IMMUTABLE. Only prune events where date < current_date.",
-        "enforcement": "Reference SSoT_Storage > deletion_rules > calendar_shield_protection",
+        "enforcement": "Reference GEM_Rules_Data > integrity_check > CALENDAR_SHIELD_INTEGRITY_VIOLATION",
         "on_update": "MERGE_PRESERVE_FUTURE_EVENTS — incoming updates to active_events_window must preserve all entries where event.date >= current_date. New events are APPENDED, expired events (date < current_date) are PRUNED."
       }
     }

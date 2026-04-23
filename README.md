@@ -2,9 +2,9 @@
 
 **An autonomous, multi-agent AI trading intelligence system powered by the Google Gemini API.**
 
-Each JSON file is a **system instruction** for a dedicated AI sub-agent. Together, these agents form an institutional-grade trading council that analyses live market data, enforces risk protocols, and produces consensus-driven trade decisions — all accessible via a real-time, glassmorphic Web Dashboard with a built-in AI chat interface.
+Each Markdown file (`.md`) is a **system instruction** for a dedicated AI sub-agent. Together, these agents form an institutional-grade trading council that analyses live market data, enforces risk protocols, and produces consensus-driven trade decisions — all accessible via a real-time, glassmorphic Web Dashboard with a built-in AI chat interface.
 
-> **No manual intervention required.** The system is fully autonomous. The AI Orchestrator reads live market data, writes to the local SSoT, appends trade lessons, and coordinates multiple council agents in parallel via automated tool calls.
+> **No manual intervention required.** The system is fully autonomous. The AI Orchestrator reads live market data, writes to the local SSoT, appends trade lessons, and coordinates multiple council agents in parallel via automated tool calls. The framework has been hardened against API rate limits with dynamic backoffs and a migration to high-quota **Gemini 2.5 Pro** orchestration.
 
 ---
 
@@ -59,9 +59,9 @@ The system runs as a single Python process with two concurrent components:
 
 ### Terminal Orchestrator (Chat AI)
 
-The chat interface in the dashboard connects directly to a **Gemini 3.1 Pro** (or best available) model configured as the Terminal Orchestrator. It has access to the following **tool functions**:
+The chat interface in the dashboard connects directly to a **Gemini 2.5 Pro** (or best available) model configured as the Terminal Orchestrator. It has access to the following **tool functions**:
 
-| `read_ssot()` | Reads the current SSoT (`local_ssot_shadow.json`) |
+| `read_ssot()` | Reads the current SSoT (`ssot.json`) |
 | `update_ssot(payload)` | Merges an execution payload into the SSoT |
 | `read_trade_lessons()` | Reads all historical trade lessons |
 | `update_trade_lessons(lesson)` | **NEW**: Appends a new insight to the lessons library autonomously |
@@ -69,7 +69,7 @@ The chat interface in the dashboard connects directly to a **Gemini 3.1 Pro** (o
 | `ask_<subagent>(query)` | Delegates a query to a specialised sub-agent |
 | `ask_council(queries)` | **NEW**: Parallel Dispatcher — runs multiple agents simultaneously (3x speedup) |
 
-Sub-agents marked as **Research**, **Sentiment**, and **Context** engines additionally have access to **Google Search** for live web data.
+Sub-agents marked as **Research**, **Sentiment**, **Bullish Advocate**, **Red Team Pessimist**, **Technical Validator**, and **Macro Sentinel** have built-in **Google Search Grounding** to fetch live 2026 catalysts and override static training data.
 
 ---
 
@@ -94,31 +94,31 @@ Sub-agents marked as **Research**, **Sentiment**, and **Context** engines additi
 
 | File | Purpose |
 |------|---------|
-| `local_ssot_shadow.json` | **Single Source of Truth.** Stores the active portfolio snapshot, mutable trading state, and forensic intelligence. Written to by the Orchestrator via `update_ssot`. |
+| `ssot.json` | **Single Source of Truth.** Stores the active portfolio snapshot, mutable trading state, and forensic intelligence. Written to by the Orchestrator via `update_ssot`. |
 | `trade_lessons.json` | **Historical trade lessons.** Appended after each post-trade review. Read by all agents to avoid repeating past mistakes. |
 | `user_config.json` | **Persisted user preferences.** Stores the active ticker list and macro indices. Auto-created on first save; survives server restarts. |
 | `config.json` | API keys for Finnhub and Polygon (optional). |
 
-### Sub-Agent JSON Instructions
+### Sub-Agent Markdown Instructions
 
-Each file below is loaded as a system instruction for a dedicated AI sub-agent via `agent_framework.py`:
+Each file below is loaded as a system instruction for a dedicated AI sub-agent via `agent_framework.py`. The system has been migrated to **Markdown (.md)** for improved token efficiency and stricter behavioural adherence:
 
 | File | Agent Name | Mode | Role |
 |------|-----------|------|------|
-| `terminal.json` | **Terminal Orchestrator** | PRO | Routes user queries, delegates to sub-agents, synthesises final decisions |
-| `macro_arbiter.json` | **Macro Sentinel** | PRO | Macro regime detection, Calendar Shield, exogenous shock monitoring |
-| `bullish_gem.json` | **Bullish Advocate** | THINKING | Constructs the strongest bull case with self-critique |
-| `red_team_gem.json` | **Red Team Pessimist** | THINKING | Constructs the strongest bear case with self-critique |
-| `neutral_gem.json` | **Neutral Structuralist** | PRO | Unbiased structural analysis; breaks ties with quantitative evidence |
-| `execution.json` | **Execution Engine** | PRO | Generates `EXECUTION_PAYLOAD` JSON; manages sizing and order routing |
-| `structural_engine.json` | **Structural Engine** | FAST | GEX regime, dark pool posture, VWAP structure analysis |
-| `technical_validator.json` | **Technical Validator** | PRO | Final gate — validates thesis against quantitative restrictions pre-execution |
-| `research.json` | **Research Engine** | THINKING | Live web search for macro narrative, filings, sector rotation signals |
-| `sentiment_engine.json` | **Sentiment Engine** | PRO | Social sentiment, news velocity, dark pool order flow |
-| `context_engine.json` | **Context Engine** | PRO | SSoT state bridge — maintains session continuity and trade thesis integrity |
-| `gex_engine.json` | **GEX Engine** | PRO | Gamma Exposure modelling, dealer hedging flow, pin risk analysis |
-| `post_trade_review.json` | **Review Engine** | PRO | Post-trade reflection — thesis vs. outcome, misfire detection, lesson authoring |
-| `rule_enforcer_engine.json` | **Rule Enforcer** | PRO | Compliance guardian — validates all decisions against `rules.json` mandates |
+| `terminal.md` | **Terminal Orchestrator** | PRO | Routes user queries, delegates to sub-agents, synthesises final decisions |
+| `macro_arbiter.md` | **Macro Sentinel** | PRO | Macro regime detection, Calendar Shield, exogenous shock monitoring (Search Enabled) |
+| `bullish_gem.md` | **Bullish Advocate** | PRO | Constructs the strongest bull case + self-critique (Search Enabled) |
+| `red_team_gem.md` | **Red Team Pessimist** | PRO | Constructs the strongest bear case + self-critique (Search Enabled) |
+| `neutral_gem.md` | **Neutral Structuralist** | PRO | Unbiased structural analysis; breaks ties with quantitative evidence |
+| `execution.md` | **Execution Engine** | PRO | Generates `EXECUTION_PAYLOAD` JSON; manages sizing and order routing |
+| `structural_engine.md` | **Structural Engine** | FAST | GEX regime, dark pool posture, VWAP structure analysis |
+| `technical_validator.md` | **Technical Validator** | PRO | Final gate — validates thesis against quantitative restrictions (Search Enabled) |
+| `research.md` | **Research Engine** | PRO | Live web search for macro narrative, filings, sector rotation signals |
+| `sentiment_engine.md` | **Sentiment Engine** | PRO | Social sentiment, news velocity, dark pool order flow (Search Enabled) |
+| `context_engine.md` | **Context Engine** | PRO | SSoT state bridge — maintains session continuity and trade thesis integrity |
+| `gex_engine.md` | **GEX Engine** | PRO | Gamma Exposure modelling, dealer hedging flow, pin risk analysis |
+| `post_trade_review.md` | **Review Engine** | PRO | Post-trade reflection — thesis vs. outcome, misfire detection, lesson authoring |
+| `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Compliance guardian — validates all decisions against `rules.md` mandates |
 
 ### Model Hierarchy
 
@@ -126,12 +126,12 @@ The system uses a **tiered fallback model** strategy defined in `agent_framework
 
 | Mode | Model Priority | Used By |
 |------|---------------|---------|
-| `PRO` | `gemini-3.1-pro-preview` → `gemini-2.5-pro` | Orchestrator, complex engines |
-| `THINKING` | `gemini-3.1-pro-preview` → `gemini-2.5-pro` | Council advocates, Research |
+| `PRO` | `gemini-2.5-pro` | Orchestrator, complex engines |
+| `THINKING` | `gemini-2.5-pro` | Council advocates, Research |
+| `GEMMA` | `gemma-4-31b-it` → `gemini-2.5-flash` | Context, Execution, Structural, Rule Enforcement |
 | `FAST` | `gemini-2.5-flash` → `gemini-2.0-flash` | Utility engines (Sentiment, Review, etc.) |
-| `LOCAL` | `Gemma 4 e4b` (via Ollama) | Context, Execution, Rule Enforcement |
 
-If a model returns a `429 Resource Exhausted` error, the system automatically waits 32 seconds and retries before falling back to the next model.
+If a model returns a `429 Resource Exhausted` error, the system automatically parses the specific `retry-after` wait time from Google's API header and executes a dynamic backoff before retrying.
 
 ---
 
@@ -167,7 +167,7 @@ python web_server.py
 
 ### Editing Sub-Agent Instructions
 
-Each JSON file in the root is human-readable and can be edited directly. The changes take effect on the **next server restart**. No Gem synchronisation is required.
+Each Markdown file (.md) in the root or `GEM_Trading_Rules/` is human-readable and can be edited directly. The changes take effect on the **next server restart**. No manual synchronisation is required.
 
 ---
 
@@ -175,7 +175,7 @@ Each JSON file in the root is human-readable and can be edited directly. The cha
 
 ### SSoT (Single Source of Truth)
 
-The `local_ssot_shadow.json` file is the system's persistent memory. The AI Orchestrator reads from it at the start of each session and writes back execution payloads automatically using the `update_ssot` tool — no manual copy-paste required.
+The `ssot.json` file is the system's persistent memory. The AI Orchestrator reads from it at the start of each session and writes back execution payloads automatically using the `update_ssot` tool — no manual copy-paste required.
 
 ### Trade Lessons
 
@@ -198,12 +198,12 @@ The `trade_lessons.json` file is a growing library of codified trade post-mortem
 
 ### Mandates vs. Protocols
 
-The `rules.json` file separates two distinct classes of directives:
+The `rules.md` file separates two distinct classes of directives:
 
 1. **Mandates (`MANDATE_*`)** — Non-negotiable system behaviour constraints (e.g., always emit untruncated JSON, weighted consensus mechanics).
 2. **Rules / Protocols (`ENH_*`)** — Financial execution strategies and domain knowledge (e.g., macro shock veto, pre-trade formulation, post-14:30 liquidity gates).
 
-The **Rule Enforcer Engine** validates all decisions against these mandates before any execution payload is written.
+The **Rule Enforcer Engine** validates all decisions against these mandates before any execution payload is written. The migration to Markdown ensures the AI pays higher attention to these mandates by stripping syntax noise.
 
 ### Adversarial Council Design
 

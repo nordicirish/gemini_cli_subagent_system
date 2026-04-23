@@ -19,7 +19,7 @@ Thumbs.db
 .DS_Store
 
 # Local Air-Gapped State Files
-local_ssot_shadow.json
+ssot.json
 trade_lessons.json
 
 # Helper Scripts

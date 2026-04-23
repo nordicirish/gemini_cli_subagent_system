@@ -140,7 +140,7 @@
         {
             "id": "MANDATE_09_STATE_EMISSION",
             "status": "STRICT_ENFORCE",
-            "instruction": "The subagent MUST independently perform CRUD operations on local context storage (trade_lessons.json and local_ssot_shadow.json) to persist updates. It MUST NOT output JSON updates to the user. UNDER NO CIRCUMSTANCES should trade lessons or state payloads be emitted in the chat. Use your tool-calling capabilities to update files directly.",
+            "instruction": "The subagent MUST independently perform CRUD operations on local context storage (trade_lessons.json and ssot.json) to persist updates. It MUST NOT output JSON updates to the user. UNDER NO CIRCUMSTANCES should trade lessons or state payloads be emitted in the chat. Use your tool-calling capabilities to update files directly.",
             "required_top_level_keys": [
                 "state_context",
                 "trade_lessons",
@@ -174,7 +174,7 @@
             "id": "MANDATE_12_BOOT_SYNC",
             "trigger": "SESSION_START",
             "status": "STRICT_ENFORCE",
-            "instruction": "All engines must build their working memory natively from the 'State of the World' payload provided in the console prompt, which contains the active local_ssot_shadow and trade_lessons data."
+            "instruction": "All engines must build their working memory natively from the 'State of the World' payload provided in the console prompt, which contains the active ssot and trade_lessons data."
         },
         {
             "id": "MANDATE_13",
@@ -811,7 +811,7 @@
         {
             "id": "ENH_49",
             "title": "Autonomous Subagent Protocol",
-            "instruction": "The system operates as an autonomous subagent. It MUST independently maintain the local context storage (trade_lessons.json and local_ssot_shadow.json) by performing CRUD operations directly using file editing tools. It MUST NOT output JSON updates to the user.",
+            "instruction": "The system operates as an autonomous subagent. It MUST independently maintain the local context storage (trade_lessons.json and ssot.json) by performing CRUD operations directly using file editing tools. It MUST NOT output JSON updates to the user.",
             "execution_flow": [
                 "1. INGESTION: Read the heavily structured 'State of the World' payload provided by the User in the prompt or directly read the local JSON files.",
                 "2. SYNTHESIS: Run all internal logic, Council voting (MANDATE_13), and structural checks.",

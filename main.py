@@ -11,9 +11,7 @@ def main():
     framework = AgentFramework()
     
     # Map of all our sub-agents (engines and advocates)
-    # LOCAL_1B  → Ollama gemma4:e2b  (fast deterministic agents)
-    # LOCAL_4B  → Ollama gemma4:e4b  (analytical agents)
-    # PRO/THINKING/FAST → Gemini cloud (reasoning, web search, orchestration)
+    # PRO/THINKING/GEMMA/FAST → Gemini cloud (reasoning, web search, orchestration)
     sub_agent_configs = {
         # --- Tier 1 (PRO Chain: 3.1 Pro -> 2.5 Pro -> Gemma 4 -> Flash) ---
         "Macro Sentinel":        {"file": "macro_arbiter.json",        "mode": "PRO"},
@@ -46,8 +44,15 @@ def main():
     print("Loading Sub-Agents...")
     for name, config in sub_agent_configs.items():
         if os.path.exists(config["file"]):
-            if name in ["Research Engine", "Sentiment Engine", "Context Engine"]:
-                sub_tools = [{"google_search": {}}]
+            # Define specific toolsets for each agent to avoid Gemini 400 conflicts
+            if name == "Structural Engine":
+                sub_tools = [tools.read_ssot, tools.get_market_data, tools.perform_web_forensic_search]
+            elif name == "Context Engine":
+                sub_tools = [tools.read_ssot, tools.update_ssot, tools.read_trade_lessons, tools.update_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search]
+            elif name == "Technical Validator":
+                sub_tools = [tools.read_ssot, tools.read_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search]
+            elif name in ["Research Engine", "Sentiment Engine", "Bullish Advocate", "Red Team Pessimist", "Macro Sentinel", "Neutral Structuralist"]:
+                sub_tools = [tools.perform_web_forensic_search]
             else:
                 sub_tools = [tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
                 
@@ -81,22 +86,28 @@ def main():
     terminal_models = framework._get_cloud_models("PRO")
     valid_model = None
     for model_name in terminal_models:
-        print(f"Testing Terminal model {model_name}...")
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] Testing Terminal model {model_name}...", end="", flush=True)
         try:
             framework.client.models.generate_content(
                 model=model_name,
-                contents="ping"
+                contents="ping",
+                config=agent_framework.types.GenerateContentConfig(
+                    http_options={'timeout': 10000}
+                )
             )
             valid_model = model_name
-            print(f"Successfully verified {model_name}!")
+            print(f" SUCCESS!")
             break
         except Exception as e:
             error_str = str(e).lower()
             if "429" in error_str or "quota" in error_str:
-                print(f"Model {model_name} is rate limited (429), but it exists! Setting as valid model.")
                 valid_model = model_name
+                print(f" QUOTA LIMITED (but verified)")
                 break
-            print(f"Failed with {model_name}: {e}")
+            print(f" FAILED")
+            continue
             
     if not valid_model:
         print("ERROR: All fallback models failed to verify. Exiting.")

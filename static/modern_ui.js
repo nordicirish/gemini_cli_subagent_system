@@ -14,6 +14,7 @@ const ModernChat = {
         this.input = document.getElementById('chat-input');
         this.messages = document.getElementById('chat-messages');
         this.sendBtn = document.getElementById('send-chat-btn');
+        this.currentLogElement = null;
 
         if (this.launcher) this.launcher.onclick = () => this.toggle();
         if (this.closeBtn) this.closeBtn.onclick = () => this.hide();
@@ -31,7 +32,48 @@ const ModernChat = {
             };
         }
 
+        // Setup real-time feedback stream
+        this.eventSource = new EventSource('/api/system_logs');
+        this.eventSource.onmessage = (event) => {
+            if (this.currentLogElement && event.data) {
+                // Filter out empty logs or basic pings
+                if (event.data.includes("Attempting") || event.data.includes("Orchestrator")) {
+                    this.currentLogElement.textContent = event.data;
+                } else if (event.data.includes("Tool") || event.data.includes("Agent") || event.data.includes("Engine")) {
+                    this.currentLogElement.textContent = "Firing Engine: " + event.data;
+                } else {
+                    this.currentLogElement.textContent = event.data;
+                }
+            }
+        };
+
+        this.loadHistory();
         console.log("Modern UI Logic v2 Initialized");
+    },
+
+    loadHistory() {
+        const history = localStorage.getItem('gem_chat_history');
+        if (history) {
+            try {
+                const messages = JSON.parse(history);
+                this.messages.innerHTML = '';
+                messages.forEach(msg => this.appendMessage(msg.role, msg.text, false));
+            } catch (e) {
+                console.error("Failed to load chat history", e);
+            }
+        }
+    },
+
+    saveHistory() {
+        const messageElements = this.messages.querySelectorAll('.modern-message');
+        const history = [];
+        messageElements.forEach(el => {
+            if (el.classList.contains('thinking-msg')) return;
+            const role = el.classList.contains('ai') ? 'ai' : 'user';
+            const text = el.getAttribute('data-raw-text') || el.innerText;
+            history.push({ role, text });
+        });
+        localStorage.setItem('gem_chat_history', JSON.stringify(history));
     },
 
     toggle() {
@@ -51,9 +93,10 @@ const ModernChat = {
         this.overlay.classList.remove('active');
     },
 
-    appendMessage(role, text) {
+    appendMessage(role, text, save = true) {
         const msgDiv = document.createElement('div');
         msgDiv.className = `modern-message ${role}`;
+        msgDiv.setAttribute('data-raw-text', text);
         
         if (role === 'ai') {
             msgDiv.innerHTML = marked.parse(text);
@@ -63,6 +106,7 @@ const ModernChat = {
         
         this.messages.appendChild(msgDiv);
         this.messages.scrollTop = this.messages.scrollHeight;
+        if (save) this.saveHistory();
     },
 
     async sendMessage() {
@@ -77,9 +121,30 @@ const ModernChat = {
         const msgDiv = document.createElement('div');
         msgDiv.className = `modern-message ai thinking-msg`;
         msgDiv.id = thinkingId;
-        msgDiv.textContent = 'Thinking...';
+        
+        const thinkingText = document.createElement('div');
+        thinkingText.textContent = 'Thinking...';
+        thinkingText.style.fontWeight = 'bold';
+        
+        const logText = document.createElement('div');
+        logText.style.fontSize = '0.8rem';
+        logText.style.color = '#888';
+        logText.style.marginTop = '4px';
+        logText.style.fontStyle = 'italic';
+        logText.textContent = 'Awaiting execution...';
+        
+        this.currentLogElement = logText;
+        
+        msgDiv.appendChild(thinkingText);
+        msgDiv.appendChild(logText);
         this.messages.appendChild(msgDiv);
         this.messages.scrollTop = this.messages.scrollHeight;
+        
+        this.input.disabled = true;
+        this.sendBtn.disabled = true;
+        this.sendBtn.style.opacity = '0.5';
+        this.sendBtn.style.cursor = 'not-allowed';
+        document.getElementById('chat-status-indicator').textContent = 'Status: Orchestrating...';
         
         try {
             const res = await fetch('/api/chat', {
@@ -92,6 +157,7 @@ const ModernChat = {
             // Remove thinking message
             const tMsg = document.getElementById(thinkingId);
             if (tMsg) tMsg.remove();
+            this.currentLogElement = null;
 
             if (data.status === 'success') {
                 this.appendMessage('ai', data.response);
@@ -102,6 +168,13 @@ const ModernChat = {
             const tMsg = document.getElementById(thinkingId);
             if (tMsg) tMsg.remove();
             this.appendMessage('ai', "Error: Connection failed.");
+        } finally {
+            this.input.disabled = false;
+            this.sendBtn.disabled = false;
+            this.sendBtn.style.opacity = '1';
+            this.sendBtn.style.cursor = 'pointer';
+            document.getElementById('chat-status-indicator').textContent = 'Status: Ready';
+            this.input.focus();
         }
     }
 };

@@ -203,18 +203,93 @@
 }
 .modern-chat-overlay.active { display: flex; }
 .modern-chat-panel {
-    width: 900px; height: 85vh; background: var(--chat-bg);
-    border: 1px solid var(--border-color); border-radius: 40px;
-    padding: 40px; display: flex; flex-direction: column;
+    width: 900px; 
+    height: 85vh; 
+    min-width: 400px;
+    min-height: 400px;
+    background: var(--chat-bg);
+    border: 1px solid var(--border-color); 
+    border-radius: 40px;
+    padding: 40px; 
+    display: flex; 
+    flex-direction: column;
+    resize: both;
+    overflow: auto;
 }
 .modern-chat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
 .modern-logo-box { width: 48px; height: 48px; background: linear-gradient(135deg, #58a6ff, #bc85ff); border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; color: white; }
 .modern-ctrl-btn { width: 48px; height: 48px; border-radius: 14px; border: 1px solid var(--border-color); background: rgba(255,255,255,0.05); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; }
-.modern-chat-messages { flex: 1; overflow-y: auto; margin-bottom: 30px; display: flex; flex-direction: column; gap: 30px; }
-.modern-message { max-width: 85%; font-size: 1.1rem; line-height: 1.6; }
-.modern-message.ai { align-self: flex-start; color: var(--text-primary); background: rgba(255,255,255,0.03); padding: 20px 0; }
-.modern-message.user { align-self: flex-end; background: rgba(88, 166, 255, 0.1); padding: 20px 30px; border-radius: 30px 30px 4px 30px; border: 1px solid rgba(88, 166, 255, 0.2); color: white; }
+.modern-chat-messages { 
+    flex: 1; 
+    overflow-y: auto; 
+    margin-bottom: 30px; 
+    display: flex; 
+    flex-direction: column; 
+    gap: 32px; 
+    padding-right: 10px; /* Space for scrollbar */
+}
+.modern-message { 
+    width: 100%; 
+    font-size: 1.1rem; 
+    line-height: 1.6; 
+    box-sizing: border-box;
+    display: block;
+    margin-bottom: 8px;
+}
+.modern-message.ai { 
+    align-self: flex-start; 
+    color: var(--text-primary); 
+    background: rgba(255,255,255,0.03); 
+    padding: 25px 35px; 
+    border-radius: 20px;
+}
+.modern-message.ai p { margin-bottom: 1.2em; }
+.modern-message.ai p:last-child { margin-bottom: 0; }
+.modern-message.ai h1, .modern-message.ai h2, .modern-message.ai h3, .modern-message.ai h4 { margin-top: 1.5em; margin-bottom: 0.6em; color: white; font-weight: 700; }
+.modern-message.ai h1:first-child, .modern-message.ai h2:first-child, .modern-message.ai h3:first-child { margin-top: 0; }
+.modern-message.ai ul, .modern-message.ai ol { margin-bottom: 1.2em; padding-left: 1.5em; }
+.modern-message.ai li { margin-bottom: 0.4em; }
+.modern-message.ai strong { color: var(--accent-blue); font-weight: 600; }
+.modern-message.user { 
+    align-self: flex-end; 
+    max-width: 90%;
+    margin-left: auto;
+    background: rgba(88, 166, 255, 0.1); 
+    padding: 20px 30px; 
+    border-radius: 30px 30px 4px 30px; 
+    border: 1px solid rgba(88, 166, 255, 0.2); 
+    color: white; 
+}
 .modern-input-area { background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 30px; padding: 20px 30px; }
-.modern-input-area textarea { width: 100%; background: transparent; border: none; outline: none; color: white; font-size: 1.15rem; resize: none; min-height: 40px; }
-.modern-send-btn { width: 48px; height: 48px; border-radius: 50%; background: #58a6ff; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; }
+.modern-input-area textarea { 
+    width: 100%; 
+    background: transparent; 
+    border: none; 
+    outline: none; 
+    color: white; 
+    font-size: 1.15rem; 
+    resize: vertical; 
+    min-height: 80px; 
+}
+.modern-input-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 15px;
+}
+.modern-send-btn { 
+    background: linear-gradient(135deg, #58a6ff, #bc85ff); 
+    border: none; 
+    color: white;
+    cursor: pointer; 
+    transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
+    box-shadow: 0 4px 15px rgba(88, 166, 255, 0.2);
+}
+.modern-send-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(88, 166, 255, 0.3);
+}
+.modern-send-btn:active {
+    transform: translateY(1px);
+}
 .thinking-msg { font-style: italic; color: var(--accent-blue) !important; animation: pulse 1.5s infinite; } @keyframes pulse { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }

@@ -96,12 +96,9 @@
     <div class="modern-chat-overlay" id="chat-window">
         <div class="modern-chat-panel">
             <div class="modern-chat-header">
-                <div class="modern-header-left">
+                <div class="modern-header-left" style="display: flex; align-items: center; gap: 20px;">
                     <div class="modern-logo-box">✦</div>
-                    <div class="modern-title-group">
-                        <h2>Gemini 3.1 Pro</h2>
-                        <span>COUNCIL ORCHESTRATOR</span>
-                    </div>
+                    <h2 style="margin: 0; font-size: 1.4rem; letter-spacing: 1px; white-space: nowrap;">GEMINI COUNCIL ORCHESTRATOR</h2>
                 </div>
                 <div class="modern-header-right">
                     <button class="modern-ctrl-btn" id="chat-close-btn">×</button>
@@ -118,9 +115,11 @@
                 <textarea id="chat-input" placeholder="Ask Gemini..." rows="1"></textarea>
                 <div class="modern-input-footer">
                     <div class="modern-input-tools">
-                        <span style="color: #8b949e; font-size: 0.8rem;">Tools: SSE-Logs | Market-Engine</span>
+                        <span id="chat-status-indicator" style="color: #8b949e; font-size: 0.85rem; font-weight: 500; letter-spacing: 0.5px;">Status: Ready</span>
                     </div>
-                    <button class="modern-send-btn" id="send-chat-btn">▲</button>
+                    <button class="modern-send-btn" id="send-chat-btn" style="width: auto; border-radius: 12px; padding: 10px 24px; font-weight: 700; letter-spacing: 1px; font-size: 0.9rem; display: flex; align-items: center; gap: 10px;">
+                        <span>✦ CHAT WITH THE COUNCIL</span>
+                    </button>
                 </div>
             </div>
         </div>

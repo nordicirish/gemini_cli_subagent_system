@@ -10,85 +10,11 @@ from google.genai import types
 # Model definitions
 # ---------------------------------------------------------------------------
 MODEL_MAPPING = {
-    "PRO":      ["gemini-3.1-pro", "gemini-2.5-pro", "gemma-4-31b-it", "gemini-2.5-flash"],
+    "PRO":      ["gemini-2.5-pro", "gemma-4-31b-it", "gemini-2.5-flash"],
     "GEMMA":    ["gemma-4-31b-it", "gemini-2.5-flash"],
     "FAST":     ["gemini-2.5-flash", "gemma-4-31b-it"],
-    "THINKING": ["gemini-3.1-pro", "gemini-2.5-pro"],
-    "LOCAL_1B": ["gemma4:e4b"],
-    "LOCAL_4B": ["gemma4:e4b"],
+    "THINKING": ["gemini-2.5-pro"]
 }
-
-LOCAL_MODES = {"LOCAL_1B", "LOCAL_4B"}
-
-# Fallback logic for local modes
-LOCAL_FALLBACK = {
-    "LOCAL_1B": "GEMMA", # If local fails, try cloud Gemma
-    "LOCAL_4B": "GEMMA"  # If local fails, try cloud Gemma
-}
-
-
-# ---------------------------------------------------------------------------
-# Thin response wrapper so Ollama responses look like Gemini responses
-# ---------------------------------------------------------------------------
-class _LocalResponse:
-    """Makes Ollama text responses duck-type compatible with Gemini responses."""
-    def __init__(self, text: str):
-        self.text = text
-
-
-# ---------------------------------------------------------------------------
-# Ollama client
-# ---------------------------------------------------------------------------
-class LocalOllamaClient:
-    """Lightweight client for Ollama's /api/chat endpoint."""
-
-    def __init__(self, base_url: str = "http://localhost:11434"):
-        self.base_url = base_url
-
-    def is_available(self) -> bool:
-        """Quick connectivity check — returns True if Ollama is running."""
-        try:
-            r = requests.get(f"{self.base_url}/api/tags", timeout=2)
-            return r.status_code == 200
-        except Exception:
-            return False
-
-    def generate(self, model: str, system_instruction: str, prompt: str, tools=None) -> str:
-        """Send a chat request. If tools provided, inject them into the system prompt."""
-        full_system = system_instruction
-        if tools:
-            tool_desc = ""
-            for t in tools:
-                if hasattr(t, '__name__'):
-                    name = t.__name__
-                    doc = t.__doc__ or "No description."
-                    tool_desc += f"- {name}: {doc}\n"
-                elif isinstance(t, dict) and "google_search" in t:
-                    tool_desc += "- google_search: Search the web for live information.\n"
-            
-            full_system += f"\n\n--- AVAILABLE TOOLS ---\n{tool_desc}\n"
-            full_system += "\n[MANDATORY TOOL PROTOCOL]"
-            full_system += "\nIf you need to read or update the state, you MUST output exactly one tool call in this format and NOTHING ELSE:"
-            full_system += "\nCALL_TOOL: tool_name({\"arg\": \"val\"})"
-            full_system += "\n\nExample to update state:"
-            full_system += "\nCALL_TOOL: update_ssot({\"payload_json\": \"{\\\"mutable_state\\\": {\\\"remaining_cash_usd\\\": 100}}\"})"
-            full_system += "\n\nDo not provide conversational filler if you are calling a tool. Call the tool FIRST."
-
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": full_system},
-                {"role": "user",   "content": prompt},
-            ],
-            "stream": False,
-        }
-        response = requests.post(
-            f"{self.base_url}/api/chat",
-            json=payload,
-            timeout=120, # Increased for model loading/VRAM swap
-        )
-        response.raise_for_status()
-        return response.json()["message"]["content"]
 
 
 # ---------------------------------------------------------------------------
@@ -106,13 +32,6 @@ class AgentFramework:
             self.client = genai.Client(api_key=api_key)
         else:
             self.client = genai.Client()
-
-        # Local client (Ollama)
-        ollama_base = self._local_config.get("LOCAL_API_BASE", "http://127.0.0.1:11434")
-        self.ollama = LocalOllamaClient(base_url=ollama_base)
-
-        # Cached availability — checked once at first LOCAL call
-        self._ollama_available: bool | None = None
 
         self.agents = {}
 
@@ -138,58 +57,34 @@ class AgentFramework:
         base_list = MODEL_MAPPING.get(mode, MODEL_MAPPING["PRO"])
         # Override with config.json if present
         overrides = {
-            "gemini-3.1-pro": self._local_config.get("MODEL_PRO_1", "gemini-3.1-pro"),
-            "gemini-2.5-pro": self._local_config.get("MODEL_PRO_2", "gemini-2.5-pro"),
+            "gemini-2.5-pro": self._local_config.get("MODEL_PRO_1", "gemini-2.5-pro"),
             "gemma-4-31b-it": self._local_config.get("MODEL_GEMMA", "gemma-4-31b-it"),
             "gemini-2.5-flash": self._local_config.get("MODEL_FLASH", "gemini-2.5-flash"),
         }
         return [overrides.get(m, m) for m in base_list]
 
-    def _get_local_model(self, mode: str) -> str:
-        """Return the Ollama model name for a LOCAL mode, respecting config.json overrides."""
-        if mode == "LOCAL_1B":
-            return self._local_config.get("LOCAL_MODEL_1B", "gemma4:e4b")
-        if mode == "LOCAL_4B":
-            return self._local_config.get("LOCAL_MODEL_4B", "gemma4:e4b")
-        return self._get_cloud_models(mode)[0]
 
-    def _check_ollama(self) -> bool:
-        """Check Ollama availability once per session and cache the result."""
-        if self._ollama_available is None:
-            self._ollama_available = self.ollama.is_available()
-            if self._ollama_available:
-                self.log("[Local] Ollama detected at http://localhost:11434 OK")
+    def load_system_instruction(self, file_path: str) -> str:
+        """Loads a file and formats it as a string for the system prompt. Supports JSON and Markdown."""
+        # Check if the requested file exists, otherwise try swapping .json to .md
+        if not os.path.exists(file_path):
+            alt_path = file_path.replace('.json', '.md')
+            if os.path.exists(alt_path):
+                file_path = alt_path
             else:
-                self.log("[Local] Ollama not reachable — local agents will fall back to Gemini.")
-        return self._ollama_available
-
-    def warmup_local_models(self):
-        """Background task to force Ollama to load the large models into VRAM."""
-        if not self._check_ollama():
-            return
+                raise FileNotFoundError(f"Missing instruction file: {file_path}")
+                
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
             
-        models = list(set([self._get_local_model("LOCAL_1B"), self._get_local_model("LOCAL_4B")]))
-        for model in models:
-            self.log(f"[Warmup] Triggering background load for: {model}...")
+        if file_path.endswith('.json'):
             try:
-                # We use a short timeout because we don't care about the response, 
-                # only that Ollama starts the load process.
-                self.ollama.generate(
-                    model=model,
-                    system_instruction="You are a system monitor. Reply 'OK' to pings.",
-                    prompt="ping"
-                )
-            except Exception:
-                # It will likely timeout if loading, which is what we want (it's loading in the background)
-                pass
-
-    def load_system_instruction(self, json_file_path: str) -> str:
-        """Loads a JSON file and formats it as a string for the system prompt."""
-        if not os.path.exists(json_file_path):
-            raise FileNotFoundError(f"Missing instruction file: {json_file_path}")
-        with open(json_file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return json.dumps(data, indent=2)
+                # Validate JSON and format it nicely
+                return json.dumps(json.loads(content), indent=2)
+            except json.JSONDecodeError:
+                return content # Fallback to raw text if malformed
+        else:
+            return content
 
     # -----------------------------------------------------------------------
     # Core generation method — routes to Ollama or Gemini based on mode
@@ -197,117 +92,69 @@ class AgentFramework:
     def generate_response_with_fallback(self, prompt, instruction, mode, tools=None):
         """Generate a response, routing to Ollama (LOCAL modes) or Gemini (cloud modes)."""
 
-        # --- LOCAL (Ollama) path ---
-        if mode in LOCAL_MODES:
-            model_name = self._get_local_model(mode)
-
-            if self._check_ollama():
-                try:
-                    self.log(f"[Local] Calling {model_name} via Ollama...")
-                    text = self.ollama.generate(
-                        model=model_name,
-                        system_instruction=instruction,
-                        prompt=prompt,
-                        tools=tools
-                    )
-                    
-                    # Manual tool calling loop for Local models
-                    # If the model outputs 'CALL_TOOL: tool_name({...})', we execute and loop once
-                    if "CALL_TOOL:" in text:
-                        import re
-                        match = re.search(r"CALL_TOOL:\s*(\w+)\((.*)\)", text, re.DOTALL)
-                        if match:
-                            tool_name = match.group(1)
-                            tool_args_str = match.group(2)
-                            self.log(f"[Local Tool] Model requested: {tool_name}")
-                            
-                            # Find the tool function
-                            target_tool = None
-                            if tools:
-                                for t in tools:
-                                    if hasattr(t, '__name__') and t.__name__ == tool_name:
-                                        target_tool = t
-                                        break
-                            
-                            if target_tool:
-                                try:
-                                    args = json.loads(tool_args_str)
-                                    # Handle single-arg vs multi-arg or naked string
-                                    if isinstance(args, dict):
-                                        tool_result = target_tool(**args)
-                                    else:
-                                        tool_result = target_tool(args)
-                                        
-                                    self.log(f"[Local Tool] Result received. Recalling model with context...")
-                                    
-                                    # Second turn: Feed result back to model
-                                    new_prompt = f"{prompt}\n\n[TOOL_RESULT: {tool_name}]\n{tool_result}\n\nPlease proceed with your final response based on this data."
-                                    return self.generate_response_with_fallback(new_prompt, instruction, mode, tools=None) # tools=None to prevent infinite loop
-                                except Exception as tool_e:
-                                    self.log(f"[Local Tool] Execution failed: {tool_e}")
-                                    text += f"\n\n[System Error: Tool {tool_name} failed: {tool_e}]"
-                            else:
-                                self.log(f"[Local Tool] Error: Tool {tool_name} not found in toolbox.")
-                                text += f"\n\n[System Error: Tool {tool_name} not found.]"
-
-                    self.log(f"[Local] {model_name} responded.")
-                    return _LocalResponse(text)
-                except Exception as e:
-                    self.log(f"[Local] Connection issue ({e}). Falling back to Gemini for this turn.")
-                    # We do NOT set _ollama_available = False so we can try again later
-
-            # Graceful fallback — use Gemini equivalent
-            fallback_mode = LOCAL_FALLBACK.get(mode, "PRO")
-            self.log(f"[Local] Routing {mode} → Gemini {fallback_mode} for this session.")
-            return self.generate_response_with_fallback(prompt, instruction, fallback_mode, tools)
-
         # --- Cloud path (Gemini/Gemma) ---
         models = self._get_cloud_models(mode)
         last_error = None
 
         for model_name in models:
-            self.log(f"[System] Attempting with model: {model_name}...")
-            try:
-                # Use a Chat session if tools are present to handle the loop automatically
-                if tools:
+            self.log(f"[Cloud Execution] Attempting with model: {model_name}...")
+            
+            # --- SDK COMPATIBILITY LAYER ---
+            # Convert simple google_search dicts to official Tool objects
+            final_tools = []
+            if tools:
+                for t in tools:
+                    if isinstance(t, dict) and "google_search" in t:
+                        final_tools.append(types.Tool(google_search=types.GoogleSearch()))
+                    else:
+                        final_tools.append(t)
+            
+            # --- Unified Config with BLOCK_NONE safety for Forensic Data ---
+            config = types.GenerateContentConfig(
+                system_instruction=instruction,
+                temperature=1.0,
+                max_output_tokens=8192,
+                tools=final_tools if final_tools else None,
+                safety_settings=[
+                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE")
+                ]
+            )
+
+            def attempt_call():
+                if final_tools:
                     chat = self.client.chats.create(
                         model=model_name,
-                        config=types.GenerateContentConfig(
-                            system_instruction=instruction,
-                            temperature=1.0,
-                            tools=tools
-                        )
+                        config=config
                     )
-                    response = chat.send_message(prompt)
-                    return response
+                    return chat.send_message(prompt)
+                else:
+                    return self.client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=config
+                    )
 
-                # Standard generation for no-tool calls
-                config = types.GenerateContentConfig(
-                    system_instruction=instruction,
-                    temperature=1.0
-                )
-                response = self.client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                    config=config
-                )
-                return response
-
+            try:
+                return attempt_call()
             except Exception as e:
                 error_msg = str(e)
                 last_error = e
 
                 if "429" in error_msg or "quota" in error_msg.lower():
-                    self.log(f"[System] Rate limit hit for {model_name}. Waiting 32 seconds...")
-                    time.sleep(32)
+                    import re
+                    wait_time = 32
+                    match = re.search(r"retry in (\d+(?:\.\d+)?)s", error_msg, re.IGNORECASE)
+                    if match:
+                        wait_time = int(float(match.group(1))) + 1
+                        
+                    self.log(f"[System] Rate limit hit for {model_name}. Waiting {wait_time} seconds...")
+                    time.sleep(wait_time)
                     try:
                         self.log(f"[System] Retrying {model_name} after backoff...")
-                        response = self.client.models.generate_content(
-                            model=model_name,
-                            contents=prompt,
-                            config=config
-                        )
-                        return response
+                        return attempt_call()
                     except Exception as retry_e:
                         self.log(f"[System] Retry failed for {model_name}: {retry_e}")
                         last_error = retry_e
@@ -318,13 +165,7 @@ class AgentFramework:
                     self.log(f"[System] 503 UNAVAILABLE for {model_name}. Retrying in 5s...")
                     time.sleep(5)
                     try:
-                        response = self.client.models.generate_content(
-                            model=model_name,
-                            contents=prompt,
-                            config=config
-                        )
-                        self.log(f"[System] {model_name} recovered.")
-                        return response
+                        return attempt_call()
                     except Exception:
                         pass  # Still down — fall through to next model immediately
                     self.log(f"[System] {model_name} still unavailable. Trying next model...")
@@ -348,7 +189,7 @@ class AgentFramework:
         This function can be passed to the Terminal orchestrator as a tool.
         """
         instruction = self.load_system_instruction(json_file)
-        backend_label = "Local" if mode in LOCAL_MODES else "Gemini"
+        backend_label = "Gemini"
 
         def call_subagent(query: str) -> str:
             self.log(f"\n[Orchestrator -> {name} ({backend_label})] Delegating: {query[:100]}...")
@@ -359,9 +200,18 @@ class AgentFramework:
                 tools=agent_tools
             )
             self.log(f"[{name}] Responded.")
-            if hasattr(response, 'text'):
-                return response.text
-            return str(response)
+            
+            # Robust text capture from parts
+            res_text = ""
+            try:
+                for part in response.candidates[0].content.parts:
+                    if part.text:
+                        res_text += part.text
+            except:
+                if hasattr(response, 'text'):
+                    res_text = response.text
+            
+            return res_text or str(response)
 
         # Naming the function explicitly for tool discovery
         call_subagent.__name__ = f"ask_{name.lower().replace(' ', '_')}"

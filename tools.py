@@ -50,7 +50,7 @@ class MockRequest:
 
 def read_ssot() -> str:
     """Reads the current Single Source of Truth (SSoT) state."""
-    path = 'local_ssot_shadow.json'
+    path = 'ssot.json'
     if not os.path.exists(path):
         return "{}"
     try:
@@ -111,17 +111,27 @@ def update_trade_lessons(lessons_json: str) -> str:
             new_data = lessons_json
             
         current_data = []
+        is_dict_format = False
         if os.path.exists(path):
             with open(path, 'r', encoding='utf-8') as f:
-                current_data = json.load(f)
+                file_content = json.load(f)
+                if isinstance(file_content, dict) and "trade_lessons" in file_content:
+                    current_data = file_content["trade_lessons"]
+                    is_dict_format = True
+                else:
+                    current_data = file_content
         
         if isinstance(new_data, list):
             current_data.extend(new_data)
+        elif isinstance(new_data, dict) and "trade_lessons" in new_data:
+            current_data.extend(new_data["trade_lessons"])
         else:
             current_data.append(new_data)
             
+        save_data = {"trade_lessons": current_data} if is_dict_format else current_data
+            
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(current_data, f, indent=2)
+            json.dump(save_data, f, indent=2)
             
         return "Trade lessons updated successfully."
     except Exception as e:
@@ -148,5 +158,40 @@ def get_market_data() -> str:
         "timestamp": state.get("timestamp"),
         "tickers": state.get("tickers")
     }
-    return json.dumps(data_to_return, indent=2)
+
+def perform_web_forensic_search(query: str) -> str:
+    """
+    Performs a live web search to fetch current market filings (424B, S-3), 
+    news catalysts, or structural data. Use this for forensic verification.
+    """
+    try:
+        from google import genai
+        from google.genai import types
+        
+        # Load config for API Key
+        api_key = None
+        if os.path.exists("config.json"):
+            with open("config.json", "r") as f:
+                config = json.load(f)
+                api_key = config.get("GEMINI_API_KEY")
+        
+        client = genai.Client(api_key=api_key) if api_key else genai.Client()
+        
+        # Use a stable flash model for the search-only retrieval
+        response = client.models.generate_content(
+            model="gemini-2.5-flash", 
+            contents=f"Search and summarize the following for financial forensic audit: {query}",
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+                safety_settings=[
+                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE")
+                ]
+            )
+        )
+        return response.text
+    except Exception as e:
+        return f"Error performing web search: {str(e)}"
 

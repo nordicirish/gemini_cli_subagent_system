@@ -268,9 +268,9 @@ async def handle_paste(req: Request):
 
         # Merge local ssot
         existing_ssot = {}
-        if os.path.exists('local_ssot_shadow.json'):
+        if os.path.exists('ssot.json'):
             try:
-                with open('local_ssot_shadow.json', 'r') as f:
+                with open('ssot.json', 'r') as f:
                     existing_ssot = json.load(f)
             except: pass
             
@@ -330,7 +330,7 @@ async def handle_paste(req: Request):
             merged_ssot.pop(k)
             
         # Prune from mutable_state if using Layer Model
-        if has_layer_model and "mutable_state" in merged_ssot:
+        if has_layer_model and "mutable_state" in merged_ssot and isinstance(merged_ssot["mutable_state"], dict):
             non_canonical_mutable = [k for k in merged_ssot["mutable_state"] if k not in CANONICAL_SSOT_KEYS]
             for k in non_canonical_mutable:
                 merged_ssot["mutable_state"].pop(k)
@@ -350,7 +350,7 @@ async def handle_paste(req: Request):
             merged_ssot.pop("DELETE_FIELD", None)
             merged_ssot.pop("DELETE_FIELD (optional)", None)
 
-        with open('local_ssot_shadow.json', 'w') as f:
+        with open('ssot.json', 'w') as f:
             json.dump(merged_ssot, f, indent=2)
             
         def _normalize_lessons(lessons_list):
@@ -1987,9 +1987,9 @@ def run_daemon():
                 except: pass
 
             supplemental_ssot = {}
-            if os.path.exists('local_ssot_shadow.json'):
+            if os.path.exists('ssot.json'):
                 try:
-                    with open('local_ssot_shadow.json', 'r') as f:
+                    with open('ssot.json', 'r') as f:
                         supplemental_ssot = json.load(f)
                 except: pass
 

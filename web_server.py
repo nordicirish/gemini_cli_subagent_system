@@ -36,76 +36,157 @@ def log_to_queue(message: str):
 # Initialize the AgentFramework with cloud-fallback
 framework = AgentFramework(log_callback=log_to_queue)
 
-# Register local engine sub-tools (Read-Only by default)
-for name, agent in framework.agents.items():
-    if name == "Research Engine":
-        sub_tools = [{"google_search": {}}]
-    elif name == "Context Engine":
-        sub_tools = [tools.read_ssot, tools.update_ssot, tools.read_trade_lessons, tools.update_trade_lessons, tools.get_market_data]
-    else:
-        sub_tools = [tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
-    agent.tools = sub_tools
+# ---------------------------------------------------------------------------
+# Subagent & Council Tool Definitions
+# ---------------------------------------------------------------------------
 
-def ask_subagent(name: str, query: str):
-    """Bridge function for the Orchestrator to call other engines."""
-    return framework.generate_response_with_fallback(query, "", name, tools=None)
+# 1. Define the Sub-Agents with their instructions and specific tools
+macro_sentinel = framework.create_agent_tool(
+    name="Macro Sentinel",
+    json_file="macro_arbiter.json",
+    mode="PRO",
+    agent_tools=[tools.read_ssot, tools.perform_web_forensic_search]
+)
 
-# Parallel Council Dispatcher
-def ask_council(queries_json: str):
-    """Run multiple council engines in parallel. Input: JSON array of {agent: name, query: text}"""
-    import json
-    try:
-        reqs = json.loads(queries_json)
-        results = framework.create_parallel_council_tool(reqs)
-        return json.dumps(results, indent=2)
-    except Exception as e:
-        return f"Council Error: {str(e)}"
+research_engine = framework.create_agent_tool(
+    name="Research Engine", 
+    json_file="research.json", 
+    mode="PRO", 
+    agent_tools=[tools.perform_web_forensic_search]
+)
 
-# Define available tools for the Terminal Orchestrator
+sentiment_engine = framework.create_agent_tool(
+    name="Sentiment Engine", 
+    json_file="sentiment_engine.json", 
+    mode="PRO",
+    agent_tools=[tools.perform_web_forensic_search]
+)
+
+structural_engine = framework.create_agent_tool(
+    name="Structural Engine", 
+    json_file="structural_engine.json", 
+    mode="PRO",
+    agent_tools=[tools.read_ssot, tools.get_market_data, tools.perform_web_forensic_search]
+)
+
+context_engine = framework.create_agent_tool(
+    name="Context Engine", 
+    json_file="context_engine.json", 
+    mode="PRO",
+    agent_tools=[tools.read_ssot, tools.update_ssot, tools.read_trade_lessons, tools.update_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search]
+)
+
+technical_validator = framework.create_agent_tool(
+    name="Technical Validator",
+    json_file="technical_validator.json",
+    mode="PRO",
+    agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search]
+)
+
+# Council Members
+bullish_advocate = framework.create_agent_tool(
+    name="Bullish Advocate", 
+    json_file="bullish_gem.json",
+    mode="PRO",
+    agent_tools=[tools.perform_web_forensic_search]
+)
+
+red_team_pessimist = framework.create_agent_tool(
+    name="Red Team Pessimist", 
+    json_file="red_team_gem.json",
+    mode="PRO",
+    agent_tools=[tools.perform_web_forensic_search]
+)
+
+
+neutral_structuralist = framework.create_agent_tool(
+    name="Neutral Structuralist", 
+    json_file="neutral_gem.json",
+    mode="PRO",
+    agent_tools=[tools.perform_web_forensic_search]
+)
+
+# 2. Create the Council Dispatcher
+council_members = {
+    "ask_macro_sentinel": macro_sentinel,
+    "ask_research_engine": research_engine,
+    "ask_sentiment_engine": sentiment_engine,
+    "ask_structural_engine": structural_engine,
+    "ask_context_engine": context_engine,
+    "ask_bullish_advocate": bullish_advocate,
+    "ask_red_team_pessimist": red_team_pessimist,
+    "ask_neutral_structuralist": neutral_structuralist,
+    "ask_technical_validator": technical_validator
+}
+ask_council = framework.create_parallel_council_tool(council_members)
+
+# 3. Define the final toolset for the Orchestrator
 terminal_tools = [
     tools.read_ssot,
     tools.update_ssot,
     tools.read_trade_lessons,
     tools.update_trade_lessons,
     tools.get_market_data,
-    ask_subagent,
+    macro_sentinel,
+    research_engine,
+    sentiment_engine,
+    structural_engine,
+    context_engine,
+    technical_validator,
     ask_council
 ]
 
 # Load Orchestrator context
 terminal_instruction = framework.load_system_instruction("terminal.json")
 rules_path = os.path.join("GEM_Trading_Rules", "rules.json")
+if not os.path.exists(rules_path):
+    rules_path = os.path.join("GEM_Trading_Rules", "rules.md")
+
 if os.path.exists(rules_path):
     with open(rules_path, "r", encoding="utf-8") as f:
         rules_content = f.read()
     terminal_instruction += f"\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{rules_content}"
 
-# FORCE LOCAL MODE DUE TO QUOTA EXHAUSTION
-framework.log("SYSTEM: Forcing LOCAL-ONLY mode due to detected Cloud Quota Exhaustion.")
-GLOBAL_STATE["system_status"] = {
-    "mode": "LOCAL_ONLY",
-    "warning": "Cloud Quota Exhausted. Using Local Gemma 4 Brain."
-}
-valid_model = "gemini-1.5-flash" # Placeholder for API initialization
+# Find a valid model for the Orchestrator from the PRO tier
+terminal_models = framework._get_cloud_models("PRO")
+valid_model = None
+for model_name in terminal_models:
+    try:
+        framework.client.models.generate_content(
+            model=model_name, 
+            contents="ping",
+            config=agent_framework.types.GenerateContentConfig(
+                http_options={'timeout': 30000}
+            )
+        )
+        valid_model = model_name
+        framework.log(f"[System] Web Orchestrator verified with {model_name}")
+        break
+    except Exception as e:
+        error_str = str(e).lower()
+        if "429" in error_str or "quota" in error_str:
+            valid_model = model_name
+            framework.log(f"[System] Web Orchestrator using {model_name} (Quota limited but verified)")
+            break
+        continue
+
+if not valid_model:
+    framework.log("[Error] No valid cloud models found for Web Orchestrator!")
+    valid_model = "gemini-1.5-flash" # Absolute last resort
 
 # Initialize the global Chat object
-global_chat = framework.client.chats.create(
-    model=valid_model,
-    config=agent_framework.types.GenerateContentConfig(
-        system_instruction=terminal_instruction,
-        temperature=1.0,
-        tools=terminal_tools
+def create_new_session():
+    return framework.client.chats.create(
+        model=valid_model,
+        config=agent_framework.types.GenerateContentConfig(
+            system_instruction=terminal_instruction,
+            temperature=1.0,
+            max_output_tokens=8192,
+            tools=terminal_tools
+        )
     )
-)
 
-# Start background warmup for local models
-threading.Thread(target=framework.warmup_local_models, daemon=True).start()
-
-print("\n" + "="*60)
-print("--- GEM WEB UI ORCHESTRATOR READY (LOCAL MODE) ---")
-print("="*60)
-
-# --- FASTAPI ENDPOINTS ---
+global_chat_session = create_new_session()
 
 class ChatRequest(BaseModel):
     message: str
@@ -113,42 +194,73 @@ class ChatRequest(BaseModel):
 @app.post("/api/chat")
 def chat_endpoint(req: ChatRequest):
     """Primary chat route. Uses local fallback if cloud is exhausted."""
+    global global_chat_session
     try:
-        # Check if we are in Local Only mode
-        is_local = GLOBAL_STATE.get("system_status", {}).get("mode") == "LOCAL_ONLY"
+        # 1. Map names to actual tool functions for manual execution
+        tool_map = {f.__name__: f for f in terminal_tools}
         
-        if is_local:
-            # Use Gemma 4 directly as the Orchestrator
-            framework.log("[Local] Orchestrator running on Gemma 4 e4b...")
-            full_response = framework.generate_response_with_fallback(
-                req.message, 
-                terminal_instruction, 
-                "LOCAL_4B", 
-                tools=terminal_tools
-            )
-        else:
-            # Standard Cloud path
-            response = global_chat.send_message(req.message)
-            full_response = ""
-            if hasattr(response, 'candidates') and response.candidates:
-                parts = []
-                for candidate in response.candidates:
-                    for part in candidate.content.parts:
-                        if hasattr(part, 'text') and part.text:
-                            parts.append(part.text)
-                full_response = "\n\n".join(parts)
-            else:
-                full_response = response.text or "No textual response received."
+        all_text = []
+        current_message = req.message
+        turn_count = 0
+        
+        while True:
+            turn_count += 1
+            framework.log(f"[Orchestrator] Starting turn {turn_count}...")
+            response = global_chat_session.send_message(current_message)
             
+            # Capture any text in this turn (Iterate through all parts to ensure capture)
+            found_text_in_turn = False
+            try:
+                for part in response.candidates[0].content.parts:
+                    if part.text:
+                        txt = part.text.strip()
+                        if txt:
+                            framework.log(f"[Orchestrator] Turn {turn_count} captured {len(txt)} chars.")
+                            all_text.append(txt)
+                            found_text_in_turn = True
+            except Exception as e:
+                framework.log(f"[Orchestrator] Text capture warning: {e}")
+                if hasattr(response, 'text') and response.text:
+                    all_text.append(response.text)
+                    found_text_in_turn = True
+            
+            # Manual function call handling
+            if response.function_calls:
+                framework.log(f"[Orchestrator] Turn {turn_count} requested {len(response.function_calls)} tools.")
+                tool_responses = []
+                for call in response.function_calls:
+                    name = call.name
+                    args = call.args or {}
+                    framework.log(f"[Tool Execution] {name}")
+                    
+                    if name in tool_map:
+                        try:
+                            result = tool_map[name](**args)
+                            tool_responses.append(agent_framework.types.Part.from_function_response(
+                                name=name, response={'result': result}
+                            ))
+                        except Exception as te:
+                            tool_responses.append(agent_framework.types.Part.from_function_response(
+                                name=name, response={'error': str(te)}
+                            ))
+                    else:
+                        tool_responses.append(agent_framework.types.Part.from_function_response(
+                            name=name, response={'error': 'Tool not found'}
+                        ))
+                
+                current_message = tool_responses
+                continue # Next turn
+            
+            break # No more tools, we are done
+        
+        if not all_text:
+            framework.log("[Orchestrator] WARNING: No text captured across all turns.")
+            return {"status": "success", "response": "_[The model performed its internal reasoning and tools but did not emit a final text summary. Please try again or check system logs.]_"}
+
+        full_response = "\n\n---\n\n".join(all_text)
         return {"status": "success", "response": full_response.strip()}
     except Exception as e:
-        # If cloud fails mid-session, try to flip to local automatically
-        if not is_local and ("429" in str(e) or "quota" in str(e).lower()):
-            GLOBAL_STATE["system_status"] = {
-                "mode": "LOCAL_ONLY",
-                "warning": "Cloud Quota Exhausted Mid-Session. Switching to Local Gemma 4."
-            }
-            return chat_endpoint(req) # Retry as local
+        # Auto-fallback logic is now handled inside AgentFramework tiers
         return {"status": "error", "message": str(e)}
 
 @app.get("/api/system_logs")
