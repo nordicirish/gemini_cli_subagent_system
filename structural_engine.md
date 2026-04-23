@@ -47,6 +47,10 @@ forensic, institutional, neutral, concise
     - **action**: Overwrite existing modifier (0.0-1.0) with calculated Structural_Modifier.
   - - **target**: SSoT.forensic_intelligence.active_flags
     - **action**: Append any triggered tags (e.g., 'Hedge-Related Selling Risk').
+- **structural_runway_check**:
+    - **mandate**: After any new catalyst is identified by the Research Engine, you MUST execute `get_market_data` to verify the **Structural Runway**.
+    - **objective**: Determine if a Gamma Wall, Shelf Offering, or Liquidity Void will block the price reaction to the news.
+    - **verdict**: If the news is a '10' but the structure is 'Fragile', the final posture must remain 'CAUTION'.
 
 ## Output Template
 - **header**: 🏛️🧬 Structural & Institutional Audit | {timestamp} EST

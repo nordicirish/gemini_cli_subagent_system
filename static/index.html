@@ -100,7 +100,13 @@
                     <div class="modern-logo-box">✦</div>
                     <h2 style="margin: 0; font-size: 1.4rem; letter-spacing: 1px; white-space: nowrap;">GEMINI COUNCIL ORCHESTRATOR</h2>
                 </div>
-                <div class="modern-header-right">
+                <div class="modern-header-right" style="display: flex; align-items: center; gap: 12px;">
+                    <button id="new-chat-btn" title="New Conversation" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
+                        <span>+</span> NEW
+                    </button>
+                    <button id="history-chat-btn" title="History" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
+                        <span>📋</span> SESSIONS
+                    </button>
                     <button class="modern-ctrl-btn" id="chat-close-btn">×</button>
                 </div>
             </div>
@@ -119,6 +125,9 @@
                     </div>
                     <button class="modern-send-btn" id="send-chat-btn" style="width: auto; border-radius: 12px; padding: 10px 24px; font-weight: 700; letter-spacing: 1px; font-size: 0.9rem; display: flex; align-items: center; gap: 10px;">
                         <span>✦ CHAT WITH THE COUNCIL</span>
+                    </button>
+                    <button class="modern-stop-btn" id="stop-chat-btn" style="display: none; width: auto; border-radius: 12px; padding: 10px 24px; font-weight: 700; letter-spacing: 1px; font-size: 0.9rem; background: #da3633; border: none; color: white; cursor: pointer; align-items: center; gap: 10px;">
+                        <span>⏹ STOP</span>
                     </button>
                 </div>
             </div>

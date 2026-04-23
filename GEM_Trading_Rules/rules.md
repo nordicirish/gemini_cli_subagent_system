@@ -161,7 +161,7 @@
 - - **id**: MANDATE_12_BOOT_SYNC
   - **trigger**: SESSION_START
   - **status**: STRICT_ENFORCE
-  - **instruction**: All engines must build their working memory natively from the 'State of the World' payload provided in the console prompt, which contains the active ssot and trade_lessons data.
+  - **instruction**: All engines must build their working memory natively from the 'State of the World' payload provided in the console prompt. Results from `perform_web_forensic_search` are officially AUTHORIZED as an authenticated extension of this memory for news and catalyst grounding.
 - - **id**: MANDATE_13
   - **name**: Weighted_Consensus_Scrutiny
   - **status**: ACTIVE
@@ -265,9 +265,12 @@
     - **residual_floor_definition**: The verifiable net cash per share on the balance sheet (e.g., $5.88 for DFTX).
     - **risk_adjustment**: During High-VIX regimes (>20), the Residual Floor is the only valid support node; ignore all intermediate EMA/SMA levels for initial sizing.
   - **rationale**: Standard stop-losses are ill-suited for binary gaps. By sizing based on the cash floor and utilizing the ESA tax-shield for rapid principal recovery, the portfolio achieves 'House Money' status 30% faster than in taxable accounts.
-- - **id**: MANDATE_23_DISTILLATION_VETO
-  - **status**: PROPOSED
-  - **instruction**: Enforce a Moat Audit on SaaS assets; cap health_score at 60 if logic is portable via industrial-scale distillation.
+- - **id**: MANDATE_23_TORQUE_TRIAGE
+  - **status**: ACTIVE
+  - **instruction**: Following a Research Engine update, the Orchestrator MUST triage agent involvement based on the **Torque Score**:
+    - **IF Torque < 5 (Minor)**: Dispatch **Neutral Structuralist** only for capacity/runway verification.
+    - **IF Torque >= 5 (Major)**: Dispatch **Full Council** (Bullish Advocate + Red Team + Neutral Structuralist) for a complete thesis re-rating and trade verdict.
+  - **objective**: Maximize analytical throughput while minimizing latency and token consumption on non-binary events.
 - - **id**: MANDATE_24_GAP_DEFENSE
   - **status**: ACTIVE
   - **revision_date**: 2026-03-03
@@ -336,7 +339,7 @@
   - **instruction**: Only flag 'Breakouts' if move > (ATR_Percent * 1.5).
 - - **id**: ENH_22
   - **title**: Payload Native Bridge Protocol
-  - **instruction**: SINGLE SOURCE OF TRUTH: 'local_storage_state' JSON block in the prompt payload.
+  - **instruction**: SINGLE SOURCE OF TRUTH: 'local_storage_state' JSON block in the prompt payload, supplemented by results from `perform_web_forensic_search`.
   - **protocol**:
     - **sync_id**: STRING
     - **market_status**: STRING
@@ -350,7 +353,7 @@
   - **instruction**: Use WAC and shares from the 'local_storage_state' payload for all P&L calculations.
 - - **id**: ENH_25
   - **name**: Temporal Guardrail Enforcement
-  - **logic**: STRICT_ISO_ANCHOR: Prioritize the 'timestamp_iso' field from the input JSON metadata as the absolute truth. Internal clock inference is strictly prohibited. If the current ISO time exceeds 16:00:00 EDT, all intraday 'squeeze' and 'momentum' projections must be auto-disabled and replaced with Post-Market/Day-2 logic.
+  - **logic**: STRICT_ISO_ANCHOR: Prioritize the '[SYSTEM_TIME]' field from the prompt as the absolute truth. Internal clock inference is strictly prohibited. If a document is dated April 22, 2026, and the system time is April 23, 2026, the document MUST be processed as historical/immediate data.
   - **enforcement**: HARD_STOP
 - - **id**: ENH_26
   - **title**: Uncertainty Disclosure Protocol
@@ -587,13 +590,13 @@
           - $DFTX
           - $PLTR
 - - **id**: ENH_49
-  - **title**: Autonomous Subagent Protocol
-  - **instruction**: The system operates as an autonomous subagent. It MUST independently maintain the local context storage (trade_lessons.json and ssot.json) by performing CRUD operations directly using file editing tools. It MUST NOT output JSON updates to the user.
+  - **title**: Autonomous Forensic Subagent Protocol
+  - **instruction**: The system operates as an autonomous subagent. It MUST independently maintain local context storage (trade_lessons.json and ssot.json) while utilizing live search results from `perform_web_forensic_search` to ground its decisions.
   - **execution_flow**:
-    - 1. INGESTION: Read the heavily structured 'State of the World' payload provided by the User in the prompt or directly read the local JSON files.
-    - 2. SYNTHESIS: Run all internal logic, Council voting (MANDATE_13), and structural checks.
+    - 1. INGESTION: Read the 'State of the World' payload AND results from forensic tools. Both are considered first-class SSoT components.
+    - 2. SYNTHESIS: Run all internal logic, Council voting (MANDATE_13), and structural checks. Provide Markdown links to any primary sources found.
     - 3. UPDATE: Use file editing tools to apply final, actionable decisions directly to the local JSON files.
-    - 4. NO EMISSION: Do not emit JSON payloads or conversational filler to the user. Maintain the context storage silently.
+    - 4. NO EMISSION: Do not emit JSON payloads. Maintain the context storage silently.
   - **payload_keys**:
     - **trade_lessons_handling**:
       - **description**: The orchestrator recognizes exactly three keys for trade_lessons management. Priority order (first match wins):
@@ -647,8 +650,8 @@
     - 2. PATCH_GENERATION: Create a JSON patch array targeting the deep nested key in the schema (e.g., ['system_thresholds', 'ALPHA_FRICTION_MINIMUM']).
     - 3. UPDATE: The subagent MUST independently update GEM_Rules_Data on the disk directly using its file editing tools.
 - - **id**: ENH_55
-  - **title**: Web Verification Protocol
-  - **instruction**: Enforces spatial trend awareness across multiple timeframes. For every ticker provided in the SSoT payload, the subagent MUST use the Google Finance extension to retrieve price charts at all required timeframes.
+  - **title**: Web Verification & Hyperlink Protocol
+  - **instruction**: When using forensic search or market data tools, agents are MANDATED to provide direct Markdown hyperlinks to primary sources to ensure the user can perform independent verification. For every ticker provided in the SSoT payload, the subagent MUST use the Google Finance extension to retrieve price charts at all required timeframes.
   - **chart_requirements**:
     - **1_day**: Verify VWAP relationship and intraday volume profile. Detect opening gap fills, failed breakouts, and distribution at key price levels.
     - **5_day**: Detect multi-day base formation, support tests, or distribution patterns. Identify pre-market vs regular session divergence.

@@ -23,6 +23,10 @@ institutional, narrative, concise
   - **engine_specific**:
     - DO NOT fabricate catalysts or events to fill narrative gaps.
     - DO NOT link a ticker to a macro theme without a direct, proven correlation.
+- **torque_scoring_mandate**:
+    - **instruction**: Every piece of new information MUST be assigned a **Torque Score (1-10)**.
+    - **definition**: 1 = Low impact/Informational; 10 = Systemic/Binary shift (e.g., NDAA Section 1709 passage).
+    - **requirement**: Explain the "Torque" based on statutory, clinical, or structural shift potential.
   - **verification_gates**: IF source_url IS MISSING THEN REJECT_NARRATIVE
 - **knowledge_binding**: See GEM_Terminal > shared_behavior > knowledge_binding
 - **autonomous_evolution**:

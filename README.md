@@ -4,7 +4,7 @@
 
 Each Markdown file (`.md`) is a **system instruction** for a dedicated AI sub-agent. Together, these agents form an institutional-grade trading council that analyses live market data, enforces risk protocols, and produces consensus-driven trade decisions — all accessible via a real-time, glassmorphic Web Dashboard with a built-in AI chat interface.
 
-> **No manual intervention required.** The system is fully autonomous. The AI Orchestrator reads live market data, writes to the local SSoT, appends trade lessons, and coordinates multiple council agents in parallel via automated tool calls. The framework has been hardened against API rate limits with dynamic backoffs and a migration to high-quota **Gemini 2.5 Pro** orchestration.
+> **Autonomous & Self-Evolving.** The system is fully autonomous, utilizing **Gemini Context Caching** to ingest a 40k-token rulebook and historical lesson library for near-instant inference. It features a **Self-Optimization Protocol (ENH_61/62)** that allows it to propose and commit its own logic updates to the core rulebook (`rules.md`) after human-in-the-loop validation.
 
 ---
 
@@ -64,10 +64,12 @@ The chat interface in the dashboard connects directly to a **Gemini 2.5 Pro** (o
 | `read_ssot()` | Reads the current SSoT (`ssot.json`) |
 | `update_ssot(payload)` | Merges an execution payload into the SSoT |
 | `read_trade_lessons()` | Reads all historical trade lessons |
-| `update_trade_lessons(lesson)` | **NEW**: Appends a new insight to the lessons library autonomously |
-| `get_market_data()` | Returns the latest live ticker and macro data |
+| `update_trade_lessons(lesson)` | Appends a new insight to the lessons library autonomously (ENH_62) |
+| `update_rules(rules_md)` | **NEW**: Commits rule promotions to `rules.md` (Human-gated per MANDATE_21) |
+| `get_market_data()` | Returns live ticker/macro data (Fixed return logic) |
+| `perform_web_forensic_search()` | Performs grounded search for catalysts and filings |
 | `ask_<subagent>(query)` | Delegates a query to a specialised sub-agent |
-| `ask_council(queries)` | **NEW**: Parallel Dispatcher — runs multiple agents simultaneously (3x speedup) |
+| `ask_council(queries)` | Parallel Dispatcher — runs multiple agents simultaneously (3x speedup) |
 
 Sub-agents marked as **Research**, **Sentiment**, **Bullish Advocate**, **Red Team Pessimist**, **Technical Validator**, and **Macro Sentinel** have built-in **Google Search Grounding** to fetch live 2026 catalysts and override static training data.
 
@@ -97,7 +99,34 @@ Sub-agents marked as **Research**, **Sentiment**, **Bullish Advocate**, **Red Te
 | `ssot.json` | **Single Source of Truth.** Stores the active portfolio snapshot, mutable trading state, and forensic intelligence. Written to by the Orchestrator via `update_ssot`. |
 | `trade_lessons.json` | **Historical trade lessons.** Appended after each post-trade review. Read by all agents to avoid repeating past mistakes. |
 | `user_config.json` | **Persisted user preferences.** Stores the active ticker list and macro indices. Auto-created on first save; survives server restarts. |
-| `config.json` | API keys for Finnhub and Polygon (optional). |
+| `config.json` | API keys and local model overrides. |
+| `trade_lessons.json` | **Historical trade lessons.** Appended autonomously via ENH_62. |
+| `rules.md` | **Canonical Rules Engine.** Now supports autonomous updates and **MANDATE_23 Triage**. |
+
+---
+
+## ⚡ High-Performance Features
+
+### 🚀 Context Caching (ENH_CACHE_01)
+The system aggregates the entire rulebook, trade history, and subagent instructions into a **Gemini Context Cache**. This reduces the per-turn token cost and eliminates "cold start" latency, allowing the Orchestrator to respond in seconds.
+
+### 🧠 Torque-Based Triage (MANDATE_23)
+The Orchestrator now intelligently scales its analytical depth based on news magnitude:
+- **Minor News (Torque < 5)**: Dispatches the **Neutral Structuralist** only for structural capacity verification.
+- **Major News (Torque >= 5)**: Triggers a **Full Council Audit** (Bullish + Red Team + Structuralist) for thesis re-rating and trade execution.
+
+### 🏛️ Autonomous Rule Evolution (ENH_61/62)
+The system "Learns" from market events. When a high-conviction pattern is identified, the **Context Engine** proposes a new rule. Once you provide **MANDATE_21** approval, the system autonomously modifies `rules.md`.
+
+### 🕓 Temporal Alignment (Wall Street Time)
+The system is anchored to **US/Eastern (New York) Time** regardless of your local timezone. This ensures the Council correctly identifies if the market is **OPEN** and applies the correct intraday vs. after-hours protocols.
+
+### 💎 Modernized Council UI
+- **Session Manager**: Start fresh conversations and archive past deliberations into a **Session History** library (last 10 sessions).
+- **Global Stop Button**: Instantly interrupt long-running tool executions or model deliberations.
+- **Persistent Chat**: Conversations survive page refreshes and modal closures via `localStorage`.
+- **Resizable Interface**: User-adjustable chat panels and multi-line input areas.
+- **Full-Width Output**: Forensic reports expand for maximum readability.
 
 ### Sub-Agent Markdown Instructions
 

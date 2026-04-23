@@ -199,22 +199,53 @@ global_chat_session = create_new_session()
 class ChatRequest(BaseModel):
     message: str
 
+import threading
+cancel_event = threading.Event()
+
+@app.post("/api/cancel_chat")
+def cancel_chat():
+    global cancel_event
+    cancel_event.set()
+    framework.log("[System] Cancellation signal received.")
+    return {"status": "cancelled"}
+
+@app.post("/api/reset_chat")
+def reset_chat():
+    global global_chat_session
+    global_chat_session = create_new_session()
+    framework.log("[System] Chat session reset.")
+    return {"status": "success"}
+
 @app.post("/api/chat")
 def chat_endpoint(req: ChatRequest):
     """Primary chat route. Uses local fallback if cloud is exhausted."""
-    global global_chat_session
+    global global_chat_session, cancel_event
+    cancel_event.clear()
     try:
         # 1. Map names to actual tool functions for manual execution
         tool_map = {f.__name__: f for f in terminal_tools}
         
+        import datetime
+        # Calculate US/Eastern (New York) Time (EDT is UTC-4)
+        ny_time = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
+        current_iso = ny_time.strftime("%Y-%m-%dT%H:%M:%S")
+        current_message = f"[SYSTEM_TIME (NEW YORK / ET): {current_iso}] [USER_QUERY]: {req.message}"
+        
         all_text = []
-        current_message = req.message
         turn_count = 0
         
         while True:
+            if cancel_event.is_set():
+                framework.log("[Orchestrator] Interrupted by user.")
+                return {"status": "success", "response": "[OFFLINE] Session terminated by user interrupt."}
+
             turn_count += 1
             framework.log(f"[Orchestrator] Starting turn {turn_count}...")
             response = global_chat_session.send_message(current_message)
+            
+            if cancel_event.is_set():
+                framework.log("[Orchestrator] Interrupted after model response.")
+                return {"status": "success", "response": "[OFFLINE] Session terminated by user interrupt."}
             
             # Capture any text in this turn (Iterate through all parts to ensure capture)
             found_text_in_turn = False
@@ -257,6 +288,10 @@ def chat_endpoint(req: ChatRequest):
                         ))
                 
                 current_message = tool_responses
+                # Prepend New York timestamp to tool output messages
+                ny_time = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
+                current_iso = ny_time.strftime("%Y-%m-%dT%H:%M:%S")
+                current_message = [f"[SYSTEM_TIME (NEW YORK / ET): {current_iso}]"] + tool_responses
                 continue # Next turn
             
             break # No more tools, we are done
