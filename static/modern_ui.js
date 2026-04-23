@@ -28,6 +28,11 @@ const ModernChat = {
         if (this.newChatBtn) this.newChatBtn.onclick = () => this.startNewChat();
         if (this.historyBtn) this.historyBtn.onclick = () => this.showHistory();
         
+        this.modelSelector = document.getElementById('model-selector');
+        if (this.modelSelector) {
+            this.modelSelector.onchange = () => this.changeModel();
+        }
+        
         if (this.input) {
             this.input.onkeydown = (e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -54,6 +59,30 @@ const ModernChat = {
 
         this.loadHistory();
         console.log("Modern UI Logic v2 Initialized");
+    },
+
+    async changeModel() {
+        const model = this.modelSelector.value;
+        const statusIndicator = document.getElementById('chat-status-indicator');
+        
+        statusIndicator.textContent = `Status: Re-Calibrating Council (${model})...`;
+        statusIndicator.style.color = 'var(--accent-blue)';
+        
+        try {
+            const res = await fetch('/api/set_model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model })
+            });
+            if (res.ok) {
+                statusIndicator.textContent = 'Status: Ready';
+                statusIndicator.style.color = '#8b949e';
+                this.appendMessage('ai', `Council re-calibrated. Now utilizing **${model}** for higher reasoning.`, false);
+            }
+        } catch (e) {
+            console.error("Model switch failed", e);
+            statusIndicator.textContent = 'Status: Calibration Error';
+        }
     },
 
     async startNewChat() {

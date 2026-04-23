@@ -11,9 +11,9 @@ from google.genai import types
 # Model definitions
 # ---------------------------------------------------------------------------
 MODEL_MAPPING = {
-    "PRO":      ["gemini-2.5-pro", "gemma-4-31b-it", "gemini-2.5-flash"],
-    "GEMMA":    ["gemma-4-31b-it", "gemini-2.5-flash"],
-    "FAST":     ["gemini-2.5-flash", "gemma-4-31b-it"],
+    "PRO":      ["gemini-2.5-pro", "gemma-4-31b-it"],
+    "FLASH":    ["gemini-2.5-flash", "gemma-4-31b-it", "gemini-1.5-flash"],
+    "GEMMA":    ["gemini-2.5-pro", "gemma-4-31b-it"],
     "THINKING": ["gemini-2.5-pro"]
 }
 

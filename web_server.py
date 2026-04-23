@@ -188,14 +188,13 @@ for model_name in terminal_models:
             break
         continue
 
-if not valid_model:
-    framework.log("[Error] No valid cloud models found for Web Orchestrator!")
-    valid_model = "gemini-1.5-flash" # Absolute last resort
+ORCHESTRATOR_MODEL = "gemini-2.5-pro" # Default tier
 
 # Initialize the global Chat object
 def create_new_session():
+    global ORCHESTRATOR_MODEL
     return framework.client.chats.create(
-        model=valid_model,
+        model=ORCHESTRATOR_MODEL,
         config=agent_framework.types.GenerateContentConfig(
             system_instruction=terminal_instruction,
             temperature=1.0,
@@ -229,10 +228,39 @@ def reset_chat():
     framework.log("[System] Chat session reset.")
     return {"status": "success"}
 
+@app.post("/api/set_model")
+def set_model(data: dict):
+    global ORCHESTRATOR_MODEL, global_chat_session, _session_hydrated
+    new_model = data.get("model", ORCHESTRATOR_MODEL)
+    if new_model != ORCHESTRATOR_MODEL:
+        framework.log(f"[System] Switching Reasoning Tier to {new_model}...")
+        ORCHESTRATOR_MODEL = new_model
+        
+        # Force a fresh session and cache rebuild on next chat
+        global_chat_session = None 
+        _session_hydrated = False
+        
+        # Explicitly trigger cache setup for the new model
+        framework.setup_context_cache(model=ORCHESTRATOR_MODEL, subagent_files=[
+            "research.json", "sentiment_engine.json", "structural_engine.json", 
+            "context_engine.json", "bullish_gem.json", "red_team_gem.json",
+            "technical_validator.json", "macro_arbiter.json"
+        ])
+        
+        # Re-create session
+        global_chat_session = create_new_session()
+        framework.log(f"[System] Council re-calibrated on {new_model}.")
+    return {"status": "success", "current_model": ORCHESTRATOR_MODEL}
+
 @app.post("/api/chat")
 def chat_endpoint(req: ChatRequest):
     """Primary chat route. Uses local fallback if cloud is exhausted."""
-    global global_chat_session, cancel_event, _session_hydrated
+    global global_chat_session, cancel_event, _session_hydrated, ORCHESTRATOR_MODEL
+    
+    # Ensure session exists (handle model switches)
+    if global_chat_session is None:
+        global_chat_session = create_new_session()
+
     cancel_event.clear()
     try:
         # 1. Map names to actual tool functions for manual execution
