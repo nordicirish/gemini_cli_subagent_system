@@ -2,6 +2,8 @@ import os
 import sys
 import uvicorn
 import asyncio
+import json
+from typing import List
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
@@ -13,6 +15,14 @@ import tools
 
 # Import the existing FastAPI app from fetch_stocks
 from fetch_stocks import app, run_daemon, GLOBAL_STATE
+
+class BasketItem(BaseModel):
+    ticker: str
+    shares: float
+    wac: float
+
+class BasketRequest(BaseModel):
+    basket: List[BasketItem]
 
 # --- LOGGING SYSTEM ---
 _system_logs_queue = None
@@ -305,6 +315,64 @@ def chat_endpoint(req: ChatRequest):
     except Exception as e:
         # Auto-fallback logic is now handled inside AgentFramework tiers
         return {"status": "error", "message": str(e)}
+
+@app.get("/api/tickers")
+@app.get("/api/get_settings")
+def get_settings():
+    if os.path.exists("user_config.json"):
+        with open("user_config.json", "r") as f:
+            return json.load(f)
+    return {"tickers": [], "macro": []}
+
+class SettingsRequest(BaseModel):
+    tickers: list
+    macro: list
+
+@app.post("/api/save_settings")
+def save_settings(req: SettingsRequest):
+    with open("user_config.json", "w") as f:
+        json.dump(req.dict(), f, indent=2)
+    framework.log("[System] User settings updated.")
+    return {"status": "success"}
+
+@app.get("/api/get_basket")
+def get_basket():
+    try:
+        if os.path.exists("ssot.json"):
+            with open("ssot.json", "r") as f:
+                content = f.read()
+                if not content.strip(): return []
+                data = json.loads(content)
+                # Map SSoT fields to UI fields
+                raw_basket = data.get("portfolio_snapshot", [])
+                return [{"ticker": i["ticker"], "shares": i.get("shares", 0), "wac": i.get("wac", 0)} for i in raw_basket]
+    except Exception as e:
+        print(f"SSoT Read Warning: {e}")
+    return []
+
+@app.post("/api/save_basket")
+def save_basket(basket: List[BasketItem]):
+    try:
+        if os.path.exists("ssot.json"):
+            with open("ssot.json", "r") as f:
+                data = json.load(f)
+            
+            # Update the specific snapshot while preserving other SSoT keys
+            new_snapshot = []
+            for item in basket:
+                new_snapshot.append({
+                    "ticker": item.ticker,
+                    "shares": item.shares,
+                    "wac": item.wac
+                })
+            data["portfolio_snapshot"] = new_snapshot
+            
+            with open("ssot.json", "w") as f:
+                json.dump(data, f, indent=2)
+            framework.log("[System] SSoT Basket synced manually.")
+    except Exception as e:
+        framework.log(f"[Error] Basket Sync Failed: {e}")
+    return {"status": "success"}
 
 @app.get("/api/system_logs")
 async def system_logs_endpoint():

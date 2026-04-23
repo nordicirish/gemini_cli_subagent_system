@@ -14,13 +14,66 @@ const Dashboard = {
         this.lastUpdated = document.getElementById('last-updated');
         this.indicator = document.getElementById('live-indicator');
         this.macroGrid = document.getElementById('dynamic-macro-cards');
+        this.basketBody = document.getElementById('basket-body');
 
         console.log("Dashboard Core v40 Initialized");
         
         // Initial setup
         await this.fetchConfig();
+        await this.fetchBasket();
+        
+        if (document.getElementById('save-basket-btn')) {
+            document.getElementById('save-basket-btn').onclick = () => this.saveBasket();
+        }
+
         this.poll();
         setInterval(() => this.poll(), 3000);
+    },
+
+    async fetchBasket() {
+        try {
+            const res = await fetch('/api/get_basket');
+            const data = await res.json();
+            this.renderBasket(data);
+        } catch (e) { console.error("Basket fetch failed", e); }
+    },
+
+    renderBasket(basket) {
+        if (!this.basketBody) return;
+        let html = '';
+        basket.forEach((item, index) => {
+            html += `
+                <tr data-index="${index}">
+                    <td style="padding: 4px; color: var(--accent-blue); font-weight: 700;">${item.ticker}</td>
+                    <td style="padding: 4px;"><input type="number" class="basket-input" data-key="shares" value="${item.shares}" style="width: 50px; background: transparent; border: 1px solid rgba(255,255,255,0.1); color: white; font-size: 0.8rem; border-radius: 4px;"></td>
+                    <td style="padding: 4px;"><input type="number" step="0.01" class="basket-input" data-key="wac" value="${item.wac}" style="width: 60px; background: transparent; border: 1px solid rgba(255,255,255,0.1); color: white; font-size: 0.8rem; border-radius: 4px;"></td>
+                </tr>
+            `;
+        });
+        this.basketBody.innerHTML = html;
+    },
+
+    async saveBasket() {
+        const rows = this.basketBody.querySelectorAll('tr');
+        const newBasket = [];
+        rows.forEach(row => {
+            const ticker = row.cells[0].textContent;
+            const shares = parseFloat(row.querySelector('[data-key="shares"]').value);
+            const wac = parseFloat(row.querySelector('[data-key="wac"]').value);
+            newBasket.push({ ticker, shares, wac });
+        });
+
+        try {
+            const res = await fetch('/api/save_basket', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newBasket)
+            });
+            if (res.ok) {
+                alert("SSoT Basket Updated.");
+                this.poll(); // Refresh dashboard with new cost basis
+            }
+        } catch (e) { console.error("Save basket failed", e); }
     },
 
     async fetchConfig() {
@@ -36,6 +89,12 @@ const Dashboard = {
 
     async poll() {
         try {
+            // Only refresh basket if user isn't currently typing in it
+            const activeInput = document.activeElement;
+            if (!activeInput || !activeInput.classList.contains('basket-input')) {
+                await this.fetchBasket();
+            }
+
             const res = await fetch('/api/data');
             const state = await res.json();
             
