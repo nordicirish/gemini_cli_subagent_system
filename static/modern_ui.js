@@ -248,7 +248,10 @@ const ModernChat = {
             const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: text })
+                body: JSON.stringify({ 
+                    message: text,
+                    history: this.currentSessionHistory // Send history for backend hydration
+                })
             });
             
             if (this.isAborted) return;

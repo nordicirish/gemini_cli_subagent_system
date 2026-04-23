@@ -208,6 +208,7 @@ global_chat_session = create_new_session()
 
 class ChatRequest(BaseModel):
     message: str
+    history: list = [] # New: Support for browser session memory
 
 import threading
 cancel_event = threading.Event()
@@ -221,15 +222,16 @@ def cancel_chat():
 
 @app.post("/api/reset_chat")
 def reset_chat():
-    global global_chat_session
+    global global_chat_session, _session_hydrated
     global_chat_session = create_new_session()
+    _session_hydrated = False
     framework.log("[System] Chat session reset.")
     return {"status": "success"}
 
 @app.post("/api/chat")
 def chat_endpoint(req: ChatRequest):
     """Primary chat route. Uses local fallback if cloud is exhausted."""
-    global global_chat_session, cancel_event
+    global global_chat_session, cancel_event, _session_hydrated
     cancel_event.clear()
     try:
         # 1. Map names to actual tool functions for manual execution
@@ -239,7 +241,21 @@ def chat_endpoint(req: ChatRequest):
         # Calculate US/Eastern (New York) Time (EDT is UTC-4)
         ny_time = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
         current_iso = ny_time.strftime("%Y-%m-%dT%H:%M:%S")
-        current_message = f"[SYSTEM_TIME (NEW YORK / ET): {current_iso}] [USER_QUERY]: {req.message}"
+        
+        # HYDRATION: If server restarted but browser has history, re-prime the LLM
+        prompt_prefix = ""
+        if req.history and not _session_hydrated:
+            framework.log("[System] Server restart detected. Hydrating memory from browser session...")
+            history_context = "\n[PAST_CONVERSATION_HISTORY (RECOVERED)]\n"
+            for msg in req.history[-10:]: # Last 10 messages
+                role = "USER" if msg["role"] == "user" else "COUNCIL"
+                # Basic cleaning of content
+                content = msg["content"].replace("\n", " ")[:300]
+                history_context += f"- {role}: {content}...\n"
+            prompt_prefix = history_context + "\n[RECOVERY_COMPLETE]\n\n"
+            _session_hydrated = True
+
+        current_message = f"{prompt_prefix}[SYSTEM_TIME (NEW YORK / ET): {current_iso}] [USER_QUERY]: {req.message}"
         
         all_text = []
         turn_count = 0
