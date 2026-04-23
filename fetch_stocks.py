@@ -566,6 +566,7 @@ class MarketDataCache:
         self.after_hours_price: dict[str, float] = {}
         self.pre_market_volume: dict[str, int] = {}
         self.after_hours_volume: dict[str, int] = {}
+        self.ssr_active: dict[str, bool] = {} # New: SSR Trigger Tracker
         self.cycles: int = 0
         self.vwap_pointer: int = 0
 
@@ -1254,6 +1255,7 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
             post_price = quote_data.get('postMarketPrice')
             reg_price = quote_data.get('regularMarketPrice')
             reg_open = quote_data.get('regularMarketOpen')
+            reg_low = quote_data.get('regularMarketDayLow') # For SSR trigger check
             batch_prev_close = quote_data.get('regularMarketPreviousClose')
             vol = int(quote_data.get('regularMarketVolume', 0) or 0)
             pre_vol = int(quote_data.get('preMarketVolume', 0) or 0)
@@ -1382,6 +1384,17 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
                         raw_gap = ((true_gap_price - reg_close) / reg_close) * 100
                     
             cache.gaps[symbol] = raw_gap
+
+            # --- SSR TRIGGER CHECK (Rules > ENH_65) ---
+            # Triggered if low is <= 10% below previous close
+            if reg_low and reg_close > 0:
+                drop_from_close = ((float(reg_low) - reg_close) / reg_close) * 100
+                if drop_from_close <= -10.0:
+                    cache.ssr_active[symbol] = True
+                else:
+                    # Note: Once triggered, SSR usually lasts today + tomorrow.
+                    # For this real-time tracker, we flag if the day's low hit the threshold.
+                    cache.ssr_active[symbol] = cache.ssr_active.get(symbol, False)
 
         if pre_price is not None:
             cache.pre_market_price[symbol] = pre_price
@@ -1888,6 +1901,7 @@ def run_daemon():
                     "session": cache.session.get(sym),
                     "session_liquidity": cache.session_liquidity.get(sym),
                     "status": "ACTIVE",
+                    "ssr_active": cache.ssr_active.get(sym, False),
                     
                     # Prices
                     "price": float(p),

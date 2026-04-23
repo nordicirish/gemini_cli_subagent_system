@@ -205,6 +205,7 @@ def create_new_session():
     )
 
 global_chat_session = create_new_session()
+_session_hydrated = False # Global flag for tracking memory hydration
 
 class ChatRequest(BaseModel):
     message: str
@@ -246,13 +247,14 @@ def chat_endpoint(req: ChatRequest):
         prompt_prefix = ""
         if req.history and not _session_hydrated:
             framework.log("[System] Server restart detected. Hydrating memory from browser session...")
-            history_context = "\n[PAST_CONVERSATION_HISTORY (RECOVERED)]\n"
-            for msg in req.history[-10:]: # Last 10 messages
+            history_context = "\n[CRITICAL: SESSION_HISTORY_RECOVERY_BLOCK]\n"
+            history_context += "The following messages are from the current active session before the system was rebooted. Continue the conversation as if no interruption occurred:\n"
+            for msg in req.history: 
                 role = "USER" if msg["role"] == "user" else "COUNCIL"
-                # Basic cleaning of content
-                content = msg["content"].replace("\n", " ")[:300]
-                history_context += f"- {role}: {content}...\n"
-            prompt_prefix = history_context + "\n[RECOVERY_COMPLETE]\n\n"
+                # Use 'text' key as defined in modern_ui.js saveHistory()
+                content = msg.get("text", "").replace("\n", " ")[:500]
+                history_context += f"- {role}: {content}\n"
+            prompt_prefix = history_context + "\n[RECOVERY_COMPLETE: END_OF_PRIOR_CONTEXT]\n\n"
             _session_hydrated = True
 
         current_message = f"{prompt_prefix}[SYSTEM_TIME (NEW YORK / ET): {current_iso}] [USER_QUERY]: {req.message}"

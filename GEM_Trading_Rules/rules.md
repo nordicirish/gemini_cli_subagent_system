@@ -1281,6 +1281,10 @@
   - **trigger**: High-conviction thesis shift during live analysis.
   - **instruction**: During an analytical turn, if a new piece of user-provided intelligence or a novel synthesis of existing data leads to a high-conviction shift in a strategic thesis (e.g., re-classifying an asset's catalyst exposure from 'indirect' to 'primary'), the Research Engine is authorized to autonomously codify this insight as a new entry in trade_lessons.json using its file editing tools. This action does not require a preceding trade event or a direct user command to save the lesson.
   - **routing**: RESEARCH_ENGINE -> tool_call (update_trade_lessons) -> trade_lessons.json
+- **id**: ENH_65
+  - **title**: SSR Regime Analysis
+  - **status**: ACTIVE
+  - **instruction**: The Technical Validator MUST flag assets under Short Sale Restriction (SSR). Short positions in SSR assets require an "Uptick Exception" analysis, acknowledging reduced liquidity for short-side hedging.
 - **authority**: EVOLUTIONARY — This section contains rules codified by the system based on historical trade lessons.
 - **DLP_001**: [RESERVED for first promotion]
 

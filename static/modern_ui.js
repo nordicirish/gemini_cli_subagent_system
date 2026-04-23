@@ -245,12 +245,16 @@ const ModernChat = {
         document.getElementById('chat-status-indicator').textContent = 'Status: Orchestrating...';
         
         try {
+            // Get last 15 messages from localStorage for hydration
+            const savedHistory = JSON.parse(localStorage.getItem('gem_chat_history') || '[]');
+            const historyPayload = savedHistory.slice(-15);
+
             const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     message: text,
-                    history: this.currentSessionHistory // Send history for backend hydration
+                    history: historyPayload
                 })
             });
             

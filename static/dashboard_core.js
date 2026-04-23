@@ -155,6 +155,7 @@ const Dashboard = {
         let html = '';
         tableData.forEach(row => {
             const sym = row.ticker;
+            const ssrBadge = row.ssr_active ? '<span class="tag down" style="font-size: 0.6rem; margin-left: 5px; padding: 1px 4px;">SSR</span>' : '';
             const p = row.price ? row.price.toFixed(2) : '—';
             
             const gap = row.gap_percent || row.session_change_pct || 0;
@@ -179,7 +180,7 @@ const Dashboard = {
 
             html += `
                 <tr>
-                    <td class="ticker-cell">${sym}</td>
+                    <td class="ticker-cell">${sym}${ssrBadge}</td>
                     <td class="price-cell">${p}</td>
                     <td class="${gapClass}">${gapStr}</td>
                     <td>${this.formatVolume(row.volume)}</td>
