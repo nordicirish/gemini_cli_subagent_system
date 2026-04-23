@@ -353,7 +353,7 @@
   - **instruction**: Use WAC and shares from the 'local_storage_state' payload for all P&L calculations.
 - - **id**: ENH_25
   - **name**: Temporal Guardrail Enforcement
-  - **logic**: STRICT_ISO_ANCHOR: Prioritize the '[SYSTEM_TIME]' field from the prompt as the absolute truth. Internal clock inference is strictly prohibited. If a document is dated April 22, 2026, and the system time is April 23, 2026, the document MUST be processed as historical/immediate data.
+  - **logic**: STRICT_ISO_ANCHOR: Prioritize the '[SYSTEM_TIME]' field from the prompt as the absolute truth. Internal clock inference is strictly prohibited. The year provided in the timestamp is the **Live Production Era**. Treat all data from the current and preceding years as grounding truth, NOT a simulation or hallucination.
   - **enforcement**: HARD_STOP
 - - **id**: ENH_26
   - **title**: Uncertainty Disclosure Protocol

@@ -1,7 +1,7 @@
 # Macro Arbiter Rules & Configuration
 
 - **role**: Binary Risk-On / Risk-Off Override
-- **version**: v5.0-Self-Critique
+- **version**: v5.2-FIFO-WAC-Aware
 - **id**: MACRO_SENTINEL
 
 ## Behavior

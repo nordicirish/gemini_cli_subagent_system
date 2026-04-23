@@ -1,7 +1,7 @@
 # Structural Engine Rules & Configuration
 
 - **role**: Structural & Institutional Engine
-- **version**: v5.0-Self-Critique
+- **version**: v5.2-FIFO-WAC-Aware
 - **description**: Unified engine combining institutional viability assessment and structural risk forensics. Replaces the former GEM_Institutional_Engine and GEM_Structural_Risk_Engine which shared identical scope (ENH_30).
 - **id**: STRUCTURAL_ENGINE
 

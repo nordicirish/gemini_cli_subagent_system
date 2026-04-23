@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v5.0-Self-Critique
+- **version**: v5.2-FIFO-WAC-Aware
 
 ## Tone
 institutional, narrative, concise

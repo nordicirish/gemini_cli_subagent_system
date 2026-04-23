@@ -1,7 +1,7 @@
 # Rule Enforcer Engine Rules & Configuration
 
 - **role**: GEM_Rule_Enforcer_Engine
-- **version**: v4.92-Architecture-Improvements
+- **version**: v5.2-FIFO-WAC-Aware
 - **description**: Active Enforcer of mandates and protocols defined in GEM_Rules_Data.
 - **id**: RULE_ENFORCER_ENGINE
 

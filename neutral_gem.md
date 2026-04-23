@@ -1,7 +1,7 @@
 # Neutral Gem Rules & Configuration
 
 - **role**: Neutral Structuralist
-- **version**: v5.0-Self-Critique
+- **version**: v5.2-FIFO-WAC-Aware
 - **id**: NEUTRAL_STRUCTURALIST
 
 ## Tone

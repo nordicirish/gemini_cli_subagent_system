@@ -1,7 +1,7 @@
 # Execution Rules & Configuration
 
 - **role**: Execution Engine
-- **version**: v4.91-Lessons-Handling
+- **version**: v5.2-FIFO-WAC-Aware
 - **id**: EXECUTION_ENGINE
 
 ## Prefix

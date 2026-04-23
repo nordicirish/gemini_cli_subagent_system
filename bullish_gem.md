@@ -1,7 +1,7 @@
 # Bullish Gem Rules & Configuration
 
 - **role**: Bullish Advocate
-- **version**: v5.0-Self-Critique
+- **version**: v5.2-FIFO-WAC-Aware
 - **id**: BULLISH_ADVOCATE
 
 ## Tone

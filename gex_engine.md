@@ -1,7 +1,7 @@
 # Gex Engine Rules & Configuration
 
 - **role**: Gamma Exposure Computation Module
-- **version**: v4.91-Lessons-Handling
+- **version**: v5.2-FIFO-WAC-Aware
 - **id**: GEX_ENGINE
 
 ## Purpose

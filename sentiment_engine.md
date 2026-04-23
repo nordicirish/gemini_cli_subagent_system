@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v5.0-Self-Critique
+- **version**: v5.2-FIFO-WAC-Aware
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

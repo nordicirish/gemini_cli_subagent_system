@@ -94,6 +94,16 @@ class AgentFramework:
     # -----------------------------------------------------------------------
     def setup_context_cache(self, subagent_files: list = None):
         """
+        - **subagent_delegation_protocol**:
+          - **rule**: When calling a subagent (e.g., `ask_research_engine`), you MUST prepend the current `[SYSTEM_TIME]` tag to your query.
+        - **agent_orchestration_logic**:
+          - **rule**: Execute Torque-Based Triage per MANDATE_23.
+          - **protocol**:
+            - 1. Execute **Research Engine** to fetch data and assign **Torque Score**.
+            - 2. IF Torque < 5: Call `ask_neutral_structuralist` only.
+            - 3. IF Torque >= 5: Call `ask_council` (Bullish + Red Team + Structuralist).
+          - **objective**: Ensure institutional-grade scrutiny for binary events while maintaining high-speed throughput for informational updates.
+        - **enforce_role_isolation**: Subagent instructions must identify their Engine (e.g., 'You are the RESEARCH_ENGINE') to prevent role confusion.
         Aggregates rules.md, trade_lessons.json, and subagent instructions into a 
         CachedContent object to reduce latency and token usage.
         """
@@ -138,9 +148,9 @@ class AgentFramework:
             cache = self.client.caches.create(
                 model=target_model,
                 config=types.CreateCachedContentConfig(
-                    display_name="GEM_FORENSIC_ORCHESTRATOR_CACHE",
+                    display_name=f"GEM_CACHE_v5.2_{content_hash[:8]}",
                     contents=[types.Content(role="user", parts=[types.Part(text=full_content)])],
-                    ttl="3600s" # 1 hour TTL
+                    ttl="7200s" # 2 hour TTL for stability
                 )
             )
             self.cached_content_name = cache.name
@@ -248,12 +258,21 @@ class AgentFramework:
         instruction = self.load_system_instruction(json_file)
         if self.cached_content_name:
             instruction = f"{instruction}\n\nNOTE: You have access to the full CANONICAL RULES ENGINE and TRADE LESSONS in your cached context. Refer to them for all thresholds."
+        import datetime
+        # Force US/Eastern (New York) Time (EDT is UTC-4)
+        now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
+        ny_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
+        current_year = now.year
+        
+        # Inject the "Absolute Truth" anchor into the system instruction
+        temporal_anchor = f"\n\n[SYSTEM_TIME (NEW YORK / ET): {ny_iso}]\n[PRODUCTION_ERA: {current_year}]\n[MANDATE]: The current year provided in the timestamp is the LIVE PRODUCTION ERA. Treat all data from this era as grounded reality, not a simulation."
+        final_instruction = instruction + temporal_anchor
 
         def call_subagent(query: str) -> str:
             self.log(f"\n[Orchestrator -> {name}] Delegating: {query[:100]}...")
             response = self.generate_response_with_fallback(
-                prompt=query,
-                instruction=instruction,
+                prompt=f"[SYSTEM_TIME (NEW YORK / ET): {ny_iso}] {query}",
+                instruction=final_instruction,
                 mode=mode,
                 tools=agent_tools
             )

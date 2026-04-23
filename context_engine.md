@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v4.92-Architecture-Improvements
+- **version**: v5.2-FIFO-WAC-Aware
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

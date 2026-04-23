@@ -1,7 +1,7 @@
 # Post Trade Review Rules & Configuration
 
 - **role**: Review Engine
-- **version**: v5.0-Self-Critique
+- **version**: v5.2-FIFO-WAC-Aware
 - **id**: REVIEW_ENGINE
 
 ## Tone
