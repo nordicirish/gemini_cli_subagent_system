@@ -58,7 +58,33 @@ const ModernChat = {
         };
 
         this.loadHistory();
+        this.fetchModels(); // Hydrate the model selector from Google
         console.log("Modern UI Logic v2 Initialized");
+    },
+
+    async fetchModels() {
+        if (!this.modelSelector) return;
+        try {
+            const res = await fetch('/api/list_models');
+            const data = await res.json();
+            if (data.status === 'success') {
+                const currentModel = this.modelSelector.value;
+                this.modelSelector.innerHTML = '';
+                data.models.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.name;
+                    opt.textContent = m.label;
+                    opt.style.background = '#1a1a1a';
+                    opt.style.color = 'white';
+                    if (m.name === currentModel || (m.name === 'gemini-2.5-pro' && !currentModel)) {
+                        opt.selected = true;
+                    }
+                    this.modelSelector.appendChild(opt);
+                });
+            }
+        } catch (e) {
+            console.error("Failed to fetch models", e);
+        }
     },
 
     async changeModel() {

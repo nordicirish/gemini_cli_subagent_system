@@ -220,6 +220,31 @@ def cancel_chat():
     framework.log("[System] Cancellation signal received.")
     return {"status": "cancelled"}
 
+@app.get("/api/list_models")
+def list_models_endpoint():
+    """Dynamically pull authorized models from Google GenAI."""
+    try:
+        models = []
+        for m in framework.client.models.list():
+            # Only include models that support text generation
+            if "generateContent" in m.supported_methods:
+                # Clean up the name (remove 'models/')
+                name = m.name.replace("models/", "")
+                
+                # Determine a user-friendly label
+                label = name.upper()
+                if "pro" in name: label += " (PRO)"
+                elif "flash" in name: label += " (FLASH)"
+                
+                models.append({"name": name, "label": label})
+        
+        # Sort so Pro models are at the top
+        models.sort(key=lambda x: ("pro" not in x["name"].lower(), x["name"]))
+        return {"status": "success", "models": models}
+    except Exception as e:
+        framework.log(f"[Error] Failed to list models: {e}")
+        return {"status": "error", "message": str(e)}
+
 @app.post("/api/reset_chat")
 def reset_chat():
     global global_chat_session, _session_hydrated
@@ -232,6 +257,11 @@ def reset_chat():
 def set_model(data: dict):
     global ORCHESTRATOR_MODEL, global_chat_session, _session_hydrated
     new_model = data.get("model", ORCHESTRATOR_MODEL)
+    
+    # FAIL-SAFE: Map legacy strings to validated preview strings
+    if new_model == "gemini-3.1-pro":
+        new_model = "gemini-3.1-pro-preview"
+
     if new_model != ORCHESTRATOR_MODEL:
         framework.log(f"[System] Switching Reasoning Tier to {new_model}...")
         ORCHESTRATOR_MODEL = new_model

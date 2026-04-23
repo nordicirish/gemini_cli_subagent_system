@@ -11,7 +11,7 @@ from google.genai import types
 # Model definitions
 # ---------------------------------------------------------------------------
 MODEL_MAPPING = {
-    "PRO":      ["gemini-2.5-pro", "gemma-4-31b-it"],
+    "PRO":      ["gemini-2.5-pro", "gemini-3.1-pro-preview", "gemma-4-31b-it"],
     "FLASH":    ["gemini-2.5-flash", "gemma-4-31b-it", "gemini-1.5-flash"],
     "GEMMA":    ["gemini-2.5-pro", "gemma-4-31b-it"],
     "THINKING": ["gemini-2.5-pro"]
@@ -62,7 +62,7 @@ class AgentFramework:
         base_list = MODEL_MAPPING.get(mode, MODEL_MAPPING["PRO"])
         # Override with config.json if present
         overrides = {
-            "gemini-2.5-pro": self._local_config.get("MODEL_PRO_1", "gemini-2.5-pro"),
+            "gemini-3.1-pro-preview": self._local_config.get("MODEL_PRO_1", "gemini-3.1-pro-preview"),
             "gemma-4-31b-it": self._local_config.get("MODEL_GEMMA", "gemma-4-31b-it"),
             "gemini-2.5-flash": self._local_config.get("MODEL_FLASH", "gemini-2.5-flash"),
         }
@@ -92,7 +92,7 @@ class AgentFramework:
     # -----------------------------------------------------------------------
     # Context Caching Logic (ENH_CACHE_01)
     # -----------------------------------------------------------------------
-    def setup_context_cache(self, subagent_files: list = None):
+    def setup_context_cache(self, model: str = None, subagent_files: list = None):
         """
         - **subagent_delegation_protocol**:
           - **rule**: When calling a subagent (e.g., `ask_research_engine`), you MUST prepend the current `[SYSTEM_TIME]` tag to your query.
@@ -107,7 +107,7 @@ class AgentFramework:
         Aggregates rules.md, trade_lessons.json, and subagent instructions into a 
         CachedContent object to reduce latency and token usage.
         """
-        self.log("[System] Initializing Context Cache assessment...")
+        self.log(f"[System] Initializing Context Cache assessment for {model or 'default'}...")
         
         # 1. Collect all static content
         parts = []
@@ -133,7 +133,8 @@ class AgentFramework:
                     continue
         
         full_content = "".join(parts)
-        content_hash = hashlib.md5(full_content.encode('utf-8')).hexdigest()
+        # Include model name in hash to force rebuild if model changes
+        content_hash = hashlib.md5((full_content + str(model)).encode('utf-8')).hexdigest()
         
         # 2. Check if cache is already valid
         if self.last_cache_hash == content_hash and self.cached_content_name:
@@ -141,7 +142,7 @@ class AgentFramework:
             return
 
         # 3. Create new cache
-        target_model = self._get_cloud_models("PRO")[0]
+        target_model = model if model else self._get_cloud_models("PRO")[0]
         
         try:
             self.log(f"[System] Creating Context Cache for {target_model} (~{len(full_content)} chars)...")
