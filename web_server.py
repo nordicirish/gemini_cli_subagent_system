@@ -40,6 +40,14 @@ framework = AgentFramework(log_callback=log_to_queue)
 # Subagent & Council Tool Definitions
 # ---------------------------------------------------------------------------
 
+# --- CONTEXT CACHING INITIALIZATION (ENH_CACHE_01) ---
+subagent_instructions = [
+    "macro_arbiter.json", "research.json", "sentiment_engine.json",
+    "structural_engine.json", "context_engine.json", "technical_validator.json",
+    "bullish_gem.json", "red_team_gem.json", "neutral_gem.json", "terminal.json"
+]
+framework.setup_context_cache(subagent_files=subagent_instructions)
+
 # 1. Define the Sub-Agents with their instructions and specific tools
 macro_sentinel = framework.create_agent_tool(
     name="Macro Sentinel",
@@ -73,7 +81,7 @@ context_engine = framework.create_agent_tool(
     name="Context Engine", 
     json_file="context_engine.json", 
     mode="PRO",
-    agent_tools=[tools.read_ssot, tools.update_ssot, tools.read_trade_lessons, tools.update_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search]
+    agent_tools=[tools.read_ssot, tools.update_ssot, tools.read_trade_lessons, tools.update_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search, tools.update_rules]
 )
 
 technical_validator = framework.create_agent_tool(

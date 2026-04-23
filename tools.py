@@ -137,6 +137,20 @@ def update_trade_lessons(lessons_json: str) -> str:
     except Exception as e:
         return f"Error updating trade lessons: {str(e)}"
 
+def update_rules(rules_md_content: str) -> str:
+    """
+    Appends or updates the canonical rules.md file. 
+    MANDATORY: This tool MUST ONLY be called after the user has explicitly approved 
+    a rule promotion proposal per MANDATE_21.
+    """
+    path = os.path.join('GEM_Trading_Rules', 'rules.md')
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(rules_md_content)
+        return "Rules.md updated successfully. NOTE: A server restart is required to refresh the Context Cache."
+    except Exception as e:
+        return f"Error updating rules: {str(e)}"
+
 def get_market_data() -> str:
     """
     Returns the latest live market data for all tickers and macro benchmarks.
@@ -158,6 +172,7 @@ def get_market_data() -> str:
         "timestamp": state.get("timestamp"),
         "tickers": state.get("tickers")
     }
+    return json.dumps(data_to_return)
 
 def perform_web_forensic_search(query: str) -> str:
     """

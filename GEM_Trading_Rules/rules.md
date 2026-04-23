@@ -1253,6 +1253,13 @@
 - **validation**: TECHNICAL_VALIDATOR must verify the proposed rule does not conflict with existing MANDATE_* directives before the proposal is emitted.
 
 ## Dynamic Learned Protocols
+
+- **id**: ENH_62
+  - **title**: Proactive Insight Codification
+  - **status**: ACTIVE
+  - **trigger**: High-conviction thesis shift during live analysis.
+  - **instruction**: During an analytical turn, if a new piece of user-provided intelligence or a novel synthesis of existing data leads to a high-conviction shift in a strategic thesis (e.g., re-classifying an asset's catalyst exposure from 'indirect' to 'primary'), the Research Engine is authorized to autonomously codify this insight as a new entry in trade_lessons.json using its file editing tools. This action does not require a preceding trade event or a direct user command to save the lesson.
+  - **routing**: RESEARCH_ENGINE -> tool_call (update_trade_lessons) -> trade_lessons.json
 - **authority**: EVOLUTIONARY — This section contains rules codified by the system based on historical trade lessons.
 - **DLP_001**: [RESERVED for first promotion]
 

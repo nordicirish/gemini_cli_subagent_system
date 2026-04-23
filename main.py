@@ -10,6 +10,10 @@ def main():
     # Initialize the Framework
     framework = AgentFramework()
     
+    # --- CONTEXT CACHING INITIALIZATION (ENH_CACHE_01) ---
+    subagent_files = [c["file"] for c in sub_agent_configs.values()] + ["terminal.json"]
+    framework.setup_context_cache(subagent_files=subagent_files)
+    
     # Map of all our sub-agents (engines and advocates)
     # PRO/THINKING/GEMMA/FAST → Gemini cloud (reasoning, web search, orchestration)
     sub_agent_configs = {
@@ -48,7 +52,7 @@ def main():
             if name == "Structural Engine":
                 sub_tools = [tools.read_ssot, tools.get_market_data, tools.perform_web_forensic_search]
             elif name == "Context Engine":
-                sub_tools = [tools.read_ssot, tools.update_ssot, tools.read_trade_lessons, tools.update_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search]
+                sub_tools = [tools.read_ssot, tools.update_ssot, tools.read_trade_lessons, tools.update_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search, tools.update_rules]
             elif name == "Technical Validator":
                 sub_tools = [tools.read_ssot, tools.read_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search]
             elif name in ["Research Engine", "Sentiment Engine", "Bullish Advocate", "Red Team Pessimist", "Macro Sentinel", "Neutral Structuralist"]:
