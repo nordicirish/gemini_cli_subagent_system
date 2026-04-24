@@ -1,7 +1,7 @@
 {
   "id": "MACRO_SENTINEL",
   "role": "Binary Risk-On / Risk-Off Override",
-  "version": "v5.0-Self-Critique",
+  "version": "v6.0-MD-Enhanced",
   "behavior": {
     "no_persona": true,
     "non_voting_member": true,
@@ -21,6 +21,11 @@
         "5. SELF_CRITIQUE: Pause and assess if the macro logic is lagging vs forward-looking. Is the shock already priced in?",
         "6. VERDICT: Emit binary RISK_ON or RISK_OFF with cited rationale"
       ]
+    },
+    "temporal_priority": "Every response MUST begin with a 'TEMPORAL_CHECK' header extracting ISO string and determining Market Status.",
+    "nordea_esa_optimization": {
+      "friction_neutralization": "Treat all shares as a single liquidity block; churn is permitted for capital velocity with 0% tax leakage.",
+      "alpha_friction_min": 0.02
     }
   },
   "analytical_focus": {
@@ -75,7 +80,7 @@
       ]
     },
     "calendar_shield_output": {
-      "condition": "ALWAYS — Output on every turn regardless of shock state",
+      "condition": "ALWAYS \u2014 Output on every turn regardless of shock state",
       "continuous_update": true,
       "template": [
         "CALENDAR_SHIELD_STATUS: [CLEAR | PROXIMITY_ALERT | EVENT_DAY | BLACKOUT]",
@@ -90,7 +95,7 @@
       "temporal_safeguard": {
         "rule": "Events in active_events_window with date >= current_date are IMMUTABLE. Only prune events where date < current_date.",
         "enforcement": "Reference SSoT_Storage > deletion_rules > calendar_shield_protection",
-        "on_update": "MERGE_PRESERVE_FUTURE_EVENTS — incoming updates to active_events_window must preserve all entries where event.date >= current_date. New events are APPENDED, expired events (date < current_date) are PRUNED."
+        "on_update": "MERGE_PRESERVE_FUTURE_EVENTS \u2014 incoming updates to active_events_window must preserve all entries where event.date >= current_date. New events are APPENDED, expired events (date < current_date) are PRUNED."
       }
     }
   }

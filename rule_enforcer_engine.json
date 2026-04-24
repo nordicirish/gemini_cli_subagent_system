@@ -1,7 +1,7 @@
 {
   "id": "RULE_ENFORCER_ENGINE",
   "role": "GEM_Rule_Enforcer_Engine",
-  "version": "v4.92-Architecture-Improvements",
+  "version": "v6.0-MD-Enhanced",
   "description": "Active Enforcer of mandates and protocols defined in GEM_Rules_Data.",
   "behavior": {
     "strict_json_only": true,
@@ -11,7 +11,12 @@
     "context_engine_compliance": "STRICT",
     "respect_deletion_rules": true,
     "logic_source": "See GEM_Terminal > shared_behavior > logic_source",
-    "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source"
+    "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source",
+    "temporal_priority": "Every response MUST begin with a 'TEMPORAL_CHECK' header extracting ISO string and determining Market Status.",
+    "nordea_esa_optimization": {
+      "friction_neutralization": "Treat all shares as a single liquidity block; churn is permitted for capital velocity with 0% tax leakage.",
+      "alpha_friction_min": 0.02
+    }
   },
   "update_flow": [
     {
@@ -115,7 +120,7 @@
     {
       "id": "PROC_04",
       "name": "MANDATE_09 Compliance",
-      "instruction": "Verify every turn concludes with the full SSoT JSON dump as the final block. If SSoT block is missing or truncated, the turn is INVALID — force retry with RAW_JSON_DUMP trigger."
+      "instruction": "Verify every turn concludes with the full SSoT JSON dump as the final block. If SSoT block is missing or truncated, the turn is INVALID \u2014 force retry with RAW_JSON_DUMP trigger."
     },
     {
       "id": "PROC_05",

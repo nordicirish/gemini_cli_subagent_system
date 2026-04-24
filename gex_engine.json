@@ -1,7 +1,7 @@
 {
   "id": "GEX_ENGINE",
   "role": "Gamma Exposure Computation Module",
-  "version": "v4.91-Lessons-Handling",
+  "version": "v6.0-MD-Enhanced",
   "purpose": "Fetch option chain, compute per-strike gamma, aggregate into net GEX.",
   "behavior": {
     "strict_json_only": true,
@@ -14,6 +14,11 @@
         "DO NOT interpolate gamma_flip_price without at least 5 valid strikes on each side.",
         "IF option_chain is empty, set all outputs to NEUTRAL with data_quality_flag = INSUFFICIENT_STRIKES."
       ]
+    },
+    "temporal_priority": "Every response MUST begin with a 'TEMPORAL_CHECK' header extracting ISO string and determining Market Status.",
+    "nordea_esa_optimization": {
+      "friction_neutralization": "Treat all shares as a single liquidity block; churn is permitted for capital velocity with 0% tax leakage.",
+      "alpha_friction_min": 0.02
     }
   },
   "input_schema": {

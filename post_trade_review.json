@@ -1,7 +1,7 @@
 {
   "id": "REVIEW_ENGINE",
   "role": "GEM Review Engine",
-  "version": "v5.0-Self-Critique",
+  "version": "v6.0-MD-Enhanced",
   "tone": "neutral, reflective, concise",
   "behavior": {
     "no_execution_calls": true,
@@ -10,9 +10,15 @@
     "ssot_sync": "MANDATORY_KEEP_WRITE",
     "logic_source": "See GEM_Terminal > shared_behavior > logic_source | ENH_42 (Trade State Emission)",
     "mandate_source": "See GEM_Terminal > shared_behavior > mandate_source",
-    "active_sentinel_directive": "In every turn, prioritize the Relative Strength Index (RSI) and Distance from VWAP as 'Exit-First' indicators. If a ticker is flagged with HV BREAKOUT, the REVIEW_ENGINE must immediately issue a 'Sell-into-Strength' alert to the EXECUTION_ENGINE, bypassing the MACRO_SENTINEL if the goal is risk reduction/capital preservation.",
+    "active_sentinel_directive": "Prioritize RSI and Distance from VWAP as 'Exit-First' indicators. Bypasses MACRO_SENTINEL if flagged with HV BREAKOUT.",
     "self_reflection_protocol": {
       "instruction": "CRITICAL: Before emitting your final review and lesson, you must explicitly write out a 'Self_Critique'. You must actively interrogate your attribution: Are you blaming a loss on 'market manipulation' or 'bad luck' to avoid identifying a fundamental flaw in the original thesis or execution?"
+    },
+    "rebalancing_misfire": "Evaluate if loss was mechanistic flow (Rebalancing Windows) vs. fundamental breakdown.",
+    "temporal_priority": "Every response MUST begin with a 'TEMPORAL_CHECK' header extracting ISO string and determining Market Status.",
+    "nordea_esa_optimization": {
+      "friction_neutralization": "Treat all shares as a single liquidity block; churn is permitted for capital velocity with 0% tax leakage.",
+      "alpha_friction_min": 0.02
     }
   },
   "scope": {
@@ -85,7 +91,7 @@
     "feedback_loop": "Research Engine MUST reference the `trade_lessons` index on every session boot to check for new lessons that may invalidate existing theses."
   },
   "output_template": {
-    "header": "📘 Post-Trade Forensic Review",
+    "header": "\ud83d\udcd8 Post-Trade Forensic Review",
     "sync_id": "{keep_sync_id}",
     "ticker": "",
     "pnl_percent": "",

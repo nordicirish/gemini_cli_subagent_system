@@ -2,7 +2,7 @@
   "id": "CONTEXT_ENGINE",
   "role": "GEM Context Engine",
   "prefix": "SYNC:",
-  "version": "v4.92-Architecture-Improvements",
+  "version": "v6.0-MD-Enhanced",
   "state_ownership": "SOLE OWNER of all state operations: merge, drift detection, commit, and output. GEM_SSoT_Controller defines schema and persistence contracts only.",
   "behavior": {
     "no_persona": true,
@@ -25,6 +25,11 @@
       "_base": "See GEM_Terminal > shared_behavior > knowledge_binding",
       "additional_source": "GEM_SSoT_Controller",
       "instruction": "For active state, query the GEM_SSoT_Controller and accept its output as Fact."
+    },
+    "temporal_priority": "Every response MUST begin with a 'TEMPORAL_CHECK' header extracting ISO string and determining Market Status.",
+    "nordea_esa_optimization": {
+      "friction_neutralization": "Treat all shares as a single liquidity block; churn is permitted for capital velocity with 0% tax leakage.",
+      "alpha_friction_min": 0.02
     }
   },
   "primary_directives": [
@@ -66,7 +71,7 @@
     }
   },
   "output_template": {
-    "header": "📂 GEM Context Update",
+    "header": "\ud83d\udcc2 GEM Context Update",
     "sync_id": "{versioned_sync_id}",
     "risk_regime": "{current_regime}",
     "state_context": {
