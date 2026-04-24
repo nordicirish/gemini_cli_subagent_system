@@ -1,6 +1,6 @@
 {
   "role": "GEM_Rules_Data",
-  "version": "v6.0-MD-Enhanced",
+  "version": "v6.1-MD-Enhanced",
   "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
   "enh_xx_registry": [
     "ENH_01: Keep-First Portfolio Reconciliation",
@@ -62,7 +62,12 @@
     "ENH_67: Sentiment-Price Divergence Sentinel",
     "ENH_68: The Devil's Advocate Hard Audit",
     "ENH_69: Cross-Sector Correlation Cascade",
-    "ENH_70: Adaptive Catalyst Decay (Health Aging)"
+    "ENH_70: Adaptive Catalyst Decay (Health Aging)",
+    "ENH_72: VVIX/VIX Divergence Guard",
+    "ENH_73: Success Memo Production Gate",
+    "ENH_74: Noon Spike Guard",
+    "ENH_75: Clinical Priority Voucher (CPV) Override",
+    "ENH_76: Token Economy Budgeting (Context Pruning)"
   ],
   "mandate_registry": [
     "MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)",
@@ -573,6 +578,9 @@
                 "red_team_component": "FLOAT (w*C*V)",
                 "structural_component": "FLOAT (w*C*V)"
               },
+              "statutory_anchors": {
+                "success_memo_enh_73": "Sa = 0.95 (Overrides technical overrides)"
+              },
               "agent_votes": [
                 {
                   "agent": "STRING (BULLISH_ADVOCATE | RED_TEAM_PESSIMIST | NEUTRAL_STRUCTURALIST)",
@@ -1001,6 +1009,47 @@
       "title": "Adaptive Catalyst Decay (Health Aging)",
       "instruction": "For every session a ticker fails to reclaim its 'Post-Catalyst High,' decay the health_score by 3 points.",
       "rationale": "Prevents 'thesis marriage' where the system holds a winner until it becomes a laggard."
+    },
+    {
+      "id": "ENH_72",
+      "title": "VVIX/VIX Divergence Guard",
+      "status": "ACTIVE",
+      "instruction": "Monitor the divergence between VVIX (Volatility of Volatility) and VIX.",
+      "logic": "IF VVIX > 105 AND VIX < 20, the system MUST transition to 'PREEMPTIVE_DEFENSE' mode. Maintain 2x ATR stop-loss buffers regardless of the 'Normal' VIX regime, as a high VVIX environment indicates institutional pre-positioning for a 'Hidden Shock.'"
+    },
+    {
+      "id": "ENH_73",
+      "title": "Success Memo Production Gate",
+      "status": "ACTIVE",
+      "instruction": "Codify the non-competitive bridge granted by 10 U.S.C. § 4022.",
+      "logic": "IF a 'Success Memo' is verified for a Defense Prime (e.g., RCAT, UMAC), the Agreement Score (Sa) is effectively anchored to 0.95. This statutory transition from R&D to Production Revenue overrides technical RSI overbought signals."
+    },
+    {
+      "id": "ENH_74",
+      "title": "Noon Spike Guard",
+      "status": "ACTIVE",
+      "instruction": "Monitor and neutralize structural noise/distribution during the 12:00-13:00 EST window.",
+      "logic": "IF Time == 12:00-13:00 EST AND Volume > 2x 10-day Average, flag as 'Structural Noise.' Neutralize buy/sell signals that lack a corresponding hard catalyst to prevent execution into rebalancing wicks."
+    },
+    {
+      "id": "ENH_75",
+      "title": "Clinical Priority Voucher (CPV) Override",
+      "status": "ACTIVE",
+      "instruction": "Recognize the valuation torque of expedited FDA pathways.",
+      "logic": "IF a Sovereign Clinical asset (e.g., DFTX) receives 'Right to Try' certification or a 'Priority Review Voucher' per the April 2026 Executive Order, Nullify Rule 159 (RSI Exits). Asset is re-classified as SOVEREIGN_STRATEGIC and held until the primary clinical readout (Panorama/Voyage)."
+    },
+    {
+      "id": "ENH_76",
+      "title": "Token Economy Budgeting (Context Pruning)",
+      "status": "ACTIVE",
+      "instruction": "Proactively manage the 128K active token window during periods of high data throughput.",
+      "logic": "During 'HIGH_VOL' or 'HIGH_TORQUE' regimes, the CONTEXT_ENGINE is authorized to prune non-essential narrative logs to prevent \"Context Drift.\"",
+      "persistence_hierarchy": [
+        "1. Portfolio Snapshot (FIFO/WAC data)",
+        "2. Active Forensic Flags (SSR, Success Memos)",
+        "3. Consensus Sa History (Last 3 turns)",
+        "4. Narrative Logs (Delete entries older than 5 turns)"
+      ]
     }
   ],
   "global_logic_gates": {
@@ -1481,6 +1530,14 @@
       "used_by": [
         "fetch_stocks",
         "rules.json"
+      ]
+    },
+    "VVIX_SHOCK_THRESHOLD": {
+      "value": 105.0,
+      "usage": "VVIX level above this (when VIX < 20) triggers PREEMPTIVE_DEFENSE mode (ENH_72)",
+      "used_by": [
+        "fetch_stocks",
+        "terminal"
       ]
     },
     "IEF_YIELD_ALERT_THRESHOLD": {

@@ -1,6 +1,6 @@
 # GEM_Rules_Data
 **Role:** GEM_Rules_Data
-**Version:** v6.0-MD-Enhanced
+**Version:** v6.1-MD-Enhanced
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.
 
 ---
@@ -66,6 +66,11 @@
 - ENH_68: The Devil's Advocate Hard Audit
 - ENH_69: Cross-Sector Correlation Cascade
 - ENH_70: Adaptive Catalyst Decay (Health Aging)
+- ENH_72: VVIX/VIX Divergence Guard
+- ENH_73: Success Memo Production Gate
+- ENH_74: Noon Spike Guard
+- ENH_75: Clinical Priority Voucher (CPV) Override
+- ENH_76: Token Economy Budgeting (Context Pruning)
 
 ## Mandate Registry
 - MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)
@@ -411,6 +416,8 @@
             - **Bullish Component:** FLOAT (w*C*V)
             - **Red Team Component:** FLOAT (w*C*V)
             - **Structural Component:** FLOAT (w*C*V)
+          - **Statutory Anchors:**
+            - **Success Memo (ENH_73):** Sa = 0.95 (Overrides technical overrides)
           - **Agent Votes:**
             - 
               - **Agent:** STRING (BULLISH_ADVOCATE | RED_TEAM_PESSIMIST | NEUTRAL_STRUCTURALIST)
@@ -693,6 +700,31 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
 - **[ENH_70 - Adaptive Catalyst Decay (Health Aging)]**
   - **Instruction:** For every session a ticker fails to reclaim its 'Post-Catalyst High,' decay the health_score by 3 points.
   - **Rationale:** Prevents 'thesis marriage' where the system holds a winner until it becomes a laggard.
+- **[ENH_72 - VVIX/VIX Divergence Guard]**
+  - **Status:** ACTIVE
+  - **Instruction:** Monitor the divergence between VVIX (Volatility of Volatility) and VIX. 
+  - **Logic:** IF VVIX > 105 AND VIX < 20, the system MUST transition to 'PREEMPTIVE_DEFENSE' mode. Maintain 2x ATR stop-loss buffers regardless of the 'Normal' VIX regime, as a high VVIX environment indicates institutional pre-positioning for a 'Hidden Shock.'
+- **[ENH_73 - Success Memo Production Gate]**
+  - **Status:** ACTIVE
+  - **Instruction:** Codify the non-competitive bridge granted by 10 U.S.C. § 4022. 
+  - **Logic:** IF a 'Success Memo' is verified for a Defense Prime (e.g., RCAT, UMAC), the Agreement Score (Sa) is effectively anchored to 0.95. This statutory transition from R&D to Production Revenue overrides technical RSI overbought signals.
+- **[ENH_74 - Noon Spike Guard]**
+  - **Status:** ACTIVE
+  - **Instruction:** Monitor and neutralize structural noise/distribution during the 12:00-13:00 EST window.
+  - **Logic:** IF Time == 12:00-13:00 EST AND Volume > 2x 10-day Average, flag as 'Structural Noise.' Neutralize buy/sell signals that lack a corresponding hard catalyst to prevent execution into rebalancing wicks.
+- **[ENH_75 - Clinical Priority Voucher (CPV) Override]**
+  - **Status:** ACTIVE
+  - **Instruction:** Recognize the valuation torque of expedited FDA pathways. 
+  - **Logic:** IF a Sovereign Clinical asset (e.g., DFTX) receives 'Right to Try' certification or a 'Priority Review Voucher' per the April 2026 Executive Order, Nullify Rule 159 (RSI Exits). Asset is re-classified as SOVEREIGN_STRATEGIC and held until the primary clinical readout (Panorama/Voyage).
+- **[ENH_76 - Token Economy Budgeting (Context Pruning)]**
+  - **Status:** ACTIVE
+  - **Instruction:** Proactively manage the 128K active token window during periods of high data throughput.
+  - **Logic:** During 'HIGH_VOL' or 'HIGH_TORQUE' regimes, the CONTEXT_ENGINE is authorized to prune non-essential narrative logs to prevent "Context Drift."
+  - **Persistence_Hierarchy:** 
+    1. Portfolio Snapshot (FIFO/WAC data)
+    2. Active Forensic Flags (SSR, Success Memos)
+    3. Consensus Sa History (Last 3 turns)
+    4. Narrative Logs (Delete entries older than 5 turns)
 
 ## Global Logic Gates
 - **Execution Gate:**
@@ -1064,6 +1096,9 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
 - **Vixy Velocity Critical:**
   - **Value:** 5.0
   - **Usage:** VIXY daily gap % at or above this triggers FEAR ALERT regardless of absolute VIX regime
+- **Vvix Shock Threshold:**
+  - **Value:** 105.0
+  - **Usage:** VVIX level above this (when VIX < 20) triggers PREEMPTIVE_DEFENSE mode (ENH_72)
   - **Used By:**
     - fetch_stocks
     - rules.json

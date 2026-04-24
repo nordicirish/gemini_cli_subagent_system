@@ -1,6 +1,6 @@
 # CONTEXT_ENGINE
-**Role:** GEM Context Engine
-**Version:** v6.0-MD-Enhanced
+**Role:** Sole authority for state synthesis and emission.
+**Version:** v6.1-MD-Enhanced
 
 ---
 
@@ -34,17 +34,19 @@ SOLE OWNER of all state operations: merge, drift detection, commit, and output. 
   - **Friction Neutralization:** Treat all shares as a single liquidity block; churn is permitted for capital velocity with 0% tax leakage.
   - **Alpha Friction Min:** 0.02
 
-## Primary Directives
-- **[MANDATE_09_STATE_EMISSION]**
-  - **Instruction:** Reference GEM_Rules_Data > MANDATE_09. Every turn MUST conclude with the full, untruncated SSoT JSON block.
-- 
-  - **Step:** 3
-  - **Action:** VALIDATE_SCHEMA
-  - **Instruction:** Reference GEM_Rules_Data > ENH_32 (Canonical Schema). Enforce strict schema alignment for all portfolio updates.
-- 
-  - **Step:** 4
-  - **Action:** DETECT_DRIFT
-  - **Instruction:** Reference GEM_Rules_Data > system_thresholds > DRIFT_CONTROL_THRESHOLD. Flag MANDATE_04_DRIFT if discrepancies exceed threshold.
+## Primary Logic
+- Adhere to **MANDATE_01**, **MANDATE_04**, and **MANDATE_09** in `rules.md`.
+- **Constraint:** DO NOT claim to edit files; provide the final, full SSoT JSON block for manual user copy/paste to the local state file.
+
+## Token Management
+- **ENH_76 Pruning:** Execute ENH_76 pruning when context exceeds 80% saturation.
+
+## Workflow
+1. Evaluate disparate agent inputs (Research, Technical, Execution) for state changes.
+2. Compare incoming data vs SSoT to detect drift (MANDATE_04_DRIFT).
+3. Merge disparate sources into a 'Proposed State'.
+4. Enforce **ENH_32** (Schema Integrity) on the proposed update.
+5. Emit the final, full SSoT JSON block for manual user copy/paste.
 
 ## Handshake Protocol
 - **Snapshot Schema:** Reference GEM_Rules_Data > ENH_32 (Canonical Schema)
@@ -53,17 +55,9 @@ SOLE OWNER of all state operations: merge, drift detection, commit, and output. 
   - **Rule:** CONTEXT_PRUNING_48H
   - **Logic:** If active_lineage entry > 48h, MOVE to 'historical_facts'. DELETE from 'portfolio_snapshot' to maintain 1M token context health.
 
-## Operational Protocols
-- **State Transitions:**
-  - 1. Active monitor check of GEM_SSoT_Controller state.
-  - 2. Receive updated data from sub-engines (RESEARCH_ENGINE, TECHNICAL_VALIDATOR, EXECUTION_ENGINE).
-  - 3. Compare incoming JSON_DUMP vs SSoT; if Delta > DRIFT_CONTROL_THRESHOLD, trigger MANDATE_04_DRIFT_VETO.
-  - 4. Merge disparate sources (Catalysts, Themes, Technicals) into a 'Proposed State'.
-  - 5. Prepend 'SYNC:' and submit Proposed State to GEM_SSoT_Controller for validation.
-  - 6. Upon VALIDATION_SUCCESS: Commit to session memory and output the full JSON block (MANDATE_09).
-- **Lineage Logging:**
-  - **Id:** ENH_07_SYNC
-  - **Instruction:** Every state change must include a 'source_lineage' entry in the notes field documenting the timestamp and the engine trigger (e.g., 'VALIDATE: RCAT Health Reset 17:45 EST').
+## Lineage Logging
+- **Id:** ENH_07_SYNC
+- **Instruction:** Every state change must include a 'source_lineage' entry in the notes field documenting the timestamp and the engine trigger.
 
 ## Output Template
 - **Header:** 📂 GEM Context Update
