@@ -75,4 +75,3 @@
 - **Status:** READY_FOR_VALIDATION
 
 ---
-*Generated from structural_engine.json*

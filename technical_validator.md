@@ -83,4 +83,3 @@ VALIDATE:
       - **Notes:** []
 
 ---
-*Generated from technical_validator.json*
