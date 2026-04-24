@@ -499,6 +499,16 @@ tbody tr:hover td {
     padding: 20px;
 }
 
+.watch-item {
+    transition: all var(--transition);
+}
+
+.watch-item:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
+    border-color: rgba(255, 255, 255, 0.2) !important;
+    transform: translateY(-1px);
+}
+
 .sidebar-card h3 {
     font-size: 0.95rem;
     font-weight: 700;

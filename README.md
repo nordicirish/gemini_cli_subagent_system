@@ -1,10 +1,10 @@
-# 🤖 Gemini Trading Subagent System
+# 🤖 GEM Trading Agent Framework (v18.0)
 
-**An autonomous, multi-agent AI trading intelligence system powered by the Google Gemini API.**
+**An autonomous, multi-agent AI trading intelligence system powered by Google Gemini & Gemma.**
 
 Each Markdown file (`.md`) is a **system instruction** for a dedicated AI sub-agent. Together, these agents form an institutional-grade trading council that analyses live market data, enforces risk protocols, and produces consensus-driven trade decisions — all accessible via a real-time, glassmorphic Web Dashboard with a built-in AI chat interface.
 
-> **Autonomous & Self-Evolving.** The system is fully autonomous, utilizing **Gemini Context Caching** to ingest a 40k-token rulebook and historical lesson library for near-instant inference. It features a **Self-Optimization Protocol (ENH_61/62)** that allows it to propose and commit its own logic updates to the core rulebook (`rules.md`) after human-in-the-loop validation.
+> **Cost-Optimized & Local-First.** The system has been hardened to eliminate all external Google Drive/Research dependencies, relying exclusively on a local **Single Source of Truth (`ssot.json`)**. It utilizes a hybrid model architecture, routing high-precision logic to **Gemma 4 31B** to maximize performance while remaining within free-tier API quotas.
 
 ---
 
@@ -13,8 +13,8 @@ Each Markdown file (`.md`) is a **system instruction** for a dedicated AI sub-ag
 ### Prerequisites
 
 - Python 3.10+
-- A [Google AI Studio API Key](https://aistudio.google.com/app/apikey) with the Gemini API enabled
-- A `config.json` file in the root with your `FINNHUB_API_KEY` (optional, for GEX data)
+- A [Google AI Studio API Key](https://aistudio.google.com/app/apikey)
+- A `config.json` file for API keys and local model overrides.
 
 ### Installation
 
@@ -39,7 +39,7 @@ The dashboard will be available at **http://localhost:8000**
 
 ## 🏗️ Architecture
 
-The system runs as a single Python process with two concurrent components:
+The system runs as a high-performance Python framework with a dynamic model router:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -49,12 +49,17 @@ The system runs as a single Python process with two concurrent components:
 │  │   FastAPI Web Server      │   │   Background Data Daemon     │   │
 │  │   (http://localhost:8000) │   │   (fetch_stocks.py thread)   │   │
 │  │                          │   │                              │   │
-│  │  GET  /api/data          │   │  Polls Yahoo Finance / yfinance│  │
-│  │  POST /api/chat  ──────────────► Terminal Orchestrator       │   │
-│  │  POST /api/tickers       │   │  Updates GLOBAL_STATE every  │   │
-│  │  POST /api/macro         │   │  30 seconds                  │   │
+│  │  GET  /api/data          │   │  Polls Yahoo Finance / SSoT  │   │
+│  │  POST /api/chat  ──────────────► Model Router (Logic Tier)   │   │
+│  │  POST /api/save_basket   │   │  Updates GLOBAL_STATE every  │   │
+│  │  POST /api/save_watch    │   │  30 seconds                  │   │
 │  └──────────────────────────┘   └──────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
+          │                                  │
+    ┌─────▼────────────────┐           ┌─────▼────────────────┐
+    │  GEMINI 2.5 PRO/FLASH│           │     GEMMA 4 31B      │
+    │  (Reasoning & Search)│           │   (Precision Logic)  │
+    └──────────────────────┘           └──────────────────────┘
 ```
 
 ### Terminal Orchestrator (Chat AI)
@@ -83,71 +88,52 @@ Sub-agents marked as **Research**, **Sentiment**, **Bullish Advocate**, **Red Te
 |------|---------|
 | `web_server.py` | **Primary entry point.** Starts the FastAPI server, initialises all sub-agents, and exposes the `/api/chat` endpoint. |
 | `main.py` | Alternative **CLI-only** orchestrator. Runs the same agent stack in a terminal chat loop. |
-
-### Core Python Modules
-
-| File | Purpose |
-|------|---------|
-| `agent_framework.py` | Initialises the Gemini API client, defines the model fallback hierarchy (`PRO → FAST`), and creates sub-agent tool functions. |
-| `tools.py` | Defines the tool functions available to the Terminal Orchestrator: `read_ssot`, `update_ssot`, `read_trade_lessons`, `get_market_data`. Also starts the background data daemon. |
-| `fetch_stocks.py` | **FastAPI app + background data daemon.** Fetches live ticker data (price, RSI, ATR, VWAP, GEX, dealer posture, etc.) via `yfinance` and Finnhub. Exposes all `/api/*` routes. |
-
-### Persistent Data Files
-
-| File | Purpose |
-|------|---------|
-| `ssot.json` | **Single Source of Truth.** Stores the active portfolio snapshot, mutable trading state, and forensic intelligence. Written to by the Orchestrator via `update_ssot`. |
-| `trade_lessons.json` | **Historical trade lessons.** Appended after each post-trade review. Read by all agents to avoid repeating past mistakes. |
-| `user_config.json` | **Persisted user preferences.** Stores the active ticker list and macro indices. Auto-created on first save; survives server restarts. |
-| `config.json` | API keys and local model overrides. |
-| `trade_lessons.json` | **Historical trade lessons.** Appended autonomously via ENH_62. |
-| `rules.md` | **Canonical Rules Engine.** Now supports autonomous updates and **MANDATE_23 Triage**. |
+| `ssot.json` | **Master Data Store.** The Single Source of Truth for portfolio holdings, cost basis (WAC), and the dynamic watch list. Synchronized in real-time with the Web Dashboard. |
+| `trade_lessons.json` | **Historical trade lessons.** Appended autonomously via ENH_62 to prevent repeating past mistakes. |
+| `rules.md` | **Canonical Rules Engine.** Local rules document containing all mandates, thresholds, and autonomous logic updates. |
+| `config.json` | **API Configuration.** Keys for Gemini, Finnhub, and local model routing overrides. |
 
 ---
 
 ## ⚡ High-Performance Features
 
+### 🧠 Hybrid Model Routing (v18.0)
+To optimize for both **cost** and **precision**, the system now routes sub-agents to specific model tiers:
+- **GEMMA Tier (Gemma 4 31B)**: Handles deterministic, JSON-heavy, and structural analysis (Context, Structural, Technical Validator).
+- **FLASH Tier (Gemini 2.5 Flash)**: Handles high-speed research, social sentiment, and news velocity monitoring.
+- **PRO Tier (Gemini 2.5 Pro)**: Reserved for the Terminal Orchestrator and complex Macro Arbitration.
+
+### 💼 Dynamic Ticker Management
+The dashboard now features an **Inline Ticker Manager**:
+- **Basket Management**: Add/Delete tickers directly in the portfolio view. Update shares and cost basis (UAC) with instant SSoT synchronization.
+- **Watch List**: Maintain a separate list of monitored symbols. The data daemon automatically begins polling any ticker added to the watch list.
+- **SSoT Sync**: All UI updates trigger a `POST` to the framework, ensuring the AI Council always analyzes the most current state of your universe.
+
 ### 🚀 Context Caching (ENH_CACHE_01)
 The system aggregates the entire rulebook, trade history, and subagent instructions into a **Gemini Context Cache**. This reduces the per-turn token cost and eliminates "cold start" latency, allowing the Orchestrator to respond in seconds.
-
-### 🧠 Torque-Based Triage (MANDATE_23)
-The Orchestrator now intelligently scales its analytical depth based on news magnitude:
-- **Minor News (Torque < 5)**: Dispatches the **Neutral Structuralist** only for structural capacity verification.
-- **Major News (Torque >= 5)**: Triggers a **Full Council Audit** (Bullish + Red Team + Structuralist) for thesis re-rating and trade execution.
 
 ### 🏛️ Autonomous Rule Evolution (ENH_61/62)
 The system "Learns" from market events. When a high-conviction pattern is identified, the **Context Engine** proposes a new rule. Once you provide **MANDATE_21** approval, the system autonomously modifies `rules.md`.
 
-### 🕓 Temporal Alignment (Wall Street Time)
-The system is anchored to **US/Eastern (New York) Time** regardless of your local timezone. This ensures the Council correctly identifies if the market is **OPEN** and applies the correct intraday vs. after-hours protocols.
-
-### 💎 Modernized Council UI
-- **Session Manager**: Start fresh conversations and archive past deliberations into a **Session History** library (last 10 sessions).
-- **Global Stop Button**: Instantly interrupt long-running tool executions or model deliberations.
-- **Persistent Chat**: Conversations survive page refreshes and modal closures via `localStorage`.
-- **Resizable Interface**: User-adjustable chat panels and multi-line input areas.
-- **Full-Width Output**: Forensic reports expand for maximum readability.
-
 ### Sub-Agent Markdown Instructions
 
-Each file below is loaded as a system instruction for a dedicated AI sub-agent via `agent_framework.py`. The system has been migrated to **Markdown (.md)** for improved token efficiency and stricter behavioural adherence:
+Each file below is loaded as a system instruction for a dedicated AI sub-agent. High-precision nodes have been migrated to the **GEMMA** tier for improved instruction-following and cost efficiency:
 
 | File | Agent Name | Mode | Role |
 |------|-----------|------|------|
 | `terminal.md` | **Terminal Orchestrator** | PRO | Routes user queries, delegates to sub-agents, synthesises final decisions |
-| `macro_arbiter.md` | **Macro Sentinel** | PRO | Macro regime detection, Calendar Shield, exogenous shock monitoring (Search Enabled) |
-| `bullish_gem.md` | **Bullish Advocate** | PRO | Constructs the strongest bull case + self-critique (Search Enabled) |
-| `red_team_gem.md` | **Red Team Pessimist** | PRO | Constructs the strongest bear case + self-critique (Search Enabled) |
-| `neutral_gem.md` | **Neutral Structuralist** | PRO | Unbiased structural analysis; breaks ties with quantitative evidence |
+| `macro_arbiter.md` | **Macro Sentinel** | PRO | Macro regime detection, Calendar Shield monitoring (Search Enabled) |
+| `bullish_gem.md` | **Bullish Advocate** | FLASH | Constructs the strongest bull case + self-critique (Search Enabled) |
+| `red_team_gem.md` | **Red Team Pessimist** | FLASH | Constructs the strongest bear case + self-critique (Search Enabled) |
+| `neutral_gem.md` | **Neutral Structuralist**| GEMMA | Unbiased structural analysis; breaks ties with quantitative evidence |
 | `execution.md` | **Execution Engine** | PRO | Generates `EXECUTION_PAYLOAD` JSON; manages sizing and order routing |
-| `structural_engine.md` | **Structural Engine** | FAST | GEX regime, dark pool posture, VWAP structure analysis |
-| `technical_validator.md` | **Technical Validator** | PRO | Final gate — validates thesis against quantitative restrictions (Search Enabled) |
-| `research.md` | **Research Engine** | PRO | Live web search for macro narrative, filings, sector rotation signals |
-| `sentiment_engine.md` | **Sentiment Engine** | PRO | Social sentiment, news velocity, dark pool order flow (Search Enabled) |
-| `context_engine.md` | **Context Engine** | PRO | SSoT state bridge — maintains session continuity and trade thesis integrity |
-| `gex_engine.md` | **GEX Engine** | PRO | Gamma Exposure modelling, dealer hedging flow, pin risk analysis |
+| `structural_engine.md` | **Structural Engine** | GEMMA | GEX regime, dark pool posture, VWAP structure analysis |
+| `technical_validator.md` | **Technical Validator** | GEMMA | Final gate — validates thesis against quantitative restrictions |
+| `research.md` | **Research Engine** | FLASH | Live web search for macro narrative, filings, sector rotation signals |
+| `sentiment_engine.md` | **Sentiment Engine** | FLASH | Social sentiment, news velocity, dark pool order flow (Search Enabled) |
+| `context_engine.md` | **Context Engine** | GEMMA | SSoT state bridge — maintains session continuity and trade thesis integrity |
+| `gex_engine.md` | **GEX Engine** | GEMMA | Gamma Exposure modelling, dealer hedging flow, pin risk analysis |
 | `post_trade_review.md` | **Review Engine** | PRO | Post-trade reflection — thesis vs. outcome, misfire detection, lesson authoring |
-| `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Compliance guardian — validates all decisions against `rules.md` mandates |
 
 ### Model Hierarchy
 
@@ -166,14 +152,13 @@ If a model returns a `429 Resource Exhausted` error, the system automatically pa
 
 ## 🖥️ Web Dashboard
 
-The dashboard is served at **http://localhost:8000** and includes:
+The glassmorphic dashboard is served at **http://localhost:8000** and includes:
 
-- **Real-time market table** — Ticker, Price, Gap %, Volume, ATR %, RSI, VWAP, Trend, Dealer Posture, Score
-- **Macro HUD** — Live cards for tracked macro indices (VIX, SPY, IEF, UUP, GDX, etc.)
-- **Alerts panel** — Surfaced signal alerts from the data daemon
-- **GEM Orchestrator Chat** — Full AI chat interface. Supports **Markdown rendering**, parallel "Council Debate" synthesis, and dynamic "Thinking..." indicators.
-- **Manage Tickers modal** — Add/remove tracked equity tickers (saved to `user_config.json`)
-- **Indices modal** — Add/remove tracked macro indices (saved to `user_config.json`)
+- **Real-time market table** — Ticker, Price, Gap %, Volume, ATR %, RSI, VWAP, Trend, Dealer Posture, Score.
+- **Macro HUD** — Live cards for tracked macro indices (VIX, SPY, IEF, UUP, GDX, etc.).
+- **Dynamic Portfolio Basket** — Inline management of your holdings. Add/Delete tickers and update cost basis (`UAC ($)`) with real-time **SSoT Sync**.
+- **Interactive Watch List** — Monitor new setups by injecting symbols directly into the background data daemon.
+- **GEMINI AI COUNCIL Chat** — Full AI chat interface. Supports **Markdown rendering**, parallel "Council Debate" synthesis, and dynamic "Thinking..." indicators.
 
 ### Keyboard Shortcuts
 - `Enter` — Send chat message
@@ -183,9 +168,13 @@ The dashboard is served at **http://localhost:8000** and includes:
 
 ## ⚙️ Configuration
 
-### Changing Tracked Tickers
+### Managing the Ticker Universe
 
-Click **📊 Manage Tickers** in the dashboard sidebar. Changes are saved immediately to `user_config.json` and persist across server restarts.
+The system has moved away from hard-coded configurations. All tickers are managed via the **Portfolio Basket** and **Watch List** on the dashboard. 
+1.  **Add Ticker**: Type the symbol into the `SYM` field and click `+`.
+2.  **Edit Basis**: Update your shares or cost basis directly in the table.
+3.  **Sync**: Click **SYNC** to commit your changes to the local `ssot.json` data store. 
+    *   *Note: Changes are instantly reflected in the background data poller.*
 
 ### Changing the API Key
 

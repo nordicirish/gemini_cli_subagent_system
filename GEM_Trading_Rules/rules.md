@@ -43,7 +43,6 @@
 - ENH_30: Forensic Structural Filtering
 - ENH_31: Temporal Logic & Catalyst Verification
 - ENH_32: Data Schema & GEX Calculation Protocol
-- ENH_33: Dynamic Research Synchronization
 
 - ENH_36: Post-ATR Execution Gate
 - ENH_37: Alpha Catalyst Scrutiny (Bullish)
@@ -83,7 +82,6 @@
 - MANDATE_08: SCHEMA_ENFORCEMENT (Forensic Field Validation)
 - MANDATE_09: STATE_EMISSION (Untruncated JSON Requirement)
 - MANDATE_10: SCHEMA_VALIDATION (Narrative & Array Checks)
-- MANDATE_11: RESEARCH_SYNC (Trading_Research Folder Link)
 - MANDATE_12: BOOT_SYNC (Session Start File Fetch)
 - MANDATE_13: CONSENSUS_SCRUTINY (Weighted Agent Voting)
 - MANDATE_14: ALPHA_CATALYST (Bullish Advocate Lens)
@@ -155,9 +153,6 @@
 - - **id**: MANDATE_10_SCHEMA_VALIDATION
   - **status**: STRICT
   - **instruction**: Verify 'forensic_intelligence' contains narrative strings and 'portfolio_snapshot' is an array of objects.
-- - **id**: MANDATE_11_RESEARCH_SYNC
-  - **status**: STRICT_ENFORCE
-  - **instruction**: Maintain active sync with 'Trading_Research' folder. Execute delta-check prior to EVERY response. Folder data overrides general training.
 - - **id**: MANDATE_12_BOOT_SYNC
   - **trigger**: SESSION_START
   - **status**: STRICT_ENFORCE
@@ -434,10 +429,6 @@
   - **calculation_logic**:
     - **gex_exposure**: shares * net_gex_total
     - **total_portfolio_gex**: sum(gex_exposure)
-- - **id**: ENH_33
-  - **title**: Dynamic Research Synchronization
-  - **instruction**: Maintain active synchronization with the local 'Trading_Research' directory. Execute dynamic re-reads of relevant PDF and text research materials between every analytical turn.
-
 - - **id**: ENH_37
   - **title**: Alpha Catalyst Scrutiny (Bullish)
   - **instruction**: Rule: Identify 13-F/144 filings and positive momentum catalysts. Output: Confidence Score (0.0-1.0).
@@ -1291,9 +1282,9 @@
 ## Infrastructure
 - **authority**: CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.
 - **RULES_DOC**:
-  - **path**: GoogleDrive://GEM_Trading_Rules/rules
-  - **description**: Primary rules document containing mandates and thresholds (Attached Knowledge Base)
-  - **access_method**: ATTACHED_KNOWLEDGE_BASE
+  - **path**: GEM_Trading_Rules/rules.md
+  - **description**: Primary rules document containing mandates and thresholds
+  - **access_method**: LOCAL_FILE
 - **SSOT_DOC**:
   - **path**: payload.local_storage_state
   - **description**: Single Source of Truth state file (Injected via Prompt Payload)
@@ -1302,7 +1293,3 @@
   - **path**: payload.trade_lessons
   - **description**: File containing codified post-trade lessons (Injected via Prompt Payload)
   - **access_method**: PROMPT_PAYLOAD
-- **RESEARCH_FOLDER**:
-  - **path**: Trading_Research
-  - **description**: Folder containing research materials and PDF uploads
-  - **access_method**: ATTACHED_KNOWLEDGE_BASE

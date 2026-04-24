@@ -62,42 +62,42 @@ framework.setup_context_cache(subagent_files=subagent_instructions)
 macro_sentinel = framework.create_agent_tool(
     name="Macro Sentinel",
     json_file="macro_arbiter.json",
-    mode="PRO",
+    mode="FLASH",
     agent_tools=[tools.read_ssot, tools.perform_web_forensic_search]
 )
 
 research_engine = framework.create_agent_tool(
     name="Research Engine", 
     json_file="research.json", 
-    mode="PRO", 
+    mode="FLASH", 
     agent_tools=[tools.perform_web_forensic_search]
 )
 
 sentiment_engine = framework.create_agent_tool(
     name="Sentiment Engine", 
     json_file="sentiment_engine.json", 
-    mode="PRO",
+    mode="FLASH",
     agent_tools=[tools.perform_web_forensic_search]
 )
 
 structural_engine = framework.create_agent_tool(
     name="Structural Engine", 
     json_file="structural_engine.json", 
-    mode="PRO",
+    mode="GEMMA",
     agent_tools=[tools.read_ssot, tools.get_market_data, tools.perform_web_forensic_search]
 )
 
 context_engine = framework.create_agent_tool(
     name="Context Engine", 
     json_file="context_engine.json", 
-    mode="PRO",
+    mode="GEMMA",
     agent_tools=[tools.read_ssot, tools.update_ssot, tools.read_trade_lessons, tools.update_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search, tools.update_rules]
 )
 
 technical_validator = framework.create_agent_tool(
     name="Technical Validator",
     json_file="technical_validator.json",
-    mode="PRO",
+    mode="GEMMA",
     agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search]
 )
 
@@ -105,22 +105,22 @@ technical_validator = framework.create_agent_tool(
 bullish_advocate = framework.create_agent_tool(
     name="Bullish Advocate", 
     json_file="bullish_gem.json",
-    mode="PRO",
+    mode="FLASH",
     agent_tools=[tools.perform_web_forensic_search]
 )
 
 red_team_pessimist = framework.create_agent_tool(
     name="Red Team Pessimist", 
     json_file="red_team_gem.json",
-    mode="PRO",
+    mode="FLASH",
     agent_tools=[tools.perform_web_forensic_search]
 )
 
 
 neutral_structuralist = framework.create_agent_tool(
     name="Neutral Structuralist", 
-    json_file="neutral_gem.json",
-    mode="PRO",
+    json_file="neutral_gem.json", 
+    mode="GEMMA",
     agent_tools=[tools.perform_web_forensic_search]
 )
 
@@ -188,7 +188,8 @@ for model_name in terminal_models:
             break
         continue
 
-ORCHESTRATOR_MODEL = "gemini-2.5-pro" # Default tier
+# Use the verified valid model from the PRO tier, fallback to gemini-2.5-pro
+ORCHESTRATOR_MODEL = valid_model or "gemini-2.5-pro"
 
 # Initialize the global Chat object
 def create_new_session():
@@ -256,11 +257,8 @@ def reset_chat():
 @app.post("/api/set_model")
 def set_model(data: dict):
     global ORCHESTRATOR_MODEL, global_chat_session, _session_hydrated
+    # Fallback to current model if none provided
     new_model = data.get("model", ORCHESTRATOR_MODEL)
-    
-    # FAIL-SAFE: Map legacy strings to validated preview strings
-    if new_model == "gemini-3.1-pro":
-        new_model = "gemini-3.1-pro-preview"
 
     if new_model != ORCHESTRATOR_MODEL:
         framework.log(f"[System] Switching Reasoning Tier to {new_model}...")
@@ -416,14 +414,10 @@ def get_basket():
     try:
         if os.path.exists("ssot.json"):
             with open("ssot.json", "r") as f:
-                content = f.read()
-                if not content.strip(): return []
-                data = json.loads(content)
-                # Map SSoT fields to UI fields
+                data = json.load(f)
                 raw_basket = data.get("portfolio_snapshot", [])
                 return [{"ticker": i["ticker"], "shares": i.get("shares", 0), "wac": i.get("wac", 0)} for i in raw_basket]
-    except Exception as e:
-        print(f"SSoT Read Warning: {e}")
+    except: pass
     return []
 
 @app.post("/api/save_basket")
@@ -432,22 +426,39 @@ def save_basket(basket: List[BasketItem]):
         if os.path.exists("ssot.json"):
             with open("ssot.json", "r") as f:
                 data = json.load(f)
-            
-            # Update the specific snapshot while preserving other SSoT keys
             new_snapshot = []
             for item in basket:
-                new_snapshot.append({
-                    "ticker": item.ticker,
-                    "shares": item.shares,
-                    "wac": item.wac
-                })
+                new_snapshot.append({"ticker": item.ticker, "shares": item.shares, "wac": item.wac})
             data["portfolio_snapshot"] = new_snapshot
-            
             with open("ssot.json", "w") as f:
                 json.dump(data, f, indent=2)
-            framework.log("[System] SSoT Basket synced manually.")
+            framework.log("[System] SSoT Basket updated.")
     except Exception as e:
-        framework.log(f"[Error] Basket Sync Failed: {e}")
+        framework.log(f"[Error] Basket Save Failed: {e}")
+    return {"status": "success"}
+
+@app.get("/api/get_watch_list")
+def get_watch_list():
+    try:
+        if os.path.exists("ssot.json"):
+            with open("ssot.json", "r") as f:
+                data = json.load(f)
+                return data.get("watched_tickers", [])
+    except: pass
+    return []
+
+@app.post("/api/save_watch_list")
+def save_watch_list(watch_list: List[str]):
+    try:
+        if os.path.exists("ssot.json"):
+            with open("ssot.json", "r") as f:
+                data = json.load(f)
+            data["watched_tickers"] = watch_list
+            with open("ssot.json", "w") as f:
+                json.dump(data, f, indent=2)
+            framework.log("[System] Watch list updated.")
+    except Exception as e:
+        framework.log(f"[Error] Watch List Save Failed: {e}")
     return {"status": "success"}
 
 @app.get("/api/system_logs")

@@ -30,9 +30,6 @@
         "ENH_30: Forensic Structural Filtering",
         "ENH_31: Temporal Logic & Catalyst Verification",
         "ENH_32: Data Schema & GEX Calculation Protocol",
-        "ENH_33: Dynamic Research Synchronization",
-        "ENH_34: Auto Load GEM-Context-SSOT doc",
-        "ENH_35: Attachment & Source Verification",
         "ENH_36: Post-ATR Execution Gate",
         "ENH_37: Alpha Catalyst Scrutiny (Bullish)",
         "ENH_38: Adversarial Risk Rebuttal (Red Team)",
@@ -70,7 +67,6 @@
         "MANDATE_08: SCHEMA_ENFORCEMENT (Forensic Field Validation)",
         "MANDATE_09: STATE_EMISSION (Untruncated JSON Requirement)",
         "MANDATE_10: SCHEMA_VALIDATION (Narrative & Array Checks)",
-        "MANDATE_11: RESEARCH_SYNC (Trading_Research Folder Link)",
         "MANDATE_12: BOOT_SYNC (Session Start File Fetch)",
         "MANDATE_13: CONSENSUS_SCRUTINY (Weighted Agent Voting)",
         "MANDATE_14: ALPHA_CATALYST (Bullish Advocate Lens)",
@@ -164,11 +160,6 @@
             "id": "MANDATE_10_SCHEMA_VALIDATION",
             "status": "STRICT",
             "instruction": "Verify 'forensic_intelligence' contains narrative strings and 'portfolio_snapshot' is an array of objects."
-        },
-        {
-            "id": "MANDATE_11_RESEARCH_SYNC",
-            "status": "STRICT_ENFORCE",
-            "instruction": "Maintain active sync with 'Trading_Research' folder. Execute delta-check prior to EVERY response. Folder data overrides general training."
         },
         {
             "id": "MANDATE_12_BOOT_SYNC",
@@ -563,36 +554,6 @@
             "calculation_logic": {
                 "gex_exposure": "shares * net_gex_total",
                 "total_portfolio_gex": "sum(gex_exposure)"
-            }
-        },
-        {
-            "id": "ENH_33",
-            "title": "Dynamic Research Synchronization",
-            "instruction": "Prioritize '@Google Drive' extension for 'Trading_Research' folder. Trigger dynamic re-reads between turns."
-        },
-        {
-            "id": "ENH_34",
-            "title": "Auto Load GEM-Context-SSOT doc",
-            "status": "ENABLED",
-            "instruction": "MANDATORY_SESSION_START_SYNC",
-            "protocol": {
-                "target_file": "GEM-Context-SSOT",
-                "source_provider": "GOOGLE_DRIVE_CENTRAL",
-                "boot_sequence": "PRIORITY_0",
-                "sync_verification": "MANDATE_12_COMPLIANT"
-            }
-        },
-        {
-            "id": "ENH_35",
-            "title": "Attachment & Source Verification",
-            "status": "ENABLED",
-            "instruction": "The system MUST perform a metadata scan for both the 'GEM-Context-SSOT' file and the 'Trading_Research' folder/file cluster at session start or turn trigger.",
-            "protocol": {
-                "gate_01_ssot": "If 'GEM-Context-SSOT' is NULL -> TRIGGER: CRITICAL_SYNC_ALERT.",
-                "gate_02_research": "If 'Trading_Research' files are NULL -> TRIGGER: DATA_STAGNATION_WARNING.",
-                "action": "ISSUE_USER_REMINDER",
-                "template": "CRITICAL: SSoT Source or Research Folder Missing. \n- SSoT Status: {ssot_status}\n- Research Status: {research_status}\nPlease attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploaded to restore data lineage.",
-                "bypass_condition": "Explicit RAW_JSON provided for SSoT AND forensic data provided for Research."
             }
         },
         {
@@ -1681,7 +1642,7 @@
     "infrastructure": {
         "authority": "CANONICAL \u00e2\u20ac\u201d This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.",
         "RULES_DOC": {
-            "path": "GoogleDrive://GEM_Trading_Rules/rules",
+            "path": "GEM_Trading_Rules/rules.md",
             "description": "Primary rules document containing mandates and thresholds (Attached Knowledge Base)",
             "access_method": "ATTACHED_KNOWLEDGE_BASE"
         },
@@ -1694,11 +1655,6 @@
             "path": "payload.trade_lessons",
             "description": "File containing codified post-trade lessons (Injected via Prompt Payload)",
             "access_method": "PROMPT_PAYLOAD"
-        },
-        "RESEARCH_FOLDER": {
-            "path": "Trading_Research",
-            "description": "Folder containing research materials and PDF uploads",
-            "access_method": "ATTACHED_KNOWLEDGE_BASE"
         }
     }
 }

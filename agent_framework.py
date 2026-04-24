@@ -11,10 +11,10 @@ from google.genai import types
 # Model definitions
 # ---------------------------------------------------------------------------
 MODEL_MAPPING = {
-    "PRO":      ["gemini-2.5-pro", "gemini-3.1-pro-preview", "gemma-4-31b-it"],
+    "PRO":      ["gemini-2.5-pro", "gemini-1.5-pro"],
     "FLASH":    ["gemini-2.5-flash", "gemma-4-31b-it", "gemini-1.5-flash"],
-    "GEMMA":    ["gemini-2.5-pro", "gemma-4-31b-it"],
-    "THINKING": ["gemini-2.5-pro"]
+    "GEMMA":    ["gemma-4-31b-it", "gemini-1.5-pro"],
+    "THINKING": ["gemini-2.5-flash", "gemini-1.5-pro"]
 }
 
 
@@ -39,6 +39,7 @@ class AgentFramework:
         # Caching state (ENH_CACHE_01)
         self.cached_content_name = None
         self.last_cache_hash = None
+        self.cache_disabled = False # New: Track Free Tier limitations
 
     def log(self, message: str):
         """Helper to print to console and send to callback if exists."""
@@ -62,7 +63,7 @@ class AgentFramework:
         base_list = MODEL_MAPPING.get(mode, MODEL_MAPPING["PRO"])
         # Override with config.json if present
         overrides = {
-            "gemini-3.1-pro-preview": self._local_config.get("MODEL_PRO_1", "gemini-3.1-pro-preview"),
+            "gemini-2.5-pro": self._local_config.get("MODEL_PRO_1", "gemini-2.5-pro"),
             "gemma-4-31b-it": self._local_config.get("MODEL_GEMMA", "gemma-4-31b-it"),
             "gemini-2.5-flash": self._local_config.get("MODEL_FLASH", "gemini-2.5-flash"),
         }
@@ -107,6 +108,9 @@ class AgentFramework:
         Aggregates rules.md, trade_lessons.json, and subagent instructions into a 
         CachedContent object to reduce latency and token usage.
         """
+        if getattr(self, 'cache_disabled', False):
+            return
+
         self.log(f"[System] Initializing Context Cache assessment for {model or 'default'}...")
         
         # 1. Collect all static content
@@ -158,7 +162,12 @@ class AgentFramework:
             self.last_cache_hash = content_hash
             self.log(f"[System] Context Cache SUCCESS: {cache.name}")
         except Exception as e:
-            self.log(f"[System] Context Cache FAILED: {e}. Falling back to standard inference.")
+            error_str = str(e)
+            if "RESOURCE_EXHAUSTED" in error_str or "limit=0" in error_str:
+                self.log(f"[Warning] Context Cache DISABLED (Free Tier detected). Switching to Standard Inference.")
+                self.cache_disabled = True
+            else:
+                self.log(f"[System] Context Cache FAILED: {e}. Falling back to standard inference.")
             self.cached_content_name = None
 
     # -----------------------------------------------------------------------

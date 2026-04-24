@@ -183,18 +183,20 @@ def perform_web_forensic_search(query: str) -> str:
         from google import genai
         from google.genai import types
         
-        # Load config for API Key
+        # Load config for model tier and API Key
         api_key = None
+        flash_model = "gemini-2.5-flash" # Default
         if os.path.exists("config.json"):
             with open("config.json", "r") as f:
                 config = json.load(f)
                 api_key = config.get("GEMINI_API_KEY")
+                flash_model = config.get("MODEL_FLASH", flash_model)
         
         client = genai.Client(api_key=api_key) if api_key else genai.Client()
         
         # Use a stable flash model for the search-only retrieval
         response = client.models.generate_content(
-            model="gemini-2.5-flash", 
+            model=flash_model, 
             contents=f"Search and summarize the following for financial forensic audit: {query}",
             config=types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())],

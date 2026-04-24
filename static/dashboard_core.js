@@ -15,15 +15,25 @@ const Dashboard = {
         this.indicator = document.getElementById('live-indicator');
         this.macroGrid = document.getElementById('dynamic-macro-cards');
         this.basketBody = document.getElementById('basket-body');
+        this.watchContainer = document.getElementById('watch-list-container');
 
-        console.log("Dashboard Core v40 Initialized");
+        console.log("Dashboard Core v41 Initialized");
         
         // Initial setup
         await this.fetchConfig();
         await this.fetchBasket();
+        await this.fetchWatchList();
         
         if (document.getElementById('save-basket-btn')) {
             document.getElementById('save-basket-btn').onclick = () => this.saveBasket();
+        }
+
+        if (document.getElementById('add-to-basket-btn')) {
+            document.getElementById('add-to-basket-btn').onclick = () => this.addToBasket();
+        }
+
+        if (document.getElementById('add-to-watch-btn')) {
+            document.getElementById('add-to-watch-btn').onclick = () => this.addToWatchList();
         }
 
         this.poll();
@@ -47,33 +57,158 @@ const Dashboard = {
                     <td style="padding: 4px; color: var(--accent-blue); font-weight: 700;">${item.ticker}</td>
                     <td style="padding: 4px;"><input type="number" class="basket-input" data-key="shares" value="${item.shares}" style="width: 50px; background: transparent; border: 1px solid rgba(255,255,255,0.1); color: white; font-size: 0.8rem; border-radius: 4px;"></td>
                     <td style="padding: 4px;"><input type="number" step="0.01" class="basket-input" data-key="wac" value="${item.wac}" style="width: 60px; background: transparent; border: 1px solid rgba(255,255,255,0.1); color: white; font-size: 0.8rem; border-radius: 4px;"></td>
+                    <td style="padding: 4px;"><button onclick="Dashboard.deleteFromBasket(${index})" style="background: transparent; border: none; color: #da3633; cursor: pointer; font-size: 1rem;">×</button></td>
                 </tr>
             `;
         });
         this.basketBody.innerHTML = html;
     },
 
+    async addToBasket() {
+        const input = document.getElementById('add-basket-ticker');
+        const ticker = input.value.trim().toUpperCase();
+        if (!ticker) return;
+
+        // Get current basket
+        const rows = this.basketBody.querySelectorAll('tr');
+        const basket = [];
+        rows.forEach(row => {
+            basket.push({
+                ticker: row.cells[0].textContent,
+                shares: parseFloat(row.querySelector('[data-key="shares"]').value),
+                wac: parseFloat(row.querySelector('[data-key="wac"]').value)
+            });
+        });
+
+        if (basket.find(i => i.ticker === ticker)) {
+            alert("Ticker already in basket.");
+            return;
+        }
+
+        basket.push({ ticker, shares: 0, wac: 0 });
+        input.value = '';
+        await this.pushBasketUpdate(basket);
+    },
+
+    async deleteFromBasket(index) {
+        const rows = this.basketBody.querySelectorAll('tr');
+        const basket = [];
+        rows.forEach((row, idx) => {
+            if (idx === index) return;
+            basket.push({
+                ticker: row.cells[0].textContent,
+                shares: parseFloat(row.querySelector('[data-key="shares"]').value),
+                wac: parseFloat(row.querySelector('[data-key="wac"]').value)
+            });
+        });
+        await this.pushBasketUpdate(basket);
+    },
+
     async saveBasket() {
         const rows = this.basketBody.querySelectorAll('tr');
-        const newBasket = [];
+        const basket = [];
         rows.forEach(row => {
-            const ticker = row.cells[0].textContent;
-            const shares = parseFloat(row.querySelector('[data-key="shares"]').value);
-            const wac = parseFloat(row.querySelector('[data-key="wac"]').value);
-            newBasket.push({ ticker, shares, wac });
+            basket.push({
+                ticker: row.cells[0].textContent,
+                shares: parseFloat(row.querySelector('[data-key="shares"]').value),
+                wac: parseFloat(row.querySelector('[data-key="wac"]').value)
+            });
         });
+        await this.pushBasketUpdate(basket);
+    },
+
+    async pushBasketUpdate(basket) {
+        const btn = document.getElementById('save-basket-btn');
+        const originalText = btn ? btn.textContent : 'SYNC';
+        if (btn) {
+            btn.textContent = 'SYNCING...';
+            btn.disabled = true;
+        }
 
         try {
             const res = await fetch('/api/save_basket', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newBasket)
+                body: JSON.stringify(basket)
             });
             if (res.ok) {
-                alert("SSoT Basket Updated.");
-                this.poll(); // Refresh dashboard with new cost basis
+                if (btn) btn.textContent = 'SAVED ✅';
+                await this.fetchBasket();
+                this.poll(); // Refresh dashboard
+            } else {
+                if (btn) btn.textContent = 'ERROR ❌';
             }
-        } catch (e) { console.error("Save basket failed", e); }
+        } catch (e) { 
+            console.error("Basket update failed", e);
+            if (btn) btn.textContent = 'ERROR ❌';
+        } finally {
+            setTimeout(() => {
+                if (btn) {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }
+            }, 2000);
+        }
+    },
+
+    async fetchWatchList() {
+        try {
+            const res = await fetch('/api/get_watch_list');
+            const data = await res.json();
+            this.renderWatchList(data);
+        } catch (e) { console.error("Watch list fetch failed", e); }
+    },
+
+    renderWatchList(list) {
+        if (!this.watchContainer || !Array.isArray(list)) return;
+        let html = '';
+        list.forEach((ticker, index) => {
+            html += `
+                <div class="watch-item" style="background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 5px; font-size: 0.75rem;">
+                    <span style="font-weight: 600; color: #8b949e;">${ticker}</span>
+                    <button onclick="Dashboard.deleteFromWatchList(${index})" style="background: transparent; border: none; color: #da3633; cursor: pointer; padding: 0; font-size: 0.9rem;">×</button>
+                </div>
+            `;
+        });
+        this.watchContainer.innerHTML = html;
+    },
+
+    async addToWatchList() {
+        const input = document.getElementById('add-watch-ticker');
+        const ticker = input.value.trim().toUpperCase();
+        if (!ticker) return;
+
+        try {
+            const res = await fetch('/api/get_watch_list');
+            const list = await res.json();
+            if (list.includes(ticker)) return;
+            list.push(ticker);
+            await this.pushWatchListUpdate(list);
+            input.value = '';
+        } catch (e) {}
+    },
+
+    async deleteFromWatchList(index) {
+        try {
+            const res = await fetch('/api/get_watch_list');
+            const list = await res.json();
+            list.splice(index, 1);
+            await this.pushWatchListUpdate(list);
+        } catch (e) {}
+    },
+
+    async pushWatchListUpdate(list) {
+        try {
+            const res = await fetch('/api/save_watch_list', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(list)
+            });
+            if (res.ok) {
+                await this.fetchWatchList();
+                this.poll(); // Refresh dashboard
+            }
+        } catch (e) { console.error("Watch list update failed", e); }
     },
 
     async fetchConfig() {
@@ -93,16 +228,13 @@ const Dashboard = {
             const activeInput = document.activeElement;
             if (!activeInput || !activeInput.classList.contains('basket-input')) {
                 await this.fetchBasket();
+                await this.fetchWatchList();
             }
 
             const res = await fetch('/api/data');
+            if (!res.ok) throw new Error("Data fetch failed");
             const state = await res.json();
             
-            // Handle System Status Warnings
-            const banner = document.getElementById('system-warning-banner');
-            const bannerText = document.getElementById('system-warning-text');
-            // System Status Warnings removed as LOCAL_ONLY mode is deprecated
-
             if (state && state.tickers) {
                 this.renderTable(state.tickers);
                 this.renderMacroHud(state.tickers);
@@ -200,4 +332,6 @@ const Dashboard = {
     }
 };
 
+// Global Exposure
+window.Dashboard = Dashboard;
 window.addEventListener('load', () => Dashboard.init());

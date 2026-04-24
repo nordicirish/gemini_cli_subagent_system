@@ -85,7 +85,11 @@
                 <div class="sidebar-card glass-panel basket-card">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                         <h3 style="margin: 0;">💼 BASKET</h3>
-                        <button id="save-basket-btn" style="background: var(--accent-blue); color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; cursor: pointer;">SYNC SSOT</button>
+                        <div style="display: flex; gap: 5px;">
+                            <input type="text" id="add-basket-ticker" placeholder="SYM" style="width: 40px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px; font-size: 0.7rem; padding: 2px 4px;">
+                            <button id="add-to-basket-btn" style="background: var(--accent-green); color: white; border: none; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; cursor: pointer;">+</button>
+                            <button id="save-basket-btn" style="background: var(--accent-blue); color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; cursor: pointer;">SYNC</button>
+                        </div>
                     </div>
                     <div id="basket-container" style="max-height: 200px; overflow-y: auto;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
@@ -93,7 +97,8 @@
                                 <tr style="text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1);">
                                     <th style="padding: 4px;">SYM</th>
                                     <th style="padding: 4px;">AMT</th>
-                                    <th style="padding: 4px;">UAC</th>
+                                    <th style="padding: 4px;">UAC ($)</th>
+                                    <th style="padding: 4px;"></th>
                                 </tr>
                             </thead>
                             <tbody id="basket-body">
@@ -103,10 +108,22 @@
                     </div>
                 </div>
 
+                <div class="sidebar-card glass-panel watch-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <h3 style="margin: 0;">👀 WATCH LIST</h3>
+                        <div style="display: flex; gap: 5px;">
+                            <input type="text" id="add-watch-ticker" placeholder="SYM" style="width: 40px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px; font-size: 0.7rem; padding: 2px 4px;">
+                            <button id="add-to-watch-btn" style="background: var(--accent-green); color: white; border: none; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; cursor: pointer;">+</button>
+                        </div>
+                    </div>
+                    <div id="watch-list-container" style="max-height: 150px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 6px;">
+                        <!-- Watch list items injected here -->
+                    </div>
+                </div>
+
                 <div class="sidebar-card glass-panel controls-card">
                     <div class="control-row">
-                        <button id="open-ticker-modal-btn" class="glow-btn outline block-btn">📊 MANAGE TICKERS</button>
-                        <button id="open-indices-modal-btn" class="glow-btn outline block-btn">📈 INDICES</button>
+                        <button id="open-indices-modal-btn" class="glow-btn outline block-btn">📈 MANAGE INDICES</button>
                     </div>
                 </div>
             </div>
@@ -123,8 +140,9 @@
                 </div>
                 <div class="modern-header-right" style="display: flex; align-items: center; gap: 12px;">
                     <select id="model-selector" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 5px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; outline: none;">
-                        <option value="gemini-3.1-pro-preview" style="background: #1a1a1a; color: white;">3.1 PRO (MAX)</option>
                         <option value="gemini-2.5-pro" selected style="background: #1a1a1a; color: white;">2.5 PRO (DEFAULT)</option>
+                        <option value="gemini-2.5-flash" style="background: #1a1a1a; color: white;">2.5 FLASH (COST-FREE)</option>
+                        <option value="gemma-4-31b-it" style="background: #1a1a1a; color: white;">GEMMA 4 31B (PRECISION)</option>
                         <option value="gemini-1.5-pro" style="background: #1a1a1a; color: white;">1.5 PRO (STABLE)</option>
                         <option value="gemini-1.5-flash" style="background: #1a1a1a; color: white;">1.5 FLASH (TURBO)</option>
                     </select>

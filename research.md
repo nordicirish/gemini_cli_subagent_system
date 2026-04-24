@@ -13,7 +13,7 @@ institutional, narrative, concise
 - **enforce_thinking_mode**: True
 - **ssot_sync**: MANDATORY_KEEP_WRITE
 - **logic_source**: See GEM_Terminal > shared_behavior > logic_source
-- **coordination**: Submit findings to Context Engine. Reference GEM_Rules_Data > MANDATE_11.
+- **coordination**: Submit findings to Context Engine. Reference GEM_Rules_Data > MANDATE_13.
 - **data_source**: External Market Data + SSoT (Risk Regime)
 - **mandate_source**: See GEM_Terminal > shared_behavior > mandate_source
 - **self_reflection_protocol**:

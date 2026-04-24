@@ -40,28 +40,24 @@ USE_POLYGON = False  # keep false unless you want Polygon volume fallback
 # ─── Persistent user config ───────────────────────────────────────────────────
 USER_CONFIG_FILE = 'user_config.json'
 
-_DEFAULT_TICKERS = ['ONDS', 'UMAC', 'RCAT', 'DFTX', 'GLD']
-_DEFAULT_MACRO   = ['^VIX', 'VIXY', 'IEF', 'UUP', 'SPY', 'GDX']
-
-def _load_user_config():
-    if os.path.exists(USER_CONFIG_FILE):
-        try:
-            with open(USER_CONFIG_FILE, 'r') as f:
-                cfg = json.load(f)
-                return cfg.get('tickers', _DEFAULT_TICKERS), cfg.get('macro', _DEFAULT_MACRO)
-        except Exception:
-            pass
-    return list(_DEFAULT_TICKERS), list(_DEFAULT_MACRO)
-
-def _save_user_config():
+def _load_ssot_tickers():
     try:
-        with open(USER_CONFIG_FILE, 'w') as f:
-            json.dump({'tickers': TICKERS, 'macro': MACRO_TICKERS}, f, indent=2)
+        with open('ssot.json', 'r') as f:
+            ssot = json.load(f)
+            portfolio = [t['ticker'] for t in ssot.get('portfolio_snapshot', [])]
+            watched = ssot.get('watched_tickers', [])
+            # Combine unique tickers, maintaining order where possible
+            combined = []
+            for t in portfolio + watched:
+                if t not in combined:
+                    combined.append(t)
+            return combined
     except Exception as e:
-        print(f'[Config] Failed to save user_config.json: {e}')
+        print(f"[SSOT] Load failed: {e}")
+        return ['ONDS', 'UMAC', 'RCAT', 'DFTX', 'GLD']
 
-TICKERS, MACRO_TICKERS = _load_user_config()
-
+TICKERS = _load_ssot_tickers()
+MACRO_TICKERS = ['^VIX', 'VIXY', 'IEF', 'UUP', 'SPY', 'GDX']
 ALL_TICKERS = TICKERS + MACRO_TICKERS
 INVERSE_MACRO = ['^VIX', 'VIXY', 'UUP', 'IEF']
 
@@ -82,6 +78,77 @@ GLOBAL_STATE = {}
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+@app.get("/api/get_basket")
+def get_basket():
+    try:
+        if os.path.exists("ssot.json"):
+            with open("ssot.json", "r") as f:
+                data = json.load(f)
+                raw_basket = data.get("portfolio_snapshot", [])
+                return JSONResponse([{"ticker": i["ticker"], "shares": i.get("shares", 0), "wac": i.get("wac", 0)} for i in raw_basket])
+    except Exception as e:
+        print(f"SSoT Read Warning: {e}")
+    return JSONResponse([])
+
+@app.post("/api/save_basket")
+async def save_basket(req: Request):
+    global TICKERS, ALL_TICKERS
+    try:
+        basket = await req.json()
+        if os.path.exists("ssot.json"):
+            with open("ssot.json", "r") as f:
+                data = json.load(f)
+            
+            new_snapshot = []
+            for item in basket:
+                new_snapshot.append({
+                    "ticker": item["ticker"],
+                    "shares": item["shares"],
+                    "wac": item["wac"]
+                })
+            data["portfolio_snapshot"] = new_snapshot
+            
+            with open("ssot.json", "w") as f:
+                json.dump(data, f, indent=2)
+            
+            # Reload TICKERS
+            TICKERS = _load_ssot_tickers()
+            ALL_TICKERS = TICKERS + MACRO_TICKERS
+            return JSONResponse({"status": "success"})
+    except Exception as e:
+        print(f"Basket Sync Failed: {e}")
+    return JSONResponse({"status": "error"})
+
+@app.get("/api/get_watch_list")
+def get_watch_list():
+    try:
+        if os.path.exists("ssot.json"):
+            with open("ssot.json", "r") as f:
+                data = json.load(f)
+                return JSONResponse(data.get("watched_tickers", []))
+    except: pass
+    return JSONResponse([])
+
+@app.post("/api/save_watch_list")
+async def save_watch_list(req: Request):
+    global TICKERS, ALL_TICKERS
+    try:
+        new_list = await req.json()
+        if os.path.exists("ssot.json"):
+            with open("ssot.json", "r") as f:
+                data = json.load(f)
+            data["watched_tickers"] = new_list
+            with open("ssot.json", "w") as f:
+                json.dump(data, f, indent=2)
+            
+            # Reload TICKERS
+            TICKERS = _load_ssot_tickers()
+            ALL_TICKERS = TICKERS + MACRO_TICKERS
+            return JSONResponse({"status": "success"})
+    except Exception as e:
+        print(f"Watch List Sync Failed: {e}")
+    return JSONResponse({"status": "error"})
+
 @app.get("/api/data")
 def get_data():
     return JSONResponse(GLOBAL_STATE)
@@ -89,28 +156,6 @@ def get_data():
 @app.get("/api/tickers")
 def get_tickers():
     return JSONResponse({"tickers": TICKERS, "macro": MACRO_TICKERS, "macro_labels": MACRO_LABELS})
-
-@app.post("/api/tickers")
-async def update_tickers(req: Request):
-    global TICKERS, ALL_TICKERS
-    data = await req.json()
-    new_tickers = data.get("tickers", [])
-    valid_tickers = [t.upper() for t in new_tickers if t]
-    TICKERS = valid_tickers
-    ALL_TICKERS = TICKERS + MACRO_TICKERS
-    _save_user_config()
-    return JSONResponse({"status": "success", "tickers": TICKERS})
-
-@app.post("/api/macro")
-async def update_macro_tickers(req: Request):
-    global MACRO_TICKERS, ALL_TICKERS
-    data = await req.json()
-    new_macro = data.get("macro", [])
-    valid_macro = [t.upper() for t in new_macro if t]
-    MACRO_TICKERS = valid_macro
-    ALL_TICKERS = TICKERS + MACRO_TICKERS
-    _save_user_config()
-    return JSONResponse({"status": "success", "macro": MACRO_TICKERS})
 
 def _deep_merge(base, delta):
     merged = base.copy()
@@ -1887,7 +1932,7 @@ def run_daemon():
                     gex_data = {'net_gex': gex_data}
 
                 # Derive dealer_posture from net_gex sign per
-                # GoogleDrive://GEM_Trading_Rules/rules > ENH_20 (Synthetic GEX Logic)
+                # GEM_Trading_Rules/rules.md > ENH_20 (Synthetic GEX Logic)
                 _raw_gex = float(gex_data.get('net_gex', 0.0))
                 if _raw_gex > 0:
                     _dealer_posture = "LONG_GAMMA"
@@ -1929,7 +1974,7 @@ def run_daemon():
                     "rsi": float(rsi_raw),
                     "vwap": float(vwap),
                     "distance_from_vwap": float(distance_from_vwap(sym)),
-                    # trend_score thresholds: GoogleDrive://GEM_Trading_Rules/rules > TREND_SCORE_UP_THRESHOLD (3) / TREND_SCORE_DOWN_THRESHOLD (-3)
+                    # trend_score thresholds: GEM_Trading_Rules/rules.md > TREND_SCORE_UP_THRESHOLD (3) / TREND_SCORE_DOWN_THRESHOLD (-3)
                     # For INVERSE_MACRO tickers: negated so rising price = negative (bearish for equities)
                     "trend_score": int(-techs.get("Trend_Score", 0)) if sym in INVERSE_MACRO else int(techs.get("Trend_Score", 0)),
                     
@@ -1941,7 +1986,7 @@ def run_daemon():
                     # GEX — field names per ENH_32 canonical schema in rules.json
                     "net_gex_total": _raw_gex,
                     "gex_exposure": _raw_gex,  # Normalized GEX exposure (position-level scaling done by SSoT Gem)
-                    "dealer_posture": _dealer_posture,  # GoogleDrive://GEM_Trading_Rules/rules > dealer_posture_logic
+                    "dealer_posture": _dealer_posture,  # GEM_Trading_Rules/rules.md > dealer_posture_logic
                     "gamma_flip_price": float(gex_data.get('flip_price', 0.0)),
                     "inventory_velocity_delta": float(gex_data.get('inventory_velocity_delta', 0.0)),
                     "gex_slope": float(gex_data.get('gex_slope', 0.0)),
@@ -1952,7 +1997,7 @@ def run_daemon():
                     "ma_200": float(techs.get("SMA_200") or 0.0),
                     "score": int(score),
                     "signal": classify_signal(sym),
-                    # trend label thresholds: GoogleDrive://GEM_Trading_Rules/rules > TREND_SCORE_UP_THRESHOLD / TREND_SCORE_DOWN_THRESHOLD
+                    # trend label thresholds: GEM_Trading_Rules/rules.md > TREND_SCORE_UP_THRESHOLD / TREND_SCORE_DOWN_THRESHOLD
                     # For INVERSE_MACRO: JSON trend uses equity-perspective (negated score)
                     "trend": ("UP" if (-ts if sym in INVERSE_MACRO else ts) >= 3 else "DOWN" if (-ts if sym in INVERSE_MACRO else ts) <= -3 else "FLAT"),
                     
@@ -1967,7 +2012,7 @@ def run_daemon():
             ief = macro_state.get('IEF', {})
             ief_gap = float(ief['gap'])
             ief_price = float(ief['price'])
-            # IEF bond alert — threshold: GoogleDrive://GEM_Trading_Rules/rules > system_thresholds > IEF_YIELD_ALERT_THRESHOLD (-0.15)
+            # IEF bond alert — threshold: GEM_Trading_Rules/rules.md > system_thresholds > IEF_YIELD_ALERT_THRESHOLD (-0.15)
             if ief_gap < -0.15:
                 print(f"   >>> BOND ALERT:  7-10Y Bond Price {ief_price:.2f} ({ief_gap:+.2f}%) {RED}[YIELDS RISING - RISK]{RESET}")
             else:

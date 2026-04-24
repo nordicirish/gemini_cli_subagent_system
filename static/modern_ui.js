@@ -76,7 +76,8 @@ const ModernChat = {
                     opt.textContent = m.label;
                     opt.style.background = '#1a1a1a';
                     opt.style.color = 'white';
-                    if (m.name === currentModel || (m.name === 'gemini-2.5-pro' && !currentModel)) {
+                    const isDefault = (m.name === 'gemini-2.5-pro' || m.name.includes('2.5-pro'));
+                    if (m.name === currentModel || (isDefault && !currentModel)) {
                         opt.selected = true;
                     }
                     this.modelSelector.appendChild(opt);
