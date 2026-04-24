@@ -2,7 +2,7 @@
 
 **A multi-agent AI trading intelligence framework built on Google Gemini Gems.**
 
-Each JSON file in this repository is a **system instruction** designed to be loaded into a separate [Google Gemini Gem](https://gemini.google.com/gems). Together, the Gems form an institutional-grade trading council that analyzes financial data, enforces risk protocols, and produces consensus-driven trade decisions. The Python backend (`fetch_stocks.py`) drives a real-time, glassmorphic Web Dashboard UI, allowing quick JSON payload extraction and SSoT paste-syncing directly from the browser.
+Starting with v6.0, the system has migrated its core orchestration from static JSON to **machine-executable Markdown instructions**. While JSON remains the underlying data exchange format for state persistence (`ssot.json`, `trade_lessons.json`), the agents themselves now utilize highly structured `.md` files for their behavioral logic and the central ruleset. This transition enhances agent readability, improves complex instruction following, and simplifies the maintenance of the Single Source of Truth (SSoT).
 
 ---
 
@@ -11,7 +11,7 @@ Each JSON file in this repository is a **system instruction** designed to be loa
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                   TERMINAL ORCHESTRATOR                     │
-│                     (terminal.json)                         │
+│                     (terminal.md)                           │
 │          Routes user input to the correct engine            │
 └────────────┬────────────────────────────────────────────────┘
              │
@@ -54,7 +54,7 @@ Each JSON file in this repository is a **system instruction** designed to be loa
           └─────────────────────┘
 ```
 
-**Governance backbone:** The **Rule Enforcer** (`rule_enforcer_engine.json`) actively validates compliance, while `rules.json` serves as the static legislative body containing the system thresholds, along with two distinct classes of architectural directives:
+**Governance backbone:** The **Rule Enforcer** (`rule_enforcer_engine.md`) actively validates compliance, while `rules.md` serves as the authoritative legislative body containing the system thresholds, mandates, and enhancement protocols.
 
 ### 🏛️ The Architectural Divide: Mandates vs. Protocols
 To prevent the LLM reasoning engines from hallucinating software structures while analyzing financial data, the system strictly separates **Software Architecture** from **Trading Logic**:
@@ -104,33 +104,33 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 
 ---
 
-## 🛠️ Setup Instructions (JSON) — One per Gem
+## 🛠️ Setup Instructions (Markdown) — One per Gem
 
 | File | Gem Role | Gemini Mode | Purpose |
 |------|----------|-------------|---------|
-| `terminal.json` | **Orchestrator** | PRO | Master router — classifies user input and dispatches to the correct engine |
-| `rules.json` | **Legislative Body** | N/A | **Static Rules**: The canonical source containing thresholds and ENH_ protocols. MUST be attached via Google Drive. |
-| `rule_enforcer_engine.json` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `GEM_Rules_Data` |
-| `SSoT_Storage.json` | **SSoT Controller** | PRO | Passive data schema logic. (State ops owned by Context Engine, execution logic deferred to Rule Enforcer) |
-| `context_engine.json` | **Context Engine** | PRO | Active SSoT bridge — drift detection, state merging, sync orchestration |
-| `bullish_gem.json` | **Bullish Advocate** | THINKING | Alpha & momentum specialist — identifies reasons to approve trades |
-| `red_team_gem.json` | **Red Team Pessimist** | THINKING | Adversarial risk specialist — identifies reasons to reject trades |
-| `neutral_gem.json` | **Neutral Structuralist** | PRO | Market architecture specialist — GEX, regime detection, liquidity |
-| `execution.json` | **Execution Engine** | PRO | ATR-adjusted position sizing, order generation, liquidity gates |
-| `gex_engine.json` | **GEX Engine** | PRO | Gamma exposure computation — net GEX, gamma flip, dealer posture |
+| `terminal.md` | **Orchestrator** | PRO | Master router — classifies user input and dispatches to the correct engine |
+| `rules.md` | **Legislative Body** | N/A | **Static Rules**: The canonical source containing thresholds and ENH_ protocols. MUST be attached via Google Drive. |
+| `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `GEM_Rules_Data` |
+| `context_engine.md` | **Context Engine** | PRO | Active SSoT bridge — drift detection, state merging, sync orchestration |
+| `bullish_gem.md` | **Bullish Advocate** | THINKING | Alpha & momentum specialist — identifies reasons to approve trades |
+| `red_team_gem.md` | **Red Team Pessimist** | THINKING | Adversarial risk specialist — identifies reasons to reject trades |
+| `neutral_gem.md` | **Neutral Structuralist** | PRO | Market architecture specialist — GEX, regime detection, liquidity |
+| `execution.md` | **Execution Engine** | PRO | ATR-adjusted position sizing, order generation, liquidity gates |
+| `gex_engine.md` | **GEX Engine** | PRO | Gamma exposure computation — net GEX, gamma flip, dealer posture |
 
-| `macro_arbiter.json` | **Macro Sentinel** | PRO | Binary risk-on/risk-off veto — CPI, FOMC, FX, geopolitical shocks |
-| `sentiment_engine.json` | **Sentiment Engine** | PRO | Sentiment & catalyst extraction — news, social velocity, regulatory |
-| `structural_risk.json` | **Structural Risk Engine** | FAST | Forensic dilution detection — shelf offerings, warrant walls, PIPE |
-| `technical_validator.json` | **Technical Validator** | PRO | Data integrity, consensus synthesis, health score calculation |
-| `research.json` | **Research Engine** | THINKING | Macro narrative, sector rotation, forensic signal attribution |
-| `post_trade_review.json` | **Review Engine** | PRO | Post-trade reflection — thesis vs. outcome, misfire detection |
+| `macro_arbiter.md` | **Macro Sentinel** | PRO | Binary risk-on/risk-off veto — CPI, FOMC, FX, geopolitical shocks |
+| `sentiment_engine.md` | **Sentiment Engine** | PRO | Sentiment & catalyst extraction — news, social velocity, regulatory |
+| `structural_engine.md` | **Structural Risk Engine** | FAST | Forensic dilution detection — shelf offerings, warrant walls, PIPE |
+| `technical_validator.md` | **Technical Validator** | PRO | Data integrity, consensus synthesis, health score calculation |
+| `research.md` | **Research Engine** | THINKING | Macro narrative, sector rotation, forensic signal attribution |
+| `post_trade_review.md` | **Review Engine** | PRO | Post-trade reflection — thesis vs. outcome, misfire detection |
 
 ### Python Utilities
 
 | File | Purpose |
 |------|---------|
 | `fetch_stocks.py` | **FastAPI Backend & Web Server** — Serves a real-time web dashboard at `http://localhost:8000`. Generates JSON prompt payloads and exposes an `/api/paste` route to ingest Gem execution payloads into the local SSoT. |
+| `json_to_md_tool.py` | **Architectural Sync Tool** — Automatically converts JSON configuration files into the machine-executable Markdown format used by the Gems. Ensures parity between source data and agent instructions. |
 | `compare_json.py` | Diff utility — compares two JSON instruction files to detect missing or added values |
 | `format_json.py` | Formatter — pretty-prints a JSON instruction file with consistent indentation |
 ### 4. Updating Gems (Maintenance)
@@ -139,7 +139,7 @@ When you update the JSON instructions in this repository (e.g., version incremen
 
 1.  **Open the Gem** in [Gemini Advanced](https://gemini.google.com/gems).
 2.  Click the **Pencil Icon** (Edit) > **Instructions**.
-3.  **Copy** the content of the updated JSON file (e.g., `technical_validator.json`).
+3.  **Copy** the content of the updated Markdown file (e.g., `technical_validator.md`).
 4.  **Paste** it into the Instructions box, replacing the old content.
 5.  Click **Update**.
 
