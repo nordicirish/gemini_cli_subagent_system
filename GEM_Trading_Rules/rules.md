@@ -1,6 +1,6 @@
 # GEM_Rules_Data
 **Role:** GEM_Rules_Data
-**Version:** v6.1-MD-Enhanced
+**Version:** v6.6-MD-Enhanced
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.
 
 ---
@@ -146,7 +146,7 @@
     - macro_calendar_shield
   - **Delta Mode:**
     - **Allowed:** True
-    - **Instruction:** When emitting a delta, include ONLY the sections that changed (e.g. `macro_calendar_shield` or `forensic_intelligence`). HOWEVER, the `portfolio_snapshot` array CANNOT be delta-merged. It must be output in its entirety, including untouched tickers.
+    - **Instruction:** When emitting a delta, include ONLY the sections that changed. The `portfolio_snapshot` array MAY omit untouched tickers, relying on the SSoT_Storage NON_DESTRUCTIVE_MERGE rules to preserve existing assets.
     - **Minimum Required Keys:**
       - state_context
       - portfolio_snapshot
@@ -195,7 +195,7 @@
   - **Instruction:** The Red Team must prioritize RISK and FAILURE. Identify reasons to REJECT, assuming the thesis is flawed.
   - **Hard Audit Protocol:** ENH_68
   - **Zero Success Requirement:** If consensus > 0.85, simulate total failure of the core catalyst (Black Swan Scenario).
-  - **Independent Forensic Hunt:** MUST independently execute 'perform_web_forensic_search' to hunt for Thesis-Killers missing from Research Engine summary.
+  - **Independent Forensic Hunt:** You MUST explicitly invoke the native Google Search tool to actively query the live web for recent Thesis-Killers, disconfirming evidence, or counter-narratives missing from the SSoT. Rely strictly on Google Search grounding; do not attempt to call external APIs.
 - **[MANDATE_16_STRUCTURAL_NEUTRALITY]**
   - **Status:** ACTIVE
   - **Instruction:** The Neutral Structuralist must prioritize LIQUIDITY and GEX. Direction is secondary to structural capacity. DEMAND ELEGANCE: If a setup relies on too many overriding exceptions, deny it (trade_state = NO_TRADE) and wait for an 'A+' setup where Macro, Structural, and Narrative align.
@@ -360,7 +360,7 @@
 - **[ENH_27 - Speculative Logic Thresholds]**
   - **Instruction:** Apply 50% sizing reduction for Gov-Tech tickers during shutdowns.
 - **[ENH_28 - Drift Control Protocol]**
-  - **Instruction:** Adhere strictly to terminal tasks; do not offer side-monitoring suggestions.
+  - **Instruction:** Verify 'Proposed State' matches SSoT schema perfectly (ENH_44) and verify all narrative data maps to scrutiny_audit strings (MANDATE_19). Reject side-monitoring suggestions.
 - **[ENH_29 - ATR & Order Execution Logic]**
   - **Instruction:** Position size MUST be derived from ATR-adjusted volatility.
 - **[ENH_30 - Forensic Structural Filter]**

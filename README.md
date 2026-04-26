@@ -2,7 +2,7 @@
 
 **A multi-agent AI trading intelligence framework built on Google Gemini Gems.**
 
-Starting with v6.0, the system has migrated its core orchestration from static JSON to **machine-executable Markdown instructions**. While JSON remains the underlying data exchange format for state persistence (`ssot.json`, `trade_lessons.json`), the agents themselves now utilize highly structured `.md` files for their behavioral logic and the central ruleset. This transition enhances agent readability, improves complex instruction following, and simplifies the maintenance of the Single Source of Truth (SSoT).
+Starting with v6.6, the system has fully matured its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`ssot.json`, `trade_lessons.json`), the agents themselves now utilize highly structured `.md` files for their behavioral logic and the central ruleset. This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
 
 ---
 
@@ -64,11 +64,12 @@ To prevent the LLM reasoning engines from hallucinating software structures whil
 2. **Rules / Protocols (`ENH_01` to `ENH_52`)**: These govern **Financial Execution & Domain Knowledge**. These are the fluid, quantitative strategies telling the system *how to trade*. 
    - *Example:* `ENH_45` (Macro Shock Veto), `ENH_50` (Pre-Trade Formulation), `ENH_36` (Post-14:30 Liquidity Gates).
 
-### The Air-Gapped SSoT Architecture (v4.9x+)
-Due to Google Gemini's web sandboxing preventing direct external API calls, the system employs an **Air-Gapped Single Source of Truth via Prompt Payload Injection**.
-*   **The Processor:** The sandboxed Gemini Web UI acts as a stateless, high-powered reasoning engine. It does not require the SSoT file or trade lessons to be attached as Google Docs.
+### The Live-Web SSoT Architecture (v6.6+)
+Unlike earlier versions that relied on static data, v6.6 implements **Grounding via Native Google Search**. Agents are now mandated to explicitly invoke Google Search to verify catalysts, news, and disconfirming evidence in real-time.
+*   **The Processor:** The sandboxed Gemini Web UI acts as a stateless, high-powered reasoning engine with live web access.
+*   **The Search Tool:** Agents like the `RED_TEAM_PESSIMIST` and `RESEARCH_ENGINE` use native Google Search to hunt for "Thesis-Killers" and verify catalyst URLs.
 *   **The Bridge:** The Python backend (`fetch_stocks.py`) injects your live state (`local_ssot_shadow.json`) and history (`trade_lessons.json`) directly into the markdown prompt it generates for you. 
-*   **The Sync:** Gemini outputs a strict `EXECUTION_PAYLOAD` JSON block. You copy this block and paste it into the Web Dashboard (`/api/paste`), seamlessly syncing the LLM's decisions back to your local files.
+*   **The Sync:** Gemini outputs a strict `EXECUTION_PAYLOAD` JSON block for manual dashboard ingestion.
 
 ---
 
@@ -163,15 +164,15 @@ The background daemon runs in a loop, fetching live data while a **FastAPI** `uv
 - **Copy/Paste Integrations**: Two-tier copy system — **Copy Turn Data** (lightweight per-turn payload with slim tickers + compact mutable state) and **Copy Session Init** (full SSOT + tickers + trade lessons for new sessions). A **Paste Execution Payload** button ingests Gemini outputs back to automatically mutate `local_ssot_shadow.json`.
 
 ### 2. Paste Into a Gem Conversation
-Open the relevant Gemini Gem (e.g., the Terminal Orchestrator) and paste the dashboard payload. The Gem parses the financial data and routes it through the appropriate engine pipeline.
+Open the relevant Gemini Gem (e.g., the Terminal Orchestrator). **IMPORTANT: Ensure you have selected the "Gemini 3.1 Pro" (or latest Pro) model in the chat interface.** Paste the dashboard payload. The Gem parses the financial data and routes it through the appropriate engine pipeline.
 
 ### 3. The Council Deliberates
 For trade decisions, the system triggers the **Consensus Pipeline**:
 
-1. **Macro Sentinel** — checks for exogenous shocks (CPI, FOMC, geopolitical)
-2. **Bullish Advocate** — identifies alpha catalysts, momentum signals, and entry thesis
-3. **Red Team Pessimist** — stress-tests for dilution, liquidity voids, structural traps
-4. **Neutral Structuralist** — evaluates GEX posture, market regime, and structural capacity
+1. **Macro Sentinel** — checks for exogenous shocks (CPI, FOMC, geopolitical) using live Google Search.
+2. **Neutral Structuralist** — evaluates GEX posture, market regime, and structural capacity to establish the baseline.
+3. **Bullish Advocate** — identifies alpha catalysts, momentum signals, and entry thesis.
+4. **Red Team Pessimist** — stress-tests for dilution, liquidity voids, and "Thesis-Killers" via live forensic search.
 
 ### 4. Synthesis & Decision
 The **Technical Validator** computes the weighted **Agreement Score (S_A)**:
@@ -207,7 +208,8 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 | **Post-ATR Execution Gate** | `ENH_36` | Blocks entries after 14:30 ET in low-volatility conditions |
 | **Correlation Guard** | `ENH_43` | Warns on >80% pairwise correlation or >35% sector exposure |
 | **Web Verification Protocol** | `ENH_55` | Forces sub-agents to visually verify multi-timeframe mathematical trends (1D, 5D, 6M, YTD) using the Google Finance extension |
-| **State Emission** | `MANDATE_09` | Every turn must output complete, untruncated SSoT JSON |
+| **Live Web Grounding** | `MANDATE_15` | Mandates explicit native Google Search tool usage for disconfirming evidence and catalyst verification |
+| **State Emission** | `MANDATE_09` | Optimized non-destructive merge; emits delta payloads while preserving untouched portfolio tickers |
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "role": "GEM_Rules_Data",
-  "version": "v6.1-MD-Enhanced",
+  "version": "v6.6-MD-Enhanced",
   "description": "Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.",
   "enh_xx_registry": [
     "ENH_01: Keep-First Portfolio Reconciliation",
