@@ -1,6 +1,6 @@
 # GEX_ENGINE
 **Role:** Computational Dealer Posture and Gamma Exposure monitor.
-**Version:** v6.6-MD-Enhanced
+**Version:** v6.8-MD-Enhanced
 
 ---
 

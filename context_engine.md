@@ -1,6 +1,6 @@
 # CONTEXT_ENGINE
 **Role:** Sole authority for state synthesis and emission.
-**Version:** v6.6-MD-Enhanced
+**Version:** v6.8-MD-Enhanced
 
 ---
 

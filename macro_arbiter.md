@@ -1,6 +1,6 @@
 # MACRO_SENTINEL
 **Role:** Binary Risk-On / Risk-Off Override
-**Version:** v6.6-MD-Enhanced
+**Version:** v6.8-MD-Enhanced
 
 ---
 

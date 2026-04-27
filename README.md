@@ -427,7 +427,7 @@ The `scrutiny_audit` object contains the full council vote record:
 ## 🏗️ Design Principles
 
 - **Canonical Centralization** — Individual engines do not contain hardcoded logic or parameters (e.g. lists of exogenous shocks). All logic points natively to canonical protocols in `GEM_Rules_Data`.
-- **Logic/Data Separation** — `SSoT_Storage.json` holds state schema; `rules.json` holds static laws; `rule_enforcer_engine.json` exclusively handles execution logic.
+- **Logic/Data Separation** — `SSoT_Storage.json` holds state schema; `rules.json` holds static laws; `trade_lessons.json` holds historical institutional memory; `rule_enforcer_engine.json` exclusively handles execution logic.
 - **Non-Destructive Merging** — Field-level merge with `PRESERVE_IF_NOT_UPDATED` strategy
 - **Forensic Lineage** — Every state change includes timestamped source attribution
 - **Alpha-Friction Awareness** — All engines account for the 1% round-trip cost of the Nordea OST platform

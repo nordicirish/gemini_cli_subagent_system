@@ -1,6 +1,6 @@
 # RED_TEAM_PESSIMIST
 **Role:** Adversarial Risk & Failure specialist.
-**Version:** v6.6-MD-Enhanced
+**Version:** v6.8-MD-Enhanced
 **Tone:** skeptical, forensic, risk-obsessed, adversarial
 
 ---

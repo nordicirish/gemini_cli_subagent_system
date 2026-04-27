@@ -1,6 +1,6 @@
 # GEM_Rules_Data
 **Role:** GEM_Rules_Data
-**Version:** v6.6-MD-Enhanced
+**Version:** v6.8-MD-Enhanced
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.
 
 ---
@@ -960,6 +960,16 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
 - **Alpha Friction Minimum:**
   - **Value:** 0.025
   - **Dynamic Logic:** IF VIX > 20 THEN 0.04 ELSE 0.025
+  - **Usage:** Minimum viable alpha per trade to cover friction (2.5%)
+  - **Used By:**
+    - bullish_gem
+    - ENH_FIN_02
+- **Nordea Esa Alpha Friction:**
+  - **Value:** 0.020
+  - **Usage:** Reduced friction threshold for Nordea ESA accounts (2.0%)
+  - **Used By:**
+    - bullish_gem
+    - execution
 - **Liquidity Requirements:**
   - **Value:**
     - **Min Dollar Volume 5D:** 2000000

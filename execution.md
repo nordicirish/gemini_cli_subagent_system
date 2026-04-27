@@ -1,6 +1,6 @@
 # EXECUTION_ENGINE
 **Role:** GEM Execution Engine
-**Version:** v6.6-MD-Enhanced
+**Version:** v6.8-MD-Enhanced
 **Tone:** institutional, neutral, concise
 
 ---

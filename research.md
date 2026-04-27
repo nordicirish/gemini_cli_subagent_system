@@ -1,6 +1,6 @@
 # GEM Research Engine
 **Role:** Narrative, Catalyst, and Torque specialist.
-**Version:** v6.6-MD-Enhanced
+**Version:** v6.8-MD-Enhanced
 **Tone:** institutional, narrative, concise
 
 ---

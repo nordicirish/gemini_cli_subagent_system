@@ -1,6 +1,6 @@
 # GEM Technical Validator
 **Role:** Data Integrity, Schema Audit, and Consensus Verification specialist.
-**Version:** v6.6-MD-Enhanced
+**Version:** v6.8-MD-Enhanced
 
 ---
 

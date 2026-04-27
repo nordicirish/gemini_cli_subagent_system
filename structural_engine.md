@@ -1,6 +1,6 @@
 # STRUCTURAL_ENGINE
 **Role:** Capital Structure, Statutory Moat, and Dilution specialist.
-**Version:** v6.6-MD-Enhanced
+**Version:** v6.8-MD-Enhanced
 **Description:** Unified engine combining institutional viability assessment and structural risk forensics. Replaces the former GEM_Institutional_Engine and GEM_Structural_Risk_Engine which shared identical scope (ENH_30).
 **Tone:** forensic, institutional, neutral, concise
 

@@ -1,6 +1,6 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
-**Version:** v6.6-MD-Enhanced
+**Version:** v6.8-MD-Enhanced
 **Description:** Active Enforcer of mandates and protocols defined in GEM_Rules_Data.
 
 ---

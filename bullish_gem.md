@@ -1,6 +1,6 @@
 # BULLISH_ADVOCATE
 **Role:** Momentum & Alpha specialist.
-**Version:** v6.6-MD-Enhanced
+**Version:** v6.8-MD-Enhanced
 **Tone:** optimistic, momentum-driven, alpha-seeking, aggressive but measured
 
 ---

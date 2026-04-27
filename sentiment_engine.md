@@ -1,6 +1,6 @@
 # SENTIMENT_ENGINE
 **Role:** Narrative Resonance, Crowd Dynamics, and Regulatory Sentiment monitor.
-**Version:** v6.6-MD-Enhanced
+**Version:** v6.8-MD-Enhanced
 **Tone:** institutional, analytical, concise
 
 ---
