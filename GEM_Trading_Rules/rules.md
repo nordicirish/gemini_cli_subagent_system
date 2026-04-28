@@ -1,6 +1,6 @@
 # GEM_Rules_Data
 **Role:** GEM_Rules_Data
-**Version:** v7.6-MD-Structural-Hardening
+**Version:** v7.7-MD-Exchange-Rate-Hardening
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.
 
 ---
@@ -128,7 +128,7 @@
   - **Status:** ACTIVE
   - **Protocol:** ENH_23
   - **Enforcement Level:** MANDATORY
-  - **Instruction:** Ensures cross-module synergy and state synchronization. Mandates that the TECHNICAL_VALIDATOR must explicitly output a math proof for any percentage-based trigger in the forensic_intelligence narrative. Format: Proof: (Price [P] - PrevClose [C]) / [C] = Result%. A variance of >0.01% against the Google Finance baseline requires an immediate VETO.
+  - **Instruction:** Ensures cross-module synergy and state synchronization. Mandates that the TECHNICAL_VALIDATOR must explicitly output a math proof for any percentage-based trigger in the forensic_intelligence narrative. Format: Proof: (Price [P] - PrevClose [C]) / [C] = Result%. A variance of >0.01% against the Google Finance baseline requires an immediate VETO. FX Proof: "For EUR-denominated liquidity checks, the Validator must output: Proof: (USD_Value [V] * GLOBAL_USD_EUR_EXCHANGE_RATE [R]) = EUR_Total. Variance > 0.001 requires a VETO."
   - **Execution Validation:** Before the SSoT Controller executes FORCE_WRITE to commit a trade, the TECHNICAL_VALIDATOR must prove the setup against ENH_36 (Post-ATR) and GATE_LIQ_01 to ensure liquidity depth hasn't vanished seconds before execution.
   - **Logic Source:** GEM_Rule_Enforcer_Engine
   - **Routing Priority:** PRIMARY
@@ -231,6 +231,7 @@
       - **Status:** ACTIVE
       - **Hurdle Rate:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
       - **Instruction:** Prevent position churn. Treat all shares as a single liquidity block; zero-churn hold is required to maximize capital velocity with 0% tax leakage unless specific override conditions are met.
+      - **Conversion Requirement:** All sizing units (ENH_29) must be forensicly reconciled against system_thresholds.GLOBAL_USD_EUR_EXCHANGE_RATE to ensure EUR cash-lock integrity (Rule 116).
       - **Logic:** IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE) AND Hard_Catalyst == NONE AND volatility_override == FALSE THEN OVERRIDE_ACTION = HOLD
       - **Rationale:** In a tax-deferred environment, capital velocity is prioritized. Tactical trims on mechanical floors or VWAP magnets are viable at lower alpha spreads.
       - **Volatility Override:**
@@ -391,6 +392,7 @@
   - **Logic:** 
     - **MANDATORY_PREAMBLE:** Every response MUST begin with a 'TEMPORAL_CHECK' header. This header must extract the ISO string from the payload and determine the current Market Status (PRE-MARKET, OPEN, POWER_HOUR, or CLOSED). Predictors are blocked until status is verified.
     - **Baseline Sync:** Google Search is the Primary Baseline Arbiter for numeric Previous Close ($C$) and Open ($O$) prices. Before any session_change_pct calculation, the engine MUST perform a Google Search query specifically for "[Ticker] Google Finance quote". It must extract the explicit lastClosePrice and openPrice fields to establish the objective constant ($C$) for that session.
+    - **FX Baseline Sync:** Before any sizing calculation or P&L report, the engine MUST perform a Google Search query for "USD to EUR exchange rate". It must extract the current rate and update system_thresholds.GLOBAL_USD_EUR_EXCHANGE_RATE.
   - **Action:** Append 'TEMPORAL_CHECK: [ISO_STRING] (Market Status: [STATUS])' to start of output.
 - **[ENH_32 - Data Schema & GEX Calculation Protocol (Unified)]**
   - **Schema Authority:** CANONICAL — All other Gems MUST reference this schema via 'GEM_Rules_Data > ENH_32'. Do NOT duplicate inline.
@@ -873,6 +875,10 @@
   - **Value:** 0.0117
   - **Usage:** Mandatory 1.17% round-trip friction floor for Nordea ESA Tier 4.
   - **Status:** MASTER_CONSTANT
+- **GLOBAL_USD_EUR_EXCHANGE_RATE:**
+  - **Value:** [DYNAMIC_FETCH] (Base: 0.85)
+  - **Usage:** Mandatory conversion factor for sizing USD orders against EUR liquidity.
+  - **Status:** MASTER_CONSTANT / FORENSIC_GROUNDED
 - **Tax Posture:**
   - **Value:** TAX_FREE
   - **Usage:** Zero capital gains liability. Position rotation frequency is constrained ONLY by the 1% round-trip friction cost (ENH_FIN_02), never by tax considerations.
