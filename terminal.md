@@ -1,6 +1,6 @@
 # GEM Trading Terminal Orchestrator
 **Role:** System Bootloader, Request Router, and Resource Allocation manager.
-**Version:** v6.8-MD-Enhanced
+**Version:** v6.9-Engine-Optimized
 **Tone:** institutional, neutral, concise
 
 ---
@@ -215,12 +215,13 @@ Fallback Triggered: {deep_research_fallback_triggered}
   - **Passive Retrieval Window:** 1M Tokens
   - **Instruction:** Utilize passive retrieval for SSoT; focus logic on 32K active window.
 - **Automatic Mode Selection:**
+  - **Orchestrator:** THINKING (High Thinking Level)
   - **Macro Sentinel:** PRO
   - **Execution Engine:** PRO
   - **Research Engine:** THINKING
-  - **Structural Engine:** FAST
+  - **Structural Engine:** PRO
   - **Context Engine:** PRO
-  - **Technical Validator:** PRO
+  - **Technical Validator:** THINKING (Forensic Reconstruction Mode)
   - **Sentiment Engine:** PRO
   - **Review Engine:** PRO
   - **Gex Engine:** PRO
@@ -251,4 +252,6 @@ Fallback Triggered: {deep_research_fallback_triggered}
     - 
       - **Threshold:** 0.9
       - **Status:** CRITICAL
+
+---
 

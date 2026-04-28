@@ -1,6 +1,6 @@
 # GEM_Rules_Data
 **Role:** GEM_Rules_Data
-**Version:** v6.8-MD-Enhanced
+**Version:** v7.6-MD-Structural-Hardening
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.
 
 ---
@@ -13,7 +13,7 @@
 - ENH_07: SSR Trigger Verification
 - ENH_08: Bicameral Vote Requirement
 - ENH_09: Bifurcation Filter
-- ENH_10: Supply Chain Lead Indicator
+- ENH_10: [MIGRATED TO TRADE_LESSONS_205]
 - ENH_11: Standardized Sync Payload Protocol
 - ENH_12: VSC Fallback Protocol
 - ENH_16: Score Bifurcation
@@ -23,7 +23,7 @@
 - ENH_20: Synthetic GEX Logic
 - ENH_21: Vol Proxy Rule
 - ENH_22: Docs Native Bridge Protocol
-- ENH_23: Memory Initialization & Persistence
+- ENH_23: [MIGRATED TO MANDATE_12]
 - ENH_24: Data Integrity & Schema Enforcement
 - ENH_25: Temporal Guardrail Enforcement
 - ENH_26: Uncertainty Disclosure Protocol
@@ -33,9 +33,8 @@
 - ENH_30: Forensic Structural Filtering
 - ENH_31: Temporal Logic & Catalyst Verification
 - ENH_32: Data Schema & GEX Calculation Protocol
-- ENH_33: Dynamic Research Synchronization
-- ENH_34: Auto Load GEM-Context-SSOT doc
-- ENH_35: Attachment & Source Verification
+- ENH_33: [MIGRATED TO MANDATE_11]
+- ENH_35: State Verification Protocol
 - ENH_36: Post-ATR Execution Gate
 - ENH_37: Alpha Catalyst Scrutiny (Bullish)
 - ENH_38: Adversarial Risk Rebuttal (Red Team)
@@ -48,7 +47,7 @@
 - ENH_45: Macro Shock & Binary Veto Protocol
 - ENH_46: Temporal Institutional Rebalancing Sentinel
 - ENH_47: Macro Calendar Shield Protocol
-- ENH_48: Narrative Bridge Protocol
+- ENH_48: [MIGRATED TO TRADE_LESSONS_207]
 - ENH_49: Air-Gap Sandbox Bridge Protocol
 - ENH_50: Pre-Execution Formulation Protocol
 - ENH_51: Retrospective & Self-Improvement Protocol
@@ -64,13 +63,18 @@
 - ENH_66: The Wall of Warrants Pivot
 - ENH_67: Sentiment-Price Divergence Sentinel
 - ENH_68: The Devil's Advocate Hard Audit
-- ENH_69: Cross-Sector Correlation Cascade
+- ENH_69: [MIGRATED TO TRADE_LESSONS_208]
 - ENH_70: Adaptive Catalyst Decay (Health Aging)
 - ENH_72: VVIX/VIX Divergence Guard
 - ENH_73: Success Memo Production Gate
 - ENH_74: Noon Spike Guard
-- ENH_75: Clinical Priority Voucher (CPV) Override
+- ENH_75: [MIGRATED TO TRADE_LESSONS_209]
 - ENH_76: Token Economy Budgeting (Context Pruning)
+- ENH_77: Proactive Search Mandate
+- ENH_78: Daily Workflow Protocol
+- ENH_79: Lesson Feedback Pipeline
+- ENH_80: Conditional Council Escalation
+- ENH_81: Conviction Bias Circuit Breaker
 
 ## Mandate Registry
 - MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)
@@ -124,7 +128,7 @@
   - **Status:** ACTIVE
   - **Protocol:** ENH_23
   - **Enforcement Level:** MANDATORY
-  - **Instruction:** Ensures cross-module synergy and state synchronization. Mandates that the TECHNICAL_VALIDATOR (PRO) must sign off on any data extraction or SSoT update to prevent isolated engine hallucinations.
+  - **Instruction:** Ensures cross-module synergy and state synchronization. Mandates that the TECHNICAL_VALIDATOR must explicitly output a math proof for any percentage-based trigger in the forensic_intelligence narrative. Format: Proof: (Price [P] - PrevClose [C]) / [C] = Result%. A variance of >0.01% against the Google Finance baseline requires an immediate VETO.
   - **Execution Validation:** Before the SSoT Controller executes FORCE_WRITE to commit a trade, the TECHNICAL_VALIDATOR must prove the setup against ENH_36 (Post-ATR) and GATE_LIQ_01 to ensure liquidity depth hasn't vanished seconds before execution.
   - **Logic Source:** GEM_Rule_Enforcer_Engine
   - **Routing Priority:** PRIMARY
@@ -139,7 +143,7 @@
   - **Instruction:** Every turn MUST terminate with SSoT JSON state. Full emission is PREFERRED. If output token limits prevent full emission, the Gem MAY emit a DELTA payload containing only the changed sections, WITH ONE MAJOR EXCEPTION: The `portfolio_snapshot` array MUST ALWAYS BE OUTPUT IN FULL. You cannot output a partial portfolio array. UNDER NO CIRCUMSTANCES should trade lessons (e.g. `new_trade_lessons`, `trade_lessons`, `trade_lessons_revision`, etc.) be output as a separate discrete JSON block; they MUST be included as a key at the root of the single SSoT JSON payload block.
   - **Required Top Level Keys:**
     - state_context
-    - trade_lessons
+    - trade_lessons (or new_trade_lessons / compressed_trade_lessons)
     - portfolio_snapshot
     - forensic_intelligence
     - runtime_flags
@@ -157,7 +161,7 @@
   - **Instruction:** Verify 'forensic_intelligence' contains narrative strings and 'portfolio_snapshot' is an array of objects.
 - **[MANDATE_11_RESEARCH_SYNC]**
   - **Status:** STRICT_ENFORCE
-  - **Instruction:** Maintain active sync with 'Trading_Research' folder. Execute delta-check prior to EVERY response. Folder data overrides general training.
+  - **Instruction:** Maintain active sync with 'Trading_Research' folder; trigger dynamic re-reads between turns. Executing delta-check prior to EVERY response. Folder data overrides general training.
   - **Torque Scoring:**
     - **Enabled:** True
     - **Mandate:** Every piece of new information MUST be assigned a Torque Score (1-10) based on statutory, clinical, or structural shift potential.
@@ -168,7 +172,7 @@
 - **[MANDATE_12_BOOT_SYNC]**
   - **Trigger:** SESSION_START
   - **Status:** STRICT_ENFORCE
-  - **Instruction:** All engines must build their working memory natively from the 'State of the World' payload provided in the console prompt, which contains the active local_ssot_shadow and trade_lessons data.
+  - **Instruction:** All engines must build working memory and establish P&L baselines natively from the 'State of the World' payload provided in the prompt.
 - **[MANDATE_13 - Weighted_Consensus_Scrutiny]**
   - **Status:** ACTIVE
   - **Logic:**
@@ -220,12 +224,14 @@
       - **Gate Id:** ROM_01
       - **Name:** Restricted Order Mapping
       - **Instruction:** Strictly prohibit MOC/LOC suggestions. Default to 'Auction Hunter' (Marketable Limit at 15:59:45 EST).
-      - **Limit Buffer Pct:** 2.0
+      - **Limit Buffer Pct:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
     - 
       - **Gate Id:** ENH_FIN_02
-      - **Name:** Alpha-Friction Protocol
-      - **Instruction:** Friction Guard: 1% Round-Trip + Re-entry Risk. In ESA, minimum viable move is lowered to 2.0% (vs 2.5% standard) due to zero immediate tax leakage. Prevent churn unless volatility_override is TRUE or Macro_Sentinel is HOSTILE.
-      - **Logic:** IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < 0.020) AND Hard_Catalyst == NONE AND volatility_override == FALSE THEN OVERRIDE_ACTION = HOLD
+      - **Name:** Alpha-Friction Protocol (Nordea ESA Tier 4)
+      - **Status:** ACTIVE
+      - **Hurdle Rate:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
+      - **Instruction:** Prevent position churn. Treat all shares as a single liquidity block; zero-churn hold is required to maximize capital velocity with 0% tax leakage unless specific override conditions are met.
+      - **Logic:** IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE) AND Hard_Catalyst == NONE AND volatility_override == FALSE THEN OVERRIDE_ACTION = HOLD
       - **Rationale:** In a tax-deferred environment, capital velocity is prioritized. Tactical trims on mechanical floors or VWAP magnets are viable at lower alpha spreads.
       - **Volatility Override:**
         - **Description:** Protective Exit Override — bypasses friction gate during active breakdowns or macro stress to prevent holding through avoidable losses.
@@ -246,7 +252,8 @@
             - **Field:** macro_shock_intensity
             - **Operator:** >=
             - **Threshold:** SHOCK_CAUTION_THRESHOLD
-        - **Logic:** ANY 2 of 4 (Macro Shock counts as a valid trigger). Negative Delta Force: IF Net_GEX < 0 AND session_change_pct < -1.0%, SET volatility_override = TRUE and emit EXIT.
+        - **Logic:** ANY 2 of 4 (Macro Shock counts as a valid trigger). Negative Delta Force: IF Net_GEX < 0 AND session_change_pct < -1.0%, SET volatility_override = TRUE and emit EXIT/TRIM.
+        - **CONFLICT RESOLUTION:** Negative Delta Force and Volatility Overrides possess ABSOLUTE EXECUTION SUPREMACY over standard Alpha-Friction hold constraints. If trigger conditions are met, mechanical holds are immediately voided to prioritize capital preservation.
         - **Effect:** SET volatility_override = TRUE — friction gate bypassed, exit treated as protective, not churn
     - 
       - **Gate Id:** NDS_01
@@ -284,7 +291,7 @@
     - **Risk Adjustment:** During High-VIX regimes (>20), the Residual Floor is the only valid support node; ignore all intermediate EMA/SMA levels for initial sizing.
   - **Rationale:** Standard stop-losses are ill-suited for binary gaps. By sizing based on the cash floor and utilizing the ESA tax-shield for rapid principal recovery, the portfolio achieves 'House Money' status 30% faster than in taxable accounts.
 - **[MANDATE_23_DISTILLATION_VETO]**
-  - **Status:** PROPOSED
+  - **Status:** ACTIVE
   - **Instruction:** Enforce a Moat Audit on SaaS assets; cap health_score at 60 if logic is portable via industrial-scale distillation.
 - **[MANDATE_24_GAP_DEFENSE]**
   - **Status:** ACTIVE
@@ -308,6 +315,10 @@
   - **Active Sentinel Directive:** Prioritize RSI and Distance from VWAP as 'Exit-First' indicators. Bypasses MACRO_SENTINEL if flagged with HV BREAKOUT.
   - **Rebalancing Misfire Audit:** Evaluate if loss was mechanistic flow (Rebalancing Windows) vs. fundamental breakdown.
 
+## Anti Hallucination Core
+- **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.
+  - **Proactive Search Mandate [CODIFIED: PROTOCOL_01]:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (`sec_link`) and Government/DoW press releases (`dow_link`) when not explicitly provided in the payload. This protocol overrides the default 'INSUFFICIENT_DATA' fallback for these specific source links. Probabilistic or assumed URLs remain strictly prohibited; links must be verified via search prior to SSoT injection.
+
 ## Enh Protocols
 - **[ENH_01 - Keep-First Portfolio Reconciliation]**
   - **Instruction:** Logic: [Keep Document Balance] + [New Buys] - [Confirmed Sells].
@@ -323,8 +334,9 @@
   - **Instruction:** Senate-only passage is PROVISIONAL. Risk Regime stays CRITICAL until House confirms.
 - **[ENH_09 - Bifurcation Filter]**
   - **Instruction:** If SPX rises but RSP is flat, trigger 'Speculative Exhaustion' warning.
-- **[ENH_10 - Supply Chain Lead Indicator]**
-  - **Instruction:** Monitor $UMAC 8-K as a leading indicator for $RCAT/$ONDS. -15% health penalty on delays.
+- **[ENH_10 - [MIGRATED]]**
+  - **Status:** DEPRECATED
+  - **Instruction:** Logic migrated to Trade Lesson 205 (UMAC_LEAD_INDICATOR).
 - **[ENH_11 - Standardized Sync Payload Protocol]**
   - **Instruction:** On manual request, output recovery JSON with sync_event: MANUAL_RECONCILIATION.
 - **[ENH_12 - Volatile State Cache (VSC) Fallback]**
@@ -348,8 +360,8 @@
     - **Market Status:** STRING
     - **On Session Start:** LOAD_LATEST_SSOT
     - **On Session End:** WRITE_MERGED_SSOT
-- **[ENH_23 - Memory Initialization & Persistence]**
-  - **Instruction:** Synchronize with the 'local_storage_state' payload block on first turn.
+- **[ENH_23 - [MIGRATED TO MANDATE_12]]**
+  - **Instruction:** Logic migrated to MANDATE_12_BOOT_SYNC.
 - **[ENH_24 - Data Integrity & Schema Enforcement]**
   - **Instruction:** Use WAC and shares from the 'local_storage_state' payload for all P&L calculations.
 - **[ENH_25 - Temporal Guardrail Enforcement]**
@@ -366,21 +378,22 @@
 - **[ENH_30 - Forensic Structural Filter]**
   - **Instruction:** Forensic flags (Dilution/Warrants) trigger sizing reduction per the structural_modifier_table below.
   - **Structural Modifier Table:**
-    - **Authority:** CANONICAL â€” GEM_Structural_Engine MUST reference this table.
+    - **Authority:** CANONICAL — GEM_Structural_Engine MUST reference this table.
     - **Base:** 1.0
     - **High Dilution:** 0.5
     - **Distressed Capital:** 0.5
     - **Questionable Governance:** 0.75
     - **Speculative Sector:** 0.75
-    - **Umac Delay Penalty:** 0.85
     - **Legislative Mismatch Penalty:** 0.5
     - **Shelf Offering Active:** 0.25
     - **Note:** Modifiers are multiplicative. shelf_offering_active (0.25) applies when 424B filed within < 72h.
 - **[ENH_31 - Temporal Logic & Protocol Sync]**
-  - **Logic:** MANDATORY_PREAMBLE: Every response MUST begin with a 'TEMPORAL_CHECK' header. This header must extract the ISO string from the payload and determine the current Market Status (PRE-MARKET, OPEN, POWER_HOUR, or CLOSED). Predictors are blocked until status is verified.
+  - **Logic:** 
+    - **MANDATORY_PREAMBLE:** Every response MUST begin with a 'TEMPORAL_CHECK' header. This header must extract the ISO string from the payload and determine the current Market Status (PRE-MARKET, OPEN, POWER_HOUR, or CLOSED). Predictors are blocked until status is verified.
+    - **Baseline Sync:** Google Search is the Primary Baseline Arbiter for numeric Previous Close ($C$) and Open ($O$) prices. Before any session_change_pct calculation, the engine MUST perform a Google Search query specifically for "[Ticker] Google Finance quote". It must extract the explicit lastClosePrice and openPrice fields to establish the objective constant ($C$) for that session.
   - **Action:** Append 'TEMPORAL_CHECK: [ISO_STRING] (Market Status: [STATUS])' to start of output.
 - **[ENH_32 - Data Schema & GEX Calculation Protocol (Unified)]**
-  - **Schema Authority:** CANONICAL â€” All other Gems MUST reference this schema via 'GEM_Rules_Data > ENH_32'. Do NOT duplicate inline.
+  - **Schema Authority:** CANONICAL — All other Gems MUST reference this schema via 'GEM_Rules_Data > ENH_32'. Do NOT duplicate inline.
   - **Schema Definition:**
     - **Portfolio Snapshot:**
       - 
@@ -427,28 +440,15 @@
   - **Calculation Logic:**
     - **Gex Exposure:** shares * net_gex_total
     - **Total Portfolio Gex:** sum(gex_exposure)
-- **[ENH_33 - Dynamic Research Synchronization]**
-  - **Instruction:** Prioritize '@Google Drive' extension for 'Trading_Research' folder. Trigger dynamic re-reads between turns.
-- **[ENH_34 - Auto Load GEM-Context-SSOT doc]**
-  - **Status:** ENABLED
-  - **Instruction:** MANDATORY_SESSION_START_SYNC
+- **[ENH_33 - [MIGRATED TO MANDATE_11]]**
+  - **Instruction:** Logic migrated to MANDATE_11_RESEARCH_SYNC.
+- **[ENH_35 - State Verification Protocol]**
+  - **Status:** ACTIVE
+  - **Instruction:** The system MUST verify that the live SSoT payload (state_context, portfolio_snapshot, unallocated_cash) is present in the prompt before executing any analysis.
   - **Protocol:**
-    - **Target File:** GEM-Context-SSOT
-    - **Source Provider:** GOOGLE_DRIVE_CENTRAL
-    - **Boot Sequence:** PRIORITY_0
-    - **Sync Verification:** MANDATE_12_COMPLIANT
-- **[ENH_35 - Attachment & Source Verification]**
-  - **Status:** ENABLED
-  - **Instruction:** The system MUST perform a metadata scan for both the 'GEM-Context-SSOT' file and the 'Trading_Research' folder/file cluster at session start or turn trigger.
-  - **Protocol:**
-    - **Gate 01 Ssot:** If 'GEM-Context-SSOT' is NULL -> TRIGGER: CRITICAL_SYNC_ALERT.
-    - **Gate 02 Research:** If 'Trading_Research' files are NULL -> TRIGGER: DATA_STAGNATION_WARNING.
-    - **Action:** ISSUE_USER_REMINDER
-    - **Template:** CRITICAL: SSoT Source or Research Folder Missing. 
-- SSoT Status: {ssot_status}
-- Research Status: {research_status}
-Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploaded to restore data lineage.
-    - **Bypass Condition:** Explicit RAW_JSON provided for SSoT AND forensic data provided for Research.
+    - **Gate 01 Data Sync:** If SSoT payload is MISSING -> TRIGGER: CRITICAL_SYNC_ALERT. Request user to inject current state JSON.
+    - **Gate 02 Research Sync:** If external research data/links are required but missing -> TRIGGER: DATA_STAGNATION_WARNING.
+    - **Action:** ISSUE_USER_REMINDER and HOLD all execution until data is provided.
 - **[ENH_37 - Alpha Catalyst Scrutiny (Bullish)]**
   - **Instruction:** Rule: Identify 13-F/144 filings and positive momentum catalysts. Output: Confidence Score (0.0-1.0).
 - **[ENH_38 - Adversarial Risk Rebuttal (Red Team)]**
@@ -568,35 +568,9 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
     - IF proximity_hours <= TIER_3.proximity_threshold_hours AND event IN TIER_3 -> shield_posture = DEFENSIVE, sizing_dampener = 0.85
     - IF proximity_hours == 0 (EVENT_DAY) AND event IN TIER_1 -> shield_posture = NO_NEW_ENTRIES, sizing_dampener = 0.25
     - IF no events within 48h -> shield_posture = FULL_RISK, sizing_dampener = 1.0
-- **[ENH_48 - Narrative Bridge Protocol]**
-  - **Process Id:** NARRATIVE_BRIDGE_V1
-  - **Trigger:** ON_SPEAKER_HIT_TAPE
-  - **Instruction:** Prevents 'Hallucinated Calm' by linking current Fed cautiousness to the established fear of DOJ-induced central bank instability.
-  - **Execution Logic:**
-    - 
-      - **Step:** 1
-      - **Action:** QUERY_LEGACY_ANCHOR_DATABASE
-      - **Target Keys:**
-        - Independence
-        - Roaring Back
-        - Stink Bug
-        - Subpoena
-        - March Cut
-    - 
-      - **Step:** 2
-      - **Action:** CALCULATE_NARRATIVE_RESONANCE
-      - **Formula:** $Resonance = (Live_Keyword_Match * Legacy_Anchor_Weight) / Time_Decay_Constant
-      - **Threshold:** 0.75
-    - 
-      - **Step:** 3
-      - **Action:** EMIT_VOLATILITY_WARNING
-      - **Conditions:**
-        - **If:** $Resonance > 0.85
-        - **Then:** RE-RATE_TICKER_SENSITIVITY
-        - **Targets:**
-          - $ONDS
-          - $DFTX
-          - $PLTR
+- **[ENH_48 - [MIGRATED]]**
+  - **Status:** DEPRECATED
+  - **Instruction:** Logic migrated to Trade Lesson 207 (NARRATIVE_BRIDGE_MARCH).
 - **[ENH_49 - Air-Gap Sandbox Bridge Protocol]**
   - **Instruction:** The Gem operates in a Web UI sandbox. It has ZERO direct write access to local files; all state updates MUST be emitted in the EXECUTION_PAYLOAD. The user will copy and paste this payload into the local fetch_stocks.py paste handler, which acts as the bridge to update local JSON files.
   - **Execution Flow:**
@@ -655,8 +629,9 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
     - 2. PATCH_GENERATION: Create a JSON patch array targeting the deep nested key in the schema (e.g., ['system_thresholds', 'ALPHA_FRICTION_MINIMUM']).
     - 3. EMISSION: Output the patch array in the `EXECUTION_PAYLOAD` under the `rule_mutations` key. The orchestrator will natively intercept this and rewrite the GEM_Rules_Data on the disk.
 - **[ENH_55 - Web Verification Protocol]**
-  - **Instruction:** Enforces spatial trend awareness across multiple timeframes. For every ticker provided in the SSoT payload, the Gem MUST use the Google Finance extension to retrieve price charts at all required timeframes.
+  - **Instruction:** Enforces spatial trend awareness across multiple timeframes. The Google Finance Extension is reserved for Spatial Verification (visual chart and trend audit) only. For every ticker provided in the SSoT payload, the Gem MUST use the Google Finance extension to retrieve price charts at all required timeframes.
   - **Chart Requirements:**
+    - **Baseline Truth:** Fetch the explicit "Previous Close" price from Google Finance. This value serves as the immutable denominator for all session percentage calculations. Calculation of percentages using assumed or mid-day opening ticks is strictly prohibited.
     - **1 Day:** Verify VWAP relationship and intraday volume profile. Detect opening gap fills, failed breakouts, and distribution at key price levels.
     - **5 Day:** Detect multi-day base formation, support tests, or distribution patterns. Identify pre-market vs regular session divergence.
     - **6 Month:** Confirm intermediate trend alignment with MA50/MA200 signals. Identify accumulation or distribution phases.
@@ -680,6 +655,7 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
     - **Gap Percent:** The 'True Gap' (locked at regular market open). Formula: ((Open - Previous Close) / Previous Close) * 100. Values > 1.0% or < -1.0% indicate a strong overnight catalyst (e.g. news/earnings gap).
     - **Session Change Pct:** The 'Net Session Change' (fluctuates intraday). Formula: ((Current Price - Previous Close) / Previous Close) * 100. Reflects live intraday return/trend.
   - **Logic Application:** Use `gap_percent` strictly to evaluate the magnitude of overnight structural gaps. Use `session_change_pct` for all intraday trend evaluations, systemic volatility overrides (e.g. Protective Exit threshold in ENH_FIN_02), and RVOL confirmation.
+  - **Forensic Baseline Mandate:** The system is FORBIDDEN from assuming session_change_pct is provided accurately by external feeds. For every turn involving a potential Negative Delta Force or Volatility Override trigger, the engine MUST reconstruct the Previous Close ($C$) baseline using the formula: $C = Open / (1 + (Gap \% / 100))$. All session calculations must derive from this reconstructed constant to eliminate data-provider lag or conflation errors.
 - **[ENH_60 - Strict FIFO WAC Recalculation]**
   - **Status:** ACTIVE
   - **Instruction:** The broker dictates strict First-In, First-Out (FIFO) accounting. The oldest purchased shares are ALWAYS sold first during any position trim or partial exit.
@@ -694,9 +670,9 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
 - **[ENH_68 - The 'Devil's Advocate' Hard Audit]**
   - **Instruction:** MANDATE_15 (Red Team) must provide a 'Zero-Success Scenario' if consensus is >0.85. The Red Team GEM must simulate total failure of the core catalyst (e.g., 'What if the FDA issues a CRL despite positive Ph3 data?').
   - **Governance:** The Orchestrator must reconcile this 'Black Swan' risk before committing.
-- **[ENH_69 - Cross-Sector Correlation Cascade]**
-  - **Instruction:** Macro Contagion logic: IF SPY Net GEX < -$10B, apply a 0.7x Sizing Multiplier to all DIB assets (UMAC, RCAT, ONDS) even if idiosyncratic news is positive.
-  - **Rationale:** Acknowledges that in a liquidity wash, 'everything is correlated to 1.0'.
+- **[ENH_69 - [MIGRATED]]**
+  - **Status:** DEPRECATED
+  - **Instruction:** Logic migrated to Trade Lesson 208 (DIB_CORRELATION_CASCADE).
 - **[ENH_70 - Adaptive Catalyst Decay (Health Aging)]**
   - **Instruction:** For every session a ticker fails to reclaim its 'Post-Catalyst High,' decay the health_score by 3 points.
   - **Rationale:** Prevents 'thesis marriage' where the system holds a winner until it becomes a laggard.
@@ -712,10 +688,9 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
   - **Status:** ACTIVE
   - **Instruction:** Monitor and neutralize structural noise/distribution during the 12:00-13:00 EST window.
   - **Logic:** IF Time == 12:00-13:00 EST AND Volume > 2x 10-day Average, flag as 'Structural Noise.' Neutralize buy/sell signals that lack a corresponding hard catalyst to prevent execution into rebalancing wicks.
-- **[ENH_75 - Clinical Priority Voucher (CPV) Override]**
-  - **Status:** ACTIVE
-  - **Instruction:** Recognize the valuation torque of expedited FDA pathways. 
-  - **Logic:** IF a Sovereign Clinical asset (e.g., DFTX) receives 'Right to Try' certification or a 'Priority Review Voucher' per the April 2026 Executive Order, Nullify Rule 159 (RSI Exits). Asset is re-classified as SOVEREIGN_STRATEGIC and held until the primary clinical readout (Panorama/Voyage).
+- **[ENH_75 - [MIGRATED]]**
+  - **Status:** DEPRECATED
+  - **Instruction:** Logic migrated to Trade Lesson 209 (CPV_OVERRIDE_DFTX).
 - **[ENH_76 - Token Economy Budgeting (Context Pruning)]**
   - **Status:** ACTIVE
   - **Instruction:** Proactively manage the 128K active token window during periods of high data throughput.
@@ -725,6 +700,9 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
     2. Active Forensic Flags (SSR, Success Memos)
     3. Consensus Sa History (Last 3 turns)
     4. Narrative Logs (Delete entries older than 5 turns)
+- **[ENH_77 - Proactive Search Mandate]**
+  - **Status:** ACTIVE
+  - **Instruction:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (`sec_link`) and Government/DoW press releases (`dow_link`) when not explicitly provided in the payload. This protocol overrides the default 'INSUFFICIENT_DATA' fallback for these specific source links. Probabilistic or assumed URLs remain strictly prohibited; links must be verified via search prior to SSoT injection.
 
 ## Global Logic Gates
 - **Execution Gate:**
@@ -769,12 +747,12 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
   - **Id:** ENH_FIN_01
   - **Provider:** Nordea_Finland_ESA
   - **Tax Status:** DEFERRED_ESA
-  - **Round Trip Cost:** 0.01
+  - **Round Trip Cost:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
   - **Constraints:**
-    - **Min Alpha Threshold:** 0.02
+    - **Min Alpha Threshold:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
     - **Fifo Impact:** NULLIFIED
     - **Wash Sale Risk:** ZERO
-  - **Instruction:** Priority is Capital Velocity. Re-entry into RS leaders (RCAT) at pivot nodes is encouraged. The 'Cost of Churn' is fixed at 1% commission; the 'Tax of Churn' is 0%.
+  - **Instruction:** Priority is Capital Velocity. Re-entry into RS leaders (RCAT) at pivot nodes is encouraged. The 'Cost of Churn' is fixed at system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE; the 'Tax of Churn' is 0%.
 
 ## Deletion Policy
 - **Inherit From Ssot:** True
@@ -801,8 +779,8 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
 - **Calendar Shield Merge Logic:**
   - **Key:** active_events_window[].date
   - **Rules:**
-    - **Preserve Future Events:** IF event.date >= current_date THEN PRESERVE â€” event is IMMUTABLE until its date has passed
-    - **Prune Expired Events:** IF event.date < current_date THEN PRUNE â€” remove from active_events_window
+    - **Preserve Future Events:** IF event.date >= current_date THEN PRESERVE — event is IMMUTABLE until its date has passed
+    - **Prune Expired Events:** IF event.date < current_date THEN PRUNE — remove from active_events_window
     - **Append New Events:** IF event NOT in active_events_window AND event.date >= current_date THEN APPEND
     - **Update Next Event:** SET next_event = MIN(active_events_window.date WHERE date >= current_date)
     - **Recalculate On Merge:** After merge, recalculate status, shield_posture, and sizing_dampener from ENH_47 tier logic based on updated next_event.proximity_hours
@@ -829,7 +807,7 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
 - **Rule:** ENH_12_ATOMIC_PERSISTENCE
 
 ## Health Score Protocol
-- **Authority:** CANONICAL â€” GEM_Technical_Validator MUST reference this protocol.
+- **Authority:** CANONICAL — GEM_Technical_Validator MUST reference this protocol.
 - **Base Score:** 100
 - **Penalties:**
   - 
@@ -844,7 +822,7 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
   - 
     - **Condition:** Trade_State == EXIT AND Drawdown_Gap < 1.5% AND volatility_override == FALSE
     - **Deduction:** 30
-    - **Label:** Alpha-Friction Violation (churn only â€” bypassed during Protective Exit Override)
+    - **Label:** Alpha-Friction Violation (churn only — bypassed during Protective Exit Override)
     - **Enh Ref:** ENH_FIN_02
   - 
     - **Condition:** fields labeled Unverified
@@ -853,8 +831,8 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
   - 
     - **Condition:** Supply Chain flags active
     - **Deduction:** 15
-    - **Label:** ENH_10 Supply Chain
-    - **Enh Ref:** ENH_10
+    - **Label:** Lesson 205 Supply Chain
+    - **Enh Ref:** Lesson 205
   - 
     - **Condition:** Signal/Trend mismatch
     - **Deduction:** 15
@@ -870,7 +848,7 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
     - **Enh Ref:** ENH_70
 
 ## Signal Consistency Thresholds
-- **Authority:** CANONICAL â€” GEM_Technical_Validator MUST reference these thresholds.
+- **Authority:** CANONICAL — GEM_Technical_Validator MUST reference these thresholds.
 - **Rules:**
   - 
     - **Condition:** rsi < 30
@@ -890,7 +868,11 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
   - **Zero Gex:** NEUTRAL
 
 ## System Thresholds
-- **Authority:** CANONICAL â€” All sub-engines MUST reference named constants here instead of hardcoding values.
+- **Authority:** CANONICAL — All sub-engines MUST reference named constants here instead of hardcoding values.
+- **GLOBAL_ALPHA_FRICTION_HURDLE:**
+  - **Value:** 0.0117
+  - **Usage:** Mandatory 1.17% round-trip friction floor for Nordea ESA Tier 4.
+  - **Status:** MASTER_CONSTANT
 - **Tax Posture:**
   - **Value:** TAX_FREE
   - **Usage:** Zero capital gains liability. Position rotation frequency is constrained ONLY by the 1% round-trip friction cost (ENH_FIN_02), never by tax considerations.
@@ -958,15 +940,15 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
     - health_score_protocol
     - technical_validator
 - **Alpha Friction Minimum:**
-  - **Value:** 0.025
-  - **Dynamic Logic:** IF VIX > 20 THEN 0.04 ELSE 0.025
-  - **Usage:** Minimum viable alpha per trade to cover friction (2.5%)
+  - **Value:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
+  - **Dynamic Logic:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
+  - **Usage:** Minimum viable alpha per trade to cover friction
   - **Used By:**
     - bullish_gem
     - ENH_FIN_02
 - **Nordea Esa Alpha Friction:**
-  - **Value:** 0.020
-  - **Usage:** Reduced friction threshold for Nordea ESA accounts (2.0%)
+  - **Value:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
+  - **Usage:** Reduced friction threshold for Nordea ESA accounts
   - **Used By:**
     - bullish_gem
     - execution
@@ -1022,8 +1004,8 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
     - ssot_storage
     - context_engine
 - **Round Trip Cost Basis:**
-  - **Value:** 0.01
-  - **Usage:** Nordea OST round-trip cost (1%)
+  - **Value:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
+  - **Usage:** Nordea OST round-trip cost (1.17%)
   - **Used By:**
     - ssot_storage
     - fin_account_gate
@@ -1054,7 +1036,7 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
     - research
 - **Protective Exit Atr:**
   - **Value:** 4.0
-  - **Usage:** ATR% threshold for Protective Exit Override â€” bypass friction gate during volatile breakdowns
+  - **Usage:** ATR% threshold for Protective Exit Override — bypass friction gate during volatile breakdowns
   - **Used By:**
     - ENH_FIN_02
     - red_team_gem
@@ -1106,6 +1088,9 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
 - **Vixy Velocity Critical:**
   - **Value:** 5.0
   - **Usage:** VIXY daily gap % at or above this triggers FEAR ALERT regardless of absolute VIX regime
+  - **Used By:**
+    - fetch_stocks
+    - MANDATE_20
 - **Vvix Shock Threshold:**
   - **Value:** 105.0
   - **Usage:** VVIX level above this (when VIX < 20) triggers PREEMPTIVE_DEFENSE mode (ENH_72)
@@ -1192,7 +1177,7 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
     - rules (RULE_04)
 
 ## Basket Definition
-- **Authority:** CANONICAL â€” All sub-engines MUST reference tickers from this section. Update here when adding/removing tickers.
+- **Authority:** CANONICAL — All sub-engines MUST reference tickers from this section. Update here when adding/removing tickers.
 - **Defense Tech:**
   - **Tickers:**
     - RCAT
@@ -1225,12 +1210,12 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
   - **Innovation Day Ticker:** RCAT
   - **Warrant Dilution Ticker:** ONDS
 - **Regulatory Context:**
-  - **Authority:** CANONICAL â€” Defines the primary regulatory body and risk triggers for the current basket.
+  - **Authority:** CANONICAL — Defines the primary regulatory body and risk triggers for the current basket.
   - **Agency Name:** DHS
   - **Risk Event Trigger:** CR
 
 ## Sector Taxonomy
-- **Authority:** CANONICAL â€” SSoT sector_exposure fields MUST align with these categories.
+- **Authority:** CANONICAL — SSoT sector_exposure fields MUST align with these categories.
 - **Categories:**
   - defense_tech
   - neuropsychiatry
@@ -1238,12 +1223,8 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
 - **Note:** Update SSoT portfolio_risk_geometry.sector_exposure when adding new sectors.
 
 ## Temporal Events
-- **Authority:** CANONICAL â€” All date-sensitive rules MUST reference events here. Update this section when deadlines change.
-- **Gov Funding Expiry:**
-  - **Value:** MONITOR_CR_EXTENSION
-  - **Usage:** Government Funding / CR expiry date
-  - **Used By:**
-    - sentiment_engine
+- **Authority:** CANONICAL — All date-sensitive rules MUST reference events here. Update this section when deadlines change.
+- **Gov Funding Expiry:** [MIGRATED TO TRADE_LESSONS_210]
 - **Dilution Warrant Event:**
   - **Value:** MONITOR_DAILY
   - **Usage:** Mandatory forensic check for daily structural overhead and share-count expansion resulting from warrant tranches.
@@ -1257,7 +1238,7 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
     - sentiment_engine
 - **Annual Reset Window:**
   - **Value:** January 01 - January 15
-  - **Usage:** Primary institutional reset window â€” year-ahead capital allocation
+  - **Usage:** Primary institutional reset window — year-ahead capital allocation
   - **Used By:**
     - ENH_46
     - research
@@ -1268,21 +1249,21 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
     - May 10 - May 20
     - August 10 - August 20
     - November 10 - November 20
-  - **Usage:** Secondary tactical review windows â€” trimming growth winners for laggards/bonds
+  - **Usage:** Secondary tactical review windows — trimming growth winners for laggards/bonds
   - **Used By:**
     - ENH_46
     - research
     - post_trade_review
 - **Quarterly Roll Windows:**
   - **Value:** Final 5 Trading Days of March, June, September, December
-  - **Usage:** Index rebalancing and futures rolls â€” peak structural volatility
+  - **Usage:** Index rebalancing and futures rolls — peak structural volatility
   - **Used By:**
     - ENH_46
     - execution
     - research
 
-## Enh 56 Daily Workflow
-- **Id:** ENH_56
+## Enh 78 Daily Workflow
+- **Id:** ENH_78
 - **Title:** Daily Workflow Protocol
 - **Status:** ACTIVE
 - **Trigger:** SESSION_START
@@ -1294,22 +1275,22 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
   - 5. THREAT MATRIX: Synthesize into priority-ranked action list (TRIM / HOLD / ADD / NEW RESEARCH)
   - 6. PRESENT: Emit structured daily briefing before accepting trade commands
 
-## Enh 57 Lesson Feedback Loop
-- **Id:** ENH_57
+## Enh 79 Lesson Feedback Loop
+- **Id:** ENH_79
 - **Title:** Lesson Feedback Pipeline
 - **Status:** ACTIVE
 - **Instruction:** After every REVIEW_ENGINE post-mortem where thesis_integrity != Confirmed, the Review Engine MUST emit a codified lesson INSIDE the main structured SSoT output payload under the key 'new_trade_lessons'. Do NOT emit it as a separate discrete JSON block. The user copies this unified payload to the fetch_stocks.py paste handler, which upserts the lesson into trade_lessons.json. The Research Engine MUST cross-reference trade_lessons.json at session boot.
 - **Routing:** REVIEW_ENGINE → new_trade_lessons (inside SSoT) → User Paste → fetch_stocks.py paste handler → trade_lessons.json
 
-## Enh 58 Conditional Council
-- **Id:** ENH_58
+## Enh 80 Conditional Council
+- **Id:** ENH_80
 - **Title:** Conditional Council Escalation
 - **Status:** ACTIVE
 - **Instruction:** Gate council depth based on trade significance. Full council (Bull + Red + Neutral → Validator) runs for: new positions, > COUNCIL_FULL_NAV_THRESHOLD NAV, high conviction spread, VIX > VOLATILITY_REGIME_THRESHOLDS.HIGH. Fast path (Bull + Red → Validator) runs for: existing position trims/adds ≤ COUNCIL_FAST_PATH_NAV_CEILING NAV. Emotional override: if user prompt contains urgency/FOMO signals, ALWAYS run full council with RED_TEAM weighted at RED_TEAM_HIGH_VOL_WEIGHT.
 - **Reference:** GEM_Terminal > routing_logic > consensus_pipeline > conditional_escalation
 
-## Enh 59 Conviction Circuit Breaker
-- **Id:** ENH_59
+## Enh 81 Conviction Circuit Breaker
+- **Id:** ENH_81
 - **Title:** Conviction Bias Circuit Breaker
 - **Status:** ACTIVE
 - **Trigger:** IF all three council members (Bull, Red, Neutral) agree with conviction > 7/10
@@ -1317,7 +1298,11 @@ Please attach 'GEM-Context-SSOT' and ensure 'Trading_Research' files are uploade
 - **Action:** Append '⚠️ CONVICTION CLUSTER: All council unanimous >7/10. Seeking disconfirming evidence.' to output.
 
 ## Infrastructure
-- **Authority:** CANONICAL â€” This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.
+- **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.
+- **Hierarchy of Authority [CODIFIED: PROTOCOL_02]:**
+  - **Supremacy:** The static Knowledge Base (`rules.md`, including all MANDATES and ENH Protocols) possesses ABSOLUTE EXECUTION SUPREMACY over the dynamic `trade_lessons` payload array.
+  - **Conflict Resolution:** In the event of a directive collision between a `trade_lesson` and a codified systemic rule, the systemic rule dictates execution.
+  - **Lesson Boundary:** `trade_lessons` may act as secondary contextual filters or trigger predefined systemic overrides (e.g., Volatility Overrides), but they CANNOT autonomously alter, suspend, or override core mechanical constraints (e.g., Alpha-Friction or Liquidity Locks) unless explicitly mapped to a defined `ENH` bypass.
 - **Rules Doc:**
   - **Path:** GoogleDrive://GEM_Trading_Rules/rules
   - **Description:** Primary rules document containing mandates and thresholds (Attached Knowledge Base)
