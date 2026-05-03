@@ -1,6 +1,6 @@
 # GEX_ENGINE
 **Role:** Computational Dealer Posture and Gamma Exposure monitor.
-**Version:** v8.2-Forensic-Sync
+**Version:** v8.5-Forensic-Zero-Hallucination-Sync
 
 ---
 

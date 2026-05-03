@@ -1512,12 +1512,24 @@ def fetch_stocks(state):
     - SSoT_JSON: Quantitative state (Prices, GEX, VWAP, Portfolio, Macro).
     - Trade_Lessons_MD: Qualitative lessons in Markdown format.
     """
+    ssot = state.get("local_storage_state", {})
+    ms = ssot.get("mutable_state", ssot)
+    portfolio = ms.get("portfolio_snapshot", [])
+
     # 1. Quantitative SSoT
     tickers_data = state.get("tickers", [])
     compact_tickers = []
     for t in tickers_data:
-        compact_tickers.append({
-            "ticker": t.get("ticker"),
+        ticker_symbol = t.get("ticker")
+        
+        hist_ctx = None
+        for p in portfolio:
+            if p.get("ticker") == ticker_symbol:
+                hist_ctx = p.get("historical_context")
+                break
+
+        ticker_payload = {
+            "ticker": ticker_symbol,
             "price": t.get("price"),
             "vwap": t.get("vwap"),
             "gap": t.get("gap_percent"),
@@ -1525,11 +1537,12 @@ def fetch_stocks(state):
             "dealer": t.get("dealer_posture"),
             "score": t.get("score"),
             "rsi": t.get("rsi")
-        })
-
-    ssot = state.get("local_storage_state", {})
-    ms = ssot.get("mutable_state", ssot)
-    portfolio = ms.get("portfolio_snapshot", [])
+        }
+        
+        if hist_ctx:
+            ticker_payload["historical_context"] = hist_ctx
+            
+        compact_tickers.append(ticker_payload)
     
     compact_portfolio = []
     for p in portfolio:

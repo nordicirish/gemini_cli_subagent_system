@@ -33,10 +33,13 @@
 
 ## #20013
 - **L-203:** [CODIFIED: DIB_PSYCH_FLOOR] Breach of $14.00 psychological parity on UMAC in a SHORT_GAMMA regime mandates an immediate freeze on 'Add' operations until session VWAP is reclaimed."
-- **L-202:** [CODIFIED: CLINICAL_VOID_OVERRIDE] In high-VIX or SPY-overbought regimes, clinical assets protected by statutory priority vouchers (L-192) function as 'Strategic Anchors'. They are exempt from standard 'House Money' trims (L-142) to preserve full binary torque until the primary readout, provided VIX remains < 30.",
+- **L-202:** [CODIFIED: CLINICAL_VOID_OVERRIDE] In high-VIX or SPY-overbought regimes, clinical assets protected by statutory priority vouchers (L-192) function as 'Strategic Anchors'. They are exempt from standard 'House Money' trims (L-142) to preserve full binary torque until the primary readout, provided VIX remains < 30.",
+
     " #20013
-- **L-205:** [CODIFIED: LOGIC_TIER_LOCK] The user interface selection of 'Thinking' has been forensicly confirmed as the active reasoning engine for the GEM Terminal ecosystem per UI visual verification."
-  ]
+- **L-205:** [CODIFIED: LOGIC_TIER_LOCK] The user interface selection of 'Thinking' has been forensicly confirmed as the active reasoning engine for the GEM Terminal ecosystem per UI visual verification."
+
+  ]
+
 } #20013
 
 ---
@@ -284,8 +287,10 @@
 - **L-196:** L-196: UAE OPEC exit weakens price control but spikes geopolitical risk in high-VIX regimes.
 - **L-197:** L-197: 8:30 AM Gauntlet mandates 50% sizing dampeners on new risk until PCE < 3.0% YoY is verified.
 - **L-199:** [CODIFIED: DIB_FLUSH_PROTOCOL]
-- **L-200:** [CODIFIED: DIB_PSYCH_FLOOR] Breach of $14.00 psychological parity on UMAC in a SHORT_GAMMA regime mandates an immediate freeze on 'Add' operations until session VWAP is reclaimed."
-  ]
+- **L-200:** [CODIFIED: DIB_PSYCH_FLOOR] Breach of $14.00 psychological parity on UMAC in a SHORT_GAMMA regime mandates an immediate freeze on 'Add' operations until session VWAP is reclaimed."
+
+  ]
+
 }
 - **L-201:** L-200: [CODIFIED: CLINICAL_VOID_OVERRIDE] In high-VIX or SPY-overbought regimes, clinical assets protected by statutory priority vouchers (L-192) function as 'Strategic Anchors'. They are exempt from standard 'House Money' trims (L-142) to preserve full binary torque until the primary readout, provided VIX remains < 30.
 - **L-204:** L-206: [CODIFIED: LOGIC_TIER_LOCK] The user interface selection of 'Thinking' has been forensicly confirmed as the active reasoning engine for the GEM Terminal ecosystem per UI visual verification.

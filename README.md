@@ -2,7 +2,7 @@
 
 **A multi-agent AI trading intelligence framework built on Google Gemini Gems.**
 
-Starting with v6.6, the system has fully matured its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`ssot.json`, `trade_lessons.json`), the agents themselves now utilize highly structured `.md` files for their behavioral logic and the central ruleset. This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
+Starting with v8.5-Forensic-Zero-Hallucination-Sync, the system has fully matured its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`ssot.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`). The agents themselves now utilize highly structured `.md` files for their behavioral logic and the central ruleset. This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
 
 ---
 
@@ -46,7 +46,7 @@ Starting with v6.6, the system has fully matured its core orchestration into **m
           ┌──────────┴──────────┐
           │   CONTEXT ENGINE     │──── SSoT STORAGE
           │   (State Bridge)     │     (Schema)
-          └──────────┬──────────┘
+          └──────────┴──────────┘
                      │
           ┌──────────┴──────────┐
           │  EXECUTION ENGINE    │
@@ -64,12 +64,12 @@ To prevent the LLM reasoning engines from hallucinating software structures whil
 2. **Rules / Protocols (`ENH_01` to `ENH_52`)**: These govern **Financial Execution & Domain Knowledge**. These are the fluid, quantitative strategies telling the system *how to trade*. 
    - *Example:* `ENH_45` (Macro Shock Veto), `ENH_50` (Pre-Trade Formulation), `ENH_36` (Post-14:30 Liquidity Gates).
 
-### The Live-Web SSoT Architecture (v6.6+)
-Unlike earlier versions that relied on static data, v6.6 implements **Grounding via Native Google Search**. Agents are now mandated to explicitly invoke Google Search to verify catalysts, news, and disconfirming evidence in real-time.
+### The Live-Web SSoT Architecture (v8.5+)
+Unlike earlier versions that relied on static data, v8.5-Forensic-Zero-Hallucination-Sync implements **Grounding via Native Google Search**. Agents are now mandated to explicitly invoke Google Search to verify catalysts, news, and disconfirming evidence in real-time.
 *   **The Processor:** The sandboxed Gemini Web UI acts as a stateless, high-powered reasoning engine with live web access.
 *   **The Search Tool:** Agents like the `RED_TEAM_PESSIMIST` and `RESEARCH_ENGINE` use native Google Search to hunt for "Thesis-Killers" and verify catalyst URLs.
-*   **The Bridge:** The Python backend (`fetch_stocks.py`) injects your live state (`local_ssot_shadow.json`) and history (`trade_lessons.json`) directly into the markdown prompt it generates for you. 
-*   **The Sync:** Gemini outputs a strict `EXECUTION_PAYLOAD` JSON block for manual dashboard ingestion.
+*   **The Bridge:** The Python backend (`fetch_stocks.py`) injects your live state (`local_ssot_shadow.json`) and institutional memory (`trade_lessons.md`) directly into the markdown prompt it generates for you. 
+*   **The Sync:** Gemini outputs a strict `EXECUTION_PAYLOAD` JSON block or Markdown lessons for manual dashboard ingestion.
 
 ---
 
@@ -83,9 +83,8 @@ The system now enforces **adversarial reasoning** and **volatility awareness** t
 
 The system integrates core software engineering principles into its trading logic to enhance autonomous rigor and self-improvement:
 1. **Plan Node Default:** System dynamically generates a rigid "Trade Thesis" before execution and triggers re-planning if the thesis is violated.
-1.  **Plan Node Default:** System dynamically generates a rigid "Trade Thesis" before execution and triggers re-planning if the thesis is violated.
 2.  **Subagent Strategy:** Employs "Dynamic Micro-Gem Routing" for borderline decisions (S_A 0.65–0.75) to spawn focused sub-engines to break ties.
-3.  **Self-Improvement Loop:** Conducts root-cause post-mortems on losses and natively appends `trade_lessons.json` to the clipboard payload so the system never repeats mistakes.
+3.  **Self-Improvement Loop:** Conducts root-cause post-mortems on losses and natively appends the `trade_lessons.md` registry to the clipboard payload so the system never repeats mistakes.
 4.  **Verification Before Done:** The `TECHNICAL_VALIDATOR` is forced to "prove the setup" against quantitative restrictions seconds before executing a `FORCE_WRITE`.
 5.  **Demand Elegance:** Explicitly rejects hacky or borderline setups relying on multiple overriding exceptions. Pushes for A+ convergence setups.
 6.  **Autonomous Bug Fixing:** Functions as a zero-prompt risk manager. Pre-formats a TRIM/EXIT JSON output if quantitative guards fail.
@@ -107,11 +106,14 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 
 ## 🛠️ Setup Instructions (Markdown) — One per Gem
 
+> **Note on Mode Selection:** The system no longer automatically forces an Orchestrator mode to prevent reasoning loops. You must **manually select** the Gemini Mode (e.g., Pro, Thinking, Flash) in the chat interface for your session. **Thinking mode is highly recommended** for the Orchestrator.
+
 | File | Gem Role | Gemini Mode | Purpose |
 |------|----------|-------------|---------|
-| `terminal.md` | **Orchestrator** | PRO | Master router — classifies user input and dispatches to the correct engine |
+| `terminal.md` | **Orchestrator** | USER SELECTED (Thinking Rec.) | Master router — classifies user input and dispatches to the correct engine |
 | `rules.md` | **Legislative Body** | N/A | **Static Rules**: The canonical source containing thresholds and ENH_ protocols. MUST be attached via Google Drive. |
 | `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `GEM_Rules_Data` |
+| `data_analyst.md` | **Data Analyst** | PRO | Tier-1 Data Shield — retrieves and formats raw web data (SEC/Macro) via native Google Search to save reasoning tokens |
 | `context_engine.md` | **Context Engine** | PRO | Active SSoT bridge — drift detection, state merging, sync orchestration |
 | `bullish_gem.md` | **Bullish Advocate** | THINKING | Alpha & momentum specialist — identifies reasons to approve trades |
 | `red_team_gem.md` | **Red Team Pessimist** | THINKING | Adversarial risk specialist — identifies reasons to reject trades |
@@ -136,7 +138,7 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 | `format_json.py` | Formatter — pretty-prints a JSON instruction file with consistent indentation |
 ### 4. Updating Gems (Maintenance)
 
-When you update the JSON instructions in this repository (e.g., version increment to v4.02), you must **manually update** the live Gem:
+When you update the JSON instructions in this repository (e.g., version increment to v8.5-Forensic-Zero-Hallucination-Sync), you must **manually update** the live Gem:
 
 1.  **Open the Gem** in [Gemini Advanced](https://gemini.google.com/gems).
 2.  Click the **Pencil Icon** (Edit) > **Instructions**.
@@ -145,7 +147,7 @@ When you update the JSON instructions in this repository (e.g., version incremen
 5.  Click **Update**.
 
 **Pro Tip:** If you are mid-session and don't want to restart, you can type:
-> *"SYSTEM UPDATE: I have patched your instructions to v4.02. Please simulate the following logic update: [Paste critical logic change]"*
+> *"SYSTEM UPDATE: I have patched your instructions to v8.5-Forensic-Zero-Hallucination-Sync. Please simulate the following logic update: [Paste critical logic change]"*
 >
 > *(However, a full restart is recommended for major version changes).*
 
@@ -164,18 +166,19 @@ The background daemon runs in a loop, fetching live data while a **FastAPI** `uv
 - **Copy/Paste Integrations**: Two-tier copy system — **Copy Turn Data** (lightweight per-turn payload with slim tickers + compact mutable state) and **Copy Session Init** (full SSOT + tickers + trade lessons for new sessions). A **Paste Execution Payload** button ingests Gemini outputs back to automatically mutate `local_ssot_shadow.json`.
 
 ### 2. Paste Into a Gem Conversation
-Open the relevant Gemini Gem (e.g., the Terminal Orchestrator). **IMPORTANT: Ensure you have selected the "Gemini 3.1 Pro" (or latest Pro) model in the chat interface.** Paste the dashboard payload. The Gem parses the financial data and routes it through the appropriate engine pipeline.
+Open the relevant Gemini Gem (e.g., the Terminal Orchestrator). **IMPORTANT: Ensure you have manually selected your preferred model mode (e.g., "Gemini 3.1 Pro" or "Thinking") in the chat interface. Thinking mode is recommended.** Paste the dashboard payload. The Gem parses the financial data and routes it through the appropriate engine pipeline.
 
 ### 3. The Council Deliberates
-For trade decisions, the system triggers the **Consensus Pipeline**:
+For trade decisions, the system triggers the **Two-Stage Consensus Pipeline**:
 
-1. **Macro Sentinel** — checks for exogenous shocks (CPI, FOMC, geopolitical) using live Google Search.
-2. **Neutral Structuralist** — evaluates GEX posture, market regime, and structural capacity to establish the baseline.
-3. **Bullish Advocate** — identifies alpha catalysts, momentum signals, and entry thesis.
-4. **Red Team Pessimist** — stress-tests for dilution, liquidity voids, and "Thesis-Killers" via live forensic search.
+1. **Data Analyst (Tier-1 Shield)** — Proactively gathers, verifies, and formats raw market data (Baseline Sync, SEC filings, macro prints) via native Google Search. This engine shields the "Thinking" models from wasting tokens on basic retrieval tasks (ENH_31 / ENH_77).
+2. **Macro Sentinel** — checks for exogenous shocks (CPI, FOMC, geopolitical) using live Google Search.
+3. **Neutral Structuralist** — evaluates GEX posture, market regime, and structural capacity to establish the baseline.
+4. **Stage 1 (Initial Theses):** **Bullish Advocate** identifies alpha catalysts, momentum signals, and entry thesis. **Red Team Pessimist** stress-tests for dilution, liquidity voids, and "Thesis-Killers" via live forensic search.
+5. **Stage 2 (Rebuttal):** The **Red Team Pessimist** is fed the Bullish thesis and mandated to provide a direct counter-argument.
 
 ### 4. Synthesis & Decision
-The **Technical Validator** computes the weighted **Agreement Score (S_A)**:
+The **Technical Validator** computes the weighted **Agreement Score (S_A)** based on the victor of the Stage 2 rebuttal:
 
 | Agent | Weight |
 |-------|--------|
@@ -188,11 +191,13 @@ The **Technical Validator** computes the weighted **Agreement Score (S_A)**:
 - `S_A 0.50–0.74` → **HOLD** / Route to Deep Research
 - `Fatal Flaw Score > 8` → **HARD VETO** (S_A forced to 0.0)
 
+**Tri-Profile Execution:** Before finalizing the order, the Execution Engine simulates Aggressive, Neutral, and Conservative sizing scenarios (Tri-Profile Review) to justify sizing before executing the deterministic formula.
+
 ### 5. Local State Ingestion (Air-Gap Bridge)
 Every turn concludes with the Gem outputting a precise JSON block named `EXECUTION_PAYLOAD`.
 1. Copy this JSON block from the Gemini UI.
 2. Click **"Paste Payload"** on your dashboard sidebar.
-3. The React/JS frontend routes the payload to the Python orchestrator, which natively parses the clipboard, validates the JSON, and seamlessly writes the state to `local_ssot_shadow.json` and `trade_lessons.json`.
+3. The React/JS frontend routes the payload to the Python orchestrator, which natively parses the clipboard, validates the JSON/Markdown, and seamlessly writes the state to `local_ssot_shadow.json` and the `trade_lessons.md` registry.
 
 ---
 
@@ -286,7 +291,7 @@ For each JSON file, create a new Gem in Google Gemini:
 ### 5. Initialize Air-Gap State Files
 The system uses local JSON files to maintain your "State of the World" portfolio and history across sessions without encountering web latency. Before your first run, create these two empty files in the root directory:
 - `local_ssot_shadow.json` (Initialize with an empty object `{}`)
-- `trade_lessons.json` (Initialize with an empty array `[]`)
+- `trade_lessons.md` (Initialize with an empty Markdown registry)
 
 *(Note: These files are included in `.gitignore` to prevent accidentally committing your personal trading portfolio and history).*
 
@@ -342,12 +347,12 @@ CRITICAL SYSTEM OVERRIDE: WIPE ALL PRIOR CONTEXT & FORCE SYNCHRONIZATION.
 
 Protocol Execution:
 1. ACKNOWLEDGE ARCHITECTURE: You are operating in a Web Sandbox environment. You MUST output all state changes as a strict JSON `EXECUTION_PAYLOAD` block so I can manually sync it via the local clipboard bridge.
-2. ACKNOWLEDGE SCHEMA: The system now uses the v4.9x Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
+2. ACKNOWLEDGE SCHEMA: The system now uses the v8.5-Forensic-Zero-Hallucination-Sync Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
 3. ACTION (ZERO-TOUCH SYNC): Use your Google Drive extension to read the attached `rules.md` markdown document in the (GEM_Trading_Rules) folder.
 4. VERIFICATION: Do NOT fabricate data. If you cannot read the file, STOP and output "TOOL FAILURE". 
    - Cite the exact `version` string verbatim from the top of the rules.md file.
    - Confirm which "ENH_" protocol governs the "Web Verification Protocol".
-5. Confirm Status: "System initialized: State is bound to v4.9x Payload Architecture and SSoT Rules are synced via Drive."
+5. Confirm Status: "System initialized: State is bound to v8.5-Forensic-Zero-Hallucination-Sync Payload Architecture and SSoT Rules are synced via Drive."
 ```
 
 ### 🟧 Local Pipeline Setup (The Clipboard Bridge)
@@ -358,7 +363,7 @@ The dashboard provides **two copy modes** to optimize token usage:
 | Button | Payload | When to Use |
 |--------|---------|-------------|
 | **📋 Copy Turn Data** | Slim tickers (`price`, `vwap`, `gap_percent`, `rsi`, `atr_percent`, `net_gex_total`, `dealer_posture`, `score`, `trend`, `signal`) + compact `mutable_state` (`unallocated_cash_eur`, `total_liquidity_eur`, `risk_regime`, slim `portfolio_snapshot`) | Every turn during an active LLM session — lightweight, token-efficient |
-| **📋 Copy Session Init** | Full SSOT (`local_ssot_shadow.json`), full ticker data, and `trade_lessons.json` history | Session initialization, start of day, or when trade lessons have changed |
+| **📋 Copy Session Init** | Full SSOT (`local_ssot_shadow.json`), full ticker data, and `trade_lessons.md` registry | Session initialization, start of day, or when trade lessons have changed |
 
 **Workflow:**
 1. **Initialize:** Click **"Copy Session Init"** and paste into the Orchestrator Gem to bootstrap a new session with full context.
@@ -439,7 +444,7 @@ The `scrutiny_audit` object contains the full council vote record:
 ## 🏗️ Design Principles
 
 - **Canonical Centralization** — Individual engines do not contain hardcoded logic or parameters (e.g. lists of exogenous shocks). All logic points natively to canonical protocols in `GEM_Rules_Data`.
-- **Logic/Data Separation** — `SSoT_Storage.json` holds state schema; `rules.json` holds static laws; `trade_lessons.json` holds historical institutional memory; `rule_enforcer_engine.json` exclusively handles execution logic.
+- **Logic/Data Separation** — `SSoT_Storage.json` holds state schema; `rules.md` holds static laws; `trade_lessons.md` holds historical institutional memory; `rule_enforcer_engine.md` exclusively handles execution logic.
 - **Non-Destructive Merging** — Field-level merge with `PRESERVE_IF_NOT_UPDATED` strategy
 - **Forensic Lineage** — Every state change includes timestamped source attribution
 - **Alpha-Friction Awareness** — All engines account for the 1% round-trip cost of the Nordea OST platform

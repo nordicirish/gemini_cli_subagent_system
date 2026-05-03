@@ -1,6 +1,6 @@
 # GEM_Rules_Data
 **Role:** GEM_Rules_Data
-**Version:** v8.2-Forensic-Sync
+**Version:** v8.5-Forensic-Zero-Hallucination-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.
 
 ---
@@ -189,6 +189,9 @@
       - RULE_04: IF VIX > 20 THEN RED_TEAM_PESSIMIST_WEIGHT = 0.55 AND NEUTRAL_STRUCTURALIST_WEIGHT = 0.25
       - RULE_05: IF VIX > 20 AND RED_TEAM_FATAL_FLAW > 6 THEN S_A = 0.0 (Hard Veto)
       - RULE_06: IF 0.65 <= S_A <= 0.75 THEN TRIGGER DYNAMIC_MICRO_GEM_ROUTING (Spawn standalone sub-engine to break the tie and keep main context clean).
+    - **Two-Stage Debate Pipeline:**
+      - Stage 1: BULLISH_ADVOCATE and RED_TEAM_PESSIMIST emit initial theses.
+      - Stage 2: RED_TEAM_PESSIMIST is fed the Bullish thesis and provides a direct counter-argument. Agreement Score S_A is calculated based on the victor of this rebuttal.
 - **[MANDATE_14_ALPHA_CATALYST]**
   - **Status:** ACTIVE
   - **Instruction:** The Bullish Advocate must prioritize GROWTH and MOMENTUM. Identify reasons to APPROVE, assuming the thesis is correct but needs verification.
@@ -281,7 +284,7 @@
   - **Status:** ACTIVE
   - **Instruction:** Unified SSoT Emission: To prevent duplication of state context, every turn must produce exactly ONE formatted Markdown report followed by exactly ONE unified JSON `EXECUTION_PAYLOAD` block.
     - **Quantitative SSoT:** All numeric/state data (Tickers, Portfolio, Macro) must be contained within the JSON.
-    - **Forensic Lessons:** New or modified qualitative rules must be emitted natively inside this JSON block under the `new_trade_lessons` or `trade_lessons` array keys.
+    - **Forensic Lessons:** Memory payloads must be bifurcated: Global Systemic Lessons appended to `new_trade_lessons` array, and Ticker-Specific Reflexes injected directly into `historical_context` inside the specific ticker's object within `portfolio_snapshot`.
   - **Rationale:** Ensures flawless data synchronization with fetch_stocks.py and eliminates terminal output redundancy.
 - **[MANDATE_23_DISTILLATION_VETO]**
   - **Status:** ACTIVE
@@ -301,7 +304,7 @@
   - **Rationale:** In Short Gamma regimes, opening gaps are often 'faded' by dealers. By using the ESA tax-shield, we can mechanically exit and re-enter these gaps, effectively 'day-trading' the news cycle with 100% of the principal intact.
 - **[MANDATE_25_STRICT_LESSON_EMISSION]**
   - **Status:** ACTIVE
-  - **Instruction:** UNIFIED JSON EMISSION RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) MUST conclude with the updated lessons delivered natively inside the SSoT JSON payload (e.g., within a `new_trade_lessons` array). Floating text-only lessons or discrete Markdown blocks for trade lessons are strictly prohibited. The Python backend (fetch_stocks.py) relies on this unified JSON structure to safely perform delta merges on the registry.
+  - **Instruction:** UNIFIED LESSON EMISSION RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) SHOULD conclude with either a structured JSON payload in `new_trade_lessons` OR a discrete Markdown block using the `L-xxx:` format. The Python backend (`fetch_stocks.py`) is equipped to parse both formats and upsert them into the central `trade_lessons.json` / `trade_lessons.md` registry. Ticker-Specific Reflexes should still be mirrored in `portfolio_snapshot[].historical_context`.
 - **[MANDATE_26_POST_TRADE_REVIEW]**
   - **Status:** ACTIVE
   - **Instruction:** The Review Engine must analyze trade outcomes to distinguish between mechanistic rebalancing flows and fundamental breakdowns.
@@ -346,7 +349,7 @@
 - **[ENH_11 - Standardized Sync Payload Protocol]**
   - **Instruction:** On manual request, output recovery JSON with sync_event: MANUAL_RECONCILIATION.
 - **[ENH_12 - Volatile State Cache (VSC) Fallback]**
-  - **Instruction:** Revert to SAFE_MODE if the 'local_storage_state' payload key is missing. Mode: Read-Only, State-Locked.
+  - **Instruction:** State Absence Veto: If the 'local_storage_state' payload key is missing, immediately HALT all analysis. Explicitly output 'INSUFFICIENT_DATA' and demand the user provide the SSoT payload. Do NOT attempt to reconstruct state or operate from prior memory.
 - **[ENH_16 - Score Bifurcation]**
   - **Instruction:** Isolate price action integrity from macro/legislative penalties.
 - **[ENH_17 - Gamma Exposure (GEX) Protocol]**
@@ -490,7 +493,7 @@
       - IF Net_GEX_Total < 0 AND ATR_Percent > (Threshold * 1.5) -> STOP_LOSS_TIGHTEN
   - **Enforcement:** MANDATORY. This layer must validate the final S_A Agreement Score before the SSoT Controller executes a FORCE_WRITE.
 - **[ENH_41 - Deterministic Position Sizing]**
-  - **Instruction:** Position size MUST be calculated as: (Base_Risk_Pct * Regime_Multiplier * Agreement_Score_SA). If Liquidity_Depth == VOID, Size = 0.
+  - **Instruction:** Position size MUST be calculated as: (Base_Risk_Pct * Regime_Multiplier * Agreement_Score_SA). If Liquidity_Depth == VOID, Size = 0. Before applying this formula, internally simulate Aggressive, Neutral, and Conservative sizing scenarios based on the NEUTRAL_STRUCTURALIST's current Regime classification (Tri-Profile Review).
 - **[ENH_42 - Trade State Emission]**
   - **Instruction:** Every turn MUST emit an explicit 'trade_state' [LONG | NO_TRADE | EXIT]. A 'NO_TRADE' state requires a mandatory 'no_trade_reason'.
 - **[ENH_43 - Correlation Advisory Guard]**
@@ -708,7 +711,7 @@
 - **[ENH_76 - Token Economy Budgeting (Context Pruning)]**
   - **Status:** ACTIVE
   - **Parameters:**
-    - **Trigger Threshold:** system_thresholds.TOKEN_PRUNING_TRIGGER (2M Tokens)
+    - **Trigger Threshold:** system_thresholds.TOKEN_PRUNING_TRIGGER (150000 Tokens)
     - **Active Reasoning Surface:** system_thresholds.ACTIVE_REASONING_SURFACE (128K Tokens)
   - **Instruction:** Proactively manage the context window during periods of high data throughput by relying on the Master Constants.
   - **Logic:** During 'HIGH_VOL' or 'HIGH_TORQUE' regimes, the CONTEXT_ENGINE is authorized to prune non-essential narrative logs to prevent "Context Drift" once the Trigger Threshold is breached.
@@ -888,7 +891,7 @@
 ## System Thresholds
 - **Authority:** CANONICAL — All sub-engines MUST reference named constants here instead of hardcoding values.
 - **TOKEN_PRUNING_TRIGGER:**
-  - **Value:** 2M
+  - **Value:** 150000
   - **Usage:** Threshold at which ENH_76 context pruning is executed.
   - **Status:** MASTER_CONSTANT
 - **ACTIVE_REASONING_SURFACE:**
@@ -1342,7 +1345,7 @@
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.
 - **Hierarchy of Authority [CODIFIED: PROTOCOL_02]:**
-  - **Supremacy:** The static Knowledge Base (`rules.md`, including all MANDATES and ENH Protocols) possesses ABSOLUTE EXECUTION SUPREMACY over the dynamic `trade_lessons` payload array.
+  - **Supremacy:** The static Knowledge Base (`rules.md`, including all MANDATES and ENH Protocols) possesses ABSOLUTE EXECUTION SUPREMACY over the dynamic `trade_lessons` payload registry (`trade_lessons.md`).
   - **Conflict Resolution:** In the event of a directive collision between a `trade_lesson` and a codified systemic rule, the systemic rule dictates execution.
   - **Lesson Boundary:** `trade_lessons` may act as secondary contextual filters or trigger predefined systemic overrides (e.g., Volatility Overrides), but they CANNOT autonomously alter, suspend, or override core mechanical constraints (e.g., Alpha-Friction or Liquidity Locks) unless explicitly mapped to a defined `ENH` bypass.
 - **Rules Doc:**
@@ -1354,12 +1357,10 @@
   - **Description:** Single Source of Truth state file (Injected via Prompt Payload)
   - **Access Method:** PROMPT_PAYLOAD
 - **Trade Lessons:**
-  - **Path:** payload.trade_lessons
-  - **Description:** File containing codified post-trade lessons (Injected via Prompt Payload)
+  - **Path:** trade_lessons.md (Injected via Prompt Payload)
+  - **Description:** High-density Markdown registry containing codified post-trade lessons (Injected via Prompt Payload)
   - **Access Method:** PROMPT_PAYLOAD
 - **Research Folder:**
   - **Path:** Trading_Research
   - **Description:** Folder containing research materials and PDF uploads
-  - **Access Method:** ATTACHED_KNOWLEDGE_BASE
-
 ---
