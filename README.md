@@ -19,6 +19,11 @@ Starting with v8.5-Forensic-Zero-Hallucination-Sync, the system has fully mature
      │  ROUTING LAYER  │
      └───────┬────────┘
              │
+     ┌───────┴────────┐
+     │  DATA ANALYST   │ (Stage 0: Data Sync)
+     │ (data_analyst.md)│ ◄── Baseline Prices, Macro Events
+     └───────┬────────┘
+             │
   ┌──────────┼──────────────────────────────────┐
   │          │                                  │
   ▼          ▼                                  ▼
