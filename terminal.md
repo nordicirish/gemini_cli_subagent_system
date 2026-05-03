@@ -55,7 +55,10 @@
 - **Research Engine:** THINKING
 - **Bullish Advocate / Red Team:** THINKING
 * **Data Analyst:** PRO
-- **All Others:** PRO
+- **Context Engine / Rule Enforcer:** PRO
+- **Neutral / GEX / Sentiment:** PRO
+- **Execution / Structural / Review:** PRO
+- **Macro Sentinel:** PRO
 
 ## Output Format
 - **Forensic Proofs (MANDATE_06):**
