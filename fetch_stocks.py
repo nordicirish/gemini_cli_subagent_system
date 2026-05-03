@@ -12,12 +12,14 @@ import pyperclip
 import re
 from scipy.stats import norm
 from yfinance.data import YfData
+from collections import defaultdict
 import threading
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+from convert_lessons import convert_json_to_md
 
 try:
     import msvcrt
@@ -73,7 +75,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 
 @app.get("/api/data")
 def get_data():
-    return JSONResponse(GLOBAL_STATE)
+    return JSONResponse(fetch_stocks(GLOBAL_STATE))
 
 @app.get("/api/tickers")
 def get_tickers():
@@ -175,33 +177,64 @@ async def handle_paste(req: Request):
         body = await req.json()
         clip_data = body.get("payload", "")
         
-        # Process the clipboard data string
-        if "```" in clip_data:
+        # Process the bifurcated clipboard data (JSON block + Markdown text)
+        json_payload = {}
+        lessons_from_md = []
+
+        # 1. Extract JSON SSoT block
+        json_match = re.search(r"```json\s*(\{.*?\})\s*```", clip_data, re.IGNORECASE | re.DOTALL)
+        if json_match:
+            try:
+                json_payload = json.loads(json_match.group(1).strip())
+            except: pass
+        else:
+            # Fallback for naked JSON
             match = re.search(r"```(?:json)?\s*(.*?)\s*```", clip_data, re.IGNORECASE | re.DOTALL)
-            if match: clip_data = match.group(1)
-            
-        clip_data = re.sub(r'\[cite_start\]', '', clip_data)
-        clip_data = re.sub(r'\[cite:\s*\d+(?:,\s*\d+)*\]', '', clip_data)
-        clip_data = clip_data.strip()
-        
-        clip_data = clip_data.strip()
-        
-        if not (clip_data.startswith('{') or clip_data.startswith('[')) or not (clip_data.endswith('}') or clip_data.endswith(']')):
-            start_brace = clip_data.find('{')
-            start_bracket = clip_data.find('[')
-            start_idx = -1
-            if start_brace != -1 and start_bracket != -1: start_idx = min(start_brace, start_bracket)
-            elif start_brace != -1: start_idx = start_brace
-            else: start_idx = start_bracket
-            
-            if start_idx != -1:
+            if match:
+                try:
+                    json_payload = json.loads(match.group(1).strip())
+                except: pass
+            else:
+                # Last resort: try to find braces
+                start_brace = clip_data.find('{')
                 end_brace = clip_data.rfind('}')
-                end_bracket = clip_data.rfind(']')
-                end_idx = max(end_brace, end_bracket)
-                if end_idx != -1 and end_idx > start_idx:
-                    clip_data = clip_data[start_idx:end_idx+1]
-        
-        payload = json.loads(clip_data.strip())
+                if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+                    try:
+                        json_payload = json.loads(clip_data[start_brace:end_brace+1].strip())
+                    except: pass
+
+        # 2. Extract Markdown Lessons block (Support both bullet and discrete L-xxx: formats)
+        # Bullet pattern: - **L-123:** Rule text #tag1 #tag2
+        bullet_pattern = r'-\s*\*\*L-(\d+):\*\*\s*(.*?)(?=\s*\n-\s*\*\*L-|\s*\n##|\s*\n$|$)'
+        for m in re.finditer(bullet_pattern, clip_data, re.DOTALL):
+            try:
+                l_id = int(m.group(1))
+                content = m.group(2).strip()
+                tags = re.findall(r'#([\w-]+)', content)
+                rule = re.sub(r'#[\w-]+', '', content).strip()
+                lessons_from_md.append({"id": l_id, "rule": rule, "tags": tags})
+            except: continue
+
+        # Discrete pattern: L-195: [text]
+        # Captures until next L-xx:, next ## header, next MANDATE_, or end of string
+        discrete_pattern = r'L-(\d+):\s*(.*?)(?=\s*L-\d+:|\s*\n##|\s*MANDATE_|\s*#|$)'
+        for m in re.finditer(discrete_pattern, clip_data, re.DOTALL):
+            try:
+                l_id = int(m.group(1))
+                # Avoid duplicates if already caught by bullet pattern
+                if any(l['id'] == l_id for l in lessons_from_md): continue
+                
+                content = m.group(2).strip()
+                # Find tags in the whole block to apply them to discrete entries
+                tags = re.findall(r'#([\w-]+)', clip_data)
+                rule = re.sub(r'#[\w-]+', '', content).strip()
+                lessons_from_md.append({"id": l_id, "rule": rule, "tags": tags})
+            except: continue
+
+        if not json_payload and not lessons_from_md:
+             return JSONResponse({"status": "error", "message": "No valid JSON or Markdown lessons found in payload"})
+
+        payload = json_payload
         
         # Map common payload aliases to canonical keys
         def map_aliases(data):
@@ -238,6 +271,10 @@ async def handle_paste(req: Request):
             extracted_trade_lessons = extracted_trade_lessons["trade_lessons"]
         if not isinstance(extracted_trade_lessons, list):
             extracted_trade_lessons = []
+            
+        # Add lessons parsed from Markdown
+        if lessons_from_md:
+            extracted_trade_lessons.extend(lessons_from_md)
             
         extracted_rev_trade_lessons = extract_and_remove(payload, "trade_lessons_revision") or []
         if isinstance(extracted_rev_trade_lessons, dict) and "trade_lessons" in extracted_rev_trade_lessons:
@@ -472,6 +509,12 @@ async def handle_paste(req: Request):
                 
             with open(lessons_file, 'w') as f:
                 json.dump(output_data, f, indent=2)
+                
+            # Sync to Markdown registry
+            try:
+                convert_json_to_md('trade_lessons.json', 'trade_lessons.md')
+            except Exception as e:
+                print(f"Failed to sync lessons to MD: {e}")
         # Rule mutations
         if extracted_mutations and isinstance(extracted_mutations, list):
             rules_file = os.path.join('GEM_Trading_Rules', 'rules.json')
@@ -1463,6 +1506,80 @@ def classify_signal(symbol):
     return "NEUTRAL"
 
 
+def fetch_stocks(state):
+    """
+    Consolidates state into a split-delivery payload optimized for LLM context.
+    - SSoT_JSON: Quantitative state (Prices, GEX, VWAP, Portfolio, Macro).
+    - Trade_Lessons_MD: Qualitative lessons in Markdown format.
+    """
+    # 1. Quantitative SSoT
+    tickers_data = state.get("tickers", [])
+    compact_tickers = []
+    for t in tickers_data:
+        compact_tickers.append({
+            "ticker": t.get("ticker"),
+            "price": t.get("price"),
+            "vwap": t.get("vwap"),
+            "gap": t.get("gap_percent"),
+            "net_gex": t.get("net_gex_total"),
+            "dealer": t.get("dealer_posture"),
+            "score": t.get("score"),
+            "rsi": t.get("rsi")
+        })
+
+    ssot = state.get("local_storage_state", {})
+    ms = ssot.get("mutable_state", ssot)
+    portfolio = ms.get("portfolio_snapshot", [])
+    
+    compact_portfolio = []
+    for p in portfolio:
+        compact_portfolio.append({
+            "ticker": p.get("ticker"),
+            "shares": p.get("shares"),
+            "wac": p.get("wac"),
+            "status": p.get("status"),
+            "trade_state": p.get("trade_state")
+        })
+
+    macro_est = {}
+    for t in tickers_data:
+        if t.get("ticker") in ['^VIX', 'IEF', 'UUP', 'SPY']:
+            macro_est[t["ticker"]] = {
+                "price": t.get("price"),
+                "chg": t.get("session_change_pct")
+            }
+
+    ssot_json = {
+        "timestamp": state.get("timestamp"),
+        "status": state.get("status"),
+        "tickers": compact_tickers,
+        "portfolio": compact_portfolio,
+        "macro": macro_est,
+        "unallocated_cash": ms.get("forensic_intelligence", {}).get("unallocated_cash_eur", 0)
+    }
+
+    # 2. Qualitative Lessons (Markdown)
+    lessons = state.get("trade_lessons", [])
+    md_lines = ["## 🔬 Trade Lessons Registry"]
+    
+    # Simple formatting per pseudo-code
+    for l in lessons:
+        l_id = l.get('id', '?')
+        rule = l.get('rule', l.get('lesson', ''))
+        tag_str = " ".join([f"#{t}" for t in l.get('tags', [])])
+        md_lines.append(f"- **L-{l_id}:** {rule} {tag_str}")
+    
+    trade_lessons_md = "\n".join(md_lines)
+
+    # Return bifurcated structure + full state for dashboard compatibility
+    output = {
+        "SSoT_JSON": ssot_json,
+        "Trade_Lessons_MD": trade_lessons_md
+    }
+    output.update(state)
+    return output
+
+
 def calculate_score(symbol):
     t = cache.technicals.get(symbol, {})
     p = cache.prices.get(symbol, 0)
@@ -1982,8 +2099,6 @@ def run_daemon():
 
             final_output = {
                 "_meta": {
-                    "description": "LIVE MARKET DATA - DO NOT TREAT AS SIMULATED",
-                    "is_simulation": False,
                     "source": "Real-time Exchange Feed",
                     "reliability": "High"
                 },

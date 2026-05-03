@@ -243,7 +243,9 @@ dCopyBtn.addEventListener('click', async () => {
             }
         };
         
-        const jsonString = JSON.stringify(turnPayload, null, 2);
+        // Output JSON Payload Only (no lessons)
+        const jsonString = "```json\n" + JSON.stringify(turnPayload, null, 2) + "\n```";
+        
         await navigator.clipboard.writeText(jsonString);
         
         dDataStatus.textContent = 'Turn data copied (lightweight)!';
@@ -263,9 +265,11 @@ dCopyAllBtn.addEventListener('click', async () => {
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
         
-        const jsonString = JSON.stringify(state, null, 2);
+        const ssotJson = state.SSoT_JSON || state;
+        const jsonString = "```json\n" + JSON.stringify(ssotJson, null, 2) + "\n```";
+        const lessonsMd = state.Trade_Lessons_MD || "";
         
-        await navigator.clipboard.writeText(jsonString);
+        await navigator.clipboard.writeText(jsonString + "\n\n" + lessonsMd);
         
         dDataStatus.textContent = 'All data copied (SSOT + Tickers + Lessons)!';
         dDataStatus.className = 'status-message text-green';

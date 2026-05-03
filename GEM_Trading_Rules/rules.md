@@ -1,6 +1,6 @@
 # GEM_Rules_Data
 **Role:** GEM_Rules_Data
-**Version:** v7.7-MD-Exchange-Rate-Hardening
+**Version:** v8.2-Forensic-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.
 
 ---
@@ -13,7 +13,7 @@
 - ENH_07: SSR Trigger Verification
 - ENH_08: Bicameral Vote Requirement
 - ENH_09: Bifurcation Filter
-- ENH_10: [MIGRATED TO TRADE_LESSONS_205]
+- ENH_10: Supply Chain Lineage
 - ENH_11: Standardized Sync Payload Protocol
 - ENH_12: VSC Fallback Protocol
 - ENH_16: Score Bifurcation
@@ -23,7 +23,7 @@
 - ENH_20: Synthetic GEX Logic
 - ENH_21: Vol Proxy Rule
 - ENH_22: Docs Native Bridge Protocol
-- ENH_23: [MIGRATED TO MANDATE_12]
+- MANDATE_12: [MIGRATED FROM ENH_23] Boot Sync Protocol
 - ENH_24: Data Integrity & Schema Enforcement
 - ENH_25: Temporal Guardrail Enforcement
 - ENH_26: Uncertainty Disclosure Protocol
@@ -33,7 +33,7 @@
 - ENH_30: Forensic Structural Filtering
 - ENH_31: Temporal Logic & Catalyst Verification
 - ENH_32: Data Schema & GEX Calculation Protocol
-- ENH_33: [MIGRATED TO MANDATE_11]
+- MANDATE_11: [MIGRATED FROM ENH_33] Research Sync Protocol
 - ENH_35: State Verification Protocol
 - ENH_36: Post-ATR Execution Gate
 - ENH_37: Alpha Catalyst Scrutiny (Bullish)
@@ -47,7 +47,7 @@
 - ENH_45: Macro Shock & Binary Veto Protocol
 - ENH_46: Temporal Institutional Rebalancing Sentinel
 - ENH_47: Macro Calendar Shield Protocol
-- ENH_48: [MIGRATED TO TRADE_LESSONS_207]
+- ENH_48: Narrative Bridge Protocol
 - ENH_49: Air-Gap Sandbox Bridge Protocol
 - ENH_50: Pre-Execution Formulation Protocol
 - ENH_51: Retrospective & Self-Improvement Protocol
@@ -63,18 +63,19 @@
 - ENH_66: The Wall of Warrants Pivot
 - ENH_67: Sentiment-Price Divergence Sentinel
 - ENH_68: The Devil's Advocate Hard Audit
-- ENH_69: [MIGRATED TO TRADE_LESSONS_208]
+- ENH_69: DIB Correlation Cascade
 - ENH_70: Adaptive Catalyst Decay (Health Aging)
 - ENH_72: VVIX/VIX Divergence Guard
 - ENH_73: Success Memo Production Gate
 - ENH_74: Noon Spike Guard
-- ENH_75: [MIGRATED TO TRADE_LESSONS_209]
+- ENH_75: CPV Override
 - ENH_76: Token Economy Budgeting (Context Pruning)
 - ENH_77: Proactive Search Mandate
 - ENH_78: Daily Workflow Protocol
 - ENH_79: Lesson Feedback Pipeline
 - ENH_80: Conditional Council Escalation
 - ENH_81: Conviction Bias Circuit Breaker
+- ENH_82: YouTube Video Extraction Protocol
 
 ## Mandate Registry
 - MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)
@@ -98,15 +99,17 @@
 - MANDATE_19: SCHEMA_MIRRORING (Context vs. SSoT Parity)
 - MANDATE_20: MACRO_VETO_POWER (Binary Risk-Off Override)
 - MANDATE_21: USER_CONFIRMATION (Provisional Trade State)
-- MANDATE_22: RESIDUAL_FLOOR (Position Sizing)
+- MANDATE_22: SSOT_EMISSION_PROTOCOL (Split-Delivery Logic)
 - MANDATE_23: DISTILLATION_VETO (Moat Audit)
 - MANDATE_24: GAP_DEFENSE (Protect overnight news gaps)
+- MANDATE_25: STRICT_LESSON_EMISSION (Markdown Requirement)
 - MANDATE_26: POST_TRADE_REVIEW (Review Engine)
+- MANDATE_27: RESIDUAL_FLOOR (Position Sizing)
 
 ## Behavioral Guardrails
 - **[MANDATE_01_GATEKEEPER]**
   - **Status:** ACTIVE
-  - **Instruction:** The SSoT GEM is the exclusive interface for state commitment. However, it MUST accept 'Proposed States' from Context Engine v3.1 as the primary valid input source.
+  - **Instruction:** The SSoT GEM is the exclusive interface for state commitment. However, it MUST accept 'Proposed States' from Context Engine as the primary valid input source.
 - **[MANDATE_02_WRITE_AUTHORITY]**
   - **Status:** ACTIVE
   - **Instruction:** This GEM is the sole authority allowed to 'Commit' changes to the terminal state in the SSoT. Exclusive permission to execute updates to the user's SSoT state is reserved for the SSoT GEM.
@@ -126,7 +129,7 @@
   - **Threshold:** 60s drift
 - **[MANDATE_06_COORDINATION]**
   - **Status:** ACTIVE
-  - **Protocol:** ENH_23
+  - **Protocol:** MANDATE_12
   - **Enforcement Level:** MANDATORY
   - **Instruction:** Ensures cross-module synergy and state synchronization. Mandates that the TECHNICAL_VALIDATOR must explicitly output a math proof for any percentage-based trigger in the forensic_intelligence narrative. Format: Proof: (Price [P] - PrevClose [C]) / [C] = Result%. A variance of >0.01% against the Google Finance baseline requires an immediate VETO. FX Proof: "For EUR-denominated liquidity checks, the Validator must output: Proof: (USD_Value [V] * GLOBAL_USD_EUR_EXCHANGE_RATE [R]) = EUR_Total. Variance > 0.001 requires a VETO."
   - **Execution Validation:** Before the SSoT Controller executes FORCE_WRITE to commit a trade, the TECHNICAL_VALIDATOR must prove the setup against ENH_36 (Post-ATR) and GATE_LIQ_01 to ensure liquidity depth hasn't vanished seconds before execution.
@@ -134,28 +137,23 @@
   - **Routing Priority:** PRIMARY
 - **[MANDATE_07_ENGINE_OVERRIDE]**
   - **Status:** ACTIVE
-  - **Instruction:** All sub-engines must adhere to GOOGLE_AI_PRO_2026 tier synchronization: ATR-derived sizing, 50% forensic reductions, and mandatory EST sync.
+  - **Instruction:** All sub-engines must adhere to engine version **v3.1** (Gemini 3.1 Pro) tier synchronization: ATR-derived sizing, 50% forensic reductions, and mandatory EST sync. Engine version v3.1 is the canonical operational baseline for all reasoning agents.
 - **[MANDATE_08_SCHEMA_ENFORCEMENT]**
   - **Status:** ACTIVE
   - **Instruction:** All state updates must conform to the schema defined in ENH_32. Reject handshakes lacking forensic fields: health_score, net_gex_total, and dealer_posture.
 - **[MANDATE_09_STATE_EMISSION]**
   - **Status:** STRICT_ENFORCE
-  - **Instruction:** Every turn MUST terminate with SSoT JSON state. Full emission is PREFERRED. If output token limits prevent full emission, the Gem MAY emit a DELTA payload containing only the changed sections, WITH ONE MAJOR EXCEPTION: The `portfolio_snapshot` array MUST ALWAYS BE OUTPUT IN FULL. You cannot output a partial portfolio array. UNDER NO CIRCUMSTANCES should trade lessons (e.g. `new_trade_lessons`, `trade_lessons`, `trade_lessons_revision`, etc.) be output as a separate discrete JSON block; they MUST be included as a key at the root of the single SSoT JSON payload block.
-  - **Required Top Level Keys:**
+  - **Instruction:** Every turn MUST conclude with the SSoT state output. Following the unified protocol in **MANDATE_22**, the response must consist of a formatted Markdown analysis followed by a single, untruncated JSON `EXECUTION_PAYLOAD`.
+  - **Required JSON Keys:**
     - state_context
-    - trade_lessons (or new_trade_lessons / compressed_trade_lessons)
-    - portfolio_snapshot
-    - forensic_intelligence
+    - portfolio_snapshot (MUST ALWAYS BE OUTPUT IN FULL)
+    - forensic_intelligence (Quantitative fields only)
     - runtime_flags
     - macro_calendar_shield
   - **Delta Mode:**
     - **Allowed:** True
-    - **Instruction:** When emitting a delta, include ONLY the sections that changed. The `portfolio_snapshot` array MAY omit untouched tickers, relying on the SSoT_Storage NON_DESTRUCTIVE_MERGE rules to preserve existing assets.
-    - **Minimum Required Keys:**
-      - state_context
-      - portfolio_snapshot
-    - **Note:** state_context.sync_id MUST always be present to track sync lineage.
-  - **Enforcement:** Delta payload must at least contain `state_context` and the FULL `portfolio_snapshot` array. The trade_lessons array MUST always reflect the current canonical set when included. Omission of other keys means no change. Trade lessons keys must be strictly INSIDE the SSoT JSON object.
+    - **Instruction:** When emitting a delta, include ONLY the sections that changed. The `portfolio_snapshot` array MUST ALWAYS be present in full.
+  - **Enforcement:** Under the unified schema, trade lessons MUST be included natively inside the JSON block per MANDATE_22/MANDATE_25.
 - **[MANDATE_10_SCHEMA_VALIDATION]**
   - **Status:** STRICT
   - **Instruction:** Verify 'forensic_intelligence' contains narrative strings and 'portfolio_snapshot' is an array of objects.
@@ -279,18 +277,12 @@
 - **[MANDATE_21_USER_CONFIRMATION]**
   - **Status:** ACTIVE
   - **Instruction:** The LLM (and all sub-engines) must NOT assume that recommended trades will be actioned or concluded until the user explicitly confirms it. All trade states are PROVISIONAL until confirmed.
-- **[MANDATE_22_RESIDUAL_FLOOR]**
+- **[MANDATE_22_SSOT_EMISSION_PROTOCOL]**
   - **Status:** ACTIVE
-  - **Instruction:** Position sizing for binary clinical plays must be derived from the Residual Cash Value floor, acknowledging that technical stops are a 0% probability event in overnight gap-downs. If Price is within 5% of a major warrant exercise price, trigger the Structural Ceiling logic in ENH_66.
-  - **Esa Tax Advantage Clause:**
-    - **Protocol:** HOUSE_MONEY_ACCELERATION
-    - **Logic:** In the Nordea ESA environment, prioritize the 'Extraction of Principal' over 'Deferred Realization'. Individual sales to reclaim initial capital carry 0% tax friction.
-    - **Execution:** Once a binary asset (e.g., DFTX) reaches the 'Principal Shield' target (Step 1), liquidate the corresponding quantity immediately. Reinvest 100% of the reclaimed capital into the next high-alpha thesis without reserving for capital gains tax.
-  - **Sizing Logic:**
-    - **Formula:** Max_Loss_Tolerance / (Entry_Price - Residual_Cash_Value)
-    - **Residual Floor Definition:** The verifiable net cash per share on the balance sheet (e.g., $5.88 for DFTX).
-    - **Risk Adjustment:** During High-VIX regimes (>20), the Residual Floor is the only valid support node; ignore all intermediate EMA/SMA levels for initial sizing.
-  - **Rationale:** Standard stop-losses are ill-suited for binary gaps. By sizing based on the cash floor and utilizing the ESA tax-shield for rapid principal recovery, the portfolio achieves 'House Money' status 30% faster than in taxable accounts.
+  - **Instruction:** Unified SSoT Emission: To prevent duplication of state context, every turn must produce exactly ONE formatted Markdown report followed by exactly ONE unified JSON `EXECUTION_PAYLOAD` block.
+    - **Quantitative SSoT:** All numeric/state data (Tickers, Portfolio, Macro) must be contained within the JSON.
+    - **Forensic Lessons:** New or modified qualitative rules must be emitted natively inside this JSON block under the `new_trade_lessons` or `trade_lessons` array keys.
+  - **Rationale:** Ensures flawless data synchronization with fetch_stocks.py and eliminates terminal output redundancy.
 - **[MANDATE_23_DISTILLATION_VETO]**
   - **Status:** ACTIVE
   - **Instruction:** Enforce a Moat Audit on SaaS assets; cap health_score at 60 if logic is portable via industrial-scale distillation.
@@ -309,12 +301,25 @@
   - **Rationale:** In Short Gamma regimes, opening gaps are often 'faded' by dealers. By using the ESA tax-shield, we can mechanically exit and re-enter these gaps, effectively 'day-trading' the news cycle with 100% of the principal intact.
 - **[MANDATE_25_STRICT_LESSON_EMISSION]**
   - **Status:** ACTIVE
-  - **Instruction:** STRICT EMISSION RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) MUST conclude with ONE single, unified SSoT JSON payload containing the updated trade_lessons/new_trade_lessons/trade_lessons_revision object INSIDE the SSoT JSON object. Do not emit lessons as a separate discrete JSON block. Text-only lessons are classified as EQUILIBRIUM_LOSS and prohibited.
+  - **Instruction:** UNIFIED JSON EMISSION RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) MUST conclude with the updated lessons delivered natively inside the SSoT JSON payload (e.g., within a `new_trade_lessons` array). Floating text-only lessons or discrete Markdown blocks for trade lessons are strictly prohibited. The Python backend (fetch_stocks.py) relies on this unified JSON structure to safely perform delta merges on the registry.
 - **[MANDATE_26_POST_TRADE_REVIEW]**
   - **Status:** ACTIVE
   - **Instruction:** The Review Engine must analyze trade outcomes to distinguish between mechanistic rebalancing flows and fundamental breakdowns.
   - **Active Sentinel Directive:** Prioritize RSI and Distance from VWAP as 'Exit-First' indicators. Bypasses MACRO_SENTINEL if flagged with HV BREAKOUT.
   - **Rebalancing Misfire Audit:** Evaluate if loss was mechanistic flow (Rebalancing Windows) vs. fundamental breakdown.
+- **[MANDATE_27_RESIDUAL_FLOOR]**
+  - **Status:** ACTIVE
+  - **Instruction:** Position sizing for binary clinical plays must be derived from the Residual Cash Value floor, acknowledging that technical stops are a 0% probability event in overnight gap-downs. If Price is within 5% of a major warrant exercise price, trigger the Structural Ceiling logic in ENH_66.
+  - **Asset Lock:** IF unallocated_cash_eur == 0 AND VIX > system_thresholds.VIX_FEAR_THRESHOLD, trigger an absolute ASSET_LOCK. This mandate possesses Absolute Execution Supremacy; all buy/add commands must be blocked during an active lock.
+  - **Esa Tax Advantage Clause:**
+    - **Protocol:** HOUSE_MONEY_ACCELERATION
+    - **Logic:** In the Nordea ESA environment, prioritize the 'Extraction of Principal' over 'Deferred Realization'. Individual sales to reclaim initial capital carry 0% tax friction.
+    - **Execution:** Once a binary asset (e.g., DFTX) reaches the 'Principal Shield' target (Step 1), liquidate the corresponding quantity immediately. Reinvest 100% of the reclaimed capital into the next high-alpha thesis without reserving for capital gains tax.
+  - **Sizing Logic:**
+    - **Formula:** Max_Loss_Tolerance / (Entry_Price - Residual_Cash_Value)
+    - **Residual Floor Definition:** The verifiable net cash per share on the balance sheet (e.g., $5.88 for DFTX).
+    - **Risk Adjustment:** During High-VIX regimes (>20), the Residual Floor is the only valid support node; ignore all intermediate EMA/SMA levels for initial sizing.
+  - **Rationale:** Standard stop-losses are ill-suited for binary gaps. By sizing based on the cash floor and utilizing the ESA tax-shield for rapid principal recovery, the portfolio achieves 'House Money' status 30% faster than in taxable accounts.
 
 ## Anti Hallucination Core
 - **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.
@@ -335,9 +340,9 @@
   - **Instruction:** Senate-only passage is PROVISIONAL. Risk Regime stays CRITICAL until House confirms.
 - **[ENH_09 - Bifurcation Filter]**
   - **Instruction:** If SPX rises but RSP is flat, trigger 'Speculative Exhaustion' warning.
-- **[ENH_10 - [MIGRATED]]**
-  - **Status:** DEPRECATED
-  - **Instruction:** Logic migrated to Trade Lesson 205 (UMAC_LEAD_INDICATOR).
+- **[ENH_10 - Supply Chain Lineage]**
+  - **Status:** ACTIVE
+  - **Instruction:** Monitor Supply Chain Lineage.
 - **[ENH_11 - Standardized Sync Payload Protocol]**
   - **Instruction:** On manual request, output recovery JSON with sync_event: MANUAL_RECONCILIATION.
 - **[ENH_12 - Volatile State Cache (VSC) Fallback]**
@@ -361,7 +366,8 @@
     - **Market Status:** STRING
     - **On Session Start:** LOAD_LATEST_SSOT
     - **On Session End:** WRITE_MERGED_SSOT
-- **[ENH_23 - [MIGRATED TO MANDATE_12]]**
+- **[MANDATE_12 - [MIGRATED FROM ENH_23]]**
+  - **Status:** ACTIVE
   - **Instruction:** Logic migrated to MANDATE_12_BOOT_SYNC.
 - **[ENH_24 - Data Integrity & Schema Enforcement]**
   - **Instruction:** Use WAC and shares from the 'local_storage_state' payload for all P&L calculations.
@@ -442,7 +448,8 @@
   - **Calculation Logic:**
     - **Gex Exposure:** shares * net_gex_total
     - **Total Portfolio Gex:** sum(gex_exposure)
-- **[ENH_33 - [MIGRATED TO MANDATE_11]]**
+- **[MANDATE_11 - [MIGRATED FROM ENH_33]]**
+  - **Status:** ACTIVE
   - **Instruction:** Logic migrated to MANDATE_11_RESEARCH_SYNC.
 - **[ENH_35 - State Verification Protocol]**
   - **Status:** ACTIVE
@@ -533,7 +540,12 @@
 - **[ENH_47 - Macro Calendar Shield Protocol]**
   - **Version:** 1.0
   - **Status:** ACTIVE
-  - **Instruction:** Forward-looking economic calendar awareness layer. Monitors proximity to scheduled macro releases (FOMC, CPI, NFP, etc.) and explicitly decouple Risk Initiation from Risk Harvesting. While NO_NEW_ENTRIES blocks opening positions, it MANDATES an 'Alpha-Harvest' review. If an existing position exhibits Distance from VWAP > 2.0% during a TIER 1/2 window, the system must trigger a TRIM order regardless of shield posture. On TIER 1 Macro Days, any asset failing to reclaim VWAP within 30 minutes of the open MUST be trimmed by 50%.
+  - **Instruction:** Forward-looking economic calendar awareness layer. Monitors proximity to scheduled macro releases (FOMC, CPI, NFP, etc.) and explicitly decouple Risk Initiation from Risk Harvesting.
+- **Verification Mandate (MACRO_VERIFICATION_PROTOCOL - MVP_v1.0):**
+  - **MVP-01 (Forensic Calendar Sync):** Prohibits the use of "First Friday" or "Standard Wednesday" heuristics for Tier 1 events. Verify dates via .gov or official agency timetables 48 hours prior to the event window.
+  - **MVP-02 (Heuristic Override):** Official agency schedules take absolute precedence over internal system projections. If a discrepancy is found, the macro_calendar_shield must be updated to the verified date immediately.
+  - **MVP-03 (Shield Calibration):** Defensive postures (e.g., NFP_SHIELD) only activate upon confirmed date validation. Deactivate phantom shields if verification fails to support the projected window.
+- **Action:** While NO_NEW_ENTRIES blocks opening positions, it MANDATES an 'Alpha-Harvest' review. If an existing position exhibits Distance from VWAP > 2.0% during a TIER 1/2 window, the system must trigger a TRIM order regardless of shield posture. On TIER 1 Macro Days, any asset failing to reclaim VWAP within 30 minutes of the open MUST be trimmed by 50%.
   - **Parameters:**
     - **Trigger Type:** Calendar_Proximity_Alignment
     - **Enforcement Level:** MANDATE_20_MACRO_VETO
@@ -570,9 +582,9 @@
     - IF proximity_hours <= TIER_3.proximity_threshold_hours AND event IN TIER_3 -> shield_posture = DEFENSIVE, sizing_dampener = 0.85
     - IF proximity_hours == 0 (EVENT_DAY) AND event IN TIER_1 -> shield_posture = NO_NEW_ENTRIES, sizing_dampener = 0.25
     - IF no events within 48h -> shield_posture = FULL_RISK, sizing_dampener = 1.0
-- **[ENH_48 - [MIGRATED]]**
-  - **Status:** DEPRECATED
-  - **Instruction:** Logic migrated to Trade Lesson 207 (NARRATIVE_BRIDGE_MARCH).
+- **[ENH_48 - Narrative Bridge Protocol]**
+  - **Status:** ACTIVE
+  - **Instruction:** Enforce Narrative Bridge resonance. Re-rate ticker sensitivity based on narrative resonance.
 - **[ENH_49 - Air-Gap Sandbox Bridge Protocol]**
   - **Instruction:** The Gem operates in a Web UI sandbox. It has ZERO direct write access to local files; all state updates MUST be emitted in the EXECUTION_PAYLOAD. The user will copy and paste this payload into the local fetch_stocks.py paste handler, which acts as the bridge to update local JSON files.
   - **Execution Flow:**
@@ -625,10 +637,10 @@
     - 2. COMPRESSION: Distill the granular, distinct lessons into a maximum of 5 overarching fundamental Guardrails or Philosophies.
     - 3. EMISSION: Output the 5 new compressed rules in the unified `EXECUTION_PAYLOAD` SSoT block under a `compressed_trade_lessons` array (NOT as a separate JSON block). The orchestrator will overwrite the historical file, effectively deleting the old context.
 - **[ENH_54 - SSoT Mutation Protocol]**
-  - **Instruction:** Enables autonomous, permanent system evolution via JSON Patching. If a post-mortem identifies that a trade failure was caused by a flawed hardcoded systemic threshold in GEM_Rules_Data (e.g., 'ALPHA_FRICTION_MINIMUM is too low for current VIX regime'), the RESEARCH_ENGINE MUST propose a permanent threshold mutation.
+  - **Instruction:** Enables autonomous, permanent system evolution via JSON Patching. If a post-mortem identifies that a trade failure was caused by a flawed hardcoded systemic threshold in GEM_Rules_Data (e.g., 'GLOBAL_ALPHA_FRICTION_HURDLE is too low for current VIX regime'), the RESEARCH_ENGINE MUST propose a permanent threshold mutation.
   - **Execution Flow:**
     - 1. IDENTIFICATION: Recognize that a string of failures maps to an explicitly defined parameter in RULES_DOC.
-    - 2. PATCH_GENERATION: Create a JSON patch array targeting the deep nested key in the schema (e.g., ['system_thresholds', 'ALPHA_FRICTION_MINIMUM']).
+    - 2. PATCH_GENERATION: Create a JSON patch array targeting the deep nested key in the schema (e.g., ['system_thresholds', 'GLOBAL_ALPHA_FRICTION_HURDLE']).
     - 3. EMISSION: Output the patch array in the `EXECUTION_PAYLOAD` under the `rule_mutations` key. The orchestrator will natively intercept this and rewrite the GEM_Rules_Data on the disk.
 - **[ENH_55 - Web Verification Protocol]**
   - **Instruction:** Enforces spatial trend awareness across multiple timeframes. The Google Finance Extension is reserved for Spatial Verification (visual chart and trend audit) only. For every ticker provided in the SSoT payload, the Gem MUST use the Google Finance extension to retrieve price charts at all required timeframes.
@@ -672,16 +684,16 @@
 - **[ENH_68 - The 'Devil's Advocate' Hard Audit]**
   - **Instruction:** MANDATE_15 (Red Team) must provide a 'Zero-Success Scenario' if consensus is >0.85. The Red Team GEM must simulate total failure of the core catalyst (e.g., 'What if the FDA issues a CRL despite positive Ph3 data?').
   - **Governance:** The Orchestrator must reconcile this 'Black Swan' risk before committing.
-- **[ENH_69 - [MIGRATED]]**
-  - **Status:** DEPRECATED
-  - **Instruction:** Logic migrated to Trade Lesson 208 (DIB_CORRELATION_CASCADE).
+- **[ENH_69 - DIB Correlation Cascade]**
+  - **Status:** ACTIVE
+  - **Instruction:** Monitor and flag Defense Industrial Base correlation cascades.
 - **[ENH_70 - Adaptive Catalyst Decay (Health Aging)]**
   - **Instruction:** For every session a ticker fails to reclaim its 'Post-Catalyst High,' decay the health_score by 3 points.
   - **Rationale:** Prevents 'thesis marriage' where the system holds a winner until it becomes a laggard.
 - **[ENH_72 - VVIX/VIX Divergence Guard]**
   - **Status:** ACTIVE
   - **Instruction:** Monitor the divergence between VVIX (Volatility of Volatility) and VIX. 
-  - **Logic:** IF VVIX > 105 AND VIX < 20, the system MUST transition to 'PREEMPTIVE_DEFENSE' mode. Maintain 2x ATR stop-loss buffers regardless of the 'Normal' VIX regime, as a high VVIX environment indicates institutional pre-positioning for a 'Hidden Shock.'
+  - **Logic:** IF VVIX > system_thresholds.VVIX_SHOCK_THRESHOLD AND VIX < system_thresholds.VIX_FEAR_THRESHOLD, the system MUST transition to 'PREEMPTIVE_DEFENSE' mode and apply a mandatory 2x ATR stop-loss buffer per Lesson L-179. Maintain 2x ATR stop-loss buffers regardless of the 'Normal' VIX regime, as a high VVIX environment indicates institutional pre-positioning for a 'Hidden Shock.'
 - **[ENH_73 - Success Memo Production Gate]**
   - **Status:** ACTIVE
   - **Instruction:** Codify the non-competitive bridge granted by 10 U.S.C. § 4022. 
@@ -690,13 +702,16 @@
   - **Status:** ACTIVE
   - **Instruction:** Monitor and neutralize structural noise/distribution during the 12:00-13:00 EST window.
   - **Logic:** IF Time == 12:00-13:00 EST AND Volume > 2x 10-day Average, flag as 'Structural Noise.' Neutralize buy/sell signals that lack a corresponding hard catalyst to prevent execution into rebalancing wicks.
-- **[ENH_75 - [MIGRATED]]**
-  - **Status:** DEPRECATED
-  - **Instruction:** Logic migrated to Trade Lesson 209 (CPV_OVERRIDE_DFTX).
+- **[ENH_75 - CPV Override]**
+  - **Status:** ACTIVE
+  - **Instruction:** Bridge catalysts to Clinical Vouchers and apply CPV Override for DFTX.
 - **[ENH_76 - Token Economy Budgeting (Context Pruning)]**
   - **Status:** ACTIVE
-  - **Instruction:** Proactively manage the 128K active token window during periods of high data throughput.
-  - **Logic:** During 'HIGH_VOL' or 'HIGH_TORQUE' regimes, the CONTEXT_ENGINE is authorized to prune non-essential narrative logs to prevent "Context Drift."
+  - **Parameters:**
+    - **Trigger Threshold:** system_thresholds.TOKEN_PRUNING_TRIGGER (2M Tokens)
+    - **Active Reasoning Surface:** system_thresholds.ACTIVE_REASONING_SURFACE (128K Tokens)
+  - **Instruction:** Proactively manage the context window during periods of high data throughput by relying on the Master Constants.
+  - **Logic:** During 'HIGH_VOL' or 'HIGH_TORQUE' regimes, the CONTEXT_ENGINE is authorized to prune non-essential narrative logs to prevent "Context Drift" once the Trigger Threshold is breached.
   - **Persistence_Hierarchy:** 
     1. Portfolio Snapshot (FIFO/WAC data)
     2. Active Forensic Flags (SSR, Success Memos)
@@ -730,6 +745,7 @@
     - Risk_Regime == 'CRITICAL' AND hard_catalyst == 'NONE'
     - health_score < HEALTH_SCORE_MINIMUM
     - dealer_posture == 'SHORT_GAMMA' AND Price < VWAP
+    - dealer_posture == 'SHORT_GAMMA' AND Price < system_thresholds.DIB_PSYCH_PARITY (for DIB assets)
   - **Esa Posture:** Defensive logic is strictly maintained; tax-free trading does not justify ignoring a Short Gamma waterfall.
 - **Consensus Gate:**
   - **Id:** ENH_40
@@ -871,6 +887,14 @@
 
 ## System Thresholds
 - **Authority:** CANONICAL — All sub-engines MUST reference named constants here instead of hardcoding values.
+- **TOKEN_PRUNING_TRIGGER:**
+  - **Value:** 2M
+  - **Usage:** Threshold at which ENH_76 context pruning is executed.
+  - **Status:** MASTER_CONSTANT
+- **ACTIVE_REASONING_SURFACE:**
+  - **Value:** 128K
+  - **Usage:** Target token count for active context after ENH_76 pruning.
+  - **Status:** MASTER_CONSTANT
 - **GLOBAL_ALPHA_FRICTION_HURDLE:**
   - **Value:** 0.0117
   - **Usage:** Mandatory 1.17% round-trip friction floor for Nordea ESA Tier 4.
@@ -945,7 +969,7 @@
   - **Used By:**
     - health_score_protocol
     - technical_validator
-- **Alpha Friction Minimum:**
+- **Global Alpha Friction Hurdle:**
   - **Value:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
   - **Dynamic Logic:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
   - **Usage:** Minimum viable alpha per trade to cover friction
@@ -1009,7 +1033,7 @@
   - **Used By:**
     - ssot_storage
     - context_engine
-- **Round Trip Cost Basis:**
+- **Global Alpha Friction Hurdle (Legacy Round Trip):**
   - **Value:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
   - **Usage:** Nordea OST round-trip cost (1.17%)
   - **Used By:**
@@ -1029,10 +1053,10 @@
     - execution
 - **Supply Chain Penalty:**
   - **Value:** 0.85
-  - **Usage:** Supply chain delay sizing multiplier (ENH_10)
+  - **Usage:** Supply chain delay sizing multiplier (Lesson 205)
   - **Used By:**
     - execution
-    - ENH_10
+    - Lesson 205
 - **Rebalancing Drift Threshold:**
   - **Value:** 0.05
   - **Usage:** Drift threshold for institutional rebalancing windows (ENH_46)
@@ -1181,6 +1205,11 @@
   - **Used By:**
     - terminal
     - rules (RULE_04)
+- **Dib Psych Parity:**
+  - **Value:** 14.00
+  - **Usage:** Psychological parity threshold for DIB assets. Breach in a SHORT_GAMMA regime mandates an immediate freeze on 'Add' operations until session VWAP is reclaimed.
+  - **Used By:**
+    - GATE_REG_01
 
 ## Basket Definition
 - **Authority:** CANONICAL — All sub-engines MUST reference tickers from this section. Update here when adding/removing tickers.
@@ -1303,6 +1332,13 @@
 - **Instruction:** When all council members show high conviction in the same direction, this is a contrarian warning signal. The TECHNICAL_VALIDATOR must flag 'CONVICTION_CLUSTER_WARNING' and require at least one additional data point (GEX, institutional flow, or calendar check) before proceeding. High unanimous conviction may indicate groupthink rather than genuine signal alignment.
 - **Action:** Append '⚠️ CONVICTION CLUSTER: All council unanimous >7/10. Seeking disconfirming evidence.' to output.
 
+## Enh 82 YouTube Video Extraction
+- **Id:** ENH_82
+- **Title:** YouTube Video Extraction Protocol
+- **Status:** ACTIVE
+- **Instruction:** Explicitly authorizes and mandates the use of the native Gemini YouTube extension to access, transcribe, and analyze relevant YouTube videos.
+- **Logic:** For qualitative intelligence gathering (e.g., earnings webcasts, military testing footage, management interviews), the RESEARCH_ENGINE must proactively invoke the YouTube extension to perform primary source verification rather than relying on secondary text summaries.
+
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.
 - **Hierarchy of Authority [CODIFIED: PROTOCOL_02]:**
@@ -1327,4 +1363,3 @@
   - **Access Method:** ATTACHED_KNOWLEDGE_BASE
 
 ---
-*Generated from rules.json*

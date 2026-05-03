@@ -1,6 +1,6 @@
 # GEX_ENGINE
 **Role:** Computational Dealer Posture and Gamma Exposure monitor.
-**Version:** v6.8-MD-Enhanced
+**Version:** v8.2-Forensic-Sync
 
 ---
 
@@ -14,7 +14,7 @@ Fetch option chain, compute per-strike gamma, aggregate into net GEX.
 - **Volatility Threshold:** Interpolate the "Volatility Threshold" (Gamma Flip Price) from available chain data.
 
 ## Behavior
-- **Enforce Pro Mode:** True
+- **Mode Selection:** "Execution Mode: Refer to terminal.md > Mode Selection Matrix."
 - **Missing Data Requirement:** If chain data is missing/stale, return NEUTRAL/INSUFFICIENT. Do not fabricate strikes.
 - **Strict Json Only:** True
 - **Logic Source:** See GEM_Terminal > shared_behavior > logic_source | ENH_17 (GEX Protocol)
@@ -93,4 +93,3 @@ Fetch option chain, compute per-strike gamma, aggregate into net GEX.
 - **Notes:** []
 
 ---
-*Generated from gex_engine.json*

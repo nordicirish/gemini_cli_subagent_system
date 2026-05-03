@@ -200,7 +200,7 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 
 | Protocol | ID | Enforcement |
 |----------|----|-------------|
-| **Alpha-Friction Guard** | `ENH_FIN_02` | Blocks trades with <2.5% expected move (covers 1% round-trip fees - adjust as neededc) |
+| **Alpha-Friction Guard** | `ENH_FIN_02` | Blocks trades with < GLOBAL_ALPHA_FRICTION_HURDLE expected move |
 | **Macro Veto** | `MANDATE_20` | Sentinel vetoes entries against surging VIXY velocity (>+5.0%) or high absolute VIX (> 20) |
 | **Drift Control** | `MANDATE_04` | Forensic handshake validation prevents behavioral/data drift |
 | **ATR Position Sizing** | `ENH_29` / `ENH_41` | Volatility-adjusted position sizing — deterministic formula |
@@ -267,8 +267,7 @@ These sections are **ticker-independent** but may need tuning for a different br
 
 | Section | Path | Default | When to change |
 |---------|------|---------|----------------|
-| **Round-Trip Cost** | `system_thresholds > ROUND_TRIP_COST_BASIS` | `0.01` (1%) | Different broker fee structure |
-| **Alpha-Friction Minimum** | `system_thresholds > ALPHA_FRICTION_MINIMUM` | `0.025` (2.5%) | Adjusting minimum viable move |
+| **Global Alpha Friction Hurdle** | `system_thresholds > GLOBAL_ALPHA_FRICTION_HURDLE` | `0.0117` (1.17%) | Universal friction hurdle |
 | **Slippage Penalty** | `system_thresholds > SLIPPAGE_PENALTY` | `0.5` | Different execution environment |
 | **OST Lockout Time** | `system_thresholds > OST_LOCKOUT_TIME` | `14:30 ET` | Different market/time zone |
 
@@ -308,25 +307,25 @@ Open your **Terminal Orchestrator Gem** (or any other Gem) and paste this prompt
 
 ```text
 System Check: Access the rules at GoogleDrive://GEM_Trading_Rules/rules.
-Please cite the exact value for "ALPHA_FRICTION_MINIMUM" located in "system_thresholds".
+Please cite the exact value for "GLOBAL_ALPHA_FRICTION_HURDLE" located in "system_thresholds".
 Also, confirm which "ENH_Protocol" governs the "Macro Calendar Shield".
 ```
 
 **Expected Result:**
-- `ALPHA_FRICTION_MINIMUM`: **0.025** (default)
+- `GLOBAL_ALPHA_FRICTION_HURDLE`: **0.0117** (default)
 - `Macro Calendar Shield`: **ENH_47**
 
 ### Test 2: The Mutation Verification (Definitive)
 Confirm the Gem is reading the *live* Google Doc, not a stale cache.
 
-1.  **Modify:** Open `GEM_Trading_Rules/rules` in Google Drive. Change `"ALPHA_FRICTION_MINIMUM": 0.025` to **`0.099`**.
+1.  **Modify:** Open `GEM_Trading_Rules/rules` in Google Drive. Change `"GLOBAL_ALPHA_FRICTION_HURDLE": 0.0117` to **`0.099`**.
 2.  **Ask:** In the Gem, ask:
     ```text
     Reload Rules from GoogleDrive://GEM_Trading_Rules/rules.
-    What is the current value of ALPHA_FRICTION_MINIMUM?
+    What is the current value of GLOBAL_ALPHA_FRICTION_HURDLE?
     ```
 3.  **Verify:** The Gem should report **0.099**.
-4.  **Reset:** Change the value back to **0.025** in the Google Doc.
+4.  **Reset:** Change the value back to **0.0117** in the Google Doc.
 
 ---
 
@@ -344,9 +343,9 @@ CRITICAL SYSTEM OVERRIDE: WIPE ALL PRIOR CONTEXT & FORCE SYNCHRONIZATION.
 Protocol Execution:
 1. ACKNOWLEDGE ARCHITECTURE: You are operating in a Web Sandbox environment. You MUST output all state changes as a strict JSON `EXECUTION_PAYLOAD` block so I can manually sync it via the local clipboard bridge.
 2. ACKNOWLEDGE SCHEMA: The system now uses the v4.9x Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
-3. ACTION (ZERO-TOUCH SYNC): Use your Google Drive extension to read the attached `rules` document (GEM_Trading_Rules/rules).
+3. ACTION (ZERO-TOUCH SYNC): Use your Google Drive extension to read the attached `rules.md` markdown document in the (GEM_Trading_Rules) folder.
 4. VERIFICATION: Do NOT fabricate data. If you cannot read the file, STOP and output "TOOL FAILURE". 
-   - Cite the exact `version` string verbatim from the top of the Google Doc.
+   - Cite the exact `version` string verbatim from the top of the rules.md file.
    - Confirm which "ENH_" protocol governs the "Web Verification Protocol".
 5. Confirm Status: "System initialized: State is bound to v4.9x Payload Architecture and SSoT Rules are synced via Drive."
 ```
@@ -401,6 +400,19 @@ Generate the absolute, complete SSoT JSON in a single markdown code block with z
 and no placeholders (e.g., do not use "// ..."). Every key from both immutable_background and
 mutable_state must be fully populated. Increment the sync_id for this final EOD synchronization.
 ```
+
+---
+
+## 🛸 Antigravity Sync Protocol (The Engine Custodian)
+To ensure absolute mathematical and logical synchronization across the GEM Trading Terminal, use the **Antigravity** persona.
+
+**How to use:**
+Upload the `antigravity.md` file along with your other project instructions to your Gemini Gem.
+
+**Trigger:** Whenever you need an update or refactor, start your prompt with:
+> "Antigravity, execute a Sync Protocol on [File Name] using the antigravity.md guardrails."
+
+**Result:** Antigravity will automatically hunt for hardcoded numbers, update forensic math proofs (MANDATE_06), and ensure engine versioning is consistent without you having to explain the 1.17% friction or FX logic every time.
 
 ---
 
