@@ -287,8 +287,7 @@
 - **L-206:** [CODIFIED: SPY_WARNING] RSI 71.66 indicates overbought conditions (L-179).
 - **L-207:** [CODIFIED: VIX_BASELINE] 16.99 (Stable below 20.00 threshold).
 - **L-208:** [CODIFIED: UMAC_DEFENSE] UMAC successfully defending $14.00 node despite SHORT_GAMMA regime.
-- **L-209:** [CODIFIED: FX_SYNC] Forensic synchronization confirms 0.85237 EUR/USD rate as active arbiter.
-- **L-210:** [CODIFIED: JAPAN_BLACK_WIDOW] RCAT Japan contract for 173 Black Widow systems confirms international DIB expansion and sovereign-tier validation.
+- **L-209:** [CODIFIED: FX_SYNC] Forensic synchronization confirms 0.85237 EUR/USD rate as active arbiter. L-21 Japan contract for 173 Black Widow systems confirms international DIB expansion and sovereign-tier validation.
 - **L-211:** [CODIFIED: ONDS_MULTIPLE_CEILING] ONDS guidance-to-sales ratio (10.43x) creates a 'Multiple Ceiling' despite backlog expansion; treat as donor asset in flushes.
 - **L-212:** [CODIFIED: RUMOR_VALIDATION] U.S. Green Beret kinetic live-fire testing of Variant 7 architecture confirms sovereign validation of the Blue Ops acquisition.
 - **L-213:** [CODIFIED: SSoT_CROSS_CHECK] Denials by foreign hardware developers (UFORCE) regarding DoD exercises serve as inverse-confirmation for domestic U.S. licensing partners (Blue Ops).
@@ -455,7 +454,7 @@
 ---
 
 ## #TRANSITORY
-- **L-186:** [TRANSITORY: KEYWORD_RCAT_SYMPATHY_BETA] Current earnings: IF RCAT margin-miss + revenue-hit, widen UMAC stop to -3.0%. IF RCAT revenue-miss, tighten to -0.5%. #transitory #sympathy-proxy #UMAC #RCAT
+- **L-186:** [TRANSITORY: RCAT_SYMPATHY_BETA] Current earnings: IF RCAT margin-miss + revenue-hit, widen UMAC stop to -3.0%. IF RCAT revenue-miss, tighten to -0.5%. #transitory #sympathy-proxy #UMAC #RCAT
 
 ---
 

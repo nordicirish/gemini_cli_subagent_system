@@ -1,6 +1,6 @@
 # SENTIMENT_ENGINE
 **Role:** Narrative Resonance, Crowd Dynamics, and Regulatory Sentiment monitor.
-**Version:** v8.5-Forensic-Zero-Hallucination-Sync
+**Version:** v8.6-Forensic-Zero-Hallucination-Sync
 **Tone:** institutional, analytical, concise
 
 ---

@@ -204,8 +204,8 @@ async def handle_paste(req: Request):
                     except: pass
 
         # 2. Extract Markdown Lessons block (Support both bullet and discrete L-xxx: formats)
-        # Bullet pattern: - **L-123:** Rule text #tag1 #tag2
-        bullet_pattern = r'-\s*\*\*L-(\d+):\*\*\s*(.*?)(?=\s*\n-\s*\*\*L-|\s*\n##|\s*\n$|$)'
+        # Bullet pattern: - **L-123:** Rule text #tag1 #tag2 (Flexible bullet and bolding)
+        bullet_pattern = r'(?:-|\*)\s*(?:\*\*)?L-(\d+):(?:\*\*)?\s*(.*?)(?=\s*\n(?:-|\*)\s*(?:\*\*)?L-|\s*\n##|\s*\n$|$)'
         for m in re.finditer(bullet_pattern, clip_data, re.DOTALL):
             try:
                 l_id = int(m.group(1))
@@ -217,7 +217,7 @@ async def handle_paste(req: Request):
 
         # Discrete pattern: L-195: [text]
         # Captures until next L-xx:, next ## header, next MANDATE_, or end of string
-        discrete_pattern = r'L-(\d+):\s*(.*?)(?=\s*L-\d+:|\s*\n##|\s*MANDATE_|\s*#|$)'
+        discrete_pattern = r'L-(\d+):\s*(.*?)(?=\s*L-\d+:|\s*\n##|\s*MANDATE_|$)'
         for m in re.finditer(discrete_pattern, clip_data, re.DOTALL):
             try:
                 l_id = int(m.group(1))
@@ -225,8 +225,8 @@ async def handle_paste(req: Request):
                 if any(l['id'] == l_id for l in lessons_from_md): continue
                 
                 content = m.group(2).strip()
-                # Find tags in the whole block to apply them to discrete entries
-                tags = re.findall(r'#([\w-]+)', clip_data)
+                # Find tags within the captured content for this specific entry
+                tags = re.findall(r'#([\w-]+)', content)
                 rule = re.sub(r'#[\w-]+', '', content).strip()
                 lessons_from_md.append({"id": l_id, "rule": rule, "tags": tags})
             except: continue
@@ -510,6 +510,11 @@ async def handle_paste(req: Request):
             with open(lessons_file, 'w') as f:
                 json.dump(output_data, f, indent=2)
                 
+            # Update GLOBAL_STATE immediately to prevent stale session init payloads
+            if "GLOBAL_STATE" in globals() or "GLOBAL_STATE" in locals():
+                global GLOBAL_STATE
+                GLOBAL_STATE["trade_lessons"] = final_normalized
+
             # Sync to Markdown registry
             try:
                 convert_json_to_md('trade_lessons.json', 'trade_lessons.md')
@@ -1583,6 +1588,8 @@ def fetch_stocks(state):
         md_lines.append(f"- **L-{l_id}:** {rule} {tag_str}")
     
     trade_lessons_md = "\n".join(md_lines)
+    
+    print(f"PAYLOAD SYNC: Packaging {len(lessons)} trade lessons for LLM context.")
 
     # Return bifurcated structure + full state for dashboard compatibility
     output = {
@@ -2101,6 +2108,21 @@ def run_daemon():
                             supplemental_lessons = lessons_data["trade_lessons"]
                         elif isinstance(lessons_data, list):
                             supplemental_lessons = lessons_data
+                except: pass
+            
+            # Fallback to trade_lessons.md if JSON is missing or empty
+            if not supplemental_lessons and os.path.exists('trade_lessons.md'):
+                try:
+                    with open('trade_lessons.md', 'r', encoding='utf-8') as f:
+                        md_content = f.read()
+                        # Extract basic lesson structure from MD bullets
+                        md_matches = re.findall(r'-\s*\*\*L-(\d+):\*\*\s*(.*?)(?=\s*\n-|\s*\n##|$)', md_content, re.DOTALL)
+                        for l_id, content in md_matches:
+                            tags = re.findall(r'#([\w-]+)', content)
+                            rule = re.sub(r'#[\w-]+', '', content).strip()
+                            supplemental_lessons.append({"id": int(l_id), "rule": rule, "tags": tags})
+                    if supplemental_lessons:
+                        print(f"{YELLOW}Loaded {len(supplemental_lessons)} lessons from trade_lessons.md (JSON fallback).{RESET}")
                 except: pass
 
             supplemental_ssot = {}

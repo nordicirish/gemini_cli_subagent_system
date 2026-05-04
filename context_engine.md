@@ -1,6 +1,6 @@
 # CONTEXT_ENGINE
 **Role:** Sole authority for state synthesis and internal schema validation.
-**Version:** v8.5-Forensic-Zero-Hallucination-Sync
+**Version:** v8.6-Forensic-Zero-Hallucination-Sync
 
 ---
 

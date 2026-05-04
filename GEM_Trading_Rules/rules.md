@@ -1,6 +1,6 @@
 # GEM_Rules_Data
 **Role:** GEM_Rules_Data
-**Version:** v8.5-Forensic-Zero-Hallucination-Sync
+**Version:** v8.6-Forensic-Zero-Hallucination-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.
 
 ---
@@ -71,7 +71,7 @@
 - ENH_75: CPV Override
 - ENH_76: Token Economy Budgeting (Context Pruning)
 - ENH_77: Proactive Search Mandate
-- ENH_78: Daily Workflow Protocol
+- ENH_78: Flash-Tier Temporal Scrutiny
 - ENH_79: Lesson Feedback Pipeline
 - ENH_80: Conditional Council Escalation
 - ENH_81: Conviction Bias Circuit Breaker
@@ -84,7 +84,7 @@
 - MANDATE_04: DRIFT_CONTROL (Forensic Handshake Enforcement)
 - MANDATE_05: TEMPORAL_PRIORITY (User Timestamp Override)
 - MANDATE_06: COORDINATION (Technical Validator Sign-off)
-- MANDATE_07: ENGINE_OVERRIDE (Tier Synchronization)
+- MANDATE_07: MODEL_TRANSPARENCY (Diagnostic Compute Visibility)
 - MANDATE_08: SCHEMA_ENFORCEMENT (Forensic Field Validation)
 - MANDATE_09: STATE_EMISSION (Untruncated JSON Requirement)
 - MANDATE_10: SCHEMA_VALIDATION (Narrative & Array Checks)
@@ -135,9 +135,9 @@
   - **Execution Validation:** Before the SSoT Controller executes FORCE_WRITE to commit a trade, the TECHNICAL_VALIDATOR must prove the setup against ENH_36 (Post-ATR) and GATE_LIQ_01 to ensure liquidity depth hasn't vanished seconds before execution.
   - **Logic Source:** GEM_Rule_Enforcer_Engine
   - **Routing Priority:** PRIMARY
-- **[MANDATE_07_ENGINE_OVERRIDE]**
-  - **Status:** ACTIVE
-  - **Instruction:** All sub-engines must adhere to engine version **v3.1** (Gemini 3.1 Pro) tier synchronization: ATR-derived sizing, 50% forensic reductions, and mandatory EST sync. Engine version v3.1 is the canonical operational baseline for all reasoning agents.
+- **[MANDATE_07_MODEL_TRANSPARENCY]**
+    - **Status:** ACTIVE
+    - **Instruction:** The system MUST explicitly and transparently declare the underlying Gemini model tier it is currently operating on (e.g., Gemini 3.1 Pro, Gemini 3 Flash). This is a critical diagnostic requirement to allow the user to monitor host server throttling and context window degradation. Do not apologize for hardware downgrades; simply report the active compute tier objectively.
 - **[MANDATE_08_SCHEMA_ENFORCEMENT]**
   - **Status:** ACTIVE
   - **Instruction:** All state updates must conform to the schema defined in ENH_32. Reject handshakes lacking forensic fields: health_score, net_gex_total, and dealer_posture.
@@ -714,7 +714,7 @@
     - **Trigger Threshold:** system_thresholds.TOKEN_PRUNING_TRIGGER (150000 Tokens)
     - **Active Reasoning Surface:** system_thresholds.ACTIVE_REASONING_SURFACE (128K Tokens)
   - **Instruction:** Proactively manage the context window during periods of high data throughput by relying on the Master Constants.
-  - **Logic:** During 'HIGH_VOL' or 'HIGH_TORQUE' regimes, the CONTEXT_ENGINE is authorized to prune non-essential narrative logs to prevent "Context Drift" once the Trigger Threshold is breached.
+  - **Logic:** During 'HIGH_VOL' or 'HIGH_TORQUE' regimes, the CONTEXT_ENGINE is authorized to prune non-essential narrative logs to prevent "Context Drift" once the Trigger Threshold is breached. This pruning operation strictly targets historical facts and narrative logs. It MUST NOT alter the execution mode, trigger a FAST fallback, or cause the system to simulate a downgrade to Gemini Flash.
   - **Persistence_Hierarchy:** 
     1. Portfolio Snapshot (FIFO/WAC data)
     2. Active Forensic Flags (SSR, Success Memos)
@@ -1300,18 +1300,9 @@
     - execution
     - research
 
-## Enh 78 Daily Workflow
-- **Id:** ENH_78
-- **Title:** Daily Workflow Protocol
+## [ENH_78 - Flash-Tier Temporal Scrutiny]
 - **Status:** ACTIVE
-- **Trigger:** SESSION_START
-- **Steps:**
-  - 1. BOOT: Ingest 'State of the World' payload (SSoT + trade_lessons)
-  - 2. MACRO SCAN: Run MACRO_SENTINEL for overnight shocks and calendar proximity
-  - 3. PORTFOLIO AUDIT: For each active position, run TECHNICAL_VALIDATOR with fresh yfinance data
-  - 4. LESSON CHECK: Cross-reference the 'trade_lessons' array in the prompt payload against open positions for applicable warnings
-  - 5. THREAT MATRIX: Synthesize into priority-ranked action list (TRIM / HOLD / ADD / NEW RESEARCH)
-  - 6. PRESENT: Emit structured daily briefing before accepting trade commands
+- **Instruction:** If the Active Compute Tier is detected as 'Gemini 3 Flash', all agents are strictly forbidden from relying on pre-training memory for temporal data (dates, earnings schedules, macro calendar events). Agents MUST explicitly invoke native Google Search to re-verify all timelines prior to executing their reasoning chain.
 
 ## Enh 79 Lesson Feedback Loop
 - **Id:** ENH_79

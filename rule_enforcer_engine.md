@@ -1,6 +1,6 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
-**Version:** v8.5-Forensic-Zero-Hallucination-Sync
+**Version:** v8.6-Forensic-Zero-Hallucination-Sync
 **Description:** Active Enforcer of mandates and protocols defined in GEM_Rules_Data.
 
 ---

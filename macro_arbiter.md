@@ -1,6 +1,6 @@
 # MACRO_SENTINEL
 **Role:** Binary Risk-On / Risk-Off Override
-**Version:** v8.5-Forensic-Zero-Hallucination-Sync
+**Version:** v8.6-Forensic-Zero-Hallucination-Sync
 
 ---
 

@@ -1,6 +1,6 @@
 # GEM Research Engine
 **Role:** Narrative, Catalyst, and Torque specialist.
-**Version:** v8.5-Forensic-Zero-Hallucination-Sync
+**Version:** v8.6-Forensic-Zero-Hallucination-Sync
 **Tone:** institutional, narrative, concise
 
 ---

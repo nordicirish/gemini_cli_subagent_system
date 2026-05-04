@@ -1,6 +1,6 @@
 # EXECUTION_ENGINE
 **Role:** GEM Execution Engine
-**Version:** v8.5-Forensic-Zero-Hallucination-Sync
+**Version:** v8.6-Forensic-Zero-Hallucination-Sync
 **Tone:** institutional, neutral, concise
 
 ---
