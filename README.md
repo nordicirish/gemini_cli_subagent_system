@@ -2,7 +2,7 @@
 
 **A multi-agent AI trading intelligence framework built on Google Gemini Gems.**
 
-Starting with v8.5-Forensic-Zero-Hallucination-Sync, the system has fully matured its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`ssot.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`). The agents themselves now utilize highly structured `.md` files for their behavioral logic and the central ruleset. This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
+Starting with v8.6-Forensic-Zero-Hallucination-Sync, the system has fully matured its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`ssot.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`). This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
 
 ---
 
@@ -69,8 +69,8 @@ To prevent the LLM reasoning engines from hallucinating software structures whil
 2. **Rules / Protocols (`ENH_01` to `ENH_52`)**: These govern **Financial Execution & Domain Knowledge**. These are the fluid, quantitative strategies telling the system *how to trade*. 
    - *Example:* `ENH_45` (Macro Shock Veto), `ENH_50` (Pre-Trade Formulation), `ENH_36` (Post-14:30 Liquidity Gates).
 
-### The Live-Web SSoT Architecture (v8.5+)
-Unlike earlier versions that relied on static data, v8.5-Forensic-Zero-Hallucination-Sync implements **Grounding via Native Google Search**. Agents are now mandated to explicitly invoke Google Search to verify catalysts, news, and disconfirming evidence in real-time.
+### The Live-Web SSoT Architecture (v8.6+)
+Unlike earlier versions that relied on static data, v8.6-Forensic-Zero-Hallucination-Sync implements **Grounding via Native Google Search**. Agents are now mandated to explicitly invoke Google Search to verify catalysts, news, and disconfirming evidence in real-time.
 *   **The Processor:** The sandboxed Gemini Web UI acts as a stateless, high-powered reasoning engine with live web access.
 *   **The Search Tool:** Agents like the `RED_TEAM_PESSIMIST` and `RESEARCH_ENGINE` use native Google Search to hunt for "Thesis-Killers" and verify catalyst URLs.
 *   **The Bridge:** The Python backend (`fetch_stocks.py`) injects your live state (`local_ssot_shadow.json`) and institutional memory (`trade_lessons.md`) directly into the markdown prompt it generates for you. 
@@ -80,9 +80,12 @@ Unlike earlier versions that relied on static data, v8.5-Forensic-Zero-Hallucina
 
 ## 📁 File Reference
 
-### 🧠 Institutional Intelligence (v4.0+)
+### 🧠 Institutional Intelligence (v8.6+)
 
-The system now enforces **adversarial reasoning** and **volatility awareness** to prevent hallucinations.
+The system now enforces **adversarial reasoning**, **volatility awareness**, and **forensic data integrity** to prevent hallucinations. 
+1. **Normalized Registry Sync**: Ensures zero-drift between the high-density `trade_lessons.md` (institutional memory) and the machine-executable `trade_lessons.json` fallback.
+2. **Flash-Tier Scrutiny (ENH_78)**: Hardens the data ingestion pipeline for high-velocity analysis, mandating cross-reference verification between live search and the SSoT.
+3. **Bifurcated Delivery**: Optimizes payload delivery by separating lightweight turn data from heavy session initialization context.
 
 ### 🧠 Console Architecture Principles (v4.1+)
 
@@ -111,11 +114,11 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 
 ## 🛠️ Setup Instructions (Markdown) — One per Gem
 
-> **Note on Mode Selection:** The system no longer automatically forces an Orchestrator mode to prevent reasoning loops. You must **manually select** the Gemini Mode (e.g., Pro, Thinking, Flash) in the chat interface for your session. **Thinking mode is highly recommended** for the Orchestrator.
+> **Note on Mode Selection:** The system no longer automatically forces an Orchestrator mode to prevent reasoning loops. You must **manually select** the Gemini Mode in the chat interface for your session. **Gemini 3 Flash mode is highly recommended** for the Orchestrator. This ensures maximum routing speed and prevents the 192K context limit timeout crashes associated with Deep Think modes.
 
 | File | Gem Role | Gemini Mode | Purpose |
 |------|----------|-------------|---------|
-| `terminal.md` | **Orchestrator** | USER SELECTED (Thinking Rec.) | Master router — classifies user input and dispatches to the correct engine |
+| `terminal.md` | **Orchestrator** | FLASH | Master router — classifies user input and dispatches to the correct engine |
 | `rules.md` | **Legislative Body** | N/A | **Static Rules**: The canonical source containing thresholds and ENH_ protocols. MUST be attached via Google Drive. |
 | `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `GEM_Rules_Data` |
 | `data_analyst.md` | **Data Analyst** | PRO | Tier-1 Data Shield — retrieves and formats raw web data (SEC/Macro) via native Google Search to save reasoning tokens |
@@ -143,7 +146,7 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 | `format_json.py` | Formatter — pretty-prints a JSON instruction file with consistent indentation |
 ### 4. Updating Gems (Maintenance)
 
-When you update the JSON instructions in this repository (e.g., version increment to v8.5-Forensic-Zero-Hallucination-Sync), you must **manually update** the live Gem:
+When you update the JSON instructions in this repository (e.g., version increment to v8.6-Forensic-Zero-Hallucination-Sync), you must **manually update** the live Gem:
 
 1.  **Open the Gem** in [Gemini Advanced](https://gemini.google.com/gems).
 2.  Click the **Pencil Icon** (Edit) > **Instructions**.
@@ -152,7 +155,7 @@ When you update the JSON instructions in this repository (e.g., version incremen
 5.  Click **Update**.
 
 **Pro Tip:** If you are mid-session and don't want to restart, you can type:
-> *"SYSTEM UPDATE: I have patched your instructions to v8.5-Forensic-Zero-Hallucination-Sync. Please simulate the following logic update: [Paste critical logic change]"*
+> *"SYSTEM UPDATE: I have patched your instructions to v8.6-Forensic-Zero-Hallucination-Sync. Please simulate the following logic update: [Paste critical logic change]"*
 >
 > *(However, a full restart is recommended for major version changes).*
 
@@ -219,6 +222,7 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 | **Correlation Guard** | `ENH_43` | Warns on >80% pairwise correlation or >35% sector exposure |
 | **Web Verification Protocol** | `ENH_55` | Forces sub-agents to visually verify multi-timeframe mathematical trends (1D, 5D, 6M, YTD) using the Google Finance extension |
 | **Live Web Grounding** | `MANDATE_15` | Mandates explicit native Google Search tool usage for disconfirming evidence and catalyst verification |
+| **Flash-Tier Scrutiny** | `ENH_78` | Hardens data integrity during high-velocity analysis via cross-reference grounding |
 | **State Emission** | `MANDATE_09` | Optimized non-destructive merge; emits delta payloads while preserving untouched portfolio tickers |
 
 ---
@@ -256,24 +260,20 @@ MACRO_TICKERS = ['IEF', '^VIX', 'VIXY', 'UUP']
 # Combined list used by the dashboard
 ALL_TICKERS = TICKERS + MACRO_TICKERS
 ```
+> [!TIP]
+> **Dynamic Ticker Intelligence**: While the core list of tickers is defined in `fetch_stocks.py`, all ticker-specific metadata, event dates (e.g., Innovation Days, Funding Expiries), and forensic "Reflexes" are now managed via the **`trade_lessons.md`** registry. This allows the system to maintain "Perishable Intelligence" without modifying the static core rules.
 
-> [!IMPORTANT]
-> **When changing tickers**, you must also update the centralized constants in `rules.json`. All ticker-specific data is consolidated in one file — see the reference table below.
+#### Managing Ticker Metadata (`trade_lessons.md`)
 
-#### Ticker-Dependent Constants (`rules.json`)
+When adding a new ticker or updating a catalyst date, append a codified lesson to the registry:
 
-These sections **must** be updated whenever you add, remove, or change portfolio tickers:
+| Data Type | Example Lesson (Markdown) | Tag Requirement |
+|-----------|---------------------------|-----------------|
+| **Event Date** | `L-217: Exercise Balikatan 2026 (May 15) serves as the primary proving ground.` | `#catalysts #[TICKER]` |
+| **Support Floor** | `L-198: [CODIFIED: DIB_PSYCH_FLOOR] Breach of $14.00 node mandates a freeze.` | `#support #[TICKER]` |
+| **Structural Flag** | `L-192: [CODIFIED: ENH_30] Authorized shares increase to 1.2B signals decay.` | `#dilution #[TICKER]` |
 
-| Section | Path in `rules.json` | What to change |
-|---------|---------------------------|----------------|
-| **Basket Definition** | `basket_definition > defense_tech > tickers` | Add/remove tickers per theme |
-| | `basket_definition > health_tech > tickers` | Add/remove tickers per theme |
-| | `basket_definition > all_watched` | Must contain the union of all theme tickers |
-| **Sector Taxonomy** | `sector_taxonomy > categories` | Add new sector names if your basket expands beyond current themes |
-| **Temporal Events** | `temporal_events > DHS_CR_EXPIRY` | Update when government CR deadline changes |
-| | `temporal_events > RCAT_INNOVATION_DAY` | Update when event date is announced (set `null` if unknown) |
-
-These sections are **ticker-independent** but may need tuning for a different broker or strategy:
+All 22+ static systemic constants (like `GLOBAL_ALPHA_FRICTION_HURDLE`) still live in the `rules.md` Knowledge Base, but they are now **ticker-independent**.
 
 | Section | Path | Default | When to change |
 |---------|------|---------|----------------|
@@ -281,7 +281,7 @@ These sections are **ticker-independent** but may need tuning for a different br
 | **Slippage Penalty** | `system_thresholds > SLIPPAGE_PENALTY` | `0.5` | Different execution environment |
 | **OST Lockout Time** | `system_thresholds > OST_LOCKOUT_TIME` | `14:30 ET` | Different market/time zone |
 
-All 22+ named constants live in `rules.json > system_thresholds`. Sub-engine files reference these by name — **never hardcode values in sub-engines**.
+All 22+ named constants live in `rules.md > system_thresholds`. Sub-engine files reference these by name — **never hardcode values in sub-engines**.
 
 ### 4. Create the Gems
 For each JSON file, create a new Gem in Google Gemini:
@@ -291,7 +291,7 @@ For each JSON file, create a new Gem in Google Gemini:
 4. Name the Gem to match its role (e.g., *"GEM Terminal"*, *"GEM Rule Enforcer"*)
 5. **Knowledge Injection (Web UI Sandbox Bridge):**
    - **Required Attachments**: You MUST attach the **`rules`** Google Doc (from `GEM_Trading_Rules/`) to the Gem's knowledge base using the Drive extension. If using the Research Engine, attach the **Trading_Research** folder.
-   - **Payload Injection (No longer attached)**: The `GEM-Context-SSOT` and `trade_lessons` files are **no longer required as attached files**. The Python dashboard now injects `local_storage_state` and `trade_lessons` directly into the text prompt payload it generates for you. 
+   - **Payload Injection (Live File Attachment):** To prevent 192K token timeout crashes during 'Thinking' mode, the full SSOT and trade_lessons files should NOT be pasted into the chat box or attached permanently to the Gem's Knowledge Base. Instead, you must attach the live 'local_ssot_shadow.json' and 'trade_lessons.md' files directly to your first chat message as live attachments.
 
 ### 5. Initialize Air-Gap State Files
 The system uses local JSON files to maintain your "State of the World" portfolio and history across sessions without encountering web latency. Before your first run, create these two empty files in the root directory:
@@ -352,12 +352,12 @@ CRITICAL SYSTEM OVERRIDE: WIPE ALL PRIOR CONTEXT & FORCE SYNCHRONIZATION.
 
 Protocol Execution:
 1. ACKNOWLEDGE ARCHITECTURE: You are operating in a Web Sandbox environment. You MUST output all state changes as a strict JSON `EXECUTION_PAYLOAD` block so I can manually sync it via the local clipboard bridge.
-2. ACKNOWLEDGE SCHEMA: The system now uses the v8.5-Forensic-Zero-Hallucination-Sync Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
+2. ACKNOWLEDGE SCHEMA: The system now uses the v8.6-Forensic-Zero-Hallucination-Sync Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
 3. ACTION (ZERO-TOUCH SYNC): Use your Google Drive extension to read the attached `rules.md` markdown document in the (GEM_Trading_Rules) folder.
 4. VERIFICATION: Do NOT fabricate data. If you cannot read the file, STOP and output "TOOL FAILURE". 
    - Cite the exact `version` string verbatim from the top of the rules.md file.
    - Confirm which "ENH_" protocol governs the "Web Verification Protocol".
-5. Confirm Status: "System initialized: State is bound to v8.5-Forensic-Zero-Hallucination-Sync Payload Architecture and SSoT Rules are synced via Drive."
+5. Confirm Status: "System initialized: State is bound to v8.6-Forensic-Zero-Hallucination-Sync Payload Architecture and SSoT Rules are synced via Drive."
 ```
 
 ### 🟧 Local Pipeline Setup (The Clipboard Bridge)
@@ -389,11 +389,7 @@ Increment the sync_id before outputting.
 ```
 
 ### Session Restore (Start of Day)
-Click **"Copy Session Init"** on the Web Dashboard to package the full SSoT, live market prices, and trade lessons history. Paste the block into the Gem and immediately prompt:
-
-```
-Restore this as active GEM context.
-```
+1. **Session Init (File Upload):** At the start of the day, do not use the 'Copy Session Init' button. Instead, attach your current 'local_ssot_shadow.json' and 'trade_lessons.md' files directly into the first chat message of your Terminal Orchestrator Gem. 2. **Initialization Prompt:** Send the files with the prompt: "MANDATE_12: Initialize session using the attached SSoT and trade lessons." 3. **Continuous Play (Text Paste):** For all subsequent turns during the session, use the **"Copy Turn Data"** button from your dashboard and paste that lightweight text payload into the chat to update the market state without crashing the context window.
 
 For all subsequent turns during the session, use **"Copy Turn Data"** instead — it sends only lightweight ticker snapshots and a compact portfolio summary, keeping token usage minimal.
 

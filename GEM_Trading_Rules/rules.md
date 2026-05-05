@@ -1,6 +1,6 @@
 # GEM_Rules_Data
 **Role:** GEM_Rules_Data
-**Version:** v8.6-Forensic-Zero-Hallucination-Sync
+**Version:** v8.7-Forensic-Zero-Hallucination-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.
 
 ---
@@ -170,7 +170,7 @@
 - **[MANDATE_12_BOOT_SYNC]**
   - **Trigger:** SESSION_START
   - **Status:** STRICT_ENFORCE
-  - **Instruction:** All engines must build working memory and establish P&L baselines natively from the 'State of the World' payload provided in the prompt.
+  - **Instruction:** At session initialization, the system must build working memory natively from the 'local_ssot_shadow.json' and 'trade_lessons.md' files attached directly to the live chat prompt. Clipboard-based "Session Initialization" is DEPRECATED to prevent context window bloat and 192K token limit crashes. Use the clipboard paste strictly for lightweight, intraday 'Turn Data' payloads.
 - **[MANDATE_13 - Weighted_Consensus_Scrutiny]**
   - **Status:** ACTIVE
   - **Logic:**
@@ -284,7 +284,7 @@
   - **Status:** ACTIVE
   - **Instruction:** Unified SSoT Emission: To prevent duplication of state context, every turn must produce exactly ONE formatted Markdown report followed by exactly ONE unified JSON `EXECUTION_PAYLOAD` block.
     - **Quantitative SSoT:** All numeric/state data (Tickers, Portfolio, Macro) must be contained within the JSON.
-    - **Forensic Lessons:** Memory payloads must be bifurcated: Global Systemic Lessons appended to `new_trade_lessons` array, and Ticker-Specific Reflexes injected directly into `historical_context` inside the specific ticker's object within `portfolio_snapshot`.
+    - **Forensic Lessons:** Memory payloads must be bifurcated: Global Systemic Lessons appended to `new_trade_lessons` (or `session_trade_lessons` alias) array, and Ticker-Specific Reflexes injected directly into `historical_context` inside the specific ticker's object within `portfolio_snapshot`.
   - **Rationale:** Ensures flawless data synchronization with fetch_stocks.py and eliminates terminal output redundancy.
 - **[MANDATE_23_DISTILLATION_VETO]**
   - **Status:** ACTIVE
@@ -605,7 +605,7 @@
           - **Action:** OVERWRITE trade_lessons.json entirely
           - **Trigger:** ENH_53 State Compression (>= 20 lessons)
         - 
-          - **Key:** new_trade_lessons
+          - **Key:** new_trade_lessons (alias: session_trade_lessons)
           - **Type:** ARRAY<STRING>
           - **Action:** APPEND to existing trade_lessons.json
           - **Trigger:** ENH_51 Retrospective (post-mortem lesson)

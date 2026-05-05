@@ -39,19 +39,19 @@ POLYGON_API_KEY = config.get("POLYGON_API_KEY")
 USE_FINNHUB = True
 USE_POLYGON = False  # keep false unless you want Polygon volume fallback
 
-TICKERS = [
+# TICKERS and MACRO_TICKERS persistence logic
+TICKERS = config.get("TICKERS", [
     'ONDS', 'UMAC', 'RCAT', 'DFTX', 'GLD'
-    
-]
+])
 
-MACRO_TICKERS = [
+MACRO_TICKERS = config.get("MACRO_TICKERS", [
     '^VIX',
     'VIXY',
     'IEF',
     'UUP',
     'SPY',
     'GDX'
-]
+])
 
 ALL_TICKERS = TICKERS + MACRO_TICKERS
 INVERSE_MACRO = ['^VIX', 'VIXY', 'UUP', 'IEF']
@@ -73,6 +73,13 @@ GLOBAL_STATE = {}
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+def save_config():
+    global config, TICKERS, MACRO_TICKERS
+    config["TICKERS"] = TICKERS
+    config["MACRO_TICKERS"] = MACRO_TICKERS
+    with open('config.json', 'w') as f:
+        json.dump(config, f, indent=4)
+
 @app.get("/api/data")
 def get_data():
     return JSONResponse(fetch_stocks(GLOBAL_STATE))
@@ -89,6 +96,7 @@ async def update_tickers(req: Request):
     valid_tickers = [t.upper() for t in new_tickers if t]
     TICKERS = valid_tickers
     ALL_TICKERS = TICKERS + MACRO_TICKERS
+    save_config()
     return JSONResponse({"status": "success", "tickers": TICKERS})
 
 @app.post("/api/macro")
@@ -99,6 +107,7 @@ async def update_macro_tickers(req: Request):
     valid_macro = [t.upper() for t in new_macro if t]
     MACRO_TICKERS = valid_macro
     ALL_TICKERS = TICKERS + MACRO_TICKERS
+    save_config()
     return JSONResponse({"status": "success", "macro": MACRO_TICKERS})
 
 def _deep_merge(base, delta):
@@ -181,11 +190,14 @@ async def handle_paste(req: Request):
         json_payload = {}
         lessons_from_md = []
 
-        # 1. Extract JSON SSoT block
+        # 1. Extract JSON SSoT block and isolate Markdown part
         json_match = re.search(r"```json\s*(\{.*?\})\s*```", clip_data, re.IGNORECASE | re.DOTALL)
+        md_part = clip_data
         if json_match:
             try:
                 json_payload = json.loads(json_match.group(1).strip())
+                # Remove the JSON block from the text we search for Markdown lessons
+                md_part = clip_data[:json_match.start()] + clip_data[json_match.end():]
             except: pass
         else:
             # Fallback for naked JSON
@@ -193,6 +205,7 @@ async def handle_paste(req: Request):
             if match:
                 try:
                     json_payload = json.loads(match.group(1).strip())
+                    md_part = clip_data[:match.start()] + clip_data[match.end():]
                 except: pass
             else:
                 # Last resort: try to find braces
@@ -201,12 +214,12 @@ async def handle_paste(req: Request):
                 if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
                     try:
                         json_payload = json.loads(clip_data[start_brace:end_brace+1].strip())
+                        md_part = clip_data[:start_brace] + clip_data[end_brace+1:]
                     except: pass
 
-        # 2. Extract Markdown Lessons block (Support both bullet and discrete L-xxx: formats)
-        # Bullet pattern: - **L-123:** Rule text #tag1 #tag2 (Flexible bullet and bolding)
+        # 2. Extract Markdown Lessons block (Search ONLY the md_part)
         bullet_pattern = r'(?:-|\*)\s*(?:\*\*)?L-(\d+):(?:\*\*)?\s*(.*?)(?=\s*\n(?:-|\*)\s*(?:\*\*)?L-|\s*\n##|\s*\n$|$)'
-        for m in re.finditer(bullet_pattern, clip_data, re.DOTALL):
+        for m in re.finditer(bullet_pattern, md_part, re.DOTALL):
             try:
                 l_id = int(m.group(1))
                 content = m.group(2).strip()
@@ -215,17 +228,12 @@ async def handle_paste(req: Request):
                 lessons_from_md.append({"id": l_id, "rule": rule, "tags": tags})
             except: continue
 
-        # Discrete pattern: L-195: [text]
-        # Captures until next L-xx:, next ## header, next MANDATE_, or end of string
         discrete_pattern = r'L-(\d+):\s*(.*?)(?=\s*L-\d+:|\s*\n##|\s*MANDATE_|$)'
-        for m in re.finditer(discrete_pattern, clip_data, re.DOTALL):
+        for m in re.finditer(discrete_pattern, md_part, re.DOTALL):
             try:
                 l_id = int(m.group(1))
-                # Avoid duplicates if already caught by bullet pattern
                 if any(l['id'] == l_id for l in lessons_from_md): continue
-                
                 content = m.group(2).strip()
-                # Find tags within the captured content for this specific entry
                 tags = re.findall(r'#([\w-]+)', content)
                 rule = re.sub(r'#[\w-]+', '', content).strip()
                 lessons_from_md.append({"id": l_id, "rule": rule, "tags": tags})
@@ -252,43 +260,71 @@ async def handle_paste(req: Request):
         if isinstance(payload.get("EXECUTION_PAYLOAD"), dict):
             map_aliases(payload["EXECUTION_PAYLOAD"])
             
-        # Helper to extract and remove lessons from payload regardless of nesting
-        def extract_and_remove(data, key):
-            val = None
-            if key in data:
-                val = data.pop(key, None)
-            elif "mutable_state" in data and isinstance(data["mutable_state"], dict) and key in data["mutable_state"]:
-                val = data["mutable_state"].pop(key, None)
-            elif "EXECUTION_PAYLOAD" in data and isinstance(data["EXECUTION_PAYLOAD"], dict) and key in data["EXECUTION_PAYLOAD"]:
-                val = data["EXECUTION_PAYLOAD"].pop(key, None)
-            return val
+        # Helper to extract and remove fields from payload regardless of nesting
+        def get_and_prune(data, key):
+            if key in data: return data.pop(key)
+            if "mutable_state" in data and isinstance(data["mutable_state"], dict) and key in data["mutable_state"]:
+                return data["mutable_state"].pop(key)
+            if "EXECUTION_PAYLOAD" in data and isinstance(data["EXECUTION_PAYLOAD"], dict) and key in data["EXECUTION_PAYLOAD"]:
+                return data["EXECUTION_PAYLOAD"].pop(key)
+            return None
 
-        # Extract lesson data *before* merging
-        extracted_compressed = extract_and_remove(payload, "compressed_trade_lessons")
-        extracted_new = extract_and_remove(payload, "new_trade_lessons")
-        extracted_trade_lessons = extract_and_remove(payload, "trade_lessons") or []
-        if isinstance(extracted_trade_lessons, dict) and "trade_lessons" in extracted_trade_lessons:
-            extracted_trade_lessons = extracted_trade_lessons["trade_lessons"]
-        if not isinstance(extracted_trade_lessons, list):
-            extracted_trade_lessons = []
+        # 3. v8.6 Forensic Lesson Hunt: Recursively find any key containing 'trade_lessons'
+        def hunt_and_extract_lessons(data):
+            found_lessons = []
+            found_compressed = None
+            if not isinstance(data, dict): return found_lessons, found_compressed
             
+            keys_to_prune = []
+            for k, v in data.items():
+                k_low = k.lower()
+                if "trade_lessons" in k_low or "trade-lessons" in k_low:
+                    if "compressed" in k_low:
+                        found_compressed = v
+                    else:
+                        if isinstance(v, list):
+                            for item in v:
+                                if isinstance(item, dict):
+                                    # Normalize Gem keys
+                                    if "content" in item and "rule" not in item:
+                                        item["rule"] = item.pop("content")
+                                    if "category" in item:
+                                        cat = item.pop("category")
+                                        if "tags" not in item: item["tags"] = []
+                                        if cat not in item["tags"]: item["tags"].append(cat)
+                                found_lessons.append(item)
+                        elif isinstance(v, dict):
+                            # Handle wrapped lessons e.g., {"trade_lessons": [...]}
+                            if "trade_lessons" in v and isinstance(v["trade_lessons"], list):
+                                found_lessons.extend(v["trade_lessons"])
+                            elif "trade_lessons_revision" in v and isinstance(v["trade_lessons_revision"], list):
+                                found_lessons.extend(v["trade_lessons_revision"])
+                            else:
+                                if "content" in v and "rule" not in v:
+                                    v["rule"] = v.pop("content")
+                                found_lessons.append(v)
+                    keys_to_prune.append(k)
+                elif k in ("mutable_state", "EXECUTION_PAYLOAD") and isinstance(v, dict):
+                    # Specifically recurse into primary payload containers
+                    nested_lessons, nested_compressed = hunt_and_extract_lessons(v)
+                    found_lessons.extend(nested_lessons)
+                    if nested_compressed: found_compressed = nested_compressed
+            
+            for k in keys_to_prune:
+                data.pop(k, None)
+            return found_lessons, found_compressed
+
+        extracted_trade_lessons, extracted_compressed = hunt_and_extract_lessons(payload)
+        if not isinstance(extracted_trade_lessons, list): extracted_trade_lessons = []
+
         # Add lessons parsed from Markdown
         if lessons_from_md:
             extracted_trade_lessons.extend(lessons_from_md)
             
-        extracted_rev_trade_lessons = extract_and_remove(payload, "trade_lessons_revision") or []
-        if isinstance(extracted_rev_trade_lessons, dict) and "trade_lessons" in extracted_rev_trade_lessons:
-            extracted_rev_trade_lessons = extracted_rev_trade_lessons["trade_lessons"]
-        elif isinstance(extracted_rev_trade_lessons, dict) and "trade_lessons_revision" in extracted_rev_trade_lessons:
-            extracted_rev_trade_lessons = extracted_rev_trade_lessons["trade_lessons_revision"]
-        if not isinstance(extracted_rev_trade_lessons, list):
-            extracted_rev_trade_lessons = []
-            
-        extracted_trade_lessons.extend(extracted_rev_trade_lessons)
         if not extracted_trade_lessons:
             extracted_trade_lessons = None
             
-        extracted_mutations = extract_and_remove(payload, "rule_mutations")
+        extracted_mutations = get_and_prune(payload, "rule_mutations")
 
         # Merge local ssot
         existing_ssot = {}
@@ -388,6 +424,12 @@ async def handle_paste(req: Request):
                     new_item["id"] = i + 1
                     if "rule" not in new_item and "lesson" in new_item:
                         new_item["rule"] = new_item.pop("lesson")
+                    if "rule" not in new_item and "content" in new_item:
+                        new_item["rule"] = new_item.pop("content")
+                    if "category" in new_item:
+                        cat = new_item.pop("category")
+                        if "tags" not in new_item: new_item["tags"] = []
+                        if cat not in new_item["tags"]: new_item["tags"].append(cat)
                     normalized.append(new_item)
                 else:
                     normalized.append({"id": i + 1, "rule": str(item)})
@@ -398,8 +440,6 @@ async def handle_paste(req: Request):
         incoming_lessons = []
         if extracted_compressed and isinstance(extracted_compressed, list):
             incoming_lessons.extend(extracted_compressed)
-        if extracted_new and isinstance(extracted_new, list):
-            incoming_lessons.extend(extracted_new)
         if extracted_trade_lessons and isinstance(extracted_trade_lessons, list):
             incoming_lessons.extend(extracted_trade_lessons)
 

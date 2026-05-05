@@ -18,7 +18,6 @@ let currentMacroTickers = [];
 let MACRO_LABELS = {};
 
 const dCopyBtn = document.getElementById('copy-json-btn');
-const dCopyAllBtn = document.getElementById('copy-all-btn');
 const dPasteBtn = document.getElementById('paste-payload-btn');
 const dDataStatus = document.getElementById('data-status');
 
@@ -259,28 +258,7 @@ dCopyBtn.addEventListener('click', async () => {
     }
 });
 
-// Copy All Data Handler (SSOT + Ticker Data + Trade Lessons)
-dCopyAllBtn.addEventListener('click', async () => {
-    try {
-        const res = await fetch(`${API_BASE}/data`);
-        const state = await res.json();
-        
-        const ssotJson = state.SSoT_JSON || state;
-        const jsonString = "```json\n" + JSON.stringify(ssotJson, null, 2) + "\n```";
-        const lessonsMd = state.Trade_Lessons_MD || "";
-        
-        await navigator.clipboard.writeText(jsonString + "\n\n" + lessonsMd);
-        
-        dDataStatus.textContent = 'All data copied (SSOT + Tickers + Lessons)!';
-        dDataStatus.className = 'status-message text-green';
-        setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
-    } catch (e) {
-        console.error(e);
-        dDataStatus.textContent = 'Failed to copy data.';
-        dDataStatus.className = 'status-message text-red';
-        setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
-    }
-});
+
 
 // Paste Payload Handler
 dPasteBtn.addEventListener('click', async () => {
