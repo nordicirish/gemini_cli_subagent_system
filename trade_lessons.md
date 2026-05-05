@@ -207,7 +207,7 @@
 - **L-153:** [CODIFIED: BASELINE_TRAP] Always cross-reference pricing/closing dates against ENH_31; social sentiment often conflates pricing with statutory closing.
 - **L-154:** [CODIFIED: MANDATE_21_TRIGGER] Factual divergence in offering dates (>3 days) triggers an immediate Model-Integrity Freeze and rejection of all related trade theses.
 - **L-155:** [CODIFIED: STALE_DATA_PENALTY] Attribution of 45-day-old news as 'Today' results in an immediate Health Score deduction of 100 per L-158.
-- **L-156:** [CODIFIED: COMPUTE_FIDELITY_WARNING] Orchestrator output during Flash-Throttled tiers requires 2x user verification for temporal data.
+- **L-156:** [CODIFIED: COMPUTE_FIDELITY_WARNING] Orchestrator output during Flash (Selected Terminal Tier) requires 2x user verification for temporal data.
 - **L-157:** [CODIFIED: DIB_EARNINGS_ANCHOR] When temporal data for offerings becomes stale, anchor support floors to the next GAAP reporting date.
 - **L-158:** [CODIFIED: HEURISTIC_DATE_TRAP] Automated financial calendars often mirror the prior year's date. Verify via PR wire before executing event-trades.
 - **L-159:** [CODIFIED: SECTOR_CONFLATION_GUARD] Verify ticker identity for shared reporting dates (e.g., CRSR vs UMAC) during peak weeks.

@@ -1,6 +1,6 @@
 # GEM_Rules_Data
 **Role:** GEM_Rules_Data
-**Version:** v8.7-Forensic-Zero-Hallucination-Sync
+**Version:** v8.8-Forensic-Zero-Hallucination-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.
 
 ---
@@ -135,9 +135,7 @@
   - **Execution Validation:** Before the SSoT Controller executes FORCE_WRITE to commit a trade, the TECHNICAL_VALIDATOR must prove the setup against ENH_36 (Post-ATR) and GATE_LIQ_01 to ensure liquidity depth hasn't vanished seconds before execution.
   - **Logic Source:** GEM_Rule_Enforcer_Engine
   - **Routing Priority:** PRIMARY
-- **[MANDATE_07_MODEL_TRANSPARENCY]**
-    - **Status:** ACTIVE
-    - **Instruction:** The system MUST explicitly and transparently declare the underlying Gemini model tier it is currently operating on (e.g., Gemini 3.1 Pro, Gemini 3 Flash). This is a critical diagnostic requirement to allow the user to monitor host server throttling and context window degradation. Do not apologize for hardware downgrades; simply report the active compute tier objectively.
+    - **Instruction:** The system MUST explicitly and transparently declare the underlying Gemini model tier it is currently operating on (e.g., Gemini 3.1 Pro, Gemini 3 Flash (Selected Terminal Tier)). This is a critical diagnostic requirement to allow the user to monitor host server performance and reasoning depth. Do not apologize for hardware downgrades; simply report the active compute tier objectively.
 - **[MANDATE_08_SCHEMA_ENFORCEMENT]**
   - **Status:** ACTIVE
   - **Instruction:** All state updates must conform to the schema defined in ENH_32. Reject handshakes lacking forensic fields: health_score, net_gex_total, and dealer_posture.
@@ -283,6 +281,7 @@
 - **[MANDATE_22_SSOT_EMISSION_PROTOCOL]**
   - **Status:** ACTIVE
   - **Instruction:** Unified SSoT Emission: To prevent duplication of state context, every turn must produce exactly ONE formatted Markdown report followed by exactly ONE unified JSON `EXECUTION_PAYLOAD` block.
+    - **Markdown Report:** Must begin with the 'Active Compute Tier' header, followed by the '### 🏁 Final Council Decision' block which MUST include the Decision and a concise 'Summary' of consensus reasoning.
     - **Quantitative SSoT:** All numeric/state data (Tickers, Portfolio, Macro) must be contained within the JSON.
     - **Forensic Lessons:** Memory payloads must be bifurcated: Global Systemic Lessons appended to `new_trade_lessons` (or `session_trade_lessons` alias) array, and Ticker-Specific Reflexes injected directly into `historical_context` inside the specific ticker's object within `portfolio_snapshot`.
   - **Rationale:** Ensures flawless data synchronization with fetch_stocks.py and eliminates terminal output redundancy.
