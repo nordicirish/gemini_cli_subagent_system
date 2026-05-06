@@ -198,7 +198,7 @@ The **Technical Validator** computes the weighted **Agreement Score (S_A)** base
 Every turn concludes with the Gem outputting a precise JSON block named `EXECUTION_PAYLOAD`.
 1. Copy this JSON block from the Gemini UI.
 2. Click **"Paste Payload"** on your dashboard sidebar.
-3. The React/JS frontend routes the payload to the Python orchestrator, which natively parses the clipboard, validates the JSON/Markdown, and seamlessly writes the state to `local_ssot_shadow.json` and the `trade_lessons.md` registry.
+3. The vanilla JS frontend routes the payload to the Python orchestrator, which natively parses the clipboard, validates the JSON/Markdown, and seamlessly writes the state to `local_ssot_shadow.json` and the `trade_lessons.md` registry.
 
 ---
 
