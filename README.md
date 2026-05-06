@@ -13,50 +13,50 @@ Starting with v8.9-Forensic-WebUI-Stability-Sync, the system has fully matured i
 │                   TERMINAL ORCHESTRATOR                     │
 │                     (terminal.md)                           │
 │          Routes user input to the correct engine            │
-└────────────┬────────────────────────────────────────────────┘
-             │
-     ┌───────┴────────┐
-     │  ROUTING LAYER  │
-     └───────┬────────┘
-             │
-     ┌───────┴────────┐
-     │  DATA ANALYST   │ (Stage 0: Data Sync)
-     │ (data_analyst.md)│ ◄── Baseline Prices, Macro Events
-     └───────┬────────┘
-             │
-  ┌──────────┼──────────────────────────────────┐
-  │          │                                  │
-  ▼          ▼                                  ▼
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+               ┌───────────┴───────────┐
+               │     ROUTING LAYER     │
+               └───────────┬───────────┘
+                           │
+               ┌───────────┴───────────┐
+               │     DATA ANALYST      │ (Stage 0: Data Sync)
+               │  (data_analyst.md)    │ ◄── Baseline Prices, Macro Events
+               └───────────┬───────────┘
+                           │
+   ┌───────────────────────┼───────────────────────┐
+   │                       │                       │
+   ▼                       ▼                       ▼
 ┌─────┐  ┌──────────┐  ┌───────┐  ┌──────┐  ┌─────────────┐
 │MACRO│  │RESEARCH  │  │ GEX   │  │SENT. │  │ STRUCTURAL  │
 │SENT.│  │ENGINE    │  │ENGINE │  │ENGINE│  │ RISK ENGINE │
 └──┬──┘  └────┬─────┘  └───┬───┘  └──┬───┘  └──────┬──────┘
-   │          │             │         │              │
-   └──────────┴──────┬──────┴─────────┴──────────────┘
-                     │
-          ┌──────────┴──────────┐
-          │   CONSENSUS COUNCIL  │
-          │  ┌────────────────┐  │
-          │  │BULLISH ADVOCATE│  │
-          │  │RED TEAM PESSIM.│  │
-          │  │NEUTRAL STRUCT. │  │
-          │  └────────────────┘  │
-          └──────────┬──────────┘
-                     │
-          ┌──────────┴──────────┐
-          │ TECHNICAL VALIDATOR  │
-          │    (Synthesis Node)  │
-          └──────────┬──────────┘
-                     │
-          ┌──────────┴──────────┐
-          │   CONTEXT ENGINE     │──── SSoT STORAGE
-          │   (State Bridge)     │     (Schema)
-          └──────────┴──────────┘
-                     │
-          ┌──────────┴──────────┐
-          │  EXECUTION ENGINE    │
-          │  (Order Generation)  │
-          └─────────────────────┘
+   │          │            │         │              │
+   └──────────┴────────────┬─────────┴──────────────┘
+                           │
+              ┌────────────┴────────────┐
+              │    CONSENSUS COUNCIL    │
+              │  ┌───────────────────┐  │
+              │  │ BULLISH ADVOCATE  │  │
+              │  │ RED TEAM PESSIM.  │  │
+              │  │ NEUTRAL STRUCT.   │  │
+              │  └───────────────────┘  │
+              └────────────┬────────────┘
+                           │
+              ┌────────────┴────────────┐
+              │  TECHNICAL VALIDATOR    │
+              │    (Synthesis Node)     │
+              └────────────┬────────────┘
+                           │
+              ┌────────────┴────────────┐
+              │    CONTEXT ENGINE       │──── SSoT STORAGE
+              │    (State Bridge)       │     (Schema)
+              └────────────┬────────────┘
+                           │
+              ┌────────────┴────────────┐
+              │   EXECUTION ENGINE      │
+              │   (Order Generation)    │
+              └─────────────────────────┘
 ```
 
 **Governance backbone:** The **Rule Enforcer** (`rule_enforcer_engine.md`) actively validates compliance, while `rules.md` serves as the authoritative legislative body containing the system thresholds, mandates, and enhancement protocols.
