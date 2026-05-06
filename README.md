@@ -123,8 +123,8 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 | `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `Gemini_Gem_Rules_Data` |
 | `data_analyst.md` | **Data Analyst** | PRO | Tier-1 Data Shield — retrieves and formats raw web data (SEC/Macro) via native Google Search to save reasoning tokens |
 | `context_engine.md` | **Context Engine** | PRO | Active SSoT bridge — drift detection, state merging, sync orchestration |
-| `bullish_gem.md` | **Bullish Advocate** | THINKING | Alpha & momentum specialist — identifies reasons to approve trades |
-| `red_team_gem.md` | **Red Team Pessimist** | THINKING | Adversarial risk specialist — identifies reasons to reject trades |
+| `bullish_gem.md` | **Bullish Advocate** | THINKING | Alpha & momentum specialist — identifies reasons to approve purchases |
+| `red_team_gem.md` | **Red Team Pessimist** | THINKING | Adversarial risk specialist — identifies reasons to reject purchases |
 | `neutral_gem.md` | **Neutral Structuralist** | PRO | Market architecture specialist — GEX, regime detection, liquidity |
 | `execution.md` | **Execution Engine** | PRO | ATR-adjusted position sizing, order generation, liquidity gates |
 | `gex_engine.md` | **GEX Engine** | PRO | Gamma exposure computation — net GEX, gamma flip, dealer posture |
@@ -242,7 +242,7 @@ pip install yfinance pandas numpy requests scipy pyperclip
 ### 3. Configure Tickers
 Edit `fetch_stocks.py` to set your portfolio and macro benchmark tickers separately:
 ```python
-# Portfolio / trade tickers
+# Portfolio / watched tickers
 TICKERS = ['ONDS', 'UMAC', 'RCAT', 'DFTX', 'RKLB', 'PLTR']
 
 # Macro benchmarks & risk indicators
@@ -319,7 +319,7 @@ Also, confirm which "ENH_Protocol" governs the "Macro Calendar Shield".
 ### Test 2: The Mutation Verification (Definitive)
 Confirm the Gem is reading the *live* Google Doc, not a stale cache.
 
-1.  **Modify:** Open `Gemini_Gem_Rules/rules` in Google Drive. Change `"GLOBAL_ALPHA_FRICTION_HURDLE": 0.0117` to **`0.099`**.
+1.  **Modify:** Open `gemini_gem_rules/rules` in Google Drive. Change `"GLOBAL_ALPHA_FRICTION_HURDLE": 0.0117` to **`0.099`**.
 2.  **Ask:** In the Gem, ask:
     ```text
     Reload Rules from GoogleDrive://Gemini_Gem_Rules/rules.
@@ -385,11 +385,11 @@ Increment the sync_id before outputting.
 For all subsequent turns during the session, use **"Copy Turn Data"** instead — it sends only lightweight ticker snapshots and a compact portfolio summary, keeping token usage minimal.
 
 ### End of Day Close
-Run this at the end of each trading session to perform a final audit and generate the EOD backup:
+Run this at the end of each session to perform a final audit and generate the EOD backup:
 
 ```
-Session Close initiated. Perform a final forensic audit of today's trading session and
-synchronize all end-of-day data for active tickers. Incorporate final trade entries,
+Session Close initiated. Perform a final forensic audit of today's session and
+synchronize all end-of-day data for active tickers. Incorporate final stock entries,
 including Units, WAC, and Remaining Cash.
 
 Once the audit is complete, execute the FULL_STATE_OUTPUT protocol per SSoT_Storage
