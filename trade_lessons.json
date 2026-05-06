@@ -1,0 +1,1476 @@
+{
+  "trade_lessons": [
+    {
+      "rule": "High-profile sector validation (e.g., tech use at WEF) often serves as a 'Hype-Shield' for distribution.",
+      "tags": [
+        "sentiment",
+        "distribution"
+      ],
+      "id": 1
+    },
+    {
+      "rule": "For clinical biotech, quarterly R&D burn is secondary to catalyst readout timelines.",
+      "tags": [
+        "biotech",
+        "fundamentals"
+      ],
+      "id": 2
+    },
+    {
+      "rule": "Industrial-Scale Distillation confirms frontier AI logic is no longer a defensible moat.",
+      "tags": [
+        "AI",
+        "competitive-moat"
+      ],
+      "id": 3
+    },
+    {
+      "rule": "In high-VIX regimes, 'Cash Runway' is the most potent technical support.",
+      "tags": [
+        "volatility",
+        "fundamentals"
+      ],
+      "id": 4
+    },
+    {
+      "rule": "[CODIFIED: MANDATE_22] Position size in binary clinical plays must be dictated by 'Residual Cash Value' floors (e.g., $5.88 for DFTX).",
+      "tags": [
+        "position-sizing",
+        "biotech"
+      ],
+      "id": 5
+    },
+    {
+      "rule": "Strategic Reinstatement in High-VIX requires 'Hard News' overrides.",
+      "tags": [
+        "volatility",
+        "catalysts"
+      ],
+      "id": 6
+    },
+    {
+      "rule": "[CODIFIED: ENH_56] Volatility expansion mandates 2x ATR stop-loss buffers. Triggers possess absolute execution supremacy over Alpha-Friction limits.",
+      "tags": [
+        "volatility",
+        "ATR",
+        "risk-management",
+        "override"
+      ],
+      "id": 7
+    },
+    {
+      "rule": "[CODIFIED: MANDATE_23] P/E > 50 SaaS firms are 'Rent Only' if moats are portable.",
+      "tags": [
+        "SaaS",
+        "valuation"
+      ],
+      "id": 8
+    },
+    {
+      "rule": "[CODIFIED: MANDATE_24] News gaps >10% require stops at the 50% midpoint.  \n\n---",
+      "tags": [
+        "risk-management",
+        "gap-trading"
+      ],
+      "id": 9
+    },
+    {
+      "rule": "Logic Lineage Protocol: Descriptive lesson text is secondary to the 'Law Pointer Registry'.",
+      "tags": [
+        "meta",
+        "system-design"
+      ],
+      "id": 10
+    },
+    {
+      "rule": "[CODIFIED: ENH_46] Field-Validation Override: Bullfrog AI USV integration validates Red Cat's all-domain ecosystem.",
+      "tags": [
+        "defense",
+        "sector-thesis"
+      ],
+      "id": 11
+    },
+    {
+      "rule": "Liquidity Warning: Peter Thiel's total liquidation confirms 'Smart Money' exit from vertical AI.",
+      "tags": [
+        "institutional-flow",
+        "AI"
+      ],
+      "id": 12
+    },
+    {
+      "rule": "Legislative Catalyst: SASC Drone Industrial Base hearings function as a 'Hard News' pivot for UMAC/RCAT.",
+      "tags": [
+        "catalysts",
+        "legislative"
+      ],
+      "id": 13
+    },
+    {
+      "rule": "The VIX Trap: Stabilization at peak levels (>22) is often a 'Distribution Plateau' preceding secondary flushes.",
+      "tags": [
+        "volatility",
+        "VIX"
+      ],
+      "id": 14
+    },
+    {
+      "rule": "VIX Velocity > 10% overrides idiosyncratic news; expect mean-reversion regardless of news quality.",
+      "tags": [
+        "volatility",
+        "VIX"
+      ],
+      "id": 15
+    },
+    {
+      "rule": "Basis Parity Guard: In 24+ VIX regimes, a 2% basis cushion is the only reliable stop-loss for high-beta plays.",
+      "tags": [
+        "risk-management",
+        "volatility"
+      ],
+      "id": 16
+    },
+    {
+      "rule": "JSON Emission Mandate: All lesson revisions MUST be paired with a machine-readable SSoT payload.",
+      "tags": [
+        "protocol",
+        "system-design"
+      ],
+      "id": 17
+    },
+    {
+      "rule": "Conflict Synergy Signal: Cross-platform integrations (RCAT on Magura) function as highest-tier validation.",
+      "tags": [
+        "catalysts",
+        "validation"
+      ],
+      "id": 18
+    },
+    {
+      "rule": "Recessionary Decoupling: Defense Industrial Base (DIB) assets function as sovereign safe havens.",
+      "tags": [
+        "decoupling",
+        "macro"
+      ],
+      "id": 19
+    },
+    {
+      "rule": "Validation Visibility: High-level officials at test facilities (Benning) override High-VIX entry restrictions.",
+      "tags": [
+        "catalysts",
+        "UMAC"
+      ],
+      "id": 20
+    },
+    {
+      "rule": "[CODIFIED: MANDATE_20] Never trade against a surging Volatility Proxy (VXX > 20).",
+      "tags": [
+        "volatility",
+        "VIX"
+      ],
+      "id": 21
+    },
+    {
+      "rule": "[CODIFIED: FIX_01] Categorize laggards as 'Donor Assets' during high-vol windows to avoid traps.",
+      "tags": [
+        "risk-management",
+        "harvesting"
+      ],
+      "id": 22
+    },
+    {
+      "rule": "Video Webinar pivots (RCAT) indicate high-conviction hardware validation for institutional conversion.",
+      "tags": [
+        "sentiment",
+        "management"
+      ],
+      "id": 23
+    },
+    {
+      "rule": "Gamma Flip nodes require rVol > 2.0 to sustain; lack of volume leads to VWAP mean-reversion.",
+      "tags": [
+        "volume",
+        "gamma"
+      ],
+      "id": 24
+    },
+    {
+      "rule": "SSR-restricted assets (RCAT) are optimal profit harvest targets during flushes as bids are protected.",
+      "tags": [
+        "harvesting",
+        "SSR"
+      ],
+      "id": 25
+    },
+    {
+      "rule": "Negative Gamma zones create a 'News-Ceiling'; Ignition is delayed until Dealer Delta flips positive.",
+      "tags": [
+        "timing",
+        "gamma"
+      ],
+      "id": 26
+    },
+    {
+      "rule": "M&A 'Prime' transitions (Electronic Warfare) have a 48-hour valuation-lag for institutional re-grossing.  &A",
+      "tags": [
+        "valuation",
+        "M"
+      ],
+      "id": 27
+    },
+    {
+      "rule": "Executive Reputation Veto: Management with 'jumping the gun' history (Thompson) requires 25% guidance discount.",
+      "tags": [
+        "risk-management",
+        "governance"
+      ],
+      "id": 28
+    },
+    {
+      "rule": "The VWAP Front-Run Penalty: During Regular Trading Hour (RTH) flushes, widen high-conviction VWAP bids by 0.5% to ensure fill.",
+      "tags": [
+        "execution",
+        "VWAP"
+      ],
+      "id": 29
+    },
+    {
+      "rule": "Capital Velocity Guard: Categorize range-bound laggards as 'Trapped Money' during macro flushes.",
+      "tags": [
+        "risk-management",
+        "capital-allocation"
+      ],
+      "id": 30
+    },
+    {
+      "rule": "Audit GAAP profits for investment-gain masking (UMAC Lesson).",
+      "tags": [
+        "earnings",
+        "forensics"
+      ],
+      "id": 31
+    },
+    {
+      "rule": "Success Memo (10 U.S.C. \u00a7 4022) is the primary production gate for RCAT.",
+      "tags": [
+        "catalysts",
+        "production"
+      ],
+      "id": 32
+    },
+    {
+      "rule": "[CODIFIED: ENH_10] ONDS acquisition of INDO provides first heavy engineering floor for the DIB basket.  &A",
+      "tags": [
+        "structure",
+        "M"
+      ],
+      "id": 33
+    },
+    {
+      "rule": "Long Gamma posture (ONDS) in a $140M catalyst event serves as a 'Volatility Speed-Governor'.",
+      "tags": [
+        "volatility",
+        "gamma"
+      ],
+      "id": 34
+    },
+    {
+      "rule": "Institutional absorption of warrant churn validates 'Hard News' catalyst dominance.",
+      "tags": [
+        "catalysts",
+        "institutional-flow"
+      ],
+      "id": 35
+    },
+    {
+      "rule": "Institutional absorption of the $10.90 ceiling (ONDS) converts resistance into primary support floor.",
+      "tags": [
+        "technical",
+        "support"
+      ],
+      "id": 36
+    },
+    {
+      "rule": "Council Self-Critique must be integrated into agent_votes JSON objects for every turn.",
+      "tags": [
+        "protocol",
+        "system-design"
+      ],
+      "id": 37
+    },
+    {
+      "rule": "[CODIFIED: ENH_47] TIER 1 Macro windows mandate 0.5x sizing and 'No New Risk' regardless of news strength.",
+      "tags": [
+        "risk-management",
+        "macro"
+      ],
+      "id": 38
+    },
+    {
+      "rule": "Breach of high-tier Pivot Points ($11.27 ONDS) on >rVol 1.5 confirms structural graduation.",
+      "tags": [
+        "graduation",
+        "technical"
+      ],
+      "id": 39
+    },
+    {
+      "rule": "Clearing psychologically volume shelves during Power Hour validates institutional risk carry.",
+      "tags": [
+        "sentiment",
+        "volume"
+      ],
+      "id": 40
+    },
+    {
+      "rule": "Failure to hold technical 'Graduation' pivots confirms idiosyncratic news is being sold.",
+      "tags": [
+        "technical",
+        "contrarian"
+      ],
+      "id": 41
+    },
+    {
+      "rule": "Formalization of European JVs (ONBERG) provides sovereign floor that overrides yield compression.  &A",
+      "tags": [
+        "macro",
+        "M"
+      ],
+      "id": 42
+    },
+    {
+      "rule": "Concurrent Short Gamma flip in SPY and IEF mandates immediate 'Bunker Mode'.",
+      "tags": [
+        "risk-management",
+        "volatility"
+      ],
+      "id": 43
+    },
+    {
+      "rule": "Dealer Short-Gamma posture in high-momentum (UMAC) acts as a 'Magnet-Ceiling', mandating trims.",
+      "tags": [
+        "profit-taking",
+        "gamma"
+      ],
+      "id": 44
+    },
+    {
+      "rule": "Verify cash floor per share (UMAC ~$7.21) to establish absolute support during flushes.",
+      "tags": [
+        "fundamentals",
+        "support"
+      ],
+      "id": 45
+    },
+    {
+      "rule": "Concurrent 424B7 and 8-K filings create a 'Liquidity Wash'; turnover >2x verifies graduation.",
+      "tags": [
+        "graduation",
+        "structure"
+      ],
+      "id": 46
+    },
+    {
+      "rule": "Ticker Graduation (DFTX) must be cross-referenced with Nasdaq listing logs to prevent failures.",
+      "tags": [
+        "ticker-sync",
+        "data-integrity"
+      ],
+      "id": 47
+    },
+    {
+      "rule": "During TIER 1 Macro days, idiosyncratic news can force Dealer Gamma Flip independently of index.",
+      "tags": [
+        "catalysts",
+        "gamma"
+      ],
+      "id": 48
+    },
+    {
+      "rule": "Principal extraction at session VWAP extension peaks secures zero-risk carry into binary events.",
+      "tags": [
+        "risk-management",
+        "profit-taking"
+      ],
+      "id": 49
+    },
+    {
+      "rule": "Realizing a tactical loss to build a cash bunker is valid macro defense ahead of FOMC.",
+      "tags": [
+        "capital-allocation",
+        "macro"
+      ],
+      "id": 50
+    },
+    {
+      "rule": "During high-VIX macro days, 'Correction Latency' must be resolved within one turn to prevent drift.",
+      "tags": [
+        "SSoT",
+        "system-design"
+      ],
+      "id": 51
+    },
+    {
+      "rule": "The Liquidity Ladder: Phase 3 (Winner Harvesting) follows Phase 2 (GLD/Bond Flush) with a 60-120 minute lag.",
+      "tags": [
+        "timing",
+        "liquidity"
+      ],
+      "id": 52
+    },
+    {
+      "rule": "Adversarial Precision Protocol (Gaps Only): Optimize entries 2% below 'Fake Floors' to catch pre-market/opening stop-wicks; pivot to VWAP if unfilled in 120 mins.",
+      "tags": [
+        "execution",
+        "manipulation"
+      ],
+      "id": 53
+    },
+    {
+      "rule": "Offering-Floor Wash: Never buy offering gaps in the first 90 mins; allow MMs to wash retail flippers before support forms.",
+      "tags": [
+        "offering",
+        "liquidity"
+      ],
+      "id": 54
+    },
+    {
+      "rule": "Gamma-Decay Delta (Charm): On expiry Fridays, OTM call delta decay (Charm) forces MMs to buy back shares after 14:30.",
+      "tags": [
+        "charm",
+        "gamma"
+      ],
+      "id": 55
+    },
+    {
+      "rule": "The $10.50 Magnet: If ONDS holds the Gamma-Flip node ($10.15), the primary target for the 14:30 unlock is the $10.50 strike.",
+      "tags": [
+        "onds",
+        "targets"
+      ],
+      "id": 56
+    },
+    {
+      "rule": "The Precision-Bid Pivot: If a precision bid fails to fill within 120 mins of a 'Plug-Pull' window, the floor is confirmed structural.",
+      "tags": [
+        "execution",
+        "timing"
+      ],
+      "id": 57
+    },
+    {
+      "rule": "The 'Least Dilutive' Trap: Management designating debt/notes as 'Least Dilutive' often precedes heavy warrant churn.",
+      "tags": [
+        "warrants",
+        "RCAT"
+      ],
+      "id": 58
+    },
+    {
+      "rule": "Success Memo Shelf-Takedown: High-impact production directives are the highest-probability windows for growth raises.",
+      "tags": [
+        "catalysts",
+        "RCAT"
+      ],
+      "id": 59
+    },
+    {
+      "rule": "Broken Deal Recovery: Offerings closing below price require VWAP reclaim for trend validation.",
+      "tags": [
+        "offering",
+        "UMAC"
+      ],
+      "id": 60
+    },
+    {
+      "rule": "Guidance Arbitrage: Tripling revenue targets (ONDS) overrides short-term warrant noise.",
+      "tags": [
+        "valuation",
+        "ONDS"
+      ],
+      "id": 61
+    },
+    {
+      "rule": "VIX > 30 mandates 'Bunker Mode' regardless of 8-K quality. (Absolute Execution Limit).",
+      "tags": [
+        "volatility",
+        "risk-management"
+      ],
+      "id": 62
+    },
+    {
+      "rule": "Verify SBC/Revenue ratios > 30% as permanent valuation drags in high-beta defense.",
+      "tags": [
+        "governance",
+        "valuation"
+      ],
+      "id": 63
+    },
+    {
+      "rule": "Direct soldier integration at military innovation labs functions as a sovereign-grade buy signal.",
+      "tags": [
+        "catalysts",
+        "validation"
+      ],
+      "id": 64
+    },
+    {
+      "rule": "Formal MOUs with Sovereign State Integrators function as 8-K equivalents for voiding MANDATE_20.",
+      "tags": [
+        "catalysts",
+        "sovereign"
+      ],
+      "id": 65
+    },
+    {
+      "rule": "Multi-domain expansion validated by field prove-outs is highest conviction expansion.",
+      "tags": [
+        "catalysts",
+        "RCAT"
+      ],
+      "id": 66
+    },
+    {
+      "rule": "Statutory report deadlines (April 1 Small-UAS Report) function as 'Hard News' anchors.",
+      "tags": [
+        "catalysts",
+        "legislative"
+      ],
+      "id": 67
+    },
+    {
+      "rule": "$1.5 Trillion budget proposals act as the ultimate Macro Veto Override.",
+      "tags": [
+        "budget",
+        "macro"
+      ],
+      "id": 68
+    },
+    {
+      "rule": "DoD CDAO thematic validation serves as the final narrative prerequisite for Program of Record.",
+      "tags": [
+        "catalysts",
+        "AI"
+      ],
+      "id": 69
+    },
+    {
+      "rule": "Peer-reviewed prevalence data publication serves as a sentiment floor for clinical biotech.",
+      "tags": [
+        "biotech",
+        "validation"
+      ],
+      "id": 70
+    },
+    {
+      "rule": "In binary-catalyst waits, broad market VIX cooling serves as a 'Macro Pass'.",
+      "tags": [
+        "macro",
+        "VIX"
+      ],
+      "id": 71
+    },
+    {
+      "rule": "The Schema-URL Trap: URLs must never be generated based on probabilistic naming schemas.",
+      "tags": [
+        "data-integrity",
+        "forensics"
+      ],
+      "id": 72
+    },
+    {
+      "rule": "Statutory Submission vs. Public Release: Deadlines signify hand-off to committees, not general public.",
+      "tags": [
+        "catalysts",
+        "timing"
+      ],
+      "id": 73
+    },
+    {
+      "rule": "The Holiday Principal Shield: Prioritize 33% trims before 3-day gaps in high-VIX regimes.",
+      "tags": [
+        "risk-management"
+      ],
+      "id": 74
+    },
+    {
+      "rule": "The Victory Pivot: Geopolitical 'Mission Success' signals provide recovery windows.",
+      "tags": [
+        "macro"
+      ],
+      "id": 75
+    },
+    {
+      "rule": "VWAP Source Hierarchy: In local calculation drift, defer to Yahoo Finance Truth (e.g., 13.31 for UMAC).",
+      "tags": [
+        "data-integrity"
+      ],
+      "id": 76
+    },
+    {
+      "rule": "OEM-Component Divergence: Sub-tier suppliers (UMAC) will follow sector OEMs lower eventually.",
+      "tags": [
+        "supply-chain"
+      ],
+      "id": 77
+    },
+    {
+      "rule": "Legislative SSoT Mandate: Never project alpha based on submission deadlines; verify hearings via official calendar.",
+      "tags": [
+        "data-integrity"
+      ],
+      "id": 78
+    },
+    {
+      "rule": "Divisional Supply-Chain Forensics: Map partner surges to specific sub-sector hardware (Aerial vs Maritime).",
+      "tags": [
+        "supply-chain"
+      ],
+      "id": 79
+    },
+    {
+      "rule": "Manual Execution Protocol: Decision on overnight risk must be made 15-30 mins before close to avoid ultimatum gaps.",
+      "tags": [
+        "execution"
+      ],
+      "id": 80
+    },
+    {
+      "rule": "Temporal Priority Mandate: The terminal must forensicly lock onto the 'timestamp' field of the latest JSON payload.",
+      "tags": [
+        "system-design"
+      ],
+      "id": 81
+    },
+    {
+      "rule": "The Evans Multiplier: Institutional offering prices ($17.00) act as the 'Fundamental Magnet'.",
+      "tags": [
+        "valuation"
+      ],
+      "id": 82
+    },
+    {
+      "rule": "The Reshoring Arbitrage: Trading >15% below institutional floor while supply bottleneck is solved is a CORE HOLD.",
+      "tags": [
+        "strategy"
+      ],
+      "id": 83
+    },
+    {
+      "rule": "[CODIFIED: AH_DRIFT] After-hours price drift in Long Gamma postures is noise unless rVol > 1.0.",
+      "tags": [
+        "execution",
+        "gamma"
+      ],
+      "id": 84
+    },
+    {
+      "rule": "Defense-Bid Pivot Logic: Differentiate between 'Urgent Operational Needs' (OEMs) and 'Long-Term Program of Record' (Infrastructure).",
+      "tags": [
+        "macro",
+        "strategy"
+      ],
+      "id": 85
+    },
+    {
+      "rule": "Multi-Domain Multiplier: Evaluate defense OEMs as 'all-domain autonomous systems' to capture high-margin unit torque.",
+      "tags": [
+        "sector-thesis",
+        "valuation"
+      ],
+      "id": 86
+    },
+    {
+      "rule": "The Gamma Flip Support: A transition from Short to Long Gamma during a VIX expansion indicates institutional absorption.",
+      "tags": [
+        "liquidity",
+        "gamma"
+      ],
+      "id": 87
+    },
+    {
+      "rule": "The Visibility Bridge: Institutional conference participation ahead of topline data serves as a 'Volatility Stabilizer' for clinical assets.",
+      "tags": [
+        "biotech",
+        "volatility"
+      ],
+      "id": 88
+    },
+    {
+      "rule": "The RS Divergence Protocol: Tickers holding within 0.2% of VWAP during a >4% sector flush are 'Smart Money' anchors.",
+      "tags": [
+        "relative-strength",
+        "VWAP"
+      ],
+      "id": 89
+    },
+    {
+      "rule": "[CODIFIED: FIX_02] Institutional 'Donor Asset' Liquidations: During high-VIX windows, institutions sell winners to fund losses elsewhere.",
+      "tags": [
+        "institutional-flow",
+        "liquidity"
+      ],
+      "id": 90
+    },
+    {
+      "rule": "The Gamma-Pivot Trap: When a ticker fails a Tier-1 news test, the only valid entry node is the S1 Pivot Point OR 2% below dealer flip node.",
+      "tags": [
+        "execution",
+        "ONDS",
+        "gamma"
+      ],
+      "id": 91
+    },
+    {
+      "rule": "VWAP front-running in a thawing macro regime (VIX dropping) offers superior entries.",
+      "tags": [
+        "execution",
+        "VWAP"
+      ],
+      "id": 92
+    },
+    {
+      "rule": "HARD NEWS (8-K) overrides previous WARRANT CHURN ceilings.",
+      "tags": [
+        "warrants",
+        "catalysts"
+      ],
+      "id": 93
+    },
+    {
+      "rule": "Component Primes (UMAC) exhibit leading RS when System Primes (ONDS) clear structural overhangs.",
+      "tags": [
+        "correlation",
+        "supply-chain"
+      ],
+      "id": 94
+    },
+    {
+      "rule": "Audit GAAP profits for investment-gain masking (Non-GAAP reality check).",
+      "tags": [
+        "earnings",
+        "forensics"
+      ],
+      "id": 95
+    },
+    {
+      "rule": "The Pivot Trap: A high-volume test of the R1 Pivot ($14.55) that is immediately rejected (V-shape) is a mandatory 'Hold' signal.",
+      "tags": [
+        "short-trap",
+        "technical",
+        "UMAC"
+      ],
+      "id": 96
+    },
+    {
+      "rule": "Forensic reality overrides headline mirages (Always check non-GAAP reality).",
+      "tags": [
+        "fundamentals",
+        "forensics"
+      ],
+      "id": 97
+    },
+    {
+      "rule": "Binary risk requires structural elegance (Check valuation ceilings vs peers).",
+      "tags": [
+        "risk-management",
+        "valuation"
+      ],
+      "id": 98
+    },
+    {
+      "rule": "The Gamma Pivot (Neutral): Transition from Short to Neutral Gamma during sector showcase confirms institutional absorption.",
+      "tags": [
+        "GEX",
+        "RCAT",
+        "technical"
+      ],
+      "id": 99
+    },
+    {
+      "rule": "[CODIFIED: ENH_47] VWAP lag (Price staying below VWAP despite market rally) indicates institutional de-risking.",
+      "tags": [
+        "VWAP",
+        "distribution"
+      ],
+      "id": 100
+    },
+    {
+      "rule": "[CODIFIED: ENH_57] Mandatory 20% NAV to Sovereign Clinical Hedges during high-VIX.  \n\n---",
+      "tags": [
+        "position-sizing",
+        "hedging"
+      ],
+      "id": 101
+    },
+    {
+      "rule": "Power Hour integrity is the arbiter of 'Institutional Graduation'.",
+      "tags": [
+        "execution",
+        "institutional-flow"
+      ],
+      "id": 102
+    },
+    {
+      "rule": "House Money Protocol: For clinical binary events and parabolic extensions, a 33% trim at +30% profit is mandatory to secure 'Free Ride' carry.",
+      "tags": [
+        "risk-management",
+        "profit-taking"
+      ],
+      "id": 103
+    },
+    {
+      "rule": "R1 Pivot ($15.09 for UMAC) in Summit sessions serves as the primary retail Take Profit node.",
+      "tags": [
+        "momentum",
+        "technical",
+        "R1"
+      ],
+      "id": 104
+    },
+    {
+      "rule": "[CODIFIED: ENH_62] Regulatory codification (Sec. 848) creates a fundamental floor that supercedes technical RSI overbought signals.",
+      "tags": [
+        "fundamentals",
+        "regulatory"
+      ],
+      "id": 105
+    },
+    {
+      "rule": "[CODIFIED: RULE_158] Audit GAAP profits for investment-gain masking; normalize for non-GAAP operational break-even.  \n\n---",
+      "tags": [
+        "UMAC",
+        "forensics"
+      ],
+      "id": 106
+    },
+    {
+      "rule": "[CODIFIED: RULE_159] Triple-Pivotal Catalyst sequences void technical RSI exits if cash runway > 24 months.  \n\n---",
+      "tags": [
+        "clinical",
+        "DFTX"
+      ],
+      "id": 107
+    },
+    {
+      "rule": "[CODIFIED: RULE_160] Appointment of Fortune 500 FP&A leadership post-raise confirms 'Industrial Graduation' and validates institutional floor.   \n\n---",
+      "tags": [
+        "governance",
+        "scaling",
+        "UMAC"
+      ],
+      "id": 108
+    },
+    {
+      "rule": "[CODIFIED: RULE_161] Geopolitical 'Victory' or 'Ceasefire' signals provide primary exit window for defense-proxies; never hold through first 90 mins.",
+      "tags": [
+        "defense",
+        "RCAT",
+        "macro",
+        "UMAC"
+      ],
+      "id": 109
+    },
+    {
+      "rule": "[CODIFIED: RULE_162] Breach of psychological floor ($15.00 for UMAC) paired with positive structural news is a 'Smart Money' shakeout.",
+      "tags": [
+        "liquidity",
+        "SSR",
+        "UMAC"
+      ],
+      "id": 110
+    },
+    {
+      "rule": "[CODIFIED: RULE_163] When SSR trigger coincides with positive structural shift, resulting 'Flush' is likely a 'Liquidity Wash'.   \n\n---",
+      "tags": [
+        "biotech",
+        "DFTX",
+        "momentum"
+      ],
+      "id": 111
+    },
+    {
+      "rule": "[CODIFIED: RULE_168] In sympathetic baskets, the second ticker's 1% distance to SSR is the 'Pivot of Maximum Pessimism'; avoid selling into trigger.",
+      "tags": [
+        "RCAT",
+        "psychology",
+        "SSR"
+      ],
+      "id": 112
+    },
+    {
+      "rule": "[CODIFIED: RULE_166] Sector-wide Gamma Flip during de-escalation flush is primary indicator of dip-buying absorption.  \n\n---",
+      "tags": [
+        "sentiment",
+        "gamma"
+      ],
+      "id": 113
+    },
+    {
+      "rule": "[CODIFIED: MANDATE_21] Hallucination Trap: Verify specific statutory/clinical torque before attributing it to micro-caps; never trade on fixed timing without agency links.  \n\n---",
+      "tags": [
+        "logic-failure",
+        "SSoT"
+      ],
+      "id": 114
+    },
+    {
+      "rule": "[CODIFIED: DATA_INTEGRITY] Source documents misattributing core pipeline assets trigger immediate Health Score deduction of 100.  \n\n---",
+      "tags": [
+        "data-integrity",
+        "forensics"
+      ],
+      "id": 115
+    },
+    {
+      "rule": "In high-VIX regimes, failure to execute 'House Money' trims leads to 'Borrowed Alpha' evaporation.",
+      "tags": [
+        "risk-management",
+        "volatility"
+      ],
+      "id": 116
+    },
+    {
+      "rule": "Federal 'Sources Sought' notices involving F-35 integration function as 'Hard News' overrides for Mandate 20.",
+      "tags": [
+        "defense",
+        "catalysts"
+      ],
+      "id": 117
+    },
+    {
+      "rule": "Rule 180: 20x expansion in sectoral earmarks triggers 'Alpha-Sentry' override, nullifying VIX-based trade restrictions.",
+      "tags": [
+        "defense",
+        "macro"
+      ],
+      "id": 118
+    },
+    {
+      "rule": "Rule 181: Component Primes (UMAC) capture value faster than System Primes (RCAT) in earmark environments due to lower execution risk.",
+      "tags": [
+        "valuation",
+        "supply-chain"
+      ],
+      "id": 119
+    },
+    {
+      "rule": "Geopolitical Brinkmanship Guard: In high-VIX, anchor trailing stops to the 50% gap midpoint on conflict proxies.",
+      "tags": [
+        "risk-management",
+        "geopolitics"
+      ],
+      "id": 120
+    },
+    {
+      "rule": "Blockade Volatility Signal: Monitor regional military activity in Strait of Hormuz as lead indicator for oil-linked defense spikes.",
+      "tags": [
+        "indicators",
+        "geopolitics"
+      ],
+      "id": 121
+    },
+    {
+      "rule": "Mediator Fragility Check: When mediator neutrality is compromised, de-escalation timelines must be discounted by 50%.",
+      "tags": [
+        "geopolitics",
+        "valuation"
+      ],
+      "id": 122
+    },
+    {
+      "rule": "Auction Demand Arb (BTC): BTC ratio < 2.30 in 10Y/20Y auction signals weak demand; trigger high-vol state for high-beta defense.",
+      "tags": [
+        "macro",
+        "bonds"
+      ],
+      "id": 123
+    },
+    {
+      "rule": "The Tail Penalty: A 'Tail' (High Yield > When-Issued) of >1.2 bps functions as Macro-Veto; freeze buys for 120 mins.",
+      "tags": [
+        "execution",
+        "macro",
+        "bonds"
+      ],
+      "id": 124
+    },
+    {
+      "rule": "Indirect Bidder Floor: If Indirects (Foreign Central Banks) drop < 65%, treat equity rally as a 'Bull Trap'.",
+      "tags": [
+        "macro",
+        "sovereign"
+      ],
+      "id": 125
+    },
+    {
+      "rule": "CODIFIED: YIELD_DECOUPLING - Clinical proxies decouple from SPY LONG_GAMMA during Treasury Auction Tails.",
+      "tags": [
+        "yields",
+        "macro",
+        "gamma"
+      ],
+      "id": 126
+    },
+    {
+      "rule": "[CODIFIED: SSR_EXPIRATION_GAP] - T+1 open mandates 50% tighter ATR stops on expiring SSR shields.    \n\n---",
+      "tags": [
+        "risk-management",
+        "ATR",
+        "SSR",
+        "override"
+      ],
+      "id": 127
+    },
+    {
+      "rule": "[CODIFIED: SCALING_MARGIN_TRAP] For mass-production scaling (e.g. UMAC), explicit headcount doubling creates known 1-2 qtr margin contraction. Do NOT liquidate.    \n\n---",
+      "tags": [
+        "fundamentals",
+        "margin-trap",
+        "scaling",
+        "UMAC"
+      ],
+      "id": 128
+    },
+    {
+      "rule": "[CODIFIED: UMAC_LEAD_INDICATOR] Monitor UMAC 8-Ks as lead for RCAT/ONDS. Apply -15% health penalty if UMAC production news is delayed.  \n\n---",
+      "tags": [
+        "lead-indicator",
+        "supply-chain"
+      ],
+      "id": 129
+    },
+    {
+      "rule": "[CODIFIED: UMAC_STRUCTURAL_PENALTY] Apply 0.85x structural modifier to all DIB sizing if UMAC reports supply chain delay > 5 days.   \n\n---",
+      "tags": [
+        "risk-management",
+        "UMAC",
+        "sizing"
+      ],
+      "id": 130
+    },
+    {
+      "rule": "[CODIFIED: NARRATIVE_BRIDGE_MARCH] Resonance > 0.85 on legacy keywords (e.g. 'Subpoena') triggers sensitivity re-rating for ONDS/DFTX.  \n\n---",
+      "tags": [
+        "time-bound",
+        "narrative"
+      ],
+      "id": 131
+    },
+    {
+      "rule": "[CODIFIED: DIB_CORRELATION_CASCADE] If SPY Net GEX < -$10B, apply 0.7x sizing multiplier to all DIB assets (UMAC/RCAT/ONDS).",
+      "tags": [
+        "DIB",
+        "correlation",
+        "GEX",
+        "macro"
+      ],
+      "id": 132
+    },
+    {
+      "rule": "[CODIFIED: AMZN_QUALITY] Anthropic gains are non-operating; focus on OpIncome ($23.9B) for AMZN quality audits.",
+      "tags": [],
+      "id": 133
+    },
+    {
+      "rule": "[CODIFIED: OPEC_RISK] UAE OPEC exit weakens price control but spikes geopolitical risk in high-VIX regimes.",
+      "tags": [],
+      "id": 134
+    },
+    {
+      "rule": "[CODIFIED: 830_GAUNTLET] 8:30 AM gauntlet mandates 50% sizing dampeners on new risk until PCE < 3.0% YoY is verified.",
+      "tags": [],
+      "id": 135
+    },
+    {
+      "rule": "[CODIFIED: MACRO_VERIFICATION_MANDATE] High-tier macro event dates (NFP, CPI, FOMC) must be forensicly verified via official agency timetables (BLS, Treasury, Fed) 24\u201348 hours prior.",
+      "tags": [],
+      "id": 136
+    },
+    {
+      "rule": "[CODIFIED: DIB_FLUSH_PROTOCOL] Condition: Valid only after first 90 mins of RTH. Trigger: VWAP Reclaim + SHORT to LONG Gamma flip. Anchor: $14.00 node (UMAC).",
+      "tags": [],
+      "id": 137
+    },
+    {
+      "rule": "[CODIFIED: CLINICAL_VOID_OVERRIDE] In high-VIX or SPY-overbought regimes, clinical assets protected by statutory priority vouchers function as 'Strategic Anchors' exempt from standard trims.",
+      "tags": [],
+      "id": 138
+    },
+    {
+      "rule": "[CODIFIED: DATA_ANALYST_INTEGRATION] Integration of the Data Analyst provides a secondary quantitative audit layer ensuring P&L and parity nodes are math-proven.",
+      "tags": [],
+      "id": 139
+    },
+    {
+      "rule": "[CODIFIED: FORENSIC_PROOF_MANDATE] Strict adherence to Forensic Proof strings required for all numeric outputs.",
+      "tags": [],
+      "id": 140
+    },
+    {
+      "rule": "[CODIFIED: SPY_WARNING] RSI 71.66 indicates overbought conditions (L-179).",
+      "tags": [],
+      "id": 141
+    },
+    {
+      "rule": "[CODIFIED: VIX_BASELINE] 16.99 (Stable below 20.00 threshold).",
+      "tags": [],
+      "id": 142
+    },
+    {
+      "rule": "[CODIFIED: FX_SYNC] Forensic synchronization confirms 0.85237 EUR/USD rate as active arbiter.",
+      "tags": [],
+      "id": 143
+    },
+    {
+      "rule": "[CODIFIED: JAPAN_BLACK_WIDOW] RCAT Japan contract for 173 Black Widow systems confirms international DIB expansion and sovereign-tier validation.",
+      "tags": [],
+      "id": 144
+    },
+    {
+      "rule": "[CODIFIED: RUMOR_VALIDATION] U.S. Green Beret kinetic live-fire testing of Variant 7 architecture confirms sovereign validation of the Blue Ops acquisition.",
+      "tags": [],
+      "id": 145
+    },
+    {
+      "rule": "[CODIFIED: SSoT_CROSS_CHECK] Denials by foreign hardware developers (UFORCE) regarding DoD exercises serve as inverse-confirmation for domestic U.S. licensing partners (Blue Ops).",
+      "tags": [],
+      "id": 146
+    },
+    {
+      "rule": "[CODIFIED: COMPETITOR_OVERLAP] Theater-specific presence (MARTAC in Philippines) must be weighted against visual-match speculation when identifying classified hardware.",
+      "tags": [],
+      "id": 147
+    },
+    {
+      "rule": "[CODIFIED: HARDWARE_FINGERPRINT] 1:1 hardware specification alignment (7.2m length, 650kg payload, 3-fuse config) overrides generalized competitor fog in visual audits.",
+      "tags": [],
+      "id": 148
+    },
+    {
+      "rule": "[CODIFIED: BACKLOG_RATIO] ONDS pro-forma backlog ($457M) vs Revenue Target ($375M) provides 1.2x visibility floor, nullifying short-term P/S noise.",
+      "tags": [],
+      "id": 149
+    },
+    {
+      "rule": "[CODIFIED: BALIKATAN_VALIDATION] Exercise Balikatan 2026 serves as the primary operational proving ground for the Blue Ops USV 'Variant 7' architecture.",
+      "tags": [],
+      "id": 150
+    },
+    {
+      "rule": "[CODIFIED: RTH_FLUSH_PROTOCOL] High-beta drone stocks below VWAP in a Short Gamma SPY regime are 'Donor Assets' until rVol > 1.2 reversal.",
+      "tags": [],
+      "id": 151
+    },
+    {
+      "rule": "[CODIFIED: OFFERING_CLOSE_DELAY] Anticipate 120-minute liquidity lag on offering closing days (UMAC) before establishing new risk.",
+      "tags": [],
+      "id": 152
+    },
+    {
+      "rule": "[CODIFIED: BASELINE_TRAP] Always cross-reference pricing/closing dates against ENH_31; social sentiment often conflates pricing with statutory closing.",
+      "tags": [],
+      "id": 153
+    },
+    {
+      "rule": "[CODIFIED: MANDATE_21_TRIGGER] Factual divergence in offering dates (>3 days) triggers an immediate Model-Integrity Freeze and rejection of all related trade theses.",
+      "tags": [],
+      "id": 154
+    },
+    {
+      "rule": "[CODIFIED: STALE_DATA_PENALTY] Attribution of 45-day-old news as 'Today' results in an immediate Health Score deduction of 100 per L-158.",
+      "tags": [],
+      "id": 155
+    },
+    {
+      "rule": "[CODIFIED: COMPUTE_FIDELITY_WARNING] Orchestrator output during Flash-Throttled tiers requires 2x user verification for temporal data.",
+      "tags": [],
+      "id": 156
+    },
+    {
+      "rule": "[CODIFIED: DIB_EARNINGS_ANCHOR] When temporal data for offerings becomes stale, anchor support floors to the next GAAP reporting date.",
+      "tags": [],
+      "id": 157
+    },
+    {
+      "rule": "[CODIFIED: HEURISTIC_DATE_TRAP] Automated financial calendars often mirror the prior year's date. Verify via PR wire before executing event-trades.",
+      "tags": [],
+      "id": 158
+    },
+    {
+      "rule": "[CODIFIED: SECTOR_CONFLATION_GUARD] Verify ticker identity for shared reporting dates (e.g., CRSR vs UMAC) during peak weeks.",
+      "tags": [],
+      "id": 159
+    },
+    {
+      "rule": "[CODIFIED: CASH_RUNWAY_OVERRIDE] Small-cap defense firms with >$200M cash and zero debt (UMAC) decouple from the 'Yield-Valuation Trap' during sovereign defense cycles.\n\n---",
+      "tags": [],
+      "id": 160
+    },
+    {
+      "rule": "Treasury auction tails mandate 120-min execution freeze.",
+      "tags": [
+        "MACRO"
+      ],
+      "id": 161
+    },
+    {
+      "rule": "$14.00 UMAC node converted to active resistance; requires VWAP reclaim.",
+      "tags": [
+        "TECHNICAL"
+      ],
+      "id": 162
+    },
+    {
+      "rule": "SPY Intraday Gamma flips serve as Bunker Thaw/Re-engagement signals.",
+      "tags": [
+        "GAMMA"
+      ],
+      "id": 163
+    },
+    {
+      "rule": "Concurrent SPY/IEF Short Gamma alignment functions as primary Bunker Trigger.",
+      "tags": [
+        "RISK"
+      ],
+      "id": 164
+    },
+    {
+      "rule": "Clinical anchors (DFTX) with RSI > 50 exempt from standard macro trims.",
+      "tags": [
+        "RELATIVE-STRENGTH"
+      ],
+      "id": 165
+    },
+    {
+      "id": 166,
+      "rule": "The \"Heuristic Date Trap\" confirmed: UMAC Q1 2026 earnings are forensicly locked to May 13, 2026. All \"Bunker\" positions and \"Scaling Margin Trap\" (L-128) risk assessments must be recalibrated to this 7-day acceleration.",
+      "tags": [
+        "TEMPORAL",
+        "UMAC",
+        "EARNINGS"
+      ]
+    },
+    {
+      "id": 167,
+      "rule": "L-167: UMAC $75M PO confirms 'Material Readiness' as primary DIB moat over RTH technicals."
+    },
+    {
+      "id": 168,
+      "rule": "L-168: SPY RSI > 68 mandates freeze on new high-beta risk regardless of idiosyncratic 8-Ks."
+    },
+    {
+      "id": 169,
+      "rule": "50% capital deployment to strategic materials creates a definitive inventory moat.",
+      "tags": [
+        "FUNDAMENTALS"
+      ]
+    },
+    {
+      "id": 170,
+      "rule": "RSI > 70 in SPY mandates profit harvesting in 'Donor Assets' to protect clinical anchors.",
+      "tags": [
+        "EXECUTION"
+      ]
+    },
+    {
+      "id": 171,
+      "rule": "Verify PR link metadata to distinguish between capital deployment and earnings dates.",
+      "tags": [
+        "TEMPORAL"
+      ]
+    },
+    {
+      "id": 172,
+      "rule": "L-172: SPY RSI 71.18 confirmed as absolute barrier for high-beta DIB expansion."
+    },
+    {
+      "id": 173,
+      "rule": "L-166"
+    },
+    {
+      "id": 174,
+      "rule": "L-172"
+    },
+    {
+      "id": 175,
+      "rule": "L-151"
+    },
+    {
+      "id": 176,
+      "rule": "L-100"
+    },
+    {
+      "id": 177,
+      "rule": "L-167 (Applied: $75M PO validation)"
+    },
+    {
+      "id": 178,
+      "rule": "L-169 (Applied: Inventory moat strategy)"
+    },
+    {
+      "id": 179,
+      "rule": "L-128 (Warning: Scaling Margin Trap for May 13)"
+    },
+    {
+      "id": 180,
+      "rule": "L-166 (Earnings Acceleration Check)"
+    },
+    {
+      "id": 181,
+      "rule": "L-172 (SPY RSI Absolute Barrier)"
+    },
+    {
+      "id": 182,
+      "rule": "L-167 ($75M PO Moat Validation)"
+    },
+    {
+      "id": 183,
+      "rule": "L-128 (Scaling Margin Trap Warning)"
+    },
+    {
+      "id": 184,
+      "rule": "L-145 (Sovereign Validation)"
+    },
+    {
+      "id": 185,
+      "rule": "L-150 (Balikatan Validation)"
+    },
+    {
+      "id": 186,
+      "rule": "L-167 (Material Readiness)"
+    },
+    {
+      "id": 187,
+      "rule": "L-128 (Scaling Margin Trap)"
+    },
+    {
+      "id": 188,
+      "rule": "L-167 (Strategic PO Validation)"
+    },
+    {
+      "id": 189,
+      "rule": "L-172 (SPY RSI Barrier)"
+    },
+    {
+      "id": 190,
+      "rule": "L-166 (Earnings Date Lock)"
+    },
+    {
+      "id": 191,
+      "rule": "L-191: SPY RSI 71.65 confirms L-172 breach; absolute freeze on DIB expansion active.",
+      "tags": [
+        "RISK",
+        "SPY",
+        "RSI"
+      ]
+    },
+    {
+      "id": 192,
+      "rule": "L-192: VWAP PIN at 13.52 confirms temporary equilibrium; RSI-172 barrier remains active.",
+      "tags": [
+        "UMAC",
+        "TECHNICAL",
+        "VETO"
+      ]
+    },
+    {
+      "id": 193,
+      "rule": "L-193: UMAC $13.63 reclaim of VWAP confirms intraday RS, but SPY-172 Veto prevents expansion.",
+      "tags": [
+        "UMAC",
+        "RS",
+        "VETO"
+      ]
+    },
+    {
+      "id": 194,
+      "rule": "L-195: USV production time reduction (700 to 400 hrs) validates Mass-Production Floor; RSI-172 veto remains active.",
+      "tags": [
+        "RCAT",
+        "UMAC",
+        "PRODUCTION",
+        "VETO"
+      ]
+    },
+    {
+      "id": 195,
+      "rule": "L-197: Gov grants provide long-term PoR graduation path (L-108), but do not override the medium-term Scaling Margin Trap (L-128).",
+      "tags": [
+        "DIB",
+        "GRANTS",
+        "MARGINS",
+        "VALUATION"
+      ]
+    },
+    {
+      "id": 196,
+      "rule": "L-198: SPY RSI 71.90 confirms high-conviction VETO; portfolio remains in 'Forensic Stasis' until RSI < 70.",
+      "tags": [
+        "VETO",
+        "RSI",
+        "STASIS"
+      ]
+    },
+    {
+      "id": 197,
+      "rule": "L-199: High-volume accumulation in DIB (UMAC/RCAT) validates Industrial Graduation (L-108), but SPY RSI-172 barrier enforces absolute HOLD.",
+      "tags": [
+        "VOLUME",
+        "DIB",
+        "RSI",
+        "VETO"
+      ]
+    },
+    {
+      "id": 198,
+      "rule": "L-201: After-hours SPY RSI 71.43 maintains L-172 breach; absolute freeze remains primary directive.",
+      "tags": [
+        "AFTER-HOURS",
+        "RSI",
+        "VETO",
+        "STASIS"
+      ]
+    },
+    {
+      "id": 199,
+      "rule": "L-191: SPY RSI 71.65 confirms L-172 breach; absolute freeze active."
+    },
+    {
+      "id": 200,
+      "rule": "L-192: VWAP PIN at 13.52 confirms temporary equilibrium."
+    },
+    {
+      "id": 201,
+      "rule": "L-193: UMAC $13.63 reclaim of VWAP confirms intraday RS."
+    },
+    {
+      "id": 202,
+      "rule": "L-194: PoR probability weighted at 65% based on $75M PO (L-167)."
+    },
+    {
+      "id": 203,
+      "rule": "L-195: USV production time reduction (700 to 400 hrs) validates Mass-Production Floor."
+    },
+    {
+      "id": 204,
+      "rule": "L-196: Gov grants/loans probability high (>70%) per Sec. 848 (L-105)."
+    },
+    {
+      "id": 205,
+      "rule": "L-197: Gov grants provide long-term PoR graduation path (L-108)."
+    },
+    {
+      "id": 206,
+      "rule": "L-198: SPY RSI 71.90 confirms high-conviction VETO."
+    },
+    {
+      "id": 207,
+      "rule": "L-199: High-volume accumulation in DIB (UMAC/RCAT) validates Industrial Graduation (L-108)."
+    },
+    {
+      "id": 208,
+      "rule": "L-200: Session close with SPY RSI 71.84 confirms L-172 breach."
+    }
+  ]
+}

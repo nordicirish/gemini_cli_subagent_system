@@ -20,8 +20,9 @@ Thumbs.db
 
 # Local Air-Gapped State Files
 local_ssot_shadow.json
-trade_lessons.json
+# trade_lessons.json
 
 # Helper Scripts
 compare_json.py
 format_json.py
+
