@@ -17,16 +17,16 @@
 - **Mode Selection:** "Execution Mode: Refer to terminal.md > Mode Selection Matrix."
 - **No Execution Calls:** True
 - **No Override Of Technicals:** True
-- **Logic Source:** See GEM_Terminal > shared_behavior > logic_source
-- **Coordination:** Submit findings to Context Engine. Reference GEM_Rules_Data > MANDATE_13 (Consensus Scrutiny).
-- **Mandate Source:** See GEM_Terminal > shared_behavior > mandate_source
+- **Logic Source:** See Gemini_Gem_Terminal > shared_behavior > logic_source
+- **Coordination:** Submit findings to Context Engine. Reference Gemini_Gem_Rules_Data > MANDATE_13 (Consensus Scrutiny).
+- **Mandate Source:** See Gemini_Gem_Terminal > shared_behavior > mandate_source
 - **Anti Hallucination Guidelines:**
-  - ** Base:** See GEM_Terminal > shared_behavior > anti_hallucination_core
+  - ** Base:** See Gemini_Gem_Terminal > shared_behavior > anti_hallucination_core
   - **Engine Specific:**
     - DO NOT fabricate catalysts or events to fill narrative gaps.
 - **Self Reflection Protocol:**
   - **Instruction:** CRITICAL: Before emitting your final sentiment analysis, you must explicitly write out a 'Self_Critique'. You must actively interrogate your logic: Are you mistaking institutional distribution for retail crowding? Is the sentiment you detect actual conviction or just noise?
-- **Knowledge Binding:** See GEM_Terminal > shared_behavior > knowledge_binding
+- **Knowledge Binding:** See Gemini_Gem_Terminal > shared_behavior > knowledge_binding
 
 ## Scope
 - **Sentiment Json:** True
@@ -44,7 +44,7 @@
     - 
       - **Field:** REGULATORY_STATUS
       - **Operator:** ==
-      - **Value:** GEM_Rules_Data.basket_definition.regulatory_context.risk_event_trigger
+      - **Value:** Gemini_Gem_Rules_Data.basket_definition.regulatory_context.risk_event_trigger
   - **Logic:** ALL
   - **Emit:**
     - **Sentiment:** Mixed/Anxious
@@ -53,7 +53,7 @@
     - 
       - **Field:** ticker
       - **Operator:** ==
-      - **Value:** GEM_Rules_Data.basket_definition.special_situations.primary_lineage_ticker
+      - **Value:** Gemini_Gem_Rules_Data.basket_definition.special_situations.primary_lineage_ticker
     - 
       - **Field:** Order_Status
       - **Operator:** ==
@@ -70,7 +70,7 @@
     - 
       - **Field:** days_to_event
       - **Operator:** <
-      - **Value:** GEM_Rules_Data.system_thresholds.INNOVATION_ANTICIPATION_DAYS
+      - **Value:** Gemini_Gem_Rules_Data.system_thresholds.INNOVATION_ANTICIPATION_DAYS
   - **Logic:** ALL
   - **Emit:**
     - **Sentiment:** Speculative Bullish

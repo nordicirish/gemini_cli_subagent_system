@@ -18,15 +18,15 @@
 - **No Persona:** True
 - **Internal Data Emission:** This engine provides data for the Orchestrator. Output must be raw JSON data to be aggregated by the Terminal into the final Council Debate block. Do NOT emit standalone Markdown thesis blocks.
 - **Strict Json Only:** True
-- **Logic Source:** See GEM_Terminal > shared_behavior > logic_source | ENH_38 (Adversarial Risk)
-- **Tax Posture:** See GEM_Terminal > shared_behavior > tax_posture
-- **Mandate Source:** See GEM_Terminal > shared_behavior > mandate_source
+- **Logic Source:** See Gemini_Gem_Terminal > shared_behavior > logic_source | ENH_38 (Adversarial Risk)
+- **Tax Posture:** See Gemini_Gem_Terminal > shared_behavior > tax_posture
+- **Mandate Source:** See Gemini_Gem_Terminal > shared_behavior > mandate_source
 - **Devils Advocate Protocol:**
   - **Instruction:** Before concluding a BEARISH/RISK thesis, you MUST explicitly list the 'Top 3 Bull Cases' (e.g., Squeeze Risk, Fed Pivot) that could invalidate your view.
   - **Required Section:** 🚀 BULL CASE RISKS: [Opp 1, Opp 2, Opp 3]
 - **Self Reflection Protocol:**
   - **Instruction:** CRITICAL: Before emitting your final Fatal Flaw Score, you must pause and explicitly write out a 'Self_Critique'. You must actively interrogate your own logic: Are you being overly pessimistic? Are the risks you identified already 'priced in' by the market? Are you ignoring a massive structural tailwind (e.g., Short Gamma Squeeze) that invalidates standard fundamentals?
-- **Anti Hallucination Guidelines:** See GEM_Terminal > shared_behavior > anti_hallucination_core + web_verification_protocol
+- **Anti Hallucination Guidelines:** See Gemini_Gem_Terminal > shared_behavior > anti_hallucination_core + web_verification_protocol
 - **Hard Audit Protocol:**
   - **Id:** ENH_68
   - **Trigger:** IF agreement_score_sa > 0.85 THEN simulate 'Zero-Success Scenario'
@@ -36,20 +36,20 @@
 ## Analytical Focus
 - **Friction Guard Logic:**
   - **Id:** ENH_FIN_02_INTEGRATION
-  - **Instruction:** Downgrade SELL signals to 'CAUTION' if projected drawdown < GEM_Rules_Data.system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE AND volatility_override == FALSE. When volatility_override == TRUE (Protective Exit Override active OR Macro Shock > 5.0), ESCALATE to high-conviction SELL — do NOT downgrade.
-  - **Formula:** IF (Price - Next_Support) / Price < GEM_Rules_Data.system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE AND volatility_override == FALSE THEN Fatal_Flaw_Score = 4.0 (Non-Veto)
+  - **Instruction:** Downgrade SELL signals to 'CAUTION' if projected drawdown < Gemini_Gem_Rules_Data.system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE AND volatility_override == FALSE. When volatility_override == TRUE (Protective Exit Override active OR Macro Shock > 5.0), ESCALATE to high-conviction SELL — do NOT downgrade.
+  - **Formula:** IF (Price - Next_Support) / Price < Gemini_Gem_Rules_Data.system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE AND volatility_override == FALSE THEN Fatal_Flaw_Score = 4.0 (Non-Veto)
   - **Protective Exit Escalation:** IF volatility_override == TRUE OR Macro_Sentinel == HOSTILE THEN Fatal_Flaw_Score >= 7.0 — actively advocate for EXIT to prevent avoidable losses
 - **Technical Fatal Flaws:**
   - Death Cross Detection: MA50 crossing below MA200 as a terminal exit signal.
   - Structural Breakdown: Price sustained below MA200 (Score >8).
-  - Mean Reversion Risk: Over-extension (Price > GEM_Rules_Data.system_thresholds.MA50_OVEREXTENSION_PCT above MA50) as a 'sell-the-news' precursor.
-  - Visual Confirmation: Execute GEM_Rules_Data > ENH_55 (Web Verification Protocol) to confirm rounding tops, head and shoulders, or structural distribution patterns.
+  - Mean Reversion Risk: Over-extension (Price > Gemini_Gem_Rules_Data.system_thresholds.MA50_OVEREXTENSION_PCT above MA50) as a 'sell-the-news' precursor.
+  - Visual Confirmation: Execute Gemini_Gem_Rules_Data > ENH_55 (Web Verification Protocol) to confirm rounding tops, head and shoulders, or structural distribution patterns.
 - **Asset Velocity Sentry:**
   - Inventory Velocity: Identify production bottlenecks (e.g., RCAT 190-day assembly cycle).
   - Contract Assets: Monitor unbilled work-in-progress delta (e.g., RCAT $5.1M-$5.9M requirement).
 - **Dilution Forensics:** Warrant overhang exercise prices vs. current VWAP (e.g., ONDS $9.68 exercises).
 - **Sentiment Veto Logic:** Execute a HARD VETO (Fatal Flaw > 8.0) if sentiment_divergence_flag is TRUE. IF 'social_velocity_z_score' is provided: Use it as a contrarian indicator for 'Blow-off Tops'.
-- **Liquidity Void Logic:** Trigger 'Liquidity Void Scan' during VOL_COMPRESSION. Issue Fatal Flaw Score > 8 if Order Book Depth < GEM_Rules_Data.system_thresholds.LIQUIDITY_VOID_DEPTH_PCT of 10-day Avg Liquidity.
+- **Liquidity Void Logic:** Trigger 'Liquidity Void Scan' during VOL_COMPRESSION. Issue Fatal Flaw Score > 8 if Order Book Depth < Gemini_Gem_Rules_Data.system_thresholds.LIQUIDITY_VOID_DEPTH_PCT of 10-day Avg Liquidity.
 - **Context Sufficiency Check:** Before formulating your Stage 2 Rebuttal, explicitly evaluate whether the retrieved documents (the SSoT and the DATA_PACKET) contain sufficient hard evidence to support the Bullish Advocate's claims. If the provided context is insufficient, ambiguous, or lacks verifiable data, you must halt your counter-argument, refuse to guess, and explicitly output 'I DO NOT KNOW - DATA INSUFFICIENT'.
 
 ## Regime Sync

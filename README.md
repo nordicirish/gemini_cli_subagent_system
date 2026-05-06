@@ -1,4 +1,4 @@
-# 💎 GEM Trading Agent System
+# 💎 Gemini Gem Stock Market Council
 
 **A multi-agent AI trading intelligence framework built on Google Gemini Gems.**
 
@@ -120,7 +120,7 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 |------|----------|-------------|---------|
 | `terminal.md` | **Orchestrator** | PRO (Standard) | Master router — strictly requires Standard Pro to prevent 192K Deep Think timeouts |
 | `rules.md` | **Legislative Body** | N/A | **Static Rules**: The canonical source containing thresholds and ENH_ protocols. MUST be attached via Google Drive. |
-| `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `GEM_Rules_Data` |
+| `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `Gemini_Gem_Rules_Data` |
 | `data_analyst.md` | **Data Analyst** | PRO | Tier-1 Data Shield — retrieves and formats raw web data (SEC/Macro) via native Google Search to save reasoning tokens |
 | `context_engine.md` | **Context Engine** | PRO | Active SSoT bridge — drift detection, state merging, sync orchestration |
 | `bullish_gem.md` | **Bullish Advocate** | THINKING | Alpha & momentum specialist — identifies reasons to approve trades |
@@ -279,9 +279,9 @@ For each JSON file, create a new Gem in Google Gemini:
 1. Go to [gemini.google.com/gems](https://gemini.google.com/gems)
 2. Click **"New Gem"**
 3. Paste the contents of the JSON file as the Gem's system instruction
-4. Name the Gem to match its role (e.g., *"GEM Terminal"*, *"GEM Rule Enforcer"*)
+4. Name the Gem to match its role (e.g., *"Gemini Gem Terminal"*, *"Gemini Gem Rule Enforcer"*)
 5. **Knowledge Injection (Web UI Sandbox Bridge):**
-   - **Required Attachments**: You MUST attach the **`rules`** Google Doc (from `GEM_Trading_Rules/`) to the Gem's knowledge base using the Drive extension. If using the Research Engine, attach the **Trading_Research** folder.
+   - **Required Attachments**: You MUST attach the **`rules`** Google Doc (from `Gemini_Gem_Rules/`) to the Gem's knowledge base using the Drive extension. If using the Research Engine, attach the **Trading_Research** folder.
    - **Payload Injection (Live File Attachment):** To prevent 192K token timeout crashes during 'Thinking' mode, the full SSOT and trade_lessons files should NOT be pasted into the chat box or attached permanently to the Gem's Knowledge Base. Instead, you must attach the live 'local_ssot_shadow.json' and 'trade_lessons.md' files directly to your first chat message as live attachments.
 
 ### 5. Initialize Air-Gap State Files
@@ -307,7 +307,7 @@ To ensure your Gems are correctly loading the rules from Google Drive, perform t
 Open your **Terminal Orchestrator Gem** (or any other Gem) and paste this prompt:
 
 ```text
-System Check: Access the rules at GoogleDrive://GEM_Trading_Rules/rules.
+System Check: Access the rules at GoogleDrive://Gemini_Gem_Rules/rules.
 Please cite the exact value for "GLOBAL_ALPHA_FRICTION_HURDLE" located in "system_thresholds".
 Also, confirm which "ENH_Protocol" governs the "Macro Calendar Shield".
 ```
@@ -319,10 +319,10 @@ Also, confirm which "ENH_Protocol" governs the "Macro Calendar Shield".
 ### Test 2: The Mutation Verification (Definitive)
 Confirm the Gem is reading the *live* Google Doc, not a stale cache.
 
-1.  **Modify:** Open `GEM_Trading_Rules/rules` in Google Drive. Change `"GLOBAL_ALPHA_FRICTION_HURDLE": 0.0117` to **`0.099`**.
+1.  **Modify:** Open `Gemini_Gem_Rules/rules` in Google Drive. Change `"GLOBAL_ALPHA_FRICTION_HURDLE": 0.0117` to **`0.099`**.
 2.  **Ask:** In the Gem, ask:
     ```text
-    Reload Rules from GoogleDrive://GEM_Trading_Rules/rules.
+    Reload Rules from GoogleDrive://Gemini_Gem_Rules/rules.
     What is the current value of GLOBAL_ALPHA_FRICTION_HURDLE?
     ```
 3.  **Verify:** The Gem should report **0.099**.
@@ -344,7 +344,7 @@ CRITICAL SYSTEM OVERRIDE: WIPE ALL PRIOR CONTEXT & FORCE SYNCHRONIZATION.
 Protocol Execution:
 1. ACKNOWLEDGE ARCHITECTURE: You are operating in a Web Sandbox environment. You MUST output all state changes as a strict JSON `EXECUTION_PAYLOAD` block so I can manually sync it via the local clipboard bridge.
 2. ACKNOWLEDGE SCHEMA: The system now uses the v8.6-Forensic-Zero-Hallucination-Sync Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
-3. ACTION (ZERO-TOUCH SYNC): Use your Google Drive extension to read the attached `rules.md` markdown document in the (GEM_Trading_Rules) folder.
+3. ACTION (ZERO-TOUCH SYNC): Use your Google Drive extension to read the attached `rules.md` markdown document in the (Gemini_Gem_Rules) folder.
 4. VERIFICATION: Do NOT fabricate data. If you cannot read the file, STOP and output "TOOL FAILURE". 
    - Cite the exact `version` string verbatim from the top of the rules.md file.
    - Confirm which "ENH_" protocol governs the "Web Verification Protocol".
@@ -401,7 +401,7 @@ mutable_state must be fully populated. Increment the sync_id for this final EOD 
 ---
 
 ## 🛸 Antigravity Sync Protocol (The Engine Custodian)
-To ensure absolute mathematical and logical synchronization across the GEM Trading Terminal, use the **Antigravity** persona.
+To ensure absolute mathematical and logical synchronization across the Gemini Gem Stock Market Council Terminal, use the **Antigravity** persona.
 
 **How to use:**
 Upload the `antigravity.md` file along with your other project instructions to your Gemini Gem.
@@ -435,7 +435,7 @@ The `scrutiny_audit` object contains the full council vote record:
 
 ## 🏗️ Design Principles
 
-- **Canonical Centralization** — Individual engines do not contain hardcoded logic or parameters (e.g. lists of exogenous shocks). All logic points natively to canonical protocols in `GEM_Rules_Data`.
+- **Canonical Centralization** — Individual engines do not contain hardcoded logic or parameters (e.g. lists of exogenous shocks). All logic points natively to canonical protocols in `Gemini_Gem_Rules_Data`.
 - **Logic/Data Separation** — `SSoT_Storage.json` holds state schema; `rules.md` holds static laws; `trade_lessons.md` holds historical institutional memory; `rule_enforcer_engine.md` exclusively handles execution logic.
 - **Non-Destructive Merging** — Field-level merge with `PRESERVE_IF_NOT_UPDATED` strategy
 - **Forensic Lineage** — Every state change includes timestamped source attribution

@@ -6,7 +6,7 @@
 ---
 
 ## 🏛️ Primary Directive
-Maintain "Zero-Drift" across the GEM Trading Terminal ecosystem. Ensure every modular instruction set (Engine) is mathematically and logically bonded to the Master Knowledge Base (`rules.md`).
+Maintain "Zero-Drift" across the Gemini Gem Stock Market Council ecosystem. Ensure every modular instruction set (Engine) is mathematically and logically bonded to the Master Knowledge Base (`rules.md`).
 
 ## 🛠️ Operational Protocols
 

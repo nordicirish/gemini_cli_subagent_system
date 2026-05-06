@@ -562,7 +562,7 @@ async def handle_paste(req: Request):
                 print(f"Failed to sync lessons to MD: {e}")
         # Rule mutations
         if extracted_mutations and isinstance(extracted_mutations, list):
-            rules_file = os.path.join('GEM_Trading_Rules', 'rules.json')
+            rules_file = os.path.join('Gemini_Gem_Rules', 'rules.json')
             if os.path.exists(rules_file):
                 try:
                     with open(rules_file, 'r') as f:
@@ -1751,7 +1751,7 @@ def calculate_score(symbol):
 # -----------------------------
 def run_daemon():
     global GLOBAL_STATE
-    print(f"{CYAN}Initializing GEM Dashboard v16.0 (Data Hardened + Trend)...{RESET}")
+    print(f"{CYAN}Initializing Gemini Gem Dashboard v16.0 (Data Hardened + Trend)...{RESET}")
     tickers_obj = {sym: yf.Ticker(sym) for sym in ALL_TICKERS}
 
     print(f"{YELLOW}Performing initial heavy fetch...{RESET}")
@@ -1857,7 +1857,7 @@ def run_daemon():
                 mode_str = f"Tick Update (VWAP Batch: {batch[0]}...)"
 
             remaining_tickers = [s for s in ALL_TICKERS if s not in batch]
-            print(f"\n{BOLD}GEM Dashboard (v17.1 - Institutional [Optional Social]){RESET}")
+            print(f"\n{BOLD}Gemini Gem Dashboard (v17.1 - Institutional [Optional Social]){RESET}")
             print(f"Time: {ny_now.strftime('%H:%M:%S')} | Status: {status_color}{status}{RESET}")
             print(f"Mode: {mode_str}")
             if remaining_tickers and not is_heavy:
@@ -2038,7 +2038,7 @@ def run_daemon():
                     gex_data = {'net_gex': gex_data}
 
                 # Derive dealer_posture from net_gex sign per
-                # GoogleDrive://GEM_Trading_Rules/rules > ENH_20 (Synthetic GEX Logic)
+                # GoogleDrive://Gemini_Gem_Rules/rules > ENH_20 (Synthetic GEX Logic)
                 _raw_gex = float(gex_data.get('net_gex', 0.0))
                 if _raw_gex > 0:
                     _dealer_posture = "LONG_GAMMA"
@@ -2079,7 +2079,7 @@ def run_daemon():
                     "rsi": float(rsi_raw),
                     "vwap": float(vwap),
                     "distance_from_vwap": float(distance_from_vwap(sym)),
-                    # trend_score thresholds: GoogleDrive://GEM_Trading_Rules/rules > TREND_SCORE_UP_THRESHOLD (3) / TREND_SCORE_DOWN_THRESHOLD (-3)
+                    # trend_score thresholds: GoogleDrive://Gemini_Gem_Rules/rules > TREND_SCORE_UP_THRESHOLD (3) / TREND_SCORE_DOWN_THRESHOLD (-3)
                     # For INVERSE_MACRO tickers: negated so rising price = negative (bearish for equities)
                     "trend_score": int(-techs.get("Trend_Score", 0)) if sym in INVERSE_MACRO else int(techs.get("Trend_Score", 0)),
                     
@@ -2091,7 +2091,7 @@ def run_daemon():
                     # GEX — field names per ENH_32 canonical schema in rules.json
                     "net_gex_total": _raw_gex,
                     "gex_exposure": _raw_gex,  # Normalized GEX exposure (position-level scaling done by SSoT Gem)
-                    "dealer_posture": _dealer_posture,  # GoogleDrive://GEM_Trading_Rules/rules > dealer_posture_logic
+                    "dealer_posture": _dealer_posture,  # GoogleDrive://Gemini_Gem_Rules/rules > dealer_posture_logic
                     "gamma_flip_price": float(gex_data.get('flip_price', 0.0)),
                     "inventory_velocity_delta": float(gex_data.get('inventory_velocity_delta', 0.0)),
                     "gex_slope": float(gex_data.get('gex_slope', 0.0)),
@@ -2102,7 +2102,7 @@ def run_daemon():
                     "ma_200": float(techs.get("SMA_200") or 0.0),
                     "score": int(score),
                     "signal": classify_signal(sym),
-                    # trend label thresholds: GoogleDrive://GEM_Trading_Rules/rules > TREND_SCORE_UP_THRESHOLD / TREND_SCORE_DOWN_THRESHOLD
+                    # trend label thresholds: GoogleDrive://Gemini_Gem_Rules/rules > TREND_SCORE_UP_THRESHOLD / TREND_SCORE_DOWN_THRESHOLD
                     # For INVERSE_MACRO: JSON trend uses equity-perspective (negated score)
                     "trend": ("UP" if (-ts if sym in INVERSE_MACRO else ts) >= 3 else "DOWN" if (-ts if sym in INVERSE_MACRO else ts) <= -3 else "FLAT"),
                     
@@ -2117,7 +2117,7 @@ def run_daemon():
             ief = macro_state.get('IEF', {})
             ief_gap = float(ief['gap'])
             ief_price = float(ief['price'])
-            # IEF bond alert — threshold: GoogleDrive://GEM_Trading_Rules/rules > system_thresholds > IEF_YIELD_ALERT_THRESHOLD (-0.15)
+            # IEF bond alert — threshold: GoogleDrive://Gemini_Gem_Rules/rules > system_thresholds > IEF_YIELD_ALERT_THRESHOLD (-0.15)
             if ief_gap < -0.15:
                 print(f"   >>> BOND ALERT:  7-10Y Bond Price {ief_price:.2f} ({ief_gap:+.2f}%) {RED}[YIELDS RISING - RISK]{RESET}")
             else:

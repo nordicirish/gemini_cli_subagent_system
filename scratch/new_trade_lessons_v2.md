@@ -278,7 +278,7 @@
 - **L-197:** [CODIFIED: DIB_FLUSH_PROTOCOL] Condition: Valid only after first 90 mins of RTH. Trigger: VWAP Reclaim + SHORT to LONG Gamma flip. Anchor: $14.00 node (UMAC).
 - **L-198:** [CODIFIED: DIB_PSYCH_FLOOR] Breach of $14.00 psychological parity on UMAC in a SHORT_GAMMA regime mandates an immediate freeze on 'Add' operations until VWAP reclaim.
 - **L-199:** [CODIFIED: CLINICAL_VOID_OVERRIDE] In high-VIX or SPY-overbought regimes, clinical assets protected by statutory priority vouchers function as 'Strategic Anchors' exempt from standard trims.
-- **L-200:** [CODIFIED: LOGIC_TIER_LOCK] UI selection of 'Thinking' is forensicly confirmed as the active reasoning engine for the GEM Terminal.
+- **L-200:** [CODIFIED: LOGIC_TIER_LOCK] UI selection of 'Thinking' is forensicly confirmed as the active reasoning engine for the Gemini Gem Terminal.
 - **L-201:** [CODIFIED: DATA_ANALYST_INTEGRATION] Integration of the Data Analyst provides a secondary quantitative audit layer ensuring P&L and parity nodes are math-proven.
 - **L-202:** [CODIFIED: ENH_31_PRE_REQ] Ensure ENH_31 search occurs before every primary session analysis.
 - **L-203:** [CODIFIED: FORENSIC_PROOF_MANDATE] Strict adherence to Forensic Proof strings required for all numeric outputs.

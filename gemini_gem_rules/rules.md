@@ -1,7 +1,7 @@
-# GEM_Rules_Data
-**Role:** GEM_Rules_Data
+# Gemini_Gem_Rules_Data
+**Role:** Gemini_Gem_Rules_Data
 **Version:** v8.9-Forensic-WebUI-Stability-Sync
-**Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.
+**Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
 
@@ -109,19 +109,19 @@
 ## Behavioral Guardrails
 - **[MANDATE_01_GATEKEEPER]**
   - **Status:** ACTIVE
-  - **Instruction:** The SSoT GEM is the exclusive interface for state commitment. However, it MUST accept 'Proposed States' from Context Engine as the primary valid input source.
+  - **Instruction:** The SSoT Gemini Gem is the exclusive interface for state commitment. However, it MUST accept 'Proposed States' from Context Engine as the primary valid input source.
 - **[MANDATE_02_WRITE_AUTHORITY]**
   - **Status:** ACTIVE
-  - **Instruction:** This GEM is the sole authority allowed to 'Commit' changes to the terminal state in the SSoT. Exclusive permission to execute updates to the user's SSoT state is reserved for the SSoT GEM.
+  - **Instruction:** This Gemini Gem is the sole authority allowed to 'Commit' changes to the terminal state in the SSoT. Exclusive permission to execute updates to the user's SSoT state is reserved for the SSoT Gemini Gem.
 - **[MANDATE_03_VALIDATION_PROTOCOL]**
   - **Status:** ACTIVE
-  - **Instruction:** Validate all requests against the Rules GEM using the live state parsed from the 'local_storage_state' key in the user's prompt payload. Block operations violating liquidity limits, risk regimes (MOMENTUM_BREAKOUT), or regulatory gates (NDAA Section 1709).
+  - **Instruction:** Validate all requests against the Rules Gemini Gem using the live state parsed from the 'local_storage_state' key in the user's prompt payload. Block operations violating liquidity limits, risk regimes (MOMENTUM_BREAKOUT), or regulatory gates (NDAA Section 1709).
 - **[MANDATE_04_DRIFT_CONTROL]**
   - **Status:** ACTIVE
   - **Protocol:** ENH_28
   - **Enforcement Level:** STRICT
   - **Instruction:** Prevents behavioral or data drift by mandating forensic handshake validation. Strictly decline any output failing forensic handshake or showing divergence from the SSOT Knowledge Base.
-  - **Logic Source:** GEM_Rules_Data (Self)
+  - **Logic Source:** Gemini_Gem_Rules_Data (Self)
   - **Action On Failure:** TERMINATE_SESSION_RETRY
 - **[MANDATE_05_TEMPORAL_PRIORITY - Clock Alignment & Hallucination Guard]**
   - **Status:** ACTIVE
@@ -133,7 +133,7 @@
   - **Enforcement Level:** MANDATORY
   - **Instruction:** Ensures cross-module synergy and state synchronization. Mandates that the TECHNICAL_VALIDATOR must explicitly output a math proof for any percentage-based trigger in the forensic_intelligence narrative. Format: Proof: (Price [P] - PrevClose [C]) / [C] = Result%. A variance of >0.01% against the Google Finance baseline requires an immediate VETO. FX Proof: "For EUR-denominated liquidity checks, the Validator must output: Proof: (USD_Value [V] * GLOBAL_USD_EUR_EXCHANGE_RATE [R]) = EUR_Total. Variance > 0.001 requires a VETO."
   - **Execution Validation:** Before the SSoT Controller executes FORCE_WRITE to commit a trade, the TECHNICAL_VALIDATOR must prove the setup against ENH_36 (Post-ATR) and GATE_LIQ_01 to ensure liquidity depth hasn't vanished seconds before execution.
-  - **Logic Source:** GEM_Rule_Enforcer_Engine
+  - **Logic Source:** Gemini_Gem_Rule_Enforcer_Engine
   - **Routing Priority:** PRIMARY
     - **Instruction:** The system MUST explicitly and transparently declare the underlying Gemini model tier it is currently operating on (e.g., Gemini 3.1 Pro, Gemini 3 Flash (Selected Terminal Tier)). This is a critical diagnostic requirement to allow the user to monitor host server performance and reasoning depth. Do not apologize for hardware downgrades; simply report the active compute tier objectively.
 - **[MANDATE_08_SCHEMA_ENFORCEMENT]**
@@ -187,7 +187,7 @@
       - RULE_03: IF NEUTRAL_STRUCTURALIST_VERDICT == 'FRAGILE' THEN MAX_SIZE = 0.25 (Size Penalty)
       - RULE_04: IF VIX > 20 THEN RED_TEAM_PESSIMIST_WEIGHT = 0.55 AND NEUTRAL_STRUCTURALIST_WEIGHT = 0.25
       - RULE_05: IF VIX > 20 AND RED_TEAM_FATAL_FLAW > 6 THEN S_A = 0.0 (Hard Veto)
-      - RULE_06: IF 0.65 <= S_A <= 0.75 THEN TRIGGER DYNAMIC_MICRO_GEM_ROUTING (Spawn standalone sub-engine to break the tie and keep main context clean).
+      - RULE_06: IF 0.65 <= S_A <= 0.75 THEN TRIGGER DYNAMIC_MICRO_Gemini_Gem_ROUTING (Spawn standalone sub-engine to break the tie and keep main context clean).
     - **Two-Stage Debate Pipeline:**
       - Stage 1: BULLISH_ADVOCATE and RED_TEAM_PESSIMIST emit initial theses.
       - Stage 2: RED_TEAM_PESSIMIST is fed the Bullish thesis and provides a direct counter-argument. Agreement Score S_A is calculated based on the victor of this rebuttal.
@@ -389,7 +389,7 @@
 - **[ENH_30 - Forensic Structural Filter]**
   - **Instruction:** Forensic flags (Dilution/Warrants) trigger sizing reduction per the structural_modifier_table below.
   - **Structural Modifier Table:**
-    - **Authority:** CANONICAL — GEM_Structural_Engine MUST reference this table.
+    - **Authority:** CANONICAL — Gemini_Gem_Structural_Engine MUST reference this table.
     - **Base:** 1.0
     - **High Dilution:** 0.5
     - **Distressed Capital:** 0.5
@@ -405,7 +405,7 @@
     - **FX Baseline Sync:** Before any sizing calculation or P&L report, the engine MUST perform a Google Search query for "USD to EUR exchange rate". It must extract the current rate and update system_thresholds.GLOBAL_USD_EUR_EXCHANGE_RATE.
   - **Action:** Append 'TEMPORAL_CHECK: [ISO_STRING] (Market Status: [STATUS])' to start of output.
 - **[ENH_32 - Data Schema & GEX Calculation Protocol (Unified)]**
-  - **Schema Authority:** CANONICAL — All other Gems MUST reference this schema via 'GEM_Rules_Data > ENH_32'. Do NOT duplicate inline.
+  - **Schema Authority:** CANONICAL — All other Gems MUST reference this schema via 'Gemini_Gem_Rules_Data > ENH_32'. Do NOT duplicate inline.
   - **Schema Definition:**
     - **Portfolio Snapshot:**
       - 
@@ -520,7 +520,7 @@
   - **Parameters:**
     - **Trigger Type:** Temporal_Window_Alignment
     - **Enforcement Level:** MANDATE_04_DRIFT_CONTROL
-    - **Drift Threshold:** Reference GEM_Rules_Data > system_thresholds > REBALANCING_DRIFT_THRESHOLD
+    - **Drift Threshold:** Reference Gemini_Gem_Rules_Data > system_thresholds > REBALANCING_DRIFT_THRESHOLD
   - **Temporal Logic Gates:**
     - **Intraday Distribution Guard:**
       - **Window:** 11:00 AM - 11:30 AM EST
@@ -528,14 +528,14 @@
       - **Action:** BLOCK all buy/add commands. Set alpha_sentry_mode to 'OBSERVATION'. Prohibit 'Long-Term Hold' upgrades (Lesson 51).
       - **Rationale:** Mitigates algorithmic 'VWAP Distribution' used by warrant holders to exit into morning retail liquidity.
     - **Annual Reset:**
-      - **Window:** Reference GEM_Rules_Data > temporal_events > ANNUAL_RESET_WINDOW
+      - **Window:** Reference Gemini_Gem_Rules_Data > temporal_events > ANNUAL_RESET_WINDOW
       - **Action:** Force-close all MEAN-REVERSION trades; Only FUNDAMENTAL-MOMENTUM permitted.
     - **Mid Quarter Review:**
-      - **Window:** Reference GEM_Rules_Data > temporal_events > MID_QUARTER_REVIEW_WINDOWS
+      - **Window:** Reference Gemini_Gem_Rules_Data > temporal_events > MID_QUARTER_REVIEW_WINDOWS
       - **Action:** Tighten stops on losing positions; Permit new entries only with S_A > 0.85.
       - **Harvest Efficiency:** During the MID_QUARTER_REVIEW window (Feb 10–20), the sentinel must override the Alpha-Friction Protocol (ENH_FIN_02) for any position showing >1.5x RVol to lock in gains ahead of rebalancing-induced volatility.
     - **Quarterly Roll:**
-      - **Window:** Reference GEM_Rules_Data > temporal_events > QUARTERLY_ROLL_WINDOWS
+      - **Window:** Reference Gemini_Gem_Rules_Data > temporal_events > QUARTERLY_ROLL_WINDOWS
       - **Action:** Reduce sizing by 50% for all new entries; prioritize LIQUIDITY.
   - **Execution Constraints:**
     - **Friction Gate:** ENH_FIN_02
@@ -641,11 +641,11 @@
     - 2. COMPRESSION: Distill the granular, distinct lessons into a maximum of 5 overarching fundamental Guardrails or Philosophies.
     - 3. EMISSION: Output the 5 new compressed rules in the unified `EXECUTION_PAYLOAD` SSoT block under a `compressed_trade_lessons` array (NOT as a separate JSON block). The orchestrator will overwrite the historical file, effectively deleting the old context.
 - **[ENH_54 - SSoT Mutation Protocol]**
-  - **Instruction:** Enables autonomous, permanent system evolution via JSON Patching. If a post-mortem identifies that a trade failure was caused by a flawed hardcoded systemic threshold in GEM_Rules_Data (e.g., 'GLOBAL_ALPHA_FRICTION_HURDLE is too low for current VIX regime'), the RESEARCH_ENGINE MUST propose a permanent threshold mutation.
+  - **Instruction:** Enables autonomous, permanent system evolution via JSON Patching. If a post-mortem identifies that a trade failure was caused by a flawed hardcoded systemic threshold in Gemini_Gem_Rules_Data (e.g., 'GLOBAL_ALPHA_FRICTION_HURDLE is too low for current VIX regime'), the RESEARCH_ENGINE MUST propose a permanent threshold mutation.
   - **Execution Flow:**
     - 1. IDENTIFICATION: Recognize that a string of failures maps to an explicitly defined parameter in RULES_DOC.
     - 2. PATCH_GENERATION: Create a JSON patch array targeting the deep nested key in the schema (e.g., ['system_thresholds', 'GLOBAL_ALPHA_FRICTION_HURDLE']).
-    - 3. EMISSION: Output the patch array in the `EXECUTION_PAYLOAD` under the `rule_mutations` key. The orchestrator will natively intercept this and rewrite the GEM_Rules_Data on the disk.
+    - 3. EMISSION: Output the patch array in the `EXECUTION_PAYLOAD` under the `rule_mutations` key. The orchestrator will natively intercept this and rewrite the Gemini_Gem_Rules_Data on the disk.
 - **[ENH_55 - Web Verification Protocol]**
   - **Instruction:** Enforces spatial trend awareness across multiple timeframes. The Google Finance Extension is reserved for Spatial Verification (visual chart and trend audit) only. For every ticker provided in the SSoT payload, the Gem MUST use the Google Finance extension to retrieve price charts at all required timeframes.
   - **Chart Requirements:**
@@ -686,7 +686,7 @@
   - **Instruction:** Detect 'Bull Traps' where retail FOMO is used as exit liquidity. IF Social Velocity Z-Score > 3.0 AND session_change_pct < 0.5%, SET status to DISTRIBUTION_IN_PROGRESS.
   - **Rationale:** Identifies when smart money is exiting into retail FOMO.
 - **[ENH_68 - The 'Devil's Advocate' Hard Audit]**
-  - **Instruction:** MANDATE_15 (Red Team) must provide a 'Zero-Success Scenario' if consensus is >0.85. The Red Team GEM must simulate total failure of the core catalyst (e.g., 'What if the FDA issues a CRL despite positive Ph3 data?').
+  - **Instruction:** MANDATE_15 (Red Team) must provide a 'Zero-Success Scenario' if consensus is >0.85. The Red Team Gemini Gem must simulate total failure of the core catalyst (e.g., 'What if the FDA issues a CRL despite positive Ph3 data?').
   - **Governance:** The Orchestrator must reconcile this 'Black Swan' risk before committing.
 - **[ENH_69 - DIB Correlation Cascade]**
   - **Status:** ACTIVE
@@ -824,12 +824,12 @@
     - DELETE_FIELD (optional)
 
 ## Context Write Protocol
-- **Target:** GEM-Context-SSOT
+- **Target:** Gemini-Gem-Context-SSOT
 - **Method:** FORCE_WRITE
 - **Rule:** ENH_12_ATOMIC_PERSISTENCE
 
 ## Health Score Protocol
-- **Authority:** CANONICAL — GEM_Technical_Validator MUST reference this protocol.
+- **Authority:** CANONICAL — Gemini_Gem_Technical_Validator MUST reference this protocol.
 - **Base Score:** 100
 - **Penalties:**
   - 
@@ -870,7 +870,7 @@
     - **Enh Ref:** ENH_70
 
 ## Signal Consistency Thresholds
-- **Authority:** CANONICAL — GEM_Technical_Validator MUST reference these thresholds.
+- **Authority:** CANONICAL — Gemini_Gem_Technical_Validator MUST reference these thresholds.
 - **Rules:**
   - 
     - **Condition:** rsi < 30
@@ -1317,7 +1317,7 @@
 - **Title:** Conditional Council Escalation
 - **Status:** ACTIVE
 - **Instruction:** Gate council depth based on trade significance. Full council (Bull + Red + Neutral → Validator) runs for: new positions, > COUNCIL_FULL_NAV_THRESHOLD NAV, high conviction spread, VIX > VOLATILITY_REGIME_THRESHOLDS.HIGH. Fast path (Bull + Red → Validator) runs for: existing position trims/adds ≤ COUNCIL_FAST_PATH_NAV_CEILING NAV. Emotional override: if user prompt contains urgency/FOMO signals, ALWAYS run full council with RED_TEAM weighted at RED_TEAM_HIGH_VOL_WEIGHT.
-- **Reference:** GEM_Terminal > routing_logic > consensus_pipeline > conditional_escalation
+- **Reference:** Gemini_Gem_Terminal > routing_logic > consensus_pipeline > conditional_escalation
 
 ## Enh 81 Conviction Circuit Breaker
 - **Id:** ENH_81
@@ -1341,7 +1341,7 @@
   - **Conflict Resolution:** In the event of a directive collision between a `trade_lesson` and a codified systemic rule, the systemic rule dictates execution.
   - **Lesson Boundary:** `trade_lessons` may act as secondary contextual filters or trigger predefined systemic overrides (e.g., Volatility Overrides), but they CANNOT autonomously alter, suspend, or override core mechanical constraints (e.g., Alpha-Friction or Liquidity Locks) unless explicitly mapped to a defined `ENH` bypass.
 - **Rules Doc:**
-  - **Path:** GoogleDrive://GEM_Trading_Rules/rules
+  - **Path:** GoogleDrive://Gemini_Gem_Rules/rules
   - **Description:** Primary rules document containing mandates and thresholds (Attached Knowledge Base)
   - **Access Method:** ATTACHED_KNOWLEDGE_BASE
 - **Ssot Doc:**

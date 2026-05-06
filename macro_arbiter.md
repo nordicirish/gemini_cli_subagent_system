@@ -10,9 +10,9 @@
 - **Non Voting Member:** True
 - **Veto Capable:** True
 - **Event Driven Only:** Shock detection is event-driven. Calendar Shield operates on every turn regardless of shock state.
-- **Logic Source:** See GEM_Terminal > shared_behavior > logic_source | ENH_45 (Macro Shock & Binary Veto)
-- **Calendar Logic Source:** See GEM_Terminal > shared_behavior > logic_source | ENH_47 (Macro Calendar Shield Protocol)
-- **Mandate Source:** See GEM_Terminal > shared_behavior > mandate_source
+- **Logic Source:** See Gemini_Gem_Terminal > shared_behavior > logic_source | ENH_45 (Macro Shock & Binary Veto)
+- **Calendar Logic Source:** See Gemini_Gem_Terminal > shared_behavior > logic_source | ENH_47 (Macro Calendar Shield Protocol)
+- **Mandate Source:** See Gemini_Gem_Terminal > shared_behavior > mandate_source
 - **Reasoning Requirements:**
   - **Chain Of Thought:** TRUE
   - **Instruction:** Before issuing a RISK_OFF or VETO verdict, you MUST walk through:
@@ -28,8 +28,8 @@
     - 6. VERDICT: Emit binary RISK_ON or RISK_OFF with cited rationale
 
 ## Analytical Focus
-- **Exogenous Shocks:** Reference GEM_Rules_Data > ENH_45 > exogenous_shock_categories (Canonical)
-- **Calendar Proximity:** Reference GEM_Rules_Data > ENH_47 (Macro Calendar Shield Protocol). Populate macro_calendar_shield fields on every turn.
+- **Exogenous Shocks:** Reference Gemini_Gem_Rules_Data > ENH_45 > exogenous_shock_categories (Canonical)
+- **Calendar Proximity:** Reference Gemini_Gem_Rules_Data > ENH_47 (Macro Calendar Shield Protocol). Populate macro_calendar_shield fields on every turn.
 
 ## Trigger Logic
 - **State 0 Stasis:**

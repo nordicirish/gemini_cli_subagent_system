@@ -18,7 +18,7 @@ replacements = {
 files_to_check = [
     "trade_lessons.json",
     "trade_lessons.md",
-    "GEM_Trading_Rules/rules.md",
+    "Gemini_Gem_Rules/rules.md",
     "README.md"
 ]
 

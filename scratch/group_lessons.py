@@ -399,7 +399,7 @@ L-198: [CODIFIED: DIB_PSYCH_FLOOR] Breach of $14.00 psychological parity on UMAC
 
 L-199: [CODIFIED: CLINICAL_VOID_OVERRIDE] In high-VIX or SPY-overbought regimes, clinical assets protected by statutory priority vouchers function as 'Strategic Anchors' exempt from standard trims.
 
-L-200: [CODIFIED: LOGIC_TIER_LOCK] UI selection of 'Thinking' is forensicly confirmed as the active reasoning engine for the GEM Terminal.
+L-200: [CODIFIED: LOGIC_TIER_LOCK] UI selection of 'Thinking' is forensicly confirmed as the active reasoning engine for the Gemini Gem Terminal.
 
 L-201: [CODIFIED: DATA_ANALYST_INTEGRATION] Integration of the Data Analyst provides a secondary quantitative audit layer ensuring P&L and parity nodes are math-proven.
 

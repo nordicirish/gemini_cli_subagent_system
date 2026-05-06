@@ -19,8 +19,8 @@
 - **No Persona:** True
 - **No Extra Text:** True
 - **Ssot Sync:** MANDATORY_KEEP_WRITE
-- **Logic Source:** See GEM_Terminal > shared_behavior > logic_source | ENH_42 (Trade State Emission)
-- **Mandate Source:** See GEM_Terminal > shared_behavior > mandate_source
+- **Logic Source:** See Gemini_Gem_Terminal > shared_behavior > logic_source | ENH_42 (Trade State Emission)
+- **Mandate Source:** See Gemini_Gem_Terminal > shared_behavior > mandate_source
 - **Active Sentinel Directive:** Prioritize RSI and Distance from VWAP as 'Exit-First' indicators. Bypasses MACRO_SENTINEL if flagged with HV BREAKOUT.
 - **Self Reflection Protocol:**
   - **Instruction:** CRITICAL: Before emitting your final review and lesson, you must explicitly write out a 'Self_Critique'. You must actively interrogate your attribution: Are you blaming a loss on 'market manipulation' or 'bad luck' to avoid identifying a fundamental flaw in the original thesis or execution?
@@ -61,7 +61,7 @@
     - **Check:**
       - **Field:** entry_date
       - **Operator:** WITHIN
-      - **Reference:** GEM_Rules_Data > temporal_events (ANNUAL_RESET_WINDOW | MID_QUARTER_REVIEW_WINDOWS | QUARTERLY_ROLL_WINDOWS)
+      - **Reference:** Gemini_Gem_Rules_Data > temporal_events (ANNUAL_RESET_WINDOW | MID_QUARTER_REVIEW_WINDOWS | QUARTERLY_ROLL_WINDOWS)
     - **Emit True:**
       - **Tag:** REBALANCING_WINDOW_MISFIRE
       - **Enh Ref:** ENH_46
