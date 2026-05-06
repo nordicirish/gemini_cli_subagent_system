@@ -31,6 +31,11 @@
 
 ---
 
+## #AFTER-HOURS
+- **L-198:** L-201: After-hours SPY RSI 71.43 maintains L-172 breach; absolute freeze remains primary directive. #AFTER-HOURS #RSI #VETO #STASIS
+
+---
+
 ## #AI
 - **L-3:** Industrial-Scale Distillation confirms frontier AI logic is no longer a defensible moat. #AI #competitive-moat
 
@@ -75,6 +80,11 @@
 - **L-76:** VWAP Source Hierarchy: In local calculation drift, defer to Yahoo Finance Truth (e.g., 13.31 for UMAC). #data-integrity
 - **L-78:** Legislative SSoT Mandate: Never project alpha based on submission deadlines; verify hearings via official calendar. #data-integrity
 - **L-115:** [CODIFIED: DATA_INTEGRITY] Source documents misattributing core pipeline assets trigger immediate Health Score deduction of 100.
+
+---
+
+## #DIB
+- **L-195:** L-197: Gov grants provide long-term PoR graduation path (L-108), but do not override the medium-term Scaling Margin Trap (L-128). #DIB #GRANTS #MARGINS #VALUATION
 
 ---
 
@@ -233,6 +243,16 @@
 - **L-188:** L-167 (Strategic PO Validation)
 - **L-189:** L-172 (SPY RSI Barrier)
 - **L-190:** L-166 (Earnings Date Lock)
+- **L-199:** L-191: SPY RSI 71.65 confirms L-172 breach; absolute freeze active.
+- **L-200:** L-192: VWAP PIN at 13.52 confirms temporary equilibrium.
+- **L-201:** L-193: UMAC $13.63 reclaim of VWAP confirms intraday RS.
+- **L-202:** L-194: PoR probability weighted at 65% based on $75M PO (L-167).
+- **L-203:** L-195: USV production time reduction (700 to 400 hrs) validates Mass-Production Floor.
+- **L-204:** L-196: Gov grants/loans probability high (>70%) per Sec. 848 (L-105).
+- **L-205:** L-197: Gov grants provide long-term PoR graduation path (L-108).
+- **L-206:** L-198: SPY RSI 71.90 confirms high-conviction VETO.
+- **L-207:** L-199: High-volume accumulation in DIB (UMAC/RCAT) validates Industrial Graduation (L-108).
+- **L-208:** L-200: Session close with SPY RSI 71.84 confirms L-172 breach.
 
 ---
 
@@ -244,6 +264,7 @@
 
 ## #RCAT
 - **L-112:** [CODIFIED: RULE_168] In sympathetic baskets, the second ticker's 1% distance to SSR is the 'Pivot of Maximum Pessimism'; avoid selling into trigger. #RCAT #psychology #SSR
+- **L-194:** L-195: USV production time reduction (700 to 400 hrs) validates Mass-Production Floor; RSI-172 veto remains active. #RCAT #UMAC #PRODUCTION #VETO
 
 ---
 
@@ -255,6 +276,7 @@
 
 ## #RISK
 - **L-164:** Concurrent SPY/IEF Short Gamma alignment functions as primary Bunker Trigger. #RISK
+- **L-191:** L-191: SPY RSI 71.65 confirms L-172 breach; absolute freeze on DIB expansion active. #RISK #SPY #RSI
 
 ---
 
@@ -327,6 +349,7 @@
 - **L-99:** The Gamma Pivot (Neutral): Transition from Short to Neutral Gamma during sector showcase confirms institutional absorption. #GEX #RCAT #technical
 - **L-104:** R1 Pivot ($15.09 for UMAC) in Summit sessions serves as the primary retail Take Profit node. #momentum #technical #R1
 - **L-162:** $14.00 UMAC node converted to active resistance; requires VWAP reclaim. #TECHNICAL
+- **L-192:** L-192: VWAP PIN at 13.52 confirms temporary equilibrium; RSI-172 barrier remains active. #UMAC #TECHNICAL #VETO
 
 ---
 
@@ -353,6 +376,7 @@
 
 ## #UMAC
 - **L-106:** [CODIFIED: RULE_158] Audit GAAP profits for investment-gain masking; normalize for non-GAAP operational break-even.
+- **L-193:** L-193: UMAC $13.63 reclaim of VWAP confirms intraday RS, but SPY-172 Veto prevents expansion. #UMAC #RS #VETO
 
 ---
 
@@ -361,6 +385,16 @@
 - **L-61:** Guidance Arbitrage: Tripling revenue targets (ONDS) overrides short-term warrant noise. #valuation #ONDS
 - **L-82:** The Evans Multiplier: Institutional offering prices ($17.00) act as the 'Fundamental Magnet'. #valuation
 - **L-119:** Rule 181: Component Primes (UMAC) capture value faster than System Primes (RCAT) in earmark environments due to lower execution risk. #valuation #supply-chain
+
+---
+
+## #VETO
+- **L-196:** L-198: SPY RSI 71.90 confirms high-conviction VETO; portfolio remains in 'Forensic Stasis' until RSI < 70. #VETO #RSI #STASIS
+
+---
+
+## #VOLUME
+- **L-197:** L-199: High-volume accumulation in DIB (UMAC/RCAT) validates Industrial Graduation (L-108), but SPY RSI-172 barrier enforces absolute HOLD. #VOLUME #DIB #RSI #VETO
 
 ---
 

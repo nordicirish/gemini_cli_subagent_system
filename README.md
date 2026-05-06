@@ -2,7 +2,7 @@
 
 **A multi-agent AI trading intelligence framework built on Google Gemini Gems.**
 
-Starting with v8.6-Forensic-Zero-Hallucination-Sync, the system has fully matured its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`ssot.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`). This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
+Starting with v8.9-Forensic-WebUI-Stability-Sync, the system has fully matured its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`ssot.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`). This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
 
 ---
 
@@ -114,11 +114,11 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 
 ## 🛠️ Setup Instructions (Markdown) — One per Gem
 
-> **Note on Mode Selection:** The system no longer automatically forces an Orchestrator mode to prevent reasoning loops. You must **manually select** the Gemini Mode in the chat interface for your session. **Gemini 3 Flash mode is highly recommended** for the Orchestrator. This ensures maximum routing speed and prevents the 192K context limit timeout crashes associated with Deep Think modes.
+> **Note on Mode Selection:** You must manually select the Gemini Mode in the chat interface. **Standard Gemini 3.1 Pro (without Thinking mode enabled)** is explicitly required for the Orchestrator. This provides the highest routing fidelity while maintaining the 1-million-token context window necessary to bypass the 192K timeout crashes associated with Deep Think modes.
 
 | File | Gem Role | Gemini Mode | Purpose |
 |------|----------|-------------|---------|
-| `terminal.md` | **Orchestrator** | FLASH | Master router — classifies user input and dispatches to the correct engine |
+| `terminal.md` | **Orchestrator** | PRO (Standard) | Master router — strictly requires Standard Pro to prevent 192K Deep Think timeouts |
 | `rules.md` | **Legislative Body** | N/A | **Static Rules**: The canonical source containing thresholds and ENH_ protocols. MUST be attached via Google Drive. |
 | `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `GEM_Rules_Data` |
 | `data_analyst.md` | **Data Analyst** | PRO | Tier-1 Data Shield — retrieves and formats raw web data (SEC/Macro) via native Google Search to save reasoning tokens |
@@ -146,16 +146,7 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 | `format_json.py` | Formatter — pretty-prints a JSON instruction file with consistent indentation |
 ### 4. Updating Gems (Maintenance)
 
-When you update the JSON instructions in this repository (e.g., version increment to v8.6-Forensic-Zero-Hallucination-Sync), you must **manually update** the live Gem:
-
-1.  **Open the Gem** in [Gemini Advanced](https://gemini.google.com/gems).
-2.  Click the **Pencil Icon** (Edit) > **Instructions**.
-3.  **Copy** the content of the updated Markdown file (e.g., `technical_validator.md`).
-4.  **Paste** it into the Instructions box, replacing the old content.
-5.  Click **Update**.
-
-**Pro Tip:** If you are mid-session and don't want to restart, you can type:
-> *"SYSTEM UPDATE: I have patched your instructions to v8.6-Forensic-Zero-Hallucination-Sync. Please simulate the following logic update: [Paste critical logic change]"*
+> *"SYSTEM UPDATE: I have patched your instructions to v8.9-Forensic-WebUI-Stability-Sync. Please simulate the following logic update: [Paste critical logic change]"*
 >
 > *(However, a full restart is recommended for major version changes).*
 

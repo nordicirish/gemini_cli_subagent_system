@@ -1,6 +1,6 @@
 # GEM_Rules_Data
 **Role:** GEM_Rules_Data
-**Version:** v8.8-Forensic-Zero-Hallucination-Sync
+**Version:** v8.9-Forensic-WebUI-Stability-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by GEM_Rule_Enforcer_Engine.
 
 ---
@@ -151,6 +151,7 @@
   - **Delta Mode:**
     - **Allowed:** True
     - **Instruction:** When emitting a delta, include ONLY the sections that changed. The `portfolio_snapshot` array MUST ALWAYS be present in full.
+  - **Truncation Guard:** The text-based Markdown report must be aggressively condensed to prioritize output tokens for the JSON EXECUTION_PAYLOAD. If the portfolio_snapshot array is exceptionally large, the Orchestrator must employ strict Delta Mode, emitting only the tickers that experienced a state change, while retaining the core SSoT structure.
   - **Enforcement:** Under the unified schema, trade lessons MUST be included natively inside the JSON block per MANDATE_22/MANDATE_25.
 - **[MANDATE_10_SCHEMA_VALIDATION]**
   - **Status:** STRICT
@@ -284,6 +285,7 @@
     - **Markdown Report:** Must begin with the 'Active Compute Tier' header, followed by the '### 🏁 Final Council Decision' block which MUST include the Decision and a concise 'Summary' of consensus reasoning.
     - **Quantitative SSoT:** All numeric/state data (Tickers, Portfolio, Macro) must be contained within the JSON.
     - **Forensic Lessons:** Memory payloads must be bifurcated: Global Systemic Lessons appended to `new_trade_lessons` (or `session_trade_lessons` alias) array, and Ticker-Specific Reflexes injected directly into `historical_context` inside the specific ticker's object within `portfolio_snapshot`.
+  - **Truncation Guard:** The text-based Markdown report must be aggressively condensed to prioritize output tokens for the JSON EXECUTION_PAYLOAD. If the portfolio_snapshot array is exceptionally large, the Orchestrator must employ strict Delta Mode, emitting only the tickers that experienced a state change, while retaining the core SSoT structure.
   - **Rationale:** Ensures flawless data synchronization with fetch_stocks.py and eliminates terminal output redundancy.
 - **[MANDATE_23_DISTILLATION_VETO]**
   - **Status:** ACTIVE
@@ -1301,7 +1303,7 @@
 
 ## [ENH_78 - Flash-Tier Temporal Scrutiny]
 - **Status:** ACTIVE
-- **Instruction:** If the Active Compute Tier is detected as 'Gemini 3 Flash', all agents are strictly forbidden from relying on pre-training memory for temporal data (dates, earnings schedules, macro calendar events). Agents MUST explicitly invoke native Google Search to re-verify all timelines prior to executing their reasoning chain.
+- **Instruction:** The system is designed for Standard Gemini 3.1 Pro. However, if Google's host server dynamically throttles the session and the Active Compute Tier is detected as 'Gemini 3 Flash', all agents are strictly forbidden from relying on pre-training memory for temporal data. The system must automatically trigger this protocol and explicitly invoke native Google Search to re-verify all timelines, dates, and SSoT facts before allowing execution.
 
 ## Enh 79 Lesson Feedback Loop
 - **Id:** ENH_79
