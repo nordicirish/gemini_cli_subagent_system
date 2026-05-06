@@ -2,6 +2,8 @@
 
 **A multi-agent AI trading intelligence framework built on Google Gemini Gems.**
 
+Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. Working together as a structured council, the agents evaluate market conditions, interpret financial data, enforce risk protocols, and generate consensus‑driven insights to support informed investment decision‑making. The platform integrates seamlessly with your real‑time dashboard, enabling a disciplined, auditable, and context‑persistent approach to stock‑market intelligence. 
+
 Starting with v8.9-Forensic-WebUI-Stability-Sync, the system has fully matured its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`ssot.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`). This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
 
 ---
