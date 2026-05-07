@@ -253,6 +253,8 @@
 - **L-206:** L-198: SPY RSI 71.90 confirms high-conviction VETO.
 - **L-207:** L-199: High-volume accumulation in DIB (UMAC/RCAT) validates Industrial Graduation (L-108).
 - **L-208:** L-200: Session close with SPY RSI 71.84 confirms L-172 breach.
+- **L-209:** L-209: [CODIFIED: EXTREME_MACRO_TRIM] When SPY RSI exceeds 75.00, it triggers an 'Extreme Toxicity' state. This overrides all 'Anchor' and 'Sovereign' hold exemptions (such as L-165). Initiate a mandatory proactive trim of 10% to 15% on all high-beta and DIB assets to manually force the generation of unallocated_cash_eur ahead of the structural flush. #MACRO #RISK-MANAGEMENT #TRIMMING
+- **L-210:** L-210: [CODIFIED: CONTRADICTION_HARVEST] If an asset is hitting intraday highs (e.g., UMAC clearing VWAP) while simultaneously facing a known fundamental drag (L-128 Scaling Margin Trap) AND a macro veto (L-172 SPY RSI > 71.18), the system must utilize the localized strength to trim the position, converting the fundamental risk into liquidity. #HARVESTING #RISK-MANAGEMENT #FUNDAMENTALS #MACRO
 
 ---
 
@@ -389,7 +391,7 @@
 ---
 
 ## #VETO
-- **L-196:** L-198: SPY RSI 71.90 confirms high-conviction VETO; portfolio remains in 'Forensic Stasis' until RSI < 70. #VETO #RSI #STASIS
+- **L-196:** L-196: [CODIFIED: VETO_STASIS_CLARIFICATION] SPY RSI > 71.18 enforces an absolute freeze on new capital deployment (buy-side stasis). It does not restrict sell-side operations. Defensive cash generation is permitted and encouraged during stasis. #VETO #RSI #STASIS
 
 ---
 

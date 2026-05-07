@@ -615,6 +615,10 @@
           - **Type:** ARRAY<OBJECT>
           - **Action:** UPSERT by ID into trade_lessons.json: update existing lessons where id matches, append new ones
           - **Trigger:** Full or partial SSoT state emission
+    - **Trade Lessons Architecture:**
+      - The system MUST NOT rely on a dedicated 'Memory Gem' for historical context. Logical consistency and financial maximization are achieved purely through the Air-Gap Bridge. 
+      - The live 'trade_lessons.md' file must be attached natively at Session Init (MANDATE_12). 
+      - The MACRO_NARRATIVE_ENGINE acts as the reader/compressor (ENH_53) and the REVIEW_ENGINE acts as the writer (MANDATE_25) to maintain the registry within the Orchestrator's active 1-million-token context window.
 - **[ENH_50 - Pre-Execution Formulation Protocol]**
   - **Instruction:** Before the SSoT Controller can emit a trade_state = LONG, the system MUST generate a rigid Trade Thesis. If a position is active and moves against the thesis, the system MUST immediately pause 'hold' operations, drop into 're-plan mode', and reassess.
   - **Execution Flow:**

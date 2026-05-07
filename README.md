@@ -19,46 +19,34 @@ Starting with v8.9-Forensic-WebUI-Stability-Sync, the system has fully matured i
                            │
                ┌───────────┴───────────┐
                │     ROUTING LAYER     │
-               └───────────┬───────────┘
-                           │
-               ┌───────────┴───────────┐
-               │     DATA ANALYST      │ (Stage 0: Data Sync)
-               │  (data_analyst.md)    │ ◄── Baseline Prices, Macro Events
-               └───────────┬───────────┘
-                           │
-   ┌───────────────────────┼───────────────────────┐
-   │                       │                       │
-   ▼                       ▼                       ▼
-┌─────┐  ┌──────────┐  ┌───────┐  ┌──────┐  ┌─────────────┐
-│MACRO│  │RESEARCH  │  │ GEX   │  │SENT. │  │ STRUCTURAL  │
-│SENT.│  │ENGINE    │  │ENGINE │  │ENGINE│  │ RISK ENGINE │
-└──┬──┘  └────┬─────┘  └───┬───┘  └──┬───┘  └──────┬──────┘
-   │          │            │         │             │
-   └──────────┴────────────┬─────────┴─────────────┘
-                           │
-              ┌────────────┴────────────┐
-              │    CONSENSUS COUNCIL    │
-              │  ┌───────────────────┐  │
-              │  │ BULLISH ADVOCATE  │  │
-              │  │ RED TEAM PESSIM.  │  │
-              │  │ NEUTRAL STRUCT.   │  │
-              │  └───────────────────┘  │
-              └────────────┬────────────┘
-                           │
-              ┌────────────┴────────────┐
-              │  TECHNICAL VALIDATOR    │
-              │    (Synthesis Node)     │
-              └────────────┬────────────┘
-                           │
-              ┌────────────┴────────────┐
-              │    CONTEXT ENGINE       │──── SSoT STORAGE
-              │    (State Bridge)       │     (Schema)
-              └────────────┬────────────┘
-                           │
-              ┌────────────┴────────────┐
-              │   EXECUTION ENGINE      │
-              │   (Order Generation)    │
-              └─────────────────────────┘
+    ┌───────────────────────┼───────────────────────┐
+    │                       │                       │
+    ▼                       ▼                       ▼
+ ┌───────┐  ┌──────────┐  ┌───────┐  ┌──────┐  ┌─────────────┐
+ │ MACRO │  │  MACRO   │  │ GEX   │  │SENT. │  │ STRUCTURAL  │
+ │ SENT. │  │NARRATIVE │  │ENGINE │  │ENGINE│  │ RISK ENGINE │
+ └──┬────┘  └────┬─────┘  └───┬───┘  └──┬───┘  └──────┬──────┘
+    │            │            │         │             │
+    └────────────┴────────────┬─────────┴─────────────┘
+                              │
+               ┌──────────────┴──────────────┐
+               │      CONSENSUS COUNCIL      │
+               │  ┌───────────────────────┐  │
+               │  │   BULLISH ADVOCATE    │  │
+               │  │   RED TEAM PESSIM.    │  │
+               │  │   NEUTRAL STRUCT.     │  │
+               │  └───────────────────────┘  │
+               └──────────────┬──────────────┘
+                              │
+               ┌──────────────┴──────────────┐
+               │ STATE & VALIDATION ROUTER   │
+               │      (Synthesis Node)       │
+               └──────────────┬──────────────┘
+                              │
+               ┌──────────────┴──────────────┐
+               │      EXECUTION ENGINE       │
+               │      (Order Generation)     │
+               └─────────────────────────────┘
 ```
 
 **Governance backbone:** The **Rule Enforcer** (`rule_enforcer_engine.md`) actively validates compliance, while `rules.md` serves as the authoritative legislative body containing the system thresholds, mandates, and enhancement protocols.
@@ -74,7 +62,7 @@ To prevent the LLM reasoning engines from hallucinating software structures whil
 ### The Live-Web SSoT Architecture (v8.6+)
 Unlike earlier versions that relied on static data, v8.6-Forensic-Zero-Hallucination-Sync implements **Grounding via Native Google Search**. Agents are now mandated to explicitly invoke Google Search to verify catalysts, news, and disconfirming evidence in real-time.
 *   **The Processor:** The sandboxed Gemini Web UI acts as a stateless, high-powered reasoning engine with live web access.
-*   **The Search Tool:** Agents like the `RED_TEAM_PESSIMIST` and `RESEARCH_ENGINE` use native Google Search to hunt for "Thesis-Killers" and verify catalyst URLs.
+*   **The Search Tool:** Agents like the `RED_TEAM_PESSIMIST` and `MACRO_NARRATIVE_ENGINE` use native Google Search to hunt for "Thesis-Killers" and verify catalyst URLs.
 *   **The Bridge:** The Python backend (`fetch_stocks.py`) injects your live state (`local_ssot_shadow.json`) and institutional memory (`trade_lessons.md`) directly into the markdown prompt it generates for you. 
 *   **The Sync:** Gemini outputs a strict `EXECUTION_PAYLOAD` JSON block or Markdown lessons for manual dashboard ingestion.
 
@@ -95,7 +83,7 @@ The system integrates core software engineering principles into its trading logi
 1. **Plan Node Default:** System dynamically generates a rigid "Trade Thesis" before execution and triggers re-planning if the thesis is violated.
 2.  **Subagent Strategy:** Employs "Dynamic Micro-Gem Routing" for borderline decisions (S_A 0.65–0.75) to spawn focused sub-engines to break ties.
 3.  **Self-Improvement Loop:** Conducts root-cause post-mortems on losses and natively appends the `trade_lessons.md` registry to the clipboard payload so the system never repeats mistakes.
-4.  **Verification Before Done:** The `TECHNICAL_VALIDATOR` is forced to "prove the setup" against quantitative restrictions seconds before executing a `FORCE_WRITE`.
+4.  **Verification Before Done:** The `STATE_VALIDATION_ROUTER` is forced to "prove the setup" against quantitative restrictions seconds before executing a `FORCE_WRITE`.
 5.  **Demand Elegance:** Explicitly rejects hacky or borderline setups relying on multiple overriding exceptions. Pushes for A+ convergence setups.
 6.  **Autonomous Bug Fixing:** Functions as a zero-prompt risk manager. Pre-formats a TRIM/EXIT JSON output if quantitative guards fail.
 
@@ -105,7 +93,7 @@ To solve for 15-minute index data delays while preventing algorithm decay from E
 2.  **Real-Time Velocity Proxy (`VIXY`)**: The short-term ETF derivative used to calculate real-time intraday Rate-of-Change percentage. The Macro Sentinel aggressively vetoes exposure against surging `VIXY` > +5%.
 
 ### Chain-of-Thought Enforcement
-The **Neutral Gem** and **Validator** must output a structured logic block:
+The **Neutral Gem** and **Router** must output a structured logic block:
 > **Reasoning Path:** 1. Regime Analysis → 2. Dealer Posture → 3. Liquidity Gap → 4. Verdict.
 
 ### 3. Devil's Advocate Protocols
@@ -124,7 +112,7 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 | `rules.md` | **Legislative Body** | N/A | **Static Rules**: The canonical source containing thresholds and ENH_ protocols. MUST be attached via Google Drive. |
 | `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `Gemini_Gem_Rules_Data` |
 | `data_analyst.md` | **Data Analyst** | PRO | Tier-1 Data Shield — retrieves and formats raw web data (SEC/Macro) via native Google Search to save reasoning tokens |
-| `context_engine.md` | **Context Engine** | PRO | Active SSoT bridge — drift detection, state merging, sync orchestration |
+| `state_validation_router.md` | **State & Validation Router** | PRO | Active SSoT bridge — drift detection, state merging, sync orchestration |
 | `bullish_gem.md` | **Bullish Advocate** | THINKING | Alpha & momentum specialist — identifies reasons to approve purchases |
 | `red_team_gem.md` | **Red Team Pessimist** | THINKING | Adversarial risk specialist — identifies reasons to reject purchases |
 | `neutral_gem.md` | **Neutral Structuralist** | PRO | Market architecture specialist — GEX, regime detection, liquidity |
@@ -132,10 +120,8 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 | `gex_engine.md` | **GEX Engine** | PRO | Gamma exposure computation — net GEX, gamma flip, dealer posture |
 
 | `macro_arbiter.md` | **Macro Sentinel** | PRO | Binary risk-on/risk-off veto — CPI, FOMC, FX, geopolitical shocks |
-| `sentiment_engine.md` | **Sentiment Engine** | PRO | Sentiment & catalyst extraction — news, social velocity, regulatory |
+| `macro_narrative_engine.md` | **Macro-Narrative Engine** | THINKING | Macro narrative, sector rotation, forensic signal attribution |
 | `structural_engine.md` | **Structural Risk Engine** | FAST | Forensic dilution detection — shelf offerings, warrant walls, PIPE |
-| `technical_validator.md` | **Technical Validator** | PRO | Data integrity, consensus synthesis, health score calculation |
-| `research.md` | **Research Engine** | THINKING | Macro narrative, sector rotation, forensic signal attribution |
 | `post_trade_review.md` | **Review Engine** | PRO | Post-trade reflection — thesis vs. outcome, misfire detection |
 
 ### Python Utilities
