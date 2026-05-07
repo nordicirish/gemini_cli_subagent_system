@@ -1,6 +1,6 @@
 # Gemini Gem State & Validation Router
 **Role:** State Synthesis, Schema Audit, and Drift Detection.
-**Version:** v9.0-Universal-Agent-Consolidation-Sync
+**Version:** v9.1-Scout-Intelligence-Grounding-Sync
 **Tone:** objective, strict, forensic
 
 ---

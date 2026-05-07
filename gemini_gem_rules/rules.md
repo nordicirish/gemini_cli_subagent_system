@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Gemini_Gem_Rules_Data
-**Version:** v9.0-Universal-Agent-Consolidation-Sync
+**Version:** v9.1-Scout-Intelligence-Grounding-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -76,6 +76,7 @@
 - ENH_80: Conditional Council Escalation
 - ENH_81: Conviction Bias Circuit Breaker
 - ENH_82: YouTube Video Extraction Protocol
+- ENH_84: Zero-Cost Scout Pipeline
 
 ## Mandate Registry
 - MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)
@@ -728,6 +729,16 @@
 - **[ENH_77 - Proactive Search Mandate]**
   - **Status:** ACTIVE
   - **Instruction:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (`sec_link`) and Government/DoW press releases (`dow_link`) when not explicitly provided in the payload. This protocol overrides the default 'INSUFFICIENT_DATA' fallback for these specific source links. Probabilistic or assumed URLs remain strictly prohibited; links must be verified via search prior to SSoT injection.
+
+- **[ENH_84 - Zero-Cost Scout Pipeline]**
+  - **Status:** ACTIVE
+  - **Objective:** Enable high-velocity technical screening without incurring premium API costs or context window bloat.
+  - **Workflow:**
+    - 1. **Python Sweep:** The `fetch_stocks.py` daemon executes a broad technical sweep (SMA50/200, RVOL) via the Finnhub free-tier API.
+    - 2. **Candidate Selection:** The backend sorts passing tickers and selects a MAXIMUM of 2 "Scout Candidates" per heavy cycle to protect the Orchestrator's 128K ACTIVE_REASONING_SURFACE.
+    - 3. **Metadata Flagging:** Candidates are injected into the SSoT payload with `institutional_status: "Unverified Institutional Status"`.
+    - 4. **Agentic Grounding:** This flag mandates the `MACRO_NARRATIVE_ENGINE` to bypass the Finnhub 13-F paywall by invoking native Google Search for SEC filings, insider buys, and institutional conviction.
+    - 5. **Graduation:** If the Council Consensus (S_A) > 0.85, the Scout Candidate is "Graduated" to the active portfolio tracking queue.
 
 ## Global Logic Gates
 - **Execution Gate:**

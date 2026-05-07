@@ -4,7 +4,7 @@
 
 Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. Working together as a structured council, the agents evaluate market conditions, interpret financial data, enforce risk protocols, and generate consensus‑driven insights to support informed investment decision‑making. The platform integrates seamlessly with your real‑time dashboard, enabling a disciplined, auditable, and context‑persistent approach to stock‑market intelligence. 
 
-Starting with **v9.0-Universal-Agent-Consolidation-Sync**, the system has fully consolidated its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`). This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
+Starting with **v9.1-Scout-Intelligence-Grounding-Sync**, the system has fully consolidated its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`). This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
 
 ---
 
@@ -76,6 +76,7 @@ The system now enforces **adversarial reasoning**, **volatility awareness**, and
 1. **Normalized Registry Sync**: Ensures zero-drift between the high-density `trade_lessons.md` (institutional memory) and the machine-executable `trade_lessons.json` fallback.
 2. **Flash-Tier Scrutiny (ENH_78)**: Hardens the data ingestion pipeline for high-velocity analysis, mandating cross-reference verification between live search and the SSoT.
 3. **Bifurcated Delivery**: Optimizes payload delivery by separating lightweight turn data from heavy session initialization context.
+4. **Scout Intelligence Pipeline (ENH_84)**: Implements autonomous, low-cost technical screening via the Finnhub API. Discovered candidates are injected into the SSoT with "Unverified Institutional Status" metadata to trigger mandatory agentic grounding.
 
 ### 🧠 Console Architecture Principles (v4.1+)
 
@@ -120,18 +121,19 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 | `macro_narrative_engine.md` | **Macro-Narrative Engine** | THINKING | Macro narrative, sector rotation, forensic signal attribution |
 | `structural_engine.md` | **Structural Risk Engine** | FLASH | Forensic dilution detection — shelf offerings, warrant walls, PIPE |
 | `post_trade_review.md` | **Review Engine** | PRO | Post-trade reflection — thesis vs. outcome, misfire detection |
+| `antigravity.md` | **Engine Custodian** | N/A | **The Grounding Guard**: Establishes the Antigravity persona to enforce mathematical rigor, logic sync, and scout integrity across all engines. |
 
 ### Python Utilities
 
 | File | Purpose |
 |------|---------|
-| `fetch_stocks.py` | **FastAPI Backend & Web Server** — Serves a real-time web dashboard at `http://localhost:8000`. Generates JSON prompt payloads and exposes an `/api/paste` route to ingest Gem execution payloads into the local SSoT. |
+| `fetch_stocks.py` | **FastAPI Backend & Scout Screening Engine** — Serves a real-time web dashboard at `http://localhost:8000`. Beyond data serving, it implements the **Zero-Cost Scout Pipeline (ENH_84)**, performing autonomous technical sweeps (SMA, RVOL) to identify high-momentum assets for Council review. |
 | `json_to_md_tool.py` | **Architectural Sync Tool** — Automatically converts JSON configuration files into the machine-executable Markdown format used by the Gems. Ensures parity between source data and agent instructions. |
 | `compare_json.py` | Diff utility — compares two JSON instruction files to detect missing or added values |
 | `format_json.py` | Formatter — pretty-prints a JSON instruction file with consistent indentation |
 ### 4. Updating Gems (Maintenance)
 
-> *"SYSTEM UPDATE: I have patched your instructions to v9.0-Universal-Agent-Consolidation-Sync. Please simulate the following logic update: [Paste critical logic change]"*
+> *"SYSTEM UPDATE: I have patched your instructions to v9.1-Scout-Intelligence-Grounding-Sync. Please simulate the following logic update: [Paste critical logic change]"*
 >
 > *(However, a full restart is recommended for major version changes).*
 
@@ -329,12 +331,12 @@ CRITICAL SYSTEM OVERRIDE: WIPE ALL PRIOR CONTEXT & FORCE SYNCHRONIZATION.
 
 Protocol Execution:
 1. ACKNOWLEDGE ARCHITECTURE: You are operating in a Web Sandbox environment. You MUST output all state changes as a strict JSON `EXECUTION_PAYLOAD` block so I can manually sync it via the local clipboard bridge.
-2. ACKNOWLEDGE SCHEMA: The system now uses the v9.0-Universal-Agent-Consolidation-Sync Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
+2. ACKNOWLEDGE SCHEMA: The system now uses the v9.1-Scout-Intelligence-Grounding-Sync Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
 3. ACTION (ZERO-TOUCH SYNC): Use your Google Drive extension to read the attached `rules.md` markdown document in the (Gemini_Gem_Rules) folder.
 4. VERIFICATION: Do NOT fabricate data. If you cannot read the file, STOP and output "TOOL FAILURE". 
    - Cite the exact `version` string verbatim from the top of the rules.md file.
    - Confirm which "ENH_" protocol governs the "Web Verification Protocol".
-5. Confirm Status: "System initialized: State is bound to v9.0-Universal-Agent-Consolidation-Sync Payload Architecture and SSoT Rules are synced via Drive."
+5. Confirm Status: "System initialized: State is bound to v9.1-Scout-Intelligence-Grounding-Sync Payload Architecture and SSoT Rules are synced via Drive."
 ```
 
 ### 🟧 Local Pipeline Setup (The Clipboard Bridge)
@@ -395,7 +397,12 @@ Upload the `antigravity.md` file along with your other project instructions to y
 **Trigger:** Whenever you need an update or refactor, start your prompt with:
 > "Antigravity, execute a Sync Protocol on [File Name] using the antigravity.md guardrails."
 
-**Result:** Antigravity will automatically hunt for hardcoded numbers, update forensic math proofs (MANDATE_06), and ensure engine versioning is consistent without you having to explain the 1.17% friction or FX logic every time.
+**Result:** Antigravity will automatically hunt for hardcoded numbers, update forensic math proofs (MANDATE_06), and ensure engine versioning is consistent.
+
+### 🛡️ Curator & Scout Protocols
+Starting with **v9.1**, Antigravity enforces the following system-wide behaviors:
+1. **The Curator Protocol (ENH_92)**: Authorizes the Orchestrator to expand concise summaries into multi-paragraph **Executive Reports** upon explicit user request (e.g., "Forensic deep-dive").
+2. **Scout Intelligence Integrity (ENH_84)**: Mandates the preservation and flagging of technical "Scout Candidates" from the Python backend to ensure they reach the Council for institutional grounding.
 
 ---
 

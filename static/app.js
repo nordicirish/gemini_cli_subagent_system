@@ -299,24 +299,47 @@ function formatVol(vol) {
     return vol.toString();
 }
 
-// Render the data table
-function renderTable(tickers) {
-    // If no tickers are processed yet, skip.
+// Render the data table with bifurcated sections
+function renderTable(tickers, state) {
     if (!tickers || !tickers.length) return;
 
-    // Filter out Macro trackers from main table to keep it focused on equities
-    // Uses the dynamically fetched list from the backend instead of hardcoding
+    // Get held tickers from portfolio snapshot
+    const ssot = state.local_storage_state || {};
+    const ms = ssot.mutable_state || {};
+    const portfolio = ms.portfolio_snapshot || [];
+    const heldTickers = new Set(portfolio.map(p => p.ticker.toUpperCase()));
+
+    // Get macro tickers to exclude
     const MACRO_TICKERS = currentMacroTickers && currentMacroTickers.length > 0 
-        ? currentMacroTickers 
-        : ['SPY', '^VIX', 'UUP', 'IEF', 'GLD', 'GDX'];
-    
-    const html = tickers.map(row => {
-        if (!row) return '';
-        
+        ? currentMacroTickers.map(t => t.toUpperCase())
+        : ['SPY', '^VIX', 'UUP', 'IEF', 'GLD', 'GDX'].map(t => t.toUpperCase());
+
+    // Group tickers
+    const groups = {
+        held: [],
+        watchlist: [],
+        scouts: []
+    };
+
+    tickers.forEach(t => {
+        const sym = t.ticker.toUpperCase();
+        if (MACRO_TICKERS.includes(sym)) return;
+
+        if (heldTickers.has(sym)) {
+            groups.held.push(t);
+        } else if (t.institutional_status === "Unverified Institutional Status") {
+            groups.scouts.push(t);
+        } else {
+            groups.watchlist.push(t);
+        }
+    });
+
+    let html = '';
+
+    const renderRow = (row) => {
         const sym = row.ticker;
         const p = row.price.toFixed(2);
         
-        // Determine price flashes
         let pClass = '';
         if(prevPrices[sym]) {
             if(p > prevPrices[sym]) pClass = 'flash-up';
@@ -324,23 +347,18 @@ function renderTable(tickers) {
         }
         prevPrices[sym] = p;
 
-        // Colors logic matching python rules
         let gapColor = row.gap_percent > 0 ? 'text-green' : (row.gap_percent < 0 ? 'text-red' : 'text-white');
-        
         let rsiColor = 'text-white';
         if (row.rsi >= 70) rsiColor = 'text-red';
         else if (row.rsi <= 30) rsiColor = 'text-green';
 
-        // Score badge
         let scoreStr = row.score > 0 ? `+${row.score}` : `${row.score}`;
         let scoreBadge = 'neutral';
         if (row.score >= 5) scoreBadge = 'positive';
         else if (row.score <= -5) scoreBadge = 'negative';
         
-        // Note tag
         const noteHtml = row.note ? `<span class="note-tag">${row.note}</span>` : '';
         
-        // Trend tag
         const isMacroInv = ['^VIX', 'UUP', 'IEF'].includes(sym);
         let trendHtml = '';
         if(row.trend === 'UP') {
@@ -352,9 +370,6 @@ function renderTable(tickers) {
         } else {
             trendHtml = `<span class="trend-tag flat">— Flat</span>`;
         }
-
-        // Hide macro tickers from main table
-        if(MACRO_TICKERS.includes(sym)) return '';
 
         return `
             <tr>
@@ -380,7 +395,28 @@ function renderTable(tickers) {
                 </td>
             </tr>
         `;
-    }).join('');
+    };
+
+    const renderHeader = (label) => `
+        <tr class="table-section-header">
+            <td colspan="10">${label}</td>
+        </tr>
+    `;
+
+    if (groups.held.length > 0) {
+        html += renderHeader('Institutional Portfolio');
+        groups.held.forEach(t => html += renderRow(t));
+    }
+
+    if (groups.watchlist.length > 0) {
+        html += renderHeader('Strategic Watchlist');
+        groups.watchlist.forEach(t => html += renderRow(t));
+    }
+
+    if (groups.scouts.length > 0) {
+        html += renderHeader('Scout Intelligence Candidates');
+        groups.scouts.forEach(t => html += renderRow(t));
+    }
 
     dTableBody.innerHTML = html;
 }
@@ -410,8 +446,8 @@ async function pollData() {
                 refreshContainer.style.display = state.is_heavy_refresh ? 'flex' : 'none';
             }
 
-            // Render table
-            renderTable(state.tickers);
+            // Render table with bifurcated sections
+            renderTable(state.tickers, state);
             
             // Render Macro HUD dynamic cards
             if (state.tickers) {

@@ -1256,88 +1256,88 @@
       "rule": "L-167: UMAC $75M PO confirms 'Material Readiness' as primary DIB moat over RTH technicals."
     },
     {
-      "id": 169,
+      "id": 168,
       "rule": "50% capital deployment to strategic materials creates a definitive inventory moat.",
       "tags": [
         "FUNDAMENTALS"
       ]
     },
     {
-      "id": 170,
+      "id": 169,
       "rule": "RSI > 70 in SPY mandates profit harvesting in 'Donor Assets' to protect clinical anchors.",
       "tags": [
         "EXECUTION"
       ]
     },
     {
-      "id": 171,
+      "id": 170,
       "rule": "Verify PR link metadata to distinguish between capital deployment and earnings dates.",
       "tags": [
         "TEMPORAL"
       ]
     },
     {
-      "id": 173,
+      "id": 171,
       "rule": "L-166"
     },
     {
-      "id": 175,
+      "id": 172,
       "rule": "L-151"
     },
     {
-      "id": 176,
+      "id": 173,
       "rule": "L-100"
     },
     {
-      "id": 177,
+      "id": 174,
       "rule": "L-167 (Applied: $75M PO validation)"
     },
     {
-      "id": 178,
+      "id": 175,
       "rule": "L-169 (Applied: Inventory moat strategy)"
     },
     {
-      "id": 179,
+      "id": 176,
       "rule": "L-128 (Warning: Scaling Margin Trap for May 13)"
     },
     {
-      "id": 180,
+      "id": 177,
       "rule": "L-166 (Earnings Acceleration Check)"
     },
     {
-      "id": 182,
+      "id": 178,
       "rule": "L-167 ($75M PO Moat Validation)"
     },
     {
-      "id": 183,
+      "id": 179,
       "rule": "L-128 (Scaling Margin Trap Warning)"
     },
     {
-      "id": 184,
+      "id": 180,
       "rule": "L-145 (Sovereign Validation)"
     },
     {
-      "id": 185,
+      "id": 181,
       "rule": "L-150 (Balikatan Validation)"
     },
     {
-      "id": 186,
+      "id": 182,
       "rule": "L-167 (Material Readiness)"
     },
     {
-      "id": 187,
+      "id": 183,
       "rule": "L-128 (Scaling Margin Trap)"
     },
     {
-      "id": 188,
+      "id": 184,
       "rule": "L-167 (Strategic PO Validation)"
     },
     {
-      "id": 190,
+      "id": 185,
       "rule": "L-166 (Earnings Date Lock)"
     },
     {
-      "id": 195,
+      "id": 186,
       "rule": "L-197: Gov grants provide long-term PoR graduation path (L-108), but do not override the medium-term Scaling Margin Trap (L-128).",
       "tags": [
         "DIB",
@@ -1347,41 +1347,59 @@
       ]
     },
     {
-      "id": 200,
+      "id": 187,
       "rule": "L-192: VWAP PIN at 13.52 confirms temporary equilibrium."
     },
     {
-      "id": 201,
+      "id": 188,
       "rule": "L-193: UMAC $13.63 reclaim of VWAP confirms intraday RS."
     },
     {
-      "id": 202,
+      "id": 189,
       "rule": "L-194: PoR probability weighted at 65% based on $75M PO (L-167)."
     },
     {
-      "id": 203,
+      "id": 190,
       "rule": "L-195: USV production time reduction (700 to 400 hrs) validates Mass-Production Floor."
     },
     {
-      "id": 204,
+      "id": 191,
       "rule": "L-196: Gov grants/loans probability high (>70%) per Sec. 848 (L-105)."
     },
     {
-      "id": 205,
+      "id": 192,
       "rule": "L-197: Gov grants provide long-term PoR graduation path (L-108)."
     },
     {
-      "id": 207,
+      "id": 193,
       "rule": "L-199: High-volume accumulation in DIB (UMAC/RCAT) validates Industrial Graduation (L-108)."
     },
     {
-      "id": 226,
+      "id": 194,
       "rule": "[CODIFIED: MELT_UP_REGIME_ADAPTATION] An SPY RSI > 75.00 no longer triggers automatic buy-side stasis or mandatory liquidations. If the NEUTRAL_STRUCTURALIST classifies the market regime as TRENDING or VOL_EXPANSION driven by liquidity surges or thematic momentum, extreme RSI readings must be treated as trend continuation rather than exhaustion. The BULLISH_ADVOCATE is authorized to participate in breakouts and accumulate high-beta exposure as long as the VIX remains stable and the ENH_FIN_02 Alpha-Friction hurdle is cleared.",
       "tags": [
         "macro",
         "regime",
         "melt-up"
       ]
+    },
+    {
+      "rule_id": "L-230",
+      "title": "Gamma Decoupling in Melt-Up Regimes",
+      "mandate": "If the broader index (SPY) crosses into negative Net GEX (SHORT_GAMMA) while the VIX remains suppressed below the 20.0 Bunker Threshold, asset-level LONG_GAMMA dealer posture overrides index weakness. Tier-1 secular growth and AI-infrastructure assets (e.g., MU) must be HELD; preemptive technical liquidation is mathematically prohibited.",
+      "tags": [
+        "#MACRO / #REGIME"
+      ],
+      "id": 195
+    },
+    {
+      "rule_id": "L-120",
+      "title": "The OEM Multiplier Effect",
+      "mandate": "Under the Drone Dominance Program (DDP) framework, international and NATO-allied OEM contract wins (e.g., XTEND European expansion) must be mathematically treated as direct fundamental backlog expansions for NDAA-compliant Component Primes (UMAC). Do not wait for the component supplier to issue a separate PR; the value is already captured.",
+      "tags": [
+        "#VALUATION / #SUPPLY-CHAIN"
+      ],
+      "id": 196
     }
   ]
 }

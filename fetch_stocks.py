@@ -1,3 +1,4 @@
+import asyncio
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -53,7 +54,22 @@ MACRO_TICKERS = config.get("MACRO_TICKERS", [
     'GDX'
 ])
 
-ALL_TICKERS = TICKERS + MACRO_TICKERS
+SCOUT_TICKERS = []
+# Load SCOUT_TICKERS from local SSoT if available (Persistence Mandate)
+if os.path.exists('local_ssot_shadow.json'):
+    try:
+        with open('local_ssot_shadow.json', 'r') as f:
+            ssot_data = json.load(f)
+            # Check both root and mutable_state for scouted_assets_tracked
+            scouts = ssot_data.get("scouted_assets_tracked")
+            if not scouts and "mutable_state" in ssot_data:
+                scouts = ssot_data["mutable_state"].get("scouted_assets_tracked")
+            if isinstance(scouts, list):
+                SCOUT_TICKERS = [s for s in scouts if isinstance(s, str)]
+    except:
+        pass
+
+ALL_TICKERS = list(dict.fromkeys(TICKERS + MACRO_TICKERS + SCOUT_TICKERS)) # Deduplicated order
 INVERSE_MACRO = ['^VIX', 'VIXY', 'UUP', 'IEF']
 
 MACRO_LABELS = {
@@ -253,6 +269,12 @@ async def handle_paste(req: Request):
                 data["state_context"] = data.pop("terminal_state")
             if "forensic_alerts" in data and "forensic_intelligence" not in data:
                 data["forensic_intelligence"] = data.pop("forensic_alerts")
+            if "allocations" in data and "portfolio_snapshot" not in data:
+                data["portfolio_snapshot"] = data.pop("allocations")
+            if "unallocated_cash_eur" in data and "remaining_cash_eur" not in data:
+                data["remaining_cash_eur"] = data["unallocated_cash_eur"]
+            if "unallocated_cash_usd" in data and "remaining_cash_usd" not in data:
+                data["remaining_cash_usd"] = data["unallocated_cash_usd"]
         
         map_aliases(payload)
         if isinstance(payload.get("mutable_state"), dict):
@@ -288,6 +310,8 @@ async def handle_paste(req: Request):
                                     # Normalize Gem keys
                                     if "content" in item and "rule" not in item:
                                         item["rule"] = item.pop("content")
+                                    if "mandate" in item and "rule" not in item:
+                                        item["rule"] = item.get("mandate") # Keep mandate but ensure rule is set
                                     if "category" in item:
                                         cat = item.pop("category")
                                         if "tags" not in item: item["tags"] = []
@@ -302,6 +326,8 @@ async def handle_paste(req: Request):
                             else:
                                 if "content" in v and "rule" not in v:
                                     v["rule"] = v.pop("content")
+                                if "mandate" in v and "rule" not in v:
+                                    v["rule"] = v.get("mandate")
                                 found_lessons.append(v)
                     keys_to_prune.append(k)
                 elif k in ("mutable_state", "EXECUTION_PAYLOAD") and isinstance(v, dict):
@@ -381,7 +407,9 @@ async def handle_paste(req: Request):
             "runtime_flags", "macro_calendar_shield", "active_orders",
             "fin_account_gate", "registry_pointers", "overnight_posture",
             "strategy_timing", "lesson_integration", "immutable_background", "mutable_state",
-            "remaining_cash_usd", "_meta"
+            "remaining_cash_usd", "remaining_cash_eur", "unallocated_cash_eur", "unallocated_cash_usd", 
+            "portfolio_total_value_usd", "portfolio_total_value_eur", "base_currency", "exchange_rate",
+            "scouted_assets_tracked", "risk_metrics", "directive", "timestamp", "EXECUTION_PAYLOAD", "_meta"
         }
         
         # Prune from root
@@ -412,6 +440,15 @@ async def handle_paste(req: Request):
 
         with open('local_ssot_shadow.json', 'w') as f:
             json.dump(merged_ssot, f, indent=2)
+        
+        # ENH_84: Immediate Memory Sync for Scouts
+        new_scouts = merged_ssot.get("scouted_assets_tracked")
+        if not new_scouts and "mutable_state" in merged_ssot:
+            new_scouts = merged_ssot["mutable_state"].get("scouted_assets_tracked")
+        if isinstance(new_scouts, list):
+            global SCOUT_TICKERS, ALL_TICKERS
+            SCOUT_TICKERS = list(set(new_scouts))
+            ALL_TICKERS = list(dict.fromkeys(TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
             
         def _normalize_lessons(lessons_list):
             normalized = []
@@ -426,6 +463,8 @@ async def handle_paste(req: Request):
                         new_item["rule"] = new_item.pop("lesson")
                     if "rule" not in new_item and "content" in new_item:
                         new_item["rule"] = new_item.pop("content")
+                    if "rule" not in new_item and "mandate" in new_item:
+                        new_item["rule"] = new_item.get("mandate")
                     if "category" in new_item:
                         cat = new_item.pop("category")
                         if "tags" not in new_item: new_item["tags"] = []
@@ -940,7 +979,7 @@ def get_finnhub_quote(symbol):
         return None, None
     try:
         url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_API_KEY}"
-        r = session.get(url, timeout=2)
+        r = requests.get(url, timeout=2) # Changed session.get to requests.get for simplicity if session isn't defined globally
         if r.status_code != 200:
             return None, None
         data = r.json()
@@ -951,6 +990,106 @@ def get_finnhub_quote(symbol):
     except:
         pass
     return None, None
+
+def get_finnhub_candles(symbol, resolution='D', count=250):
+    if not USE_FINNHUB:
+        return None
+    try:
+        to_ts = int(t_time.time())
+        from_ts = to_ts - (count * 24 * 3600 * 1.5)
+        url = f"https://finnhub.io/api/v1/stock/candle?symbol={symbol}&resolution={resolution}&from={int(from_ts)}&to={to_ts}&token={FINNHUB_API_KEY}"
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get('s') == 'ok':
+                return data
+    except:
+        pass
+    
+    # Fallback to yfinance if Finnhub fails (Zero-Cost Protocol Guard)
+    try:
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period="1y", interval="1d")
+        if not df.empty and len(df) >= count:
+            return {
+                's': 'ok',
+                'c': df['Close'].tolist(),
+                'v': df['Volume'].tolist()
+            }
+    except:
+        pass
+    return None
+
+async def run_finnhub_scout_sweep(target_sectors):
+    """
+    ENH_84: Zero-Cost Scout Sweep.
+    Natively calculates SMA50/200 and RVOL from Finnhub OHLCV.
+    Returns max 2 candidates to prevent context bloat.
+    """
+    global SCOUT_TICKERS, ALL_TICKERS
+    
+    # Generic sector mapping for the sweep
+    sector_map = {
+        "DIB": ["RCAT", "UMAC", "ONDS", "AVAV", "KTOS", "BA", "LMT", "NOC", "GD", "LHX"],
+        "BIOTECH": ["DFTX", "BNTX", "MRNA", "VRTX", "AMGN", "REGN", "GILD"],
+        "AI": ["PLTR", "SOUN", "BBAI", "NVDA", "MSFT", "GOOGL", "AMD"]
+    }
+    
+    tickers_to_scan = []
+    for sector in target_sectors:
+        tickers_to_scan.extend(sector_map.get(sector.upper(), []))
+    
+    # Remove duplicates and already watched tickers
+    # Remove duplicates and already watched tickers
+    # Use lowercase comparison to ensure zero collisions
+    current_all_upper = [t.upper() for t in ALL_TICKERS]
+    tickers_to_scan = [t for t in tickers_to_scan if t.upper() not in current_all_upper]
+    
+    candidates = []
+    for symbol in tickers_to_scan:
+        # Rate Limit Protection: 30 calls/sec -> throttle to 0.05s
+        await asyncio.sleep(0.05) 
+        
+        candles = get_finnhub_candles(symbol)
+        if not candles or candles.get('s') != 'ok':
+            continue
+            
+        c = candles.get('c', [])
+        v = candles.get('v', [])
+        if len(c) < 200:
+            continue
+            
+        # Calculate Technicals natively
+        sma50 = sum(c[-50:]) / 50
+        sma200 = sum(c[-200:]) / 200
+        last_price = c[-1]
+        
+        # Calculate RVOL (Current Vol / 20-day Avg Vol)
+        avg_vol_20 = sum(v[-21:-1]) / 20
+        last_vol = v[-1]
+        rvol = last_vol / avg_vol_20 if avg_vol_20 > 0 else 0
+        
+        # Filtering logic: Golden Cross or high RVOL momentum
+        if (last_price > sma50 > sma200) or (rvol > 2.5 and last_price > sma50):
+            candidates.append({
+                "ticker": symbol,
+                "score": rvol + (1.0 if last_price > sma50 else 0)
+            })
+            
+    # Strictly cap at 2 candidates per protocol
+    candidates.sort(key=lambda x: x['score'], reverse=True)
+    new_scouts = [cand['ticker'] for cand in candidates[:2]]
+    
+    # Integrate into processing queue
+    if new_scouts:
+        print(f"\n{CYAN}[ENH_84] Scout Integration: Found {new_scouts}{RESET}")
+        for s in new_scouts:
+            if s not in SCOUT_TICKERS:
+                SCOUT_TICKERS.append(s)
+        # Update systemic ALL_TICKERS queue (Deduplicated)
+        ALL_TICKERS = list(dict.fromkeys(TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+    
+    return new_scouts
 
 def get_polygon_history_df(symbol):
     if not USE_POLYGON:
@@ -1584,6 +1723,10 @@ def fetch_stocks(state):
             "rsi": t.get("rsi")
         }
         
+        # ENH_84: Inject Unverified Flag for Scout Candidates (Hardened Normalized Check)
+        if ticker_symbol.strip().upper() in [s.strip().upper() for s in SCOUT_TICKERS]:
+            ticker_payload["institutional_status"] = "Unverified Institutional Status"
+        
         if hist_ctx:
             ticker_payload["historical_context"] = hist_ctx
             
@@ -1629,7 +1772,6 @@ def fetch_stocks(state):
     
     trade_lessons_md = "\n".join(md_lines)
     
-    print(f"PAYLOAD SYNC: Packaging {len(lessons)} trade lessons for LLM context.")
 
     # Return bifurcated structure + full state for dashboard compatibility
     output = {
@@ -1751,8 +1893,10 @@ def calculate_score(symbol):
 # -----------------------------
 def run_daemon():
     global GLOBAL_STATE
-    print(f"{CYAN}Initializing Gemini Gem Dashboard v16.0 (Data Hardened + Trend)...{RESET}")
+    print(f"{CYAN}Initializing Gemini Gem Dashboard v18.0 (Scout Intelligence Grounding)...{RESET}")
     tickers_obj = {sym: yf.Ticker(sym) for sym in ALL_TICKERS}
+    if SCOUT_TICKERS:
+        print(f"{CYAN}[ENH_84] Active Scouts Tracked: {SCOUT_TICKERS}{RESET}")
 
     print(f"{YELLOW}Performing initial heavy fetch...{RESET}")
     for sym, obj in tickers_obj.items():
@@ -1794,26 +1938,37 @@ def run_daemon():
 
     try:
         while True:
-            # Sync tickers_obj with ALL_TICKERS
-            for sym in ALL_TICKERS:
-                if sym not in tickers_obj:
-                    tickers_obj[sym] = yf.Ticker(sym)
-            keys_to_remove = [sym for sym in list(tickers_obj.keys()) if sym not in ALL_TICKERS]
-            for sym in keys_to_remove:
-                del tickers_obj[sym]
-
             os.system('cls' if os.name == 'nt' else 'clear')
             print("\033[?25l", end="", flush=True)
             ny_now = datetime.now(ZoneInfo("America/New_York"))
             status = get_market_status()
 
             cache.cycles += 1
-            is_heavy = (cache.cycles % HISTORY_REFRESH_CYCLES == 0)
+            # Trigger heavy refresh on first cycle or every 10th cycle
+            is_heavy = (cache.cycles == 1 or cache.cycles % HISTORY_REFRESH_CYCLES == 0)
 
             # Immediately notify frontend that heavy fetching has begun
-            if is_heavy and GLOBAL_STATE.get("tickers"):
-                GLOBAL_STATE["is_heavy_refresh"] = True
-                GLOBAL_STATE["is_heavy_refresh"] = True
+            if is_heavy:
+                if GLOBAL_STATE.get("tickers"):
+                    GLOBAL_STATE["is_heavy_refresh"] = True
+                
+                # ENH_84: Run Zero-Cost Scout Sweep on Heavy Cycle
+                try:
+                    # Target current core sectors for scouting
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(run_finnhub_scout_sweep(["DIB", "BIOTECH", "AI"]))
+                    loop.close()
+                except Exception as e:
+                    print(f"{RED}Scout Sweep Error: {e}{RESET}")
+
+            # Sync tickers_obj with ALL_TICKERS (Moved after scout sweep for immediate processing)
+            for sym in ALL_TICKERS:
+                if sym not in tickers_obj:
+                    tickers_obj[sym] = yf.Ticker(sym)
+            keys_to_remove = [sym for sym in list(tickers_obj.keys()) if sym not in ALL_TICKERS]
+            for sym in keys_to_remove:
+                del tickers_obj[sym]
 
             BATCH_SIZE = 10
 
@@ -1857,7 +2012,9 @@ def run_daemon():
                 mode_str = f"Tick Update (VWAP Batch: {batch[0]}...)"
 
             remaining_tickers = [s for s in ALL_TICKERS if s not in batch]
-            print(f"\n{BOLD}Gemini Gem Dashboard (v17.1 - Institutional [Optional Social]){RESET}")
+            print(f"\n{BOLD}Gemini Gem Dashboard (v18.0 - Scout Intelligence Grounding){RESET}")
+            if SCOUT_TICKERS:
+                print(f"{CYAN}Active Scouts: {SCOUT_TICKERS}{RESET}")
             print(f"Time: {ny_now.strftime('%H:%M:%S')} | Status: {status_color}{status}{RESET}")
             print(f"Mode: {mode_str}")
             if remaining_tickers and not is_heavy:

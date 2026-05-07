@@ -23,12 +23,13 @@ def convert_json_to_md(json_path, md_path):
             current_category = 'other'
             for line in f:
                 line = line.strip()
+                if not line: continue
                 if line.startswith('## #'):
                     current_category = line[4:].lower()
                 elif line.startswith('- **L-'):
                     md_lessons.append((current_category, line))
     
-    # Track existing IDs and text in MD to avoid duplicates
+    # Track existing IDs and text in MD
     existing_md_ids = set()
     existing_md_text = set()
     for _, line in md_lessons:
@@ -42,62 +43,85 @@ def convert_json_to_md(json_path, md_path):
 
     # 2. Group JSON rules
     categories = defaultdict(list)
-    PRIMARY_CATEGORIES = ['volatility', 'defense', 'fundamentals', 'macro', 'risk-management', 'catalysts', 'technical', 'gamma', 'system-design']
+    PRIMARY_CATEGORIES = ['volatility', 'defense', 'fundamentals', 'macro', 'risk-management', 'catalysts', 'technical', 'gamma', 'system-design', 'position-sizing', 'biotech', 'valuation', 'supply-chain']
 
+    json_ids = set()
     for lesson in lessons:
-        lesson_id = lesson.get('id', '?')
-        rule = lesson.get('rule', lesson.get('lesson', ''))
-        tags = lesson.get('tags', [])
+        lesson_id = lesson.get('id')
+        if isinstance(lesson_id, int):
+            json_ids.add(lesson_id)
         
-        # Skip if already in MD manually (by ID or text)
-        if isinstance(lesson_id, int) and lesson_id in existing_md_ids:
-            continue
-        rule_text_only = rule.strip().lower()
-        if rule_text_only in existing_md_text:
-            continue
+        # Determine best rule text
+        rule = lesson.get('rule', lesson.get('lesson', lesson.get('mandate', lesson.get('content', ''))))
+        title = lesson.get('title', '')
+        if title and rule:
+            rule = f"{title}: {rule}"
+        elif title:
+            rule = title
             
+        lesson['_final_rule'] = rule # Store for later
+        
+        tags = lesson.get('tags', [])
         primary = "other"
         for tag in tags:
-            t_lower = tag.lower()
+            t_lower = tag.lower().replace('#', '')
             if t_lower in PRIMARY_CATEGORIES:
                 primary = t_lower
                 break
         else:
             if tags:
-                primary = tags[0].lower()
+                primary = tags[0].lower().replace('#', '')
         
         categories[primary].append(lesson)
 
     # 3. Generate new MD content
     md_lines = ["# 📘 Trade Lessons Registry", ""]
     
-    all_categories = set(categories.keys())
-    for cat, _ in md_lessons:
-        all_categories.add(cat)
-        
-    sorted_categories = sorted(list(all_categories), key=lambda x: (x not in ['volatility', 'defense', 'fundamentals'], x))
+    # Categories to display
+    all_categories = sorted(list(set(list(categories.keys()) + [c for c, _ in md_lessons])), 
+                            key=lambda x: (x not in PRIMARY_CATEGORIES, x))
 
-    for category in sorted_categories:
+    for category in all_categories:
         md_lines.append(f"## #{category.upper()}")
         
-        # Add existing MD lessons for this category
-        for cat, line in md_lessons:
-            if cat == category:
-                md_lines.append(line)
-                
-        # Add JSON lessons for this category
+        # Track what we've added to this category to avoid duplicates
+        added_in_cat = set()
+
+        # Add JSON lessons first (SSoT)
         if category in categories:
             for lesson in categories[category]:
                 lesson_id = lesson.get('id', '?')
-                rule = lesson.get('rule', lesson.get('lesson', ''))
+                rule = lesson.get('_final_rule', '')
                 tags = lesson.get('tags', [])
                 
-                tag_str = " ".join([f"#{t}" for t in tags]) if tags else ""
+                # Clean tags
+                clean_tags = []
+                for t in tags:
+                    t = t.strip()
+                    if not t: continue
+                    if not t.startswith('#'): t = f"#{t}"
+                    clean_tags.append(t)
                 
-                if rule.startswith("L-") and ":" in rule:
-                    md_lines.append(f"- **L-{lesson_id}:** {rule} {tag_str}".strip())
+                tag_str = " ".join(clean_tags)
+                
+                line = f"- **L-{lesson_id}:** {rule} {tag_str}".strip()
+                md_lines.append(line)
+                if isinstance(lesson_id, int):
+                    added_in_cat.add(lesson_id)
+                
+        # Add existing MD lessons ONLY if they aren't in the JSON (Manual additions)
+        for cat, line in md_lessons:
+            if cat == category:
+                match = re.search(r'-\s*\*\*L-(\d+):\*\*\s*', line)
+                if match:
+                    lid = int(match.group(1))
+                    if lid not in json_ids and lid not in added_in_cat:
+                        md_lines.append(line)
+                        added_in_cat.add(lid)
                 else:
-                    md_lines.append(f"- **L-{lesson_id}:** {rule} {tag_str}".strip())
+                    # Naked line or something weird, keep it if not already added by text? 
+                    # For simplicity, if it doesn't have an L-id we recognize, we'll keep it.
+                    md_lines.append(line)
                     
         md_lines.append("")
         md_lines.append("---")
@@ -110,7 +134,8 @@ def convert_json_to_md(json_path, md_path):
     with open(md_path, 'w', encoding='utf-8') as f:
         f.write("\n".join(md_lines) + "\n")
     
-    print(f"Successfully converted and merged {len(lessons)} lessons to {md_path}")
+    print(f"Successfully synchronized {len(lessons)} lessons from JSON to {md_path}")
+
 
 if __name__ == "__main__":
     convert_json_to_md('trade_lessons.json', 'trade_lessons.md')

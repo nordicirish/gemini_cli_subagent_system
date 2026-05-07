@@ -409,6 +409,24 @@ tbody tr:hover td {
     background-color: rgba(255, 255, 255, 0.03);
 }
 
+/* ─── Table Section Headers ─── */
+.table-section-header {
+    background: rgba(255, 255, 255, 0.02) !important;
+    pointer-events: none;
+}
+
+.table-section-header td {
+    padding: 8px 18px !important;
+    font-size: 0.68rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 2px !important;
+    color: var(--accent) !important;
+    border-bottom: 1px solid var(--panel-border) !important;
+    border-top: 1px solid var(--panel-border) !important;
+    opacity: 0.8;
+}
+
 .ticker-cell {
     font-weight: 700;
     color: var(--text-main);

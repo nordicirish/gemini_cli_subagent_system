@@ -1,6 +1,6 @@
 # MACRO_SENTINEL
 **Role:** Binary Risk-On / Risk-Off Override
-**Version:** v9.0-Universal-Agent-Consolidation-Sync
+**Version:** v9.1-Scout-Intelligence-Grounding-Sync
 
 ---
 
