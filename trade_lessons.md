@@ -32,7 +32,7 @@
 ---
 
 ## #AFTER-HOURS
-- **L-198:** L-201: After-hours SPY RSI 71.43 maintains L-172 breach; absolute freeze remains primary directive. #AFTER-HOURS #RSI #VETO #STASIS
+
 
 ---
 
@@ -179,6 +179,7 @@
 - **L-126:** CODIFIED: YIELD_DECOUPLING - Clinical proxies decouple from SPY LONG_GAMMA during Treasury Auction Tails. #yields #macro #gamma
 - **L-132:** [CODIFIED: DIB_CORRELATION_CASCADE] If SPY Net GEX < -$10B, apply 0.7x sizing multiplier to all DIB assets (UMAC/RCAT/ONDS). #DIB #correlation #GEX #macro
 - **L-161:** Treasury auction tails mandate 120-min execution freeze. #MACRO
+- **L-226:** [CODIFIED: MELT_UP_REGIME_ADAPTATION] An SPY RSI > 75.00 no longer triggers automatic buy-side stasis or mandatory liquidations. If the NEUTRAL_STRUCTURALIST classifies the market regime as TRENDING or VOL_EXPANSION driven by liquidity surges or thematic momentum, extreme RSI readings must be treated as trend continuation rather than exhaustion. The BULLISH_ADVOCATE is authorized to participate in breakouts and accumulate high-beta exposure as long as the VIX remains stable and the ENH_FIN_02 Alpha-Friction hurdle is cleared. #macro #regime #melt-up
 
 ---
 
@@ -223,17 +224,15 @@
 - **L-159:** [CODIFIED: SECTOR_CONFLATION_GUARD] Verify ticker identity for shared reporting dates (e.g., CRSR vs UMAC) during peak weeks.
 - **L-160:** [CODIFIED: CASH_RUNWAY_OVERRIDE] Small-cap defense firms with >$200M cash and zero debt (UMAC) decouple from the 'Yield-Valuation Trap' during sovereign defense cycles.
 - **L-167:** L-167: UMAC $75M PO confirms 'Material Readiness' as primary DIB moat over RTH technicals.
-- **L-168:** L-168: SPY RSI > 68 mandates freeze on new high-beta risk regardless of idiosyncratic 8-Ks.
-- **L-172:** L-172: SPY RSI 71.18 confirmed as absolute barrier for high-beta DIB expansion.
 - **L-173:** L-166
-- **L-174:** L-172
+
 - **L-175:** L-151
 - **L-176:** L-100
 - **L-177:** L-167 (Applied: $75M PO validation)
 - **L-178:** L-169 (Applied: Inventory moat strategy)
 - **L-179:** L-128 (Warning: Scaling Margin Trap for May 13)
 - **L-180:** L-166 (Earnings Acceleration Check)
-- **L-181:** L-172 (SPY RSI Absolute Barrier)
+
 - **L-182:** L-167 ($75M PO Moat Validation)
 - **L-183:** L-128 (Scaling Margin Trap Warning)
 - **L-184:** L-145 (Sovereign Validation)
@@ -241,9 +240,9 @@
 - **L-186:** L-167 (Material Readiness)
 - **L-187:** L-128 (Scaling Margin Trap)
 - **L-188:** L-167 (Strategic PO Validation)
-- **L-189:** L-172 (SPY RSI Barrier)
+
 - **L-190:** L-166 (Earnings Date Lock)
-- **L-199:** L-191: SPY RSI 71.65 confirms L-172 breach; absolute freeze active.
+
 - **L-200:** L-192: VWAP PIN at 13.52 confirms temporary equilibrium.
 - **L-201:** L-193: UMAC $13.63 reclaim of VWAP confirms intraday RS.
 - **L-202:** L-194: PoR probability weighted at 65% based on $75M PO (L-167).
@@ -252,9 +251,7 @@
 - **L-205:** L-197: Gov grants provide long-term PoR graduation path (L-108).
 - **L-206:** L-198: SPY RSI 71.90 confirms high-conviction VETO.
 - **L-207:** L-199: High-volume accumulation in DIB (UMAC/RCAT) validates Industrial Graduation (L-108).
-- **L-208:** L-200: Session close with SPY RSI 71.84 confirms L-172 breach.
-- **L-209:** L-209: [CODIFIED: EXTREME_MACRO_TRIM] When SPY RSI exceeds 75.00, it triggers an 'Extreme Toxicity' state. This overrides all 'Anchor' and 'Sovereign' hold exemptions (such as L-165). Initiate a mandatory proactive trim of 10% to 15% on all high-beta and DIB assets to manually force the generation of unallocated_cash_eur ahead of the structural flush. #MACRO #RISK-MANAGEMENT #TRIMMING
-- **L-210:** L-210: [CODIFIED: CONTRADICTION_HARVEST] If an asset is hitting intraday highs (e.g., UMAC clearing VWAP) while simultaneously facing a known fundamental drag (L-128 Scaling Margin Trap) AND a macro veto (L-172 SPY RSI > 71.18), the system must utilize the localized strength to trim the position, converting the fundamental risk into liquidity. #HARVESTING #RISK-MANAGEMENT #FUNDAMENTALS #MACRO
+
 
 ---
 
@@ -266,7 +263,7 @@
 
 ## #RCAT
 - **L-112:** [CODIFIED: RULE_168] In sympathetic baskets, the second ticker's 1% distance to SSR is the 'Pivot of Maximum Pessimism'; avoid selling into trigger. #RCAT #psychology #SSR
-- **L-194:** L-195: USV production time reduction (700 to 400 hrs) validates Mass-Production Floor; RSI-172 veto remains active. #RCAT #UMAC #PRODUCTION #VETO
+- **L-194:** L-195: USV production time reduction (700 to 400 hrs) validates Mass-Production Floor. #RCAT #UMAC #PRODUCTION
 
 ---
 
@@ -278,7 +275,7 @@
 
 ## #RISK
 - **L-164:** Concurrent SPY/IEF Short Gamma alignment functions as primary Bunker Trigger. #RISK
-- **L-191:** L-191: SPY RSI 71.65 confirms L-172 breach; absolute freeze on DIB expansion active. #RISK #SPY #RSI
+
 
 ---
 
@@ -351,7 +348,7 @@
 - **L-99:** The Gamma Pivot (Neutral): Transition from Short to Neutral Gamma during sector showcase confirms institutional absorption. #GEX #RCAT #technical
 - **L-104:** R1 Pivot ($15.09 for UMAC) in Summit sessions serves as the primary retail Take Profit node. #momentum #technical #R1
 - **L-162:** $14.00 UMAC node converted to active resistance; requires VWAP reclaim. #TECHNICAL
-- **L-192:** L-192: VWAP PIN at 13.52 confirms temporary equilibrium; RSI-172 barrier remains active. #UMAC #TECHNICAL #VETO
+- **L-192:** L-192: VWAP PIN at 13.52 confirms temporary equilibrium. #UMAC #TECHNICAL
 
 ---
 
@@ -378,7 +375,7 @@
 
 ## #UMAC
 - **L-106:** [CODIFIED: RULE_158] Audit GAAP profits for investment-gain masking; normalize for non-GAAP operational break-even.
-- **L-193:** L-193: UMAC $13.63 reclaim of VWAP confirms intraday RS, but SPY-172 Veto prevents expansion. #UMAC #RS #VETO
+- **L-193:** L-193: UMAC $13.63 reclaim of VWAP confirms intraday RS. #UMAC #RS
 
 ---
 
@@ -390,13 +387,8 @@
 
 ---
 
-## #VETO
-- **L-196:** L-196: [CODIFIED: VETO_STASIS_CLARIFICATION] SPY RSI > 71.18 enforces an absolute freeze on new capital deployment (buy-side stasis). It does not restrict sell-side operations. Defensive cash generation is permitted and encouraged during stasis. #VETO #RSI #STASIS
-
----
-
 ## #VOLUME
-- **L-197:** L-199: High-volume accumulation in DIB (UMAC/RCAT) validates Industrial Graduation (L-108), but SPY RSI-172 barrier enforces absolute HOLD. #VOLUME #DIB #RSI #VETO
+- **L-197:** L-199: High-volume accumulation in DIB (UMAC/RCAT) validates Industrial Graduation (L-108). #VOLUME #DIB
 
 ---
 

@@ -51,6 +51,8 @@
 - **Sentiment Veto Logic:** Execute a HARD VETO (Fatal Flaw > 8.0) if sentiment_divergence_flag is TRUE. IF 'social_velocity_z_score' is provided: Use it as a contrarian indicator for 'Blow-off Tops'.
 - **Liquidity Void Logic:** Trigger 'Liquidity Void Scan' during VOL_COMPRESSION. Issue Fatal Flaw Score > 8 if Order Book Depth < Gemini_Gem_Rules_Data.system_thresholds.LIQUIDITY_VOID_DEPTH_PCT of 10-day Avg Liquidity.
 - **Context Sufficiency Check:** Before formulating your Stage 2 Rebuttal, explicitly evaluate whether the retrieved documents (the SSoT and the DATA_PACKET) contain sufficient hard evidence to support the Bullish Advocate's claims. If the provided context is insufficient, ambiguous, or lacks verifiable data, you must halt your counter-argument, refuse to guess, and explicitly output 'I DO NOT KNOW - DATA INSUFFICIENT'.
+- **RSI Divergence Guardrail:** You are strictly forbidden from issuing a 'Fatal Flaw Score' > 6.5 solely based on an overbought RSI (>75). Overbought conditions must be paired with explicit disconfirming evidence (e.g., rising VIX, weak breadth, or negative divergence) to trigger a structural veto.
+
 
 ## Regime Sync
 - **Id:** MANDATE_17_REGIME_SYNC

@@ -4,7 +4,7 @@
 
 Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. Working together as a structured council, the agents evaluate market conditions, interpret financial data, enforce risk protocols, and generate consensus‑driven insights to support informed investment decision‑making. The platform integrates seamlessly with your real‑time dashboard, enabling a disciplined, auditable, and context‑persistent approach to stock‑market intelligence. 
 
-Starting with v8.9-Forensic-WebUI-Stability-Sync, the system has fully matured its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`ssot.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`). This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
+Starting with **v9.0-Universal-Agent-Consolidation-Sync**, the system has fully consolidated its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`). This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
 
 ---
 
@@ -102,26 +102,23 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 
 ---
 
-## 🛠️ Setup Instructions (Markdown) — One per Gem
-
-> **Note on Mode Selection:** You must manually select the Gemini Mode in the chat interface. **Standard Gemini 3.1 Pro (without Thinking mode enabled)** is explicitly required for the Orchestrator. This provides the highest routing fidelity while maintaining the 1-million-token context window necessary to bypass the 192K timeout crashes associated with Deep Think modes.
+### 3. Setup Instructions (Markdown) — One per Gem
 
 | File | Gem Role | Gemini Mode | Purpose |
 |------|----------|-------------|---------|
 | `terminal.md` | **Orchestrator** | PRO (Standard) | Master router — strictly requires Standard Pro to prevent 192K Deep Think timeouts |
 | `rules.md` | **Legislative Body** | N/A | **Static Rules**: The canonical source containing thresholds and ENH_ protocols. MUST be attached via Google Drive. |
 | `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `Gemini_Gem_Rules_Data` |
-| `data_analyst.md` | **Data Analyst** | PRO | Tier-1 Data Shield — retrieves and formats raw web data (SEC/Macro) via native Google Search to save reasoning tokens |
+| `data_analyst.md` | **Data Analyst** | FLASH / PRO | Tier-1 Data Shield — retrieves and formats raw web data (SEC/Macro) via native Google Search |
 | `state_validation_router.md` | **State & Validation Router** | PRO | Active SSoT bridge — drift detection, state merging, sync orchestration |
 | `bullish_gem.md` | **Bullish Advocate** | THINKING | Alpha & momentum specialist — identifies reasons to approve purchases |
 | `red_team_gem.md` | **Red Team Pessimist** | THINKING | Adversarial risk specialist — identifies reasons to reject purchases |
 | `neutral_gem.md` | **Neutral Structuralist** | PRO | Market architecture specialist — GEX, regime detection, liquidity |
 | `execution.md` | **Execution Engine** | PRO | ATR-adjusted position sizing, order generation, liquidity gates |
 | `gex_engine.md` | **GEX Engine** | PRO | Gamma exposure computation — net GEX, gamma flip, dealer posture |
-
 | `macro_arbiter.md` | **Macro Sentinel** | PRO | Binary risk-on/risk-off veto — CPI, FOMC, FX, geopolitical shocks |
 | `macro_narrative_engine.md` | **Macro-Narrative Engine** | THINKING | Macro narrative, sector rotation, forensic signal attribution |
-| `structural_engine.md` | **Structural Risk Engine** | FAST | Forensic dilution detection — shelf offerings, warrant walls, PIPE |
+| `structural_engine.md` | **Structural Risk Engine** | FLASH | Forensic dilution detection — shelf offerings, warrant walls, PIPE |
 | `post_trade_review.md` | **Review Engine** | PRO | Post-trade reflection — thesis vs. outcome, misfire detection |
 
 ### Python Utilities
@@ -134,7 +131,7 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 | `format_json.py` | Formatter — pretty-prints a JSON instruction file with consistent indentation |
 ### 4. Updating Gems (Maintenance)
 
-> *"SYSTEM UPDATE: I have patched your instructions to v8.9-Forensic-WebUI-Stability-Sync. Please simulate the following logic update: [Paste critical logic change]"*
+> *"SYSTEM UPDATE: I have patched your instructions to v9.0-Universal-Agent-Consolidation-Sync. Please simulate the following logic update: [Paste critical logic change]"*
 >
 > *(However, a full restart is recommended for major version changes).*
 
@@ -156,13 +153,12 @@ The background daemon runs in a loop, fetching live data while a **FastAPI** `uv
 Open the relevant Gemini Gem (e.g., the Terminal Orchestrator). **IMPORTANT: Ensure you have manually selected your preferred model mode (e.g., "Gemini 3.1 Pro" or "Thinking") in the chat interface. Thinking mode is recommended.** Paste the dashboard payload. The Gem parses the financial data and routes it through the appropriate engine pipeline.
 
 ### 3. The Council Deliberates
-For trade decisions, the system triggers the **Two-Stage Consensus Pipeline**:
+For trade decisions, the system triggers the **v9.0 Multi-Stage Consensus Pipeline**:
 
-1. **Data Analyst (Tier-1 Shield)** — Proactively gathers, verifies, and formats raw market data (Baseline Sync, SEC filings, macro prints) via native Google Search. This engine shields the "Thinking" models from wasting tokens on basic retrieval tasks (ENH_31 / ENH_77).
-2. **Macro Sentinel** — checks for exogenous shocks (CPI, FOMC, geopolitical) using live Google Search.
-3. **Neutral Structuralist** — evaluates GEX posture, market regime, and structural capacity to establish the baseline.
-4. **Stage 1 (Initial Theses):** **Bullish Advocate** identifies alpha catalysts, momentum signals, and entry thesis. **Red Team Pessimist** stress-tests for dilution, liquidity voids, and "Thesis-Killers" via live forensic search.
-5. **Stage 2 (Rebuttal):** The **Red Team Pessimist** is fed the Bullish thesis and mandated to provide a direct counter-argument.
+1. **Stage 0 (Data Sync):** The **Data Analyst (Tier-1 Shield)** proactively gathers and verifies raw market data (Baseline Sync, SEC filings, macro prints) via native Google Search.
+2. **Stage 0B (Macro-Narrative):** The **Macro-Narrative Engine** provides the thematic backdrop and torque scoring to ground the debate in institutional flow.
+3. **Stage 1 (Initial Theses):** The **Bullish Advocate** and **Red Team Pessimist** emit their initial theses. The Red Team stress-tests for "Thesis-Killers" while adhering to the **RSI Divergence Guardrail** (no vetoes based solely on RSI > 75).
+4. **Stage 2 (Rebuttal):** The **Red Team Pessimist** is fed the Bullish thesis and mandated to provide a direct counter-argument.
 
 ### 4. Synthesis & Decision
 The **Technical Validator** computes the weighted **Agreement Score (S_A)** based on the victor of the Stage 2 rebuttal:
@@ -193,16 +189,18 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 | Protocol | ID | Enforcement |
 |----------|----|-------------|
 | **Alpha-Friction Guard** | `ENH_FIN_02` | Blocks trades with < GLOBAL_ALPHA_FRICTION_HURDLE expected move |
+| **Regime Adaptation** | `L-226` | Authorizes trend participation in SPY RSI > 75 if regime is TRENDING/VOL_EXPANSION |
 | **Macro Veto** | `MANDATE_20` | Sentinel vetoes entries against surging VIXY velocity (>+5.0%) or high absolute VIX (> 20) |
 | **Drift Control** | `MANDATE_04` | Forensic handshake validation prevents behavioral/data drift |
 | **ATR Position Sizing** | `ENH_29` / `ENH_41` | Volatility-adjusted position sizing — deterministic formula |
 | **Forensic Structural Filter** | `ENH_30` | 50% sizing reduction on dilution/warrant forensic flags |
 | **Post-ATR Execution Gate** | `ENH_36` | Blocks entries after 14:30 ET in low-volatility conditions |
 | **Correlation Guard** | `ENH_43` | Warns on >80% pairwise correlation or >35% sector exposure |
-| **Web Verification Protocol** | `ENH_55` | Forces sub-agents to visually verify multi-timeframe mathematical trends (1D, 5D, 6M, YTD) using the Google Finance extension |
-| **Live Web Grounding** | `MANDATE_15` | Mandates explicit native Google Search tool usage for disconfirming evidence and catalyst verification |
+| **Web Verification Protocol** | `ENH_55` | Forces sub-agents to visually verify trends using Google Finance |
+| **RSI Divergence Guard** | `RT_GUARD_01` | Forbids Red Team vetoes solely based on overbought RSI without disconfirming evidence |
+| **Live Web Grounding** | `MANDATE_15` | Mandates explicit native Google Search tool usage for catalyst verification |
 | **Flash-Tier Scrutiny** | `ENH_78` | Hardens data integrity during high-velocity analysis via cross-reference grounding |
-| **State Emission** | `MANDATE_09` | Optimized non-destructive merge; emits delta payloads while preserving untouched portfolio tickers |
+| **State Emission** | `MANDATE_09` | Optimized non-destructive merge; emits delta payloads |
 
 ---
 
@@ -331,12 +329,12 @@ CRITICAL SYSTEM OVERRIDE: WIPE ALL PRIOR CONTEXT & FORCE SYNCHRONIZATION.
 
 Protocol Execution:
 1. ACKNOWLEDGE ARCHITECTURE: You are operating in a Web Sandbox environment. You MUST output all state changes as a strict JSON `EXECUTION_PAYLOAD` block so I can manually sync it via the local clipboard bridge.
-2. ACKNOWLEDGE SCHEMA: The system now uses the v8.6-Forensic-Zero-Hallucination-Sync Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
+2. ACKNOWLEDGE SCHEMA: The system now uses the v9.0-Universal-Agent-Consolidation-Sync Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
 3. ACTION (ZERO-TOUCH SYNC): Use your Google Drive extension to read the attached `rules.md` markdown document in the (Gemini_Gem_Rules) folder.
 4. VERIFICATION: Do NOT fabricate data. If you cannot read the file, STOP and output "TOOL FAILURE". 
    - Cite the exact `version` string verbatim from the top of the rules.md file.
    - Confirm which "ENH_" protocol governs the "Web Verification Protocol".
-5. Confirm Status: "System initialized: State is bound to v8.6-Forensic-Zero-Hallucination-Sync Payload Architecture and SSoT Rules are synced via Drive."
+5. Confirm Status: "System initialized: State is bound to v9.0-Universal-Agent-Consolidation-Sync Payload Architecture and SSoT Rules are synced via Drive."
 ```
 
 ### 🟧 Local Pipeline Setup (The Clipboard Bridge)
@@ -425,9 +423,9 @@ The `scrutiny_audit` object contains the full council vote record:
 
 - **Canonical Centralization** — Individual engines do not contain hardcoded logic or parameters (e.g. lists of exogenous shocks). All logic points natively to canonical protocols in `Gemini_Gem_Rules_Data`.
 - **Logic/Data Separation** — `SSoT_Storage.json` holds state schema; `rules.md` holds static laws; `trade_lessons.md` holds historical institutional memory; `rule_enforcer_engine.md` exclusively handles execution logic.
-- **Non-Destructive Merging** — Field-level merge with `PRESERVE_IF_NOT_UPDATED` strategy
-- **Forensic Lineage** — Every state change includes timestamped source attribution
-- **Alpha-Friction Awareness** — All engines account for the 1% round-trip cost of the Institutional ESA platform
+- **Non-Destructive Merging** — Field-level merge with `PRESERVE_IF_NOT_UPDATED` strategy.
+- **Forensic Lineage** — Every state change includes timestamped source attribution.
+- **Institutional Equity Savings Account (ESA) Alignment** — All engines account for the round-trip friction and FX conversion requirements of the institutional platform.
 
 ---
 

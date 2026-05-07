@@ -1256,10 +1256,6 @@
       "rule": "L-167: UMAC $75M PO confirms 'Material Readiness' as primary DIB moat over RTH technicals."
     },
     {
-      "id": 168,
-      "rule": "L-168: SPY RSI > 68 mandates freeze on new high-beta risk regardless of idiosyncratic 8-Ks."
-    },
-    {
       "id": 169,
       "rule": "50% capital deployment to strategic materials creates a definitive inventory moat.",
       "tags": [
@@ -1281,16 +1277,8 @@
       ]
     },
     {
-      "id": 172,
-      "rule": "L-172: SPY RSI 71.18 confirmed as absolute barrier for high-beta DIB expansion."
-    },
-    {
       "id": 173,
       "rule": "L-166"
-    },
-    {
-      "id": 174,
-      "rule": "L-172"
     },
     {
       "id": 175,
@@ -1315,10 +1303,6 @@
     {
       "id": 180,
       "rule": "L-166 (Earnings Acceleration Check)"
-    },
-    {
-      "id": 181,
-      "rule": "L-172 (SPY RSI Absolute Barrier)"
     },
     {
       "id": 182,
@@ -1349,49 +1333,8 @@
       "rule": "L-167 (Strategic PO Validation)"
     },
     {
-      "id": 189,
-      "rule": "L-172 (SPY RSI Barrier)"
-    },
-    {
       "id": 190,
       "rule": "L-166 (Earnings Date Lock)"
-    },
-    {
-      "id": 191,
-      "rule": "L-191: SPY RSI 71.65 confirms L-172 breach; absolute freeze on DIB expansion active.",
-      "tags": [
-        "RISK",
-        "SPY",
-        "RSI"
-      ]
-    },
-    {
-      "id": 192,
-      "rule": "L-192: VWAP PIN at 13.52 confirms temporary equilibrium; RSI-172 barrier remains active.",
-      "tags": [
-        "UMAC",
-        "TECHNICAL",
-        "VETO"
-      ]
-    },
-    {
-      "id": 193,
-      "rule": "L-193: UMAC $13.63 reclaim of VWAP confirms intraday RS, but SPY-172 Veto prevents expansion.",
-      "tags": [
-        "UMAC",
-        "RS",
-        "VETO"
-      ]
-    },
-    {
-      "id": 194,
-      "rule": "L-195: USV production time reduction (700 to 400 hrs) validates Mass-Production Floor; RSI-172 veto remains active.",
-      "tags": [
-        "RCAT",
-        "UMAC",
-        "PRODUCTION",
-        "VETO"
-      ]
     },
     {
       "id": 195,
@@ -1402,39 +1345,6 @@
         "MARGINS",
         "VALUATION"
       ]
-    },
-    {
-      "id": 196,
-      "rule": "L-196: [CODIFIED: VETO_STASIS_CLARIFICATION] SPY RSI > 71.18 enforces an absolute freeze on new capital deployment (buy-side stasis). It does not restrict sell-side operations. Defensive cash generation is permitted and encouraged during stasis.",
-      "tags": [
-        "VETO",
-        "RSI",
-        "STASIS"
-      ]
-    },
-    {
-      "id": 197,
-      "rule": "L-199: High-volume accumulation in DIB (UMAC/RCAT) validates Industrial Graduation (L-108), but SPY RSI-172 barrier enforces absolute HOLD.",
-      "tags": [
-        "VOLUME",
-        "DIB",
-        "RSI",
-        "VETO"
-      ]
-    },
-    {
-      "id": 198,
-      "rule": "L-201: After-hours SPY RSI 71.43 maintains L-172 breach; absolute freeze remains primary directive.",
-      "tags": [
-        "AFTER-HOURS",
-        "RSI",
-        "VETO",
-        "STASIS"
-      ]
-    },
-    {
-      "id": 199,
-      "rule": "L-191: SPY RSI 71.65 confirms L-172 breach; absolute freeze active."
     },
     {
       "id": 200,
@@ -1461,34 +1371,16 @@
       "rule": "L-197: Gov grants provide long-term PoR graduation path (L-108)."
     },
     {
-      "id": 206,
-      "rule": "L-198: SPY RSI 71.90 confirms high-conviction VETO."
-    },
-    {
       "id": 207,
       "rule": "L-199: High-volume accumulation in DIB (UMAC/RCAT) validates Industrial Graduation (L-108)."
     },
     {
-      "id": 208,
-      "rule": "L-200: Session close with SPY RSI 71.84 confirms L-172 breach."
-    },
-    {
-      "id": 209,
-      "rule": "L-209: [CODIFIED: EXTREME_MACRO_TRIM] When SPY RSI exceeds 75.00, it triggers an 'Extreme Toxicity' state. This overrides all 'Anchor' and 'Sovereign' hold exemptions (such as L-165). Initiate a mandatory proactive trim of 10% to 15% on all high-beta and DIB assets to manually force the generation of unallocated_cash_eur ahead of the structural flush.",
+      "id": 226,
+      "rule": "[CODIFIED: MELT_UP_REGIME_ADAPTATION] An SPY RSI > 75.00 no longer triggers automatic buy-side stasis or mandatory liquidations. If the NEUTRAL_STRUCTURALIST classifies the market regime as TRENDING or VOL_EXPANSION driven by liquidity surges or thematic momentum, extreme RSI readings must be treated as trend continuation rather than exhaustion. The BULLISH_ADVOCATE is authorized to participate in breakouts and accumulate high-beta exposure as long as the VIX remains stable and the ENH_FIN_02 Alpha-Friction hurdle is cleared.",
       "tags": [
-        "MACRO",
-        "RISK-MANAGEMENT",
-        "TRIMMING"
-      ]
-    },
-    {
-      "id": 210,
-      "rule": "L-210: [CODIFIED: CONTRADICTION_HARVEST] If an asset is hitting intraday highs (e.g., UMAC clearing VWAP) while simultaneously facing a known fundamental drag (L-128 Scaling Margin Trap) AND a macro veto (L-172 SPY RSI > 71.18), the system must utilize the localized strength to trim the position, converting the fundamental risk into liquidity.",
-      "tags": [
-        "HARVESTING",
-        "RISK-MANAGEMENT",
-        "FUNDAMENTALS",
-        "MACRO"
+        "macro",
+        "regime",
+        "melt-up"
       ]
     }
   ]
