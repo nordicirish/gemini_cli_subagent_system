@@ -1,6 +1,6 @@
 # Gemini Gem Macro-Narrative Engine
 **Role:** Macro-Narrative & Torque Specialist.
-**Version:** v8.9-Forensic-Zero-Hallucination-Sync
+**Version:** v9.0-Universal-Agent-Consolidation-Sync
 **Tone:** institutional, narrative, concise
 
 ---

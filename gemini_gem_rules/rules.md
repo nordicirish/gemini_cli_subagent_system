@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Gemini_Gem_Rules_Data
-**Version:** v8.9-Forensic-WebUI-Stability-Sync
+**Version:** v9.0-Universal-Agent-Consolidation-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -95,7 +95,7 @@
 - MANDATE_15: ADVERSARIAL_REVIEW (Red Team Lens)
 - MANDATE_16: STRUCTURAL_NEUTRALITY (Liquidity Lens)
 - MANDATE_17: REGIME_SYNC (Dynamic Weighting & Meta-Arbiter)
-- MANDATE_18: RESTRICTED_EXECUTION (Nordea/Retail Constraints)
+- MANDATE_18: RESTRICTED_EXECUTION (Institutional ESA / Retail Constraints)
 - MANDATE_19: SCHEMA_MIRRORING (Context vs. SSoT Parity)
 - MANDATE_20: MACRO_VETO_POWER (Binary Risk-Off Override)
 - MANDATE_21: USER_CONFIRMATION (Provisional Trade State)
@@ -131,7 +131,7 @@
   - **Status:** ACTIVE
   - **Protocol:** MANDATE_12
   - **Enforcement Level:** MANDATORY
-  - **Instruction:** Ensures cross-module synergy and state synchronization. Mandates that the TECHNICAL_VALIDATOR must explicitly output a math proof for any percentage-based trigger in the forensic_intelligence narrative. Format: Proof: (Price [P] - PrevClose [C]) / [C] = Result%. A variance of >0.01% against the Google Finance baseline requires an immediate VETO. FX Proof: "For EUR-denominated liquidity checks, the Validator must output: Proof: (USD_Value [V] * GLOBAL_USD_EUR_EXCHANGE_RATE [R]) = EUR_Total. Variance > 0.001 requires a VETO."
+  - **Instruction:** Ensures cross-module synergy and state synchronization. Mandates that the TECHNICAL_VALIDATOR must explicitly output a math proof for any percentage-based trigger in the forensic_intelligence narrative. Format: Proof: (Price [P] - PrevClose [C]) / [C] = Result%. A variance of >0.01% against the Google Finance baseline requires an immediate VETO. FX CONVERSION: Apply FX Integrity Proof: "Before any position sizing is finalized, you MUST output: Proof: (USD_Value [V] * BASE_CURRENCY_EXCHANGE_RATE [R]) = Base_Currency_Total." Variance > 0.001 requires a VETO."
   - **Execution Validation:** Before the SSoT Controller executes FORCE_WRITE to commit a trade, the TECHNICAL_VALIDATOR must prove the setup against ENH_36 (Post-ATR) and GATE_LIQ_01 to ensure liquidity depth hasn't vanished seconds before execution.
   - **Logic Source:** Gemini_Gem_Rule_Enforcer_Engine
   - **Routing Priority:** PRIMARY
@@ -211,12 +211,12 @@
     - **Instruction:** The SSoT Controller MUST validate the final Agreement Score (S_A) against the Meta-Arbiter logic in ENH_40 before committing.
 - **[MANDATE_18_RESTRICTED_EXECUTION]**
   - **Status:** ACTIVE
-  - **Account Class:** Nordea_Finland_ESA
+  - **Account Class:** General_Account_Class
   - **Tax Regime:** DEFERRED_UNTIL_WITHDRAWAL
-  - **Description:** Hard-codes platform limitations and Alpha-Friction logic for high-fee retail accounts. Factoring Nordea ESA tax-deferred status for FIFO neutralization.
+  - **Description:** Hard-codes platform limitations and Alpha-Friction logic for high-fee accounts. Factoring tax-deferred status for FIFO neutralization.
   - **Logic Gates:**
     - 
-      - **Gate Id:** ESA_01
+      - **Gate Id:** TAX_01
       - **Name:** Tax-Neutral Capital Velocity
       - **Instruction:** Individual trades do NOT trigger taxable events. Wash-Sale tax friction is neutralized for intraday rebalancing. Operational decisions (Adds/Trims) are dictated by VWAP geometry and VIX regimes rather than tax-preservation inertia.
       - **Effect:** Treat all shares of a ticker as a single liquidity block. Churn is permitted to maximize cash generation on sector volatility.
@@ -227,11 +227,11 @@
       - **Limit Buffer Pct:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
     - 
       - **Gate Id:** ENH_FIN_02
-      - **Name:** Alpha-Friction Protocol (Nordea ESA Tier 4)
+      - **Name:** Alpha-Friction Protocol
       - **Status:** ACTIVE
       - **Hurdle Rate:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
       - **Instruction:** Prevent position churn. Treat all shares as a single liquidity block; zero-churn hold is required to maximize capital velocity with 0% tax leakage unless specific override conditions are met.
-      - **Conversion Requirement:** All sizing units (ENH_29) must be forensicly reconciled against system_thresholds.GLOBAL_USD_EUR_EXCHANGE_RATE to ensure EUR cash-lock integrity (Rule 116).
+      - **Conversion Requirement:** All sizing units (ENH_29) must be forensicly reconciled against system_thresholds.BASE_CURRENCY_EXCHANGE_RATE to ensure Base_Currency cash-lock integrity (Rule 116).
       - **Logic:** IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE) AND Hard_Catalyst == NONE AND volatility_override == FALSE THEN OVERRIDE_ACTION = HOLD
       - **Rationale:** In a tax-deferred environment, capital velocity is prioritized. Tactical trims on mechanical floors or VWAP magnets are viable at lower alpha spreads.
       - **Volatility Override:**
@@ -294,15 +294,15 @@
   - **Status:** ACTIVE
   - **Revision Date:** 2026-03-03
   - **Instruction:** Protect overnight news gaps. Trailing stops must be anchored to the 50% retracement of the opening gap to prevent 'Bull Traps' in Short Gamma regimes.
-  - **Esa Tax Advantage Clause:**
+  - **Tax Advantage Clause:**
     - **Protocol:** FRICTIONLESS_GAP_REENTRY
-    - **Logic:** The Nordea ESA eliminates 'Wash Sale' inertia and FIFO capital gains leakage. If a position hits the 50% Gap Stop, exit immediately. If price later re-claims the Gap Midpoint on positive rVol, re-entry is mandatory.
+    - **Logic:** The account environment eliminates 'Wash Sale' inertia and FIFO capital gains leakage. If a position hits the 50% Gap Stop, exit immediately. If price later re-claims the Gap Midpoint on positive rVol, re-entry is mandatory.
     - **Execution:** Treat Gap Defense as a 'Binary Switch'. 100% exit at the 50% retracement; 100% re-entry at the 50% reclaim. Tax-deferred status allows for this mechanical churn to capture the full volatility curve without immediate tax-friction erosion.
   - **Technical Parameters:**
     - **Anchor Point:** Gap_Midpoint = (Previous_Close + Open_Price) / 2
     - **Defense Logic:** IF Current_Price < Gap_Midpoint AND VIX > 20 THEN SET status = 'IN_DISTRESS' AND emit TRIM_50
     - **Reclamation Logic:** IF Current_Price > Gap_Midpoint AND rVol > 1.5 THEN SET status = 'MOMENTUM_RESTORED' AND emit FULL_REINSTATEMENT
-  - **Rationale:** In Short Gamma regimes, opening gaps are often 'faded' by dealers. By using the ESA tax-shield, we can mechanically exit and re-enter these gaps, effectively 'day-trading' the news cycle with 100% of the principal intact.
+  - **Rationale:** In Short Gamma regimes, opening gaps are often 'faded' by dealers. By using the tax-shield, we can mechanically exit and re-enter these gaps, effectively 'day-trading' the news cycle with 100% of the principal intact.
 - **[MANDATE_25_STRICT_LESSON_EMISSION]**
   - **Status:** ACTIVE
   - **Instruction:** UNIFIED LESSON EMISSION RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) SHOULD conclude with either a structured JSON payload in `new_trade_lessons` OR a discrete Markdown block using the `L-xxx:` format. The Python backend (`fetch_stocks.py`) is equipped to parse both formats and upsert them into the central `trade_lessons.json` / `trade_lessons.md` registry. Ticker-Specific Reflexes should still be mirrored in `portfolio_snapshot[].historical_context`.
@@ -314,16 +314,16 @@
 - **[MANDATE_27_RESIDUAL_FLOOR]**
   - **Status:** ACTIVE
   - **Instruction:** Position sizing for binary clinical plays must be derived from the Residual Cash Value floor, acknowledging that technical stops are a 0% probability event in overnight gap-downs. If Price is within 5% of a major warrant exercise price, trigger the Structural Ceiling logic in ENH_66.
-  - **Asset Lock:** IF unallocated_cash_eur == 0 AND VIX > system_thresholds.VIX_FEAR_THRESHOLD, trigger an absolute ASSET_LOCK. This mandate possesses Absolute Execution Supremacy; all buy/add commands must be blocked during an active lock.
-  - **Esa Tax Advantage Clause:**
+  - **Asset Lock:** IF unallocated_cash_base_currency == 0 AND VIX > system_thresholds.VIX_FEAR_THRESHOLD, trigger an absolute ASSET_LOCK. This mandate possesses Absolute Execution Supremacy; all buy/add commands must be blocked during an active lock.
+  - **Tax Advantage Clause:**
     - **Protocol:** HOUSE_MONEY_ACCELERATION
-    - **Logic:** In the Nordea ESA environment, prioritize the 'Extraction of Principal' over 'Deferred Realization'. Individual sales to reclaim initial capital carry 0% tax friction.
+    - **Logic:** In the tax-deferred environment, prioritize the 'Extraction of Principal' over 'Deferred Realization'. Individual sales to reclaim initial capital carry 0% tax friction.
     - **Execution:** Once a binary asset (e.g., DFTX) reaches the 'Principal Shield' target (Step 1), liquidate the corresponding quantity immediately. Reinvest 100% of the reclaimed capital into the next high-alpha thesis without reserving for capital gains tax.
   - **Sizing Logic:**
     - **Formula:** Max_Loss_Tolerance / (Entry_Price - Residual_Cash_Value)
     - **Residual Floor Definition:** The verifiable net cash per share on the balance sheet (e.g., $5.88 for DFTX).
     - **Risk Adjustment:** During High-VIX regimes (>20), the Residual Floor is the only valid support node; ignore all intermediate EMA/SMA levels for initial sizing.
-  - **Rationale:** Standard stop-losses are ill-suited for binary gaps. By sizing based on the cash floor and utilizing the ESA tax-shield for rapid principal recovery, the portfolio achieves 'House Money' status 30% faster than in taxable accounts.
+  - **Rationale:** Standard stop-losses are ill-suited for binary gaps. By sizing based on the cash floor and utilizing the tax-shield for rapid principal recovery, the portfolio achieves 'House Money' status 30% faster than in taxable accounts.
 
 ## Anti Hallucination Core
 - **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.
@@ -402,7 +402,7 @@
   - **Logic:** 
     - **MANDATORY_PREAMBLE:** Every response MUST begin with a 'TEMPORAL_CHECK' header. This header must extract the ISO string from the payload and determine the current Market Status (PRE-MARKET, OPEN, POWER_HOUR, or CLOSED). Predictors are blocked until status is verified.
     - **Baseline Sync:** Google Search is the Primary Baseline Arbiter for numeric Previous Close ($C$) and Open ($O$) prices. Before any session_change_pct calculation, the engine MUST perform a Google Search query specifically for "[Ticker] Google Finance quote". It must extract the explicit lastClosePrice and openPrice fields to establish the objective constant ($C$) for that session.
-    - **FX Baseline Sync:** Before any sizing calculation or P&L report, the engine MUST perform a Google Search query for "USD to EUR exchange rate". It must extract the current rate and update system_thresholds.GLOBAL_USD_EUR_EXCHANGE_RATE.
+    - **FX Baseline Sync:** Before any sizing calculation or P&L report, the engine MUST perform a Google Search query for "USD to Base Currency exchange rate". It must extract the current rate and update system_thresholds.BASE_CURRENCY_EXCHANGE_RATE.
   - **Action:** Append 'TEMPORAL_CHECK: [ISO_STRING] (Market Status: [STATUS])' to start of output.
 - **[ENH_32 - Data Schema & GEX Calculation Protocol (Unified)]**
   - **Schema Authority:** CANONICAL — All other Gems MUST reference this schema via 'Gemini_Gem_Rules_Data > ENH_32'. Do NOT duplicate inline.
@@ -736,7 +736,7 @@
   - **Block If:**
     - current_time >= OST_LOCKOUT_TIME AND (atr_percent <= ATR_PERCENT_MINIMUM OR rvol <= RVOL_OST_GATE)
   - **Permit If:**
-    - account_class == 'Nordea_Finland_ESA' AND volatility_override == TRUE
+    - account_class == 'Equity_Savings_Account_ESA' AND volatility_override == TRUE
   - **Note:** ESA advantage allows for late-session 'Volatility Harvesting' provided rVol confirms institutional presence.
 - **Liquidity Gate:**
   - **Id:** GATE_LIQ_01
@@ -771,7 +771,7 @@
   - **Note:** Short Sale Restriction verification remains a primary trigger for 'Warrant Churn' detection.
 - **Fin Account Gate:**
   - **Id:** ENH_FIN_01
-  - **Provider:** Nordea_Finland_ESA
+  - **Provider:** Equity_Savings_Account_ESA
   - **Tax Status:** DEFERRED_ESA
   - **Round Trip Cost:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
   - **Constraints:**
@@ -905,11 +905,11 @@
   - **Status:** MASTER_CONSTANT
 - **GLOBAL_ALPHA_FRICTION_HURDLE:**
   - **Value:** 0.0117
-  - **Usage:** Mandatory 1.17% round-trip friction floor for Nordea ESA Tier 4.
+  - **Usage:** Mandatory 1.17% round-trip friction floor for Institutional ESA Tier 4.
   - **Status:** MASTER_CONSTANT
-- **GLOBAL_USD_EUR_EXCHANGE_RATE:**
-  - **Value:** [DYNAMIC_FETCH] (Base: 0.85)
-  - **Usage:** Mandatory conversion factor for sizing USD orders against EUR liquidity.
+- **BASE_CURRENCY_EXCHANGE_RATE:**
+  - **Value:** [DYNAMIC_FETCH] (Base: 1.0)
+  - **Usage:** Mandatory conversion factor for sizing USD orders against local Base Currency liquidity.
   - **Status:** MASTER_CONSTANT / FORENSIC_GROUNDED
 - **Tax Posture:**
   - **Value:** TAX_FREE
@@ -984,9 +984,9 @@
   - **Used By:**
     - bullish_gem
     - ENH_FIN_02
-- **Nordea Esa Alpha Friction:**
+- **Institutional ESA Alpha Friction:**
   - **Value:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
-  - **Usage:** Reduced friction threshold for Nordea ESA accounts
+  - **Usage:** Reduced friction threshold for Institutional ESA accounts
   - **Used By:**
     - bullish_gem
     - execution
@@ -1043,7 +1043,7 @@
     - context_engine
 - **Global Alpha Friction Hurdle (Legacy Round Trip):**
   - **Value:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
-  - **Usage:** Nordea OST round-trip cost (1.17%)
+  - **Usage:** Institutional ESA round-trip cost (1.17%)
   - **Used By:**
     - ssot_storage
     - fin_account_gate

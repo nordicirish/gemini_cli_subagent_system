@@ -427,7 +427,7 @@ The `scrutiny_audit` object contains the full council vote record:
 - **Logic/Data Separation** — `SSoT_Storage.json` holds state schema; `rules.md` holds static laws; `trade_lessons.md` holds historical institutional memory; `rule_enforcer_engine.md` exclusively handles execution logic.
 - **Non-Destructive Merging** — Field-level merge with `PRESERVE_IF_NOT_UPDATED` strategy
 - **Forensic Lineage** — Every state change includes timestamped source attribution
-- **Alpha-Friction Awareness** — All engines account for the 1% round-trip cost of the Nordea OST platform
+- **Alpha-Friction Awareness** — All engines account for the 1% round-trip cost of the Institutional ESA platform
 
 ---
 
