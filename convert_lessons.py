@@ -16,31 +16,10 @@ def convert_json_to_md(json_path, md_path):
         print("No lessons found in JSON.")
         return
 
-    # 1. Read existing MD rules to preserve any manual additions
-    md_lessons = []
-    if os.path.exists(md_path):
-        with open(md_path, 'r', encoding='utf-8') as f:
-            current_category = 'other'
-            for line in f:
-                line = line.strip()
-                if not line: continue
-                if line.startswith('## #'):
-                    current_category = line[4:].lower()
-                elif line.startswith('- **L-'):
-                    md_lessons.append((current_category, line))
+    # 1. Read existing MD rules (Legacy preservation logic removed to support ENH_53 pruning)
+    # We no longer re-insert lessons found in MD but missing from JSON to ensure SSoT integrity.
+    # Manual additions should be made to trade_lessons.json.
     
-    # Track existing IDs and text in MD
-    existing_md_ids = set()
-    existing_md_text = set()
-    for _, line in md_lessons:
-        # extract ID from '- **L-123:**'
-        match = re.search(r'-\s*\*\*L-(\d+):\*\*\s*(.*)', line)
-        if match:
-            existing_md_ids.add(int(match.group(1)))
-            # Strip tags for comparison
-            text_only = re.sub(r'#[\w-]+', '', match.group(2)).strip().lower()
-            existing_md_text.add(text_only)
-
     # 2. Group JSON rules
     categories = defaultdict(list)
     PRIMARY_CATEGORIES = ['volatility', 'defense', 'fundamentals', 'macro', 'risk-management', 'catalysts', 'technical', 'gamma', 'system-design', 'position-sizing', 'biotech', 'valuation', 'supply-chain']
@@ -78,16 +57,13 @@ def convert_json_to_md(json_path, md_path):
     md_lines = ["# 📘 Trade Lessons Registry", ""]
     
     # Categories to display
-    all_categories = sorted(list(set(list(categories.keys()) + [c for c, _ in md_lessons])), 
+    all_categories = sorted(list(categories.keys()), 
                             key=lambda x: (x not in PRIMARY_CATEGORIES, x))
 
     for category in all_categories:
         md_lines.append(f"## #{category.upper()}")
         
-        # Track what we've added to this category to avoid duplicates
-        added_in_cat = set()
-
-        # Add JSON lessons first (SSoT)
+        # Add JSON lessons (SSoT)
         if category in categories:
             for lesson in categories[category]:
                 lesson_id = lesson.get('id', '?')
@@ -106,22 +82,6 @@ def convert_json_to_md(json_path, md_path):
                 
                 line = f"- **L-{lesson_id}:** {rule} {tag_str}".strip()
                 md_lines.append(line)
-                if isinstance(lesson_id, int):
-                    added_in_cat.add(lesson_id)
-                
-        # Add existing MD lessons ONLY if they aren't in the JSON (Manual additions)
-        for cat, line in md_lessons:
-            if cat == category:
-                match = re.search(r'-\s*\*\*L-(\d+):\*\*\s*', line)
-                if match:
-                    lid = int(match.group(1))
-                    if lid not in json_ids and lid not in added_in_cat:
-                        md_lines.append(line)
-                        added_in_cat.add(lid)
-                else:
-                    # Naked line or something weird, keep it if not already added by text? 
-                    # For simplicity, if it doesn't have an L-id we recognize, we'll keep it.
-                    md_lines.append(line)
                     
         md_lines.append("")
         md_lines.append("---")

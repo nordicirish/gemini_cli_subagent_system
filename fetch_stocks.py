@@ -535,102 +535,97 @@ async def handle_paste(req: Request):
             incoming_lessons.extend(extracted_trade_lessons)
 
         if incoming_lessons:
-            existing_lessons = []
+            final_normalized = []
             existing_data = None
             if os.path.exists(lessons_file):
                 try:
                     with open(lessons_file, 'r') as f:
                         existing_data = json.load(f)
-                        if isinstance(existing_data, dict):
-                            existing_lessons = existing_data.get("trade_lessons", [])
-                        elif isinstance(existing_data, list):
-                            existing_lessons = existing_data
-                except json.JSONDecodeError:
-                    pass
-            
-            # Build lookup of existing lessons by id for upsert
-            # Build lookup of existing lessons by id and text
-            existing_by_id = {}
-            existing_by_text = {}
-            for idx, lesson in enumerate(existing_lessons):
-                if isinstance(lesson, dict):
-                    if "id" in lesson:
-                        existing_by_id[lesson["id"]] = lesson
-                    rule_text = lesson.get("rule", lesson.get("lesson", "")).strip().lower()
-                    if rule_text: existing_by_text[rule_text] = lesson
-                elif isinstance(lesson, str):
-                    rule_text = lesson.strip().lower()
-                    if rule_text: existing_by_text[rule_text] = lesson
-            
-            kept_ids = set()
-            new_compiled_lessons = []
+                except: pass
 
-            for item in incoming_lessons:
-                if isinstance(item, str):
-                    match = re.match(r'^(\d+)-(\d+).*PERMANENT', item, re.IGNORECASE)
-                    if match:
-                        start_id = int(match.group(1))
-                        end_id = int(match.group(2))
-                        kept_ids.update(range(start_id, end_id + 1))
-                    else:
-                        rule_text = item.strip().lower()
+            if extracted_compressed:
+                # ENH_53 OVERWRITE MANDATE: Replacement phase for State Compression
+                final_normalized = _normalize_lessons(incoming_lessons)
+            else:
+                # MERGE/UPSERT logic for new or session lessons
+                existing_lessons = []
+                if existing_data:
+                    if isinstance(existing_data, dict):
+                        existing_lessons = existing_data.get("trade_lessons", [])
+                    elif isinstance(existing_data, list):
+                        existing_lessons = existing_data
+                
+                # Build lookup of existing lessons by id and text
+                existing_by_id = {}
+                existing_by_text = {}
+                for idx, lesson in enumerate(existing_lessons):
+                    if isinstance(lesson, dict):
+                        if "id" in lesson:
+                            existing_by_id[lesson["id"]] = lesson
+                        rule_text = lesson.get("rule", lesson.get("lesson", "")).strip().lower()
+                        if rule_text: existing_by_text[rule_text] = lesson
+                    elif isinstance(lesson, str):
+                        rule_text = lesson.strip().lower()
+                        if rule_text: existing_by_text[rule_text] = lesson
+                
+                kept_ids = set()
+                new_compiled_lessons = []
+
+                for item in incoming_lessons:
+                    if isinstance(item, str):
+                        match = re.match(r'^(\d+)-(\d+).*PERMANENT', item, re.IGNORECASE)
+                        if match:
+                            start_id = int(match.group(1))
+                            end_id = int(match.group(2))
+                            kept_ids.update(range(start_id, end_id + 1))
+                        else:
+                            rule_text = item.strip().lower()
+                            if rule_text and rule_text in existing_by_text:
+                                continue
+                            new_compiled_lessons.append(item)
+                            if rule_text: existing_by_text[rule_text] = item
+                    elif isinstance(item, dict):
+                        item_id = item.get("id")
+                        rule_text = item.get("rule", item.get("lesson", "")).strip().lower()
+                        
+                        if item_id is not None:
+                            kept_ids.add(item_id)
+                            if item_id in existing_by_id:
+                                existing_by_id[item_id].update(item)
+                                new_compiled_lessons.append(existing_by_id[item_id])
+                                if rule_text: existing_by_text[rule_text] = existing_by_id[item_id]
+                                continue
+                                
                         if rule_text and rule_text in existing_by_text:
+                            existing = existing_by_text[rule_text]
+                            if isinstance(existing, dict):
+                                orig_id = existing.get("id")
+                                existing.update(item)
+                                if orig_id is not None:
+                                    existing["id"] = orig_id
                             continue
+                            
                         new_compiled_lessons.append(item)
                         if rule_text: existing_by_text[rule_text] = item
-                elif isinstance(item, dict):
-                    item_id = item.get("id")
-                    rule_text = item.get("rule", item.get("lesson", "")).strip().lower()
-                    
-                    if item_id is not None:
-                        kept_ids.add(item_id)
-                        if item_id in existing_by_id:
-                            # Upsert by ID
-                            existing_by_id[item_id].update(item)
-                            new_compiled_lessons.append(existing_by_id[item_id])
-                            
-                            # Update text registry too
-                            if rule_text: existing_by_text[rule_text] = existing_by_id[item_id]
-                            continue
-                            
-                    # If no ID match, check by text
-                    if rule_text and rule_text in existing_by_text:
-                        # Existing lesson found by text match
-                        existing = existing_by_text[rule_text]
-                        if isinstance(existing, dict):
-                            # Restore its original ID to prevent disruption
-                            orig_id = existing.get("id")
-                            existing.update(item)
-                            if orig_id is not None:
-                                existing["id"] = orig_id
-                        continue
-                        
-                    # It's completely new
-                    new_compiled_lessons.append(item)
-                    if rule_text: existing_by_text[rule_text] = item
-                else:
-                    new_compiled_lessons.append(item)
+                    else:
+                        new_compiled_lessons.append(item)
 
-            # Re-inject preserved lessons that were NOT explicitly updated
-            preserved_lessons = []
-            for lesson in existing_lessons:
-                if isinstance(lesson, dict):
-                    lid = lesson.get("id")
-                    updated = False
-                    if lid is not None:
-                        for new_lesson in new_compiled_lessons:
-                            if isinstance(new_lesson, dict) and new_lesson.get("id") == lid:
-                                updated = True
-                                break
-                    if not updated:
+                preserved_lessons = []
+                for lesson in existing_lessons:
+                    if isinstance(lesson, dict):
+                        lid = lesson.get("id")
+                        updated = False
+                        if lid is not None:
+                            for new_lesson in new_compiled_lessons:
+                                if isinstance(new_lesson, dict) and new_lesson.get("id") == lid:
+                                    updated = True
+                                    break
+                        if not updated:
+                            preserved_lessons.append(lesson)
+                    elif isinstance(lesson, str):
                         preserved_lessons.append(lesson)
-                elif isinstance(lesson, str):
-                    preserved_lessons.append(lesson)
 
-            # Combine preserved lessons with newly updated/added ones
-            existing_lessons = preserved_lessons + new_compiled_lessons
-            
-            final_normalized = _normalize_lessons(existing_lessons)
+                final_normalized = _normalize_lessons(preserved_lessons + new_compiled_lessons)
                 
             if isinstance(existing_data, dict):
                 existing_data["trade_lessons"] = final_normalized
