@@ -157,13 +157,13 @@ Open the relevant Gemini Gem (e.g., the Terminal Orchestrator). **IMPORTANT: Ens
 ### 3. The Council Deliberates
 For trade decisions, the system triggers the **v9.0 Multi-Stage Consensus Pipeline**:
 
-1. **Stage 0 (Data Sync):** The **Data Analyst (Tier-1 Shield)** proactively gathers and verifies raw market data (Baseline Sync, SEC filings, macro prints) via native Google Search.
+1. **Stage 0 (Data Sync) [AUTONOMOUS MANDATE]:** The Orchestrator AUTOMATICALLY halts the council and routes tickers to the **Data Analyst (Tier-1 Shield)**. The Analyst proactively gathers and verifies raw market data (Baseline Sync, SEC filings, macro prints) via native Google Search, completely bypassing manual [SYNC_FINANCE] commands.
 2. **Stage 0B (Macro-Narrative):** The **Macro-Narrative Engine** provides the thematic backdrop and torque scoring to ground the debate in institutional flow.
 3. **Stage 1 (Initial Theses):** The **Bullish Advocate** and **Red Team Pessimist** emit their initial theses. The Red Team stress-tests for "Thesis-Killers" while adhering to the **RSI Divergence Guardrail** (no vetoes based solely on RSI > 75).
 4. **Stage 2 (Rebuttal):** The **Red Team Pessimist** is fed the Bullish thesis and mandated to provide a direct counter-argument.
 
 ### 4. Synthesis & Decision
-The **Technical Validator** computes the weighted **Agreement Score (S_A)** based on the victor of the Stage 2 rebuttal:
+The **Execution Engine** relies on the **Deterministic Consensus Protocol (MANDATE_13)**. It computes the weighted **Agreement Score (S_A)** based on the victor of the Stage 2 rebuttal:
 
 | Agent | Weight |
 |-------|--------|
@@ -198,9 +198,12 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 | **Forensic Structural Filter** | `ENH_30` | 50% sizing reduction on dilution/warrant forensic flags |
 | **Post-ATR Execution Gate** | `ENH_36` | Blocks entries after 14:30 ET in low-volatility conditions |
 | **Correlation Guard** | `ENH_43` | Warns on >80% pairwise correlation or >35% sector exposure |
-| **Web Verification Protocol** | `ENH_55` | Forces sub-agents to visually verify trends using Google Finance |
+| **Web Verification Protocol** | `ENH_55` | Forces sub-agents to visually verify trends using Google Finance (2026 Candlestick & Comparison Beta) |
 | **RSI Divergence Guard** | `RT_GUARD_01` | Forbids Red Team vetoes solely based on overbought RSI without disconfirming evidence |
 | **Live Web Grounding** | `MANDATE_15` | Mandates explicit native Google Search tool usage for catalyst verification |
+| **Consumer AI Sandbox** | `ANTI-RECURSION` | Strictly forbids using consumer AI overlays (AI Overview, etc.) to prevent Arbiter Collision |
+| **Air-Gap Execution** | `PROTOCOL_0` | Antigravity uses Direct Local File Mutation but cannot simulate remote GitHub pushes |
+| **Prediction Market Sync** | `MVP_v1.0` | Macro Sentinel evaluates Kalshi/Polymarket probability pricing for Tier 1 events |
 | **Flash-Tier Scrutiny** | `ENH_78` | Hardens data integrity during high-velocity analysis via cross-reference grounding |
 | **State Emission** | `MANDATE_09` | Optimized non-destructive merge; emits delta payloads |
 

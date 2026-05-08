@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Gemini_Gem_Rules_Data
-**Version:** v9.12-Universal-Agent-Consolidation-Sync
+**Version:** v9.13-Universal-Agent-Consolidation-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -106,6 +106,11 @@
 - MANDATE_25: STRICT_LESSON_EMISSION (Markdown Requirement)
 - MANDATE_26: POST_TRADE_REVIEW (Review Engine)
 - MANDATE_27: RESIDUAL_FLOOR (Position Sizing)
+
+## Tool Supremacy Hierarchy
+- **Google Search:** Primary Numeric Arbiter (Prices, Rates, Statutory text).
+- **Google Finance Extension:** Spatial/Visual Verification (Charts, Trends) only.
+- **Consumer AI Sandbox (ANTI-RECURSION MANDATE):** All agents are STRICTLY FORBIDDEN from utilizing Google Finance's consumer AI features (AI Overview, Spark Overlays, AI Earnings Summaries, or the native Gemini Research Tool). The Council MUST ingest RAW data (transcripts, raw charts, numerical financials) and perform the synthesis themselves to prevent Arbiter Collision and protect forensic lineage (MANDATE_06).
 
 ## Behavioral Guardrails
 - **[MANDATE_01_GATEKEEPER]**
@@ -662,7 +667,7 @@
     - **1 Day (High Density):** Verify VWAP relationship and intraday volume profile. Detect opening gap fills and candle-by-candle distribution at key levels.
     - **5 Day (Structural):** Detect multi-day base formation and price-action 'clumping' on candlesticks. Identify pre-market vs regular session divergence.
     - **6 Month / YTD:** Validate macro trend thesis and MA50/200 alignment using the 2026 'Trend-Filter' overlay.
-  - **Consumer AI Sandbox (ANTI-RECURSION MANDATE):** All agents are STRICTLY FORBIDDEN from utilizing Google Finance's consumer AI features (AI Overview, Spark Overlays, AI Earnings Summaries, or the native Gemini Research Tool). The Council MUST ingest RAW data (transcripts, raw charts, numerical financials) and perform the synthesis themselves. Outsourcing reasoning to external consumer AI tools violates MANDATE_06 and destroys forensic lineage.
+  - **Consumer AI Sandbox (ANTI-RECURSION MANDATE):** All agents are STRICTLY FORBIDDEN from utilizing Google Finance's consumer AI features (AI Overview, Spark Overlays, AI Earnings Summaries, or the native Gemini Research Tool). The Council MUST ingest RAW data (transcripts, raw charts, numerical financials) and perform the synthesis themselves to prevent Arbiter Collision and protect forensic lineage (MANDATE_06).
   - **Execution Flow:**
     - 1. EXTENSION_CALL: Trigger Google Finance to view the 1-day, 5-day, 6-month, and YTD charts for each active or watched ticker.
     - 2. INTRADAY_CHECK: On the 1-day chart, confirm price relationship to VWAP and flag any distribution volume spikes or gap-fill failures.

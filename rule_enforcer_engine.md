@@ -106,4 +106,4 @@
   - **Instruction:** Conclusion must explicitly state: "RULE_COMPLIANCE: [VERIFIED/REJECTED]".
 
 ---
-*Generated from rule_enforcer_engine.json*
+
