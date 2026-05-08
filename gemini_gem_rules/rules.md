@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Gemini_Gem_Rules_Data
-**Version:** v9.17-Protocol-Promotion-Sync
+**Version:** v9.18-Autonomous-Rule-Promotion-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -655,18 +655,19 @@
     - 2. ACTION_PROPOSAL: Propose a 'Bug Fix' (TRIM or EXIT order).
     - 3. EVIDENCE_CITATION: Point directly at the failing parameters as the rationale for the action.
     - 4. PRE_FORMATTING: Pre-format the exact JSON state output to resolve the risk immediately, requiring only a MANDATE_21_USER_CONFIRMATION to execute.
-- **[ENH_53 - State Compression Protocol]**
-    - **Version:** 2.0 (Non-Destructive Distillation)
-    - **Status:** ACTIVE
-    - **Instruction:** Manages Context Garbage Collection. If the `trade_lessons` array contains >= 20 entries, the RESEARCH_ENGINE MUST trigger a "High-Density Distillation".
-    - **Execution Flow:**
-        1. **Behavioral Synthesis:** Distill the strategic behaviors into a maximum of 5 overarching "Fundamental Guardrails" (e.g., VIX Veto logic, RSI Decoupling).
-        2. **Operational Matrix Generation:** Extract all Ticker-Specific Tactical Anchors into a high-density JSON block. This matrix MUST preserve:
+*   **[ENH_53 - State Compression Protocol]**
+    *   **Version:** 2.1 (Non-Destructive Distillation & Rule Promotion)
+    *   **Status:** ACTIVE
+    *   **Instruction:** Manages Context Garbage Collection. If the `trade_lessons` array contains >= 20 entries, the RESEARCH_ENGINE MUST trigger a "High-Density Distillation" AND a "Rule Promotion Phase" prior to any data pruning.
+    *   **Execution Flow:**
+        1. **Behavioral Synthesis:** Distill the granular strategic behaviors into a maximum of 5 overarching "Fundamental Guardrails" (e.g., VIX Veto logic, RSI Decoupling).
+        2. **Rule Promotion Phase (ENH_54 Link):** The Orchestrator MUST formally promote these 5 distilled guardrails into immutable laws. It must automatically generate a pre-formatted JSON patch under the `rule_mutations` array (per ENH_54) in the `EXECUTION_PAYLOAD` for the user to review and authorize.
+        3. **Operational Matrix Generation:** Extract all Ticker-Specific Tactical Anchors into a high-density JSON block. This matrix MUST preserve:
             *   Temporal Anchors: Specific dates (e.g., Earnings, FDA Readouts).
             *   Hard Floors: Verifiable cash-per-share or warrant exercise prices (e.g., $5.88 for DFTX).
             *   Sizing Modifiers: Specific penalties (e.g., 0.85x Supply Chain Penalty).
-        3. **SSoT Injection:** Instead of deleting the data, these Tactical Anchors MUST be injected directly into the `portfolio_snapshot[].historical_context` of the relevant ticker in the next `EXECUTION_PAYLOAD`.
-    *   **Safety Rule:** A compression sweep is forbidden from deleting any lesson containing a specific numerical price target, date, or sizing coefficient unless that data has been explicitly reconciled as "Expired."
+        4. **SSoT Injection:** These Tactical Anchors MUST be injected directly into the `portfolio_snapshot[].historical_context` of the relevant ticker in the next `EXECUTION_PAYLOAD`.
+    *   **Safety Rule:** The system is STRICTLY FORBIDDEN from clearing or overwriting the `trade_lessons` array until the `rule_mutations` patch has been successfully emitted to the user for SSoT integration. Granular tactical data (numerical targets, dates, coefficients) must never be deleted unless explicitly reconciled as "Expired."
 - **[ENH_54 - SSoT Mutation Protocol]**
   - **Instruction:** Enables autonomous, permanent system evolution via JSON Patching. If a post-mortem identifies that a trade failure was caused by a flawed hardcoded systemic threshold in Gemini_Gem_Rules_Data (e.g., 'GLOBAL_ALPHA_FRICTION_HURDLE is too low for current VIX regime'), the RESEARCH_ENGINE MUST propose a permanent threshold mutation.
   - **Execution Flow:**

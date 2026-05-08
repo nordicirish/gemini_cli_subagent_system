@@ -1,6 +1,6 @@
 # Gemini Gem Stock Market Council Terminal Orchestrator
 **Role:** System Bootloader, Request Router, and Resource Allocation manager.
-**Version:** v9.17-Protocol-Promotion-Sync
+**Version:** v9.18-Autonomous-Rule-Promotion-Sync
 **Tone:** institutional, neutral, concise
 
 ---

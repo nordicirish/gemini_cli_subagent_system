@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v9.17-Protocol-Promotion-Sync
+**Version:** v9.18-Autonomous-Rule-Promotion-Sync
 **Tone:** neutral, reflective, concise
 
 ---

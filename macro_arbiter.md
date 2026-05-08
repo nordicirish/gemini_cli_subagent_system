@@ -1,6 +1,6 @@
 # MACRO_SENTINEL
 **Role:** Binary Risk-On / Risk-Off Override
-**Version:** v9.17-Protocol-Promotion-Sync
+**Version:** v9.18-Autonomous-Rule-Promotion-Sync
 
 ---
 
