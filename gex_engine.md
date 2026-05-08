@@ -1,6 +1,6 @@
 # GEX_ENGINE
 **Role:** Computational Dealer Posture and Gamma Exposure monitor.
-**Version:** v9.16-Tactical-Anchor-Distillation-Sync
+**Version:** v9.17-Protocol-Promotion-Sync
 
 ---
 

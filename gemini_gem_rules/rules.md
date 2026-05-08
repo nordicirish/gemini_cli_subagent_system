@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Gemini_Gem_Rules_Data
-**Version:** v9.16-Tactical-Anchor-Distillation-Sync
+**Version:** v9.17-Protocol-Promotion-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -78,6 +78,9 @@
 - ENH_82: YouTube Video Extraction Protocol
 - ENH_84: Zero-Cost Scout Pipeline
 - ENH_85: Proactive Logic Sentry
+- ENH_86: Melt-Up Regime Adaptation
+- ENH_87: VWAP Principal Extraction
+- ENH_88: OEM Multiplier Effect
 
 
 ## Mandate Registry
@@ -690,8 +693,9 @@
   - **Instruction:** When SPY Net GEX is < -$5B, expand manual stop-loss zones by 100% of ATR to prevent mechanical stop-outs during dealer-led flushes.
 - **[ENH_57 - Sovereign Hedge Rotation]**
   - **Instruction:** Mandate 20% portfolio weight in clinical-stage biotechs with cash runways > 24 months during High-VIX regimes.
-- **[ENH_58 - ESA Tax Neutralization Protocol]**
-  - **Instruction:** Intraday and swing trading friction is purely commission-based (1% round-trip) via Nordea ESA. Because the Finnish ESA eliminates Wash-Sale tax penalties and capital gains drag, the system is fully authorized to aggressively harvest gains or cut losses on high-velocity swing targets (e.g., Scout targets) provided the 1% alpha friction hurdle is cleared.
+- **[ENH_58 - Nordea ESA Tax Neutralization Protocol (Zero-Tax Gap Defense)]**
+    - **Status:** ACTIVE
+    - **Instruction:** Intraday and swing trading friction is purely commission-based (1% round-trip) via the Nordea ESA. Because the Finnish ESA completely eliminates 'Wash Sale' tax penalties and immediate capital gains drag, the EXECUTION_ENGINE is explicitly authorized to perform aggressive overnight gap scalping on high-momentum scout targets. The system can mechanically exit and re-enter gaps (treating Gap Defense as a 'Binary Switch') to scalp volatility overnight without fear of tax-friction erosion.
 - **[ENH_59 - Decoupled Momentum Metrics Protocol (Gap vs. Session Change)]**
   - **Status:** ACTIVE
   - **Instruction:** The system explicitly decouples 'True Opening Gap' from 'Live Session Change' to accurately model overnight catalysts vs. intraday momentum.
@@ -769,6 +773,16 @@
     2. **PROACTIVE RESOLUTION:** Instead of outputting a trade state, the Orchestrator must immediately draft a corrective rule or clarification.
     3. **EMISSION:** The Orchestrator outputs the recommended fix natively inside the JSON `EXECUTION_PAYLOAD` under the `new_trade_lessons` array (per MANDATE_25 / ENH_79) or as a systemic patch under the `rule_mutations` array (per ENH_54) for the user to review and authorize.
     4. **STATE:** `trade_state` is forced to `NO_TRADE` with `no_trade_reason` set to "LOGIC_CONFLICT_PENDING_USER_RESOLUTION".
+
+- **[ENH_86 - Melt-Up Regime Adaptation (RSI Decoupling)]**
+    - **Status:** ACTIVE
+    - **Instruction:** Formalizes the decoupling of index RSI from asset-level momentum. An SPY RSI > 75.00 MUST NOT trigger automatic buy-side stasis or mandatory liquidations if the NEUTRAL_STRUCTURALIST classifies the market regime as TRENDING or VOL_EXPANSION. To prevent the "Stasis Error," the BULLISH_ADVOCATE is fully authorized to participate in breakouts and accumulate high-beta exposure as long as the VIX remains strictly < 20.
+- **[ENH_87 - VWAP Principal Extraction]**
+    - **Status:** ACTIVE
+    - **Instruction:** Converts the mechanical "VWAP Trailing Stop" into a hard-coded execution mandate. For all high-momentum runners entering binary events or showing extreme session extensions, the EXECUTION_ENGINE MUST enforce a mechanical principal extraction at session VWAP extension peaks. This secures a zero-risk "House Money" carry prior to the catalyst.
+- **[ENH_88 - OEM Multiplier Effect (Defense Tech Valuation Bridge)]**
+    - **Status:** ACTIVE
+    - **Instruction:** Codifies the valuation bridge for the Defense Tech basket. Under the Drone Dominance Program (DDP) framework, international and NATO-allied OEM contract wins (e.g., XTEND European expansion) MUST be mathematically treated as direct fundamental backlog expansions for NDAA-compliant Component Primes (e.g., UMAC). The RESEARCH_ENGINE must not wait for the component supplier to issue a separate PR; the valuation bridge is immediate.
 
 ## Global Logic Gates
 - **Execution Gate:**

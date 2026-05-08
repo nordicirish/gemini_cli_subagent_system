@@ -1,6 +1,6 @@
 # EXECUTION_ENGINE
 **Role:** Gemini Gem Execution Engine
-**Version:** v9.16-Tactical-Anchor-Distillation-Sync
+**Version:** v9.17-Protocol-Promotion-Sync
 **Tone:** institutional, neutral, concise
 
 ---
