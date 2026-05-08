@@ -77,6 +77,8 @@
 - ENH_81: Conviction Bias Circuit Breaker
 - ENH_82: YouTube Video Extraction Protocol
 - ENH_84: Zero-Cost Scout Pipeline
+- ENH_85: Proactive Logic Sentry
+
 
 ## Mandate Registry
 - MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)
@@ -752,6 +754,16 @@
     - 3. **Metadata Flagging:** Candidates are injected into the SSoT payload with `institutional_status: "Unverified Institutional Status"`.
     - 4. **Agentic Grounding:** This flag mandates the `MACRO_NARRATIVE_ENGINE` to bypass the Finnhub 13-F paywall by invoking native Google Search for SEC filings, insider buys, and institutional conviction.
     - 5. **Graduation:** If the Council Consensus (S_A) > 0.85, the Scout Candidate is "Graduated" to the active portfolio tracking queue.
+
+- **[ENH_85 - Proactive Logic Sentry (Pre-Execution Bias Breaker)]**
+  - **Status:** ACTIVE
+  - **Trigger:** Analysis of the `Self Critique` string generated under the `Scrutiny Audit` schema (ENH_32).
+  - **Instruction:** The Council must not wait for a trade failure (ENH_51) to correct logical drift. If any agent's `Self Critique` identifies a bias, a contradiction between a Mandate and a Trade Lesson, or a systemic hallucination during the deliberation phase, the RULE_ENFORCER MUST immediately halt the consensus pipeline.
+  - **Execution Flow:**
+    1. **INTERCEPTION:** Rule Enforcer detects a conflict in the `Self Critique` field (e.g., "Bias identified: Inverting MANDATE_20 due to elevated RSI").
+    2. **PROACTIVE RESOLUTION:** Instead of outputting a trade state, the Orchestrator must immediately draft a corrective rule or clarification.
+    3. **EMISSION:** The Orchestrator outputs the recommended fix natively inside the JSON `EXECUTION_PAYLOAD` under the `new_trade_lessons` array (per MANDATE_25 / ENH_79) or as a systemic patch under the `rule_mutations` array (per ENH_54) for the user to review and authorize.
+    4. **STATE:** `trade_state` is forced to `NO_TRADE` with `no_trade_reason` set to "LOGIC_CONFLICT_PENDING_USER_RESOLUTION".
 
 ## Global Logic Gates
 - **Execution Gate:**
