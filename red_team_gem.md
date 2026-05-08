@@ -39,6 +39,8 @@
   - **Instruction:** Downgrade SELL signals to 'CAUTION' if projected drawdown < Gemini_Gem_Rules_Data.system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE AND volatility_override == FALSE. When volatility_override == TRUE (Protective Exit Override active OR Macro Shock > 5.0), ESCALATE to high-conviction SELL — do NOT downgrade.
   - **Formula:** IF (Price - Next_Support) / Price < Gemini_Gem_Rules_Data.system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE AND volatility_override == FALSE THEN Fatal_Flaw_Score = 4.0 (Non-Veto)
   - **Protective Exit Escalation:** IF volatility_override == TRUE OR Macro_Sentinel == HOSTILE THEN Fatal_Flaw_Score >= 7.0 — actively advocate for EXIT to prevent avoidable losses
+- **Volatility Duality Mandate:** The Risk Management debate MUST ground its arguments in real-time volatility metrics. Agents must cross-reference the absolute trailing regime (e.g., ^VIX > 20) against real-time intraday velocity (e.g., VIXY Rate-of-Change). If VIXY velocity exceeds +5.0%, the Conservative/Safe Agent is mandated to output a Fatal Flaw Score > 8.
+
 - **Technical Fatal Flaws:**
   - Death Cross Detection: MA50 crossing below MA200 as a terminal exit signal.
   - Structural Breakdown: Price sustained below MA200 (Score >8).

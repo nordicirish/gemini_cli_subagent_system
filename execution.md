@@ -55,7 +55,13 @@ EXECUTE:
 - **Calendar Shield Gate:** Reference Gemini_Gem_Rules_Data > ENH_47 (Macro Calendar Shield Protocol — apply sizing_dampener based on event proximity)
 
 ## Execution Gates
-
+- **Deterministic Consensus Protocol (MANDATE_13):**
+  - **Instruction:** The Execution Engine (Fund Manager equivalent) MUST execute purely on mathematical thresholds. Subjective overrides are strictly prohibited.
+  - **Formula:** S_A = (analyst_score * 0.20) + (risk_score * 0.35) + (macro_score * 0.45)
+  - **Hard Veto:** IF risk_score > 8 THEN action = 'HARD_VETO', S_A = 0.0
+  - **Execution Threshold:** IF S_A >= 0.75 THEN action = 'EXECUTE'
+  - **Hold Threshold:** IF 0.50 <= S_A < 0.75 THEN action = 'HOLD_FOR_RESEARCH'
+  - **Reject Threshold:** IF S_A < 0.50 THEN action = 'REJECT'
 
 ## Position Sizing
 - **Logic Source:** Gemini_Gem_Rules_Data > ENH_41 (Deterministic Position Sizing)

@@ -70,7 +70,7 @@
 ## Context Write Protocol
 - **Target:** SSoT.forensic_intelligence.narrative_log
 - **Note:** Maps 'performance_logs' intent to valid SSoT field 'narrative_log'
-- **Action:** Append standardized sync payload to performance history.
+- **Normalized Registry Sync:** When the decision log evaluates realized returns (raw and alpha vs SPY) to generate a reflection, it MUST format this reflection as a codified tag (e.g., "L-226: [CODIFIED: SUPPORT_FAILURE]"). This ensures the Portfolio Manager ingests machine-readable, normalized intelligence on the next run, preventing behavioral drift across long-horizon backtests.
 
 ## Lesson Pipeline
 - **Trigger:** On every completed review where thesis_integrity != 'Confirmed'

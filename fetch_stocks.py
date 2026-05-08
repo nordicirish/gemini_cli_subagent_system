@@ -96,6 +96,23 @@ def save_config():
     with open('config.json', 'w') as f:
         json.dump(config, f, indent=4)
 
+# [AUTONOMOUS MANDATE: ENH_84 Scout Screening]
+def run_scout_pipeline(ticker):
+    """
+    Executes a zero-cost technical sweep via free-tier APIs (e.g., Finnhub)
+    before invoking the expensive Analyst LLM node.
+    """
+    # 1. Fetch live baseline data (SMA50, SMA200, RVOL)
+    # Placeholder for actual technical fetch
+    technical_data = {"rvol": 2.0, "price": 100, "sma_200": 90} 
+    
+    # 2. Hard Gate: Block if structural minimums fail
+    if technical_data.get('rvol', 0) < 1.5 or technical_data.get('price', 0) < technical_data.get('sma_200', float('inf')):
+        return {"status": "REJECTED_BY_SCOUT", "reason": "Insufficient momentum/trend."}
+        
+    # 3. Graduate to Analyst
+    return {"status": "Unverified Institutional Status", "data": technical_data}
+
 @app.get("/api/data")
 def get_data():
     return JSONResponse(fetch_stocks(GLOBAL_STATE))

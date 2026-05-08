@@ -73,7 +73,7 @@ Unlike earlier versions that relied on static data, v8.6-Forensic-Zero-Hallucina
 ### 🧠 Institutional Intelligence (v8.6+)
 
 The system now enforces **adversarial reasoning**, **volatility awareness**, and **forensic data integrity** to prevent hallucinations. 
-1. **Normalized Registry Sync**: Ensures zero-drift between the high-density `trade_lessons.md` (institutional memory) and the machine-executable `trade_lessons.json` fallback.
+1. **Normalized Registry Sync**: When the decision log evaluates realized returns (raw and alpha vs SPY) to generate a reflection, it MUST format this reflection as a codified tag (e.g., "L-226: [CODIFIED: SUPPORT_FAILURE]"). This ensures the Portfolio Manager ingests machine-readable, normalized intelligence on the next run, preventing behavioral drift across long-horizon backtests.
 2. **Flash-Tier Scrutiny (ENH_78)**: Hardens the data ingestion pipeline for high-velocity analysis, mandating cross-reference verification between live search and the SSoT.
 3. **Bifurcated Delivery**: Optimizes payload delivery by separating lightweight turn data from heavy session initialization context.
 4. **Scout Intelligence Pipeline (ENH_84)**: Implements autonomous, low-cost technical screening via the Finnhub API. Discovered candidates are injected into the SSoT with "Unverified Institutional Status" metadata to trigger mandatory agentic grounding.
