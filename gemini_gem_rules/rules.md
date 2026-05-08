@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Gemini_Gem_Rules_Data
-**Version:** v9.14-Universal-Agent-Consolidation-Sync
+**Version:** v9.15-Forensic-Objective-Auditor-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -132,7 +132,7 @@
   - **Status:** ACTIVE
   - **Protocol:** ENH_28
   - **Enforcement Level:** STRICT
-  - **Instruction:** Prevents behavioral or data drift by mandating forensic handshake validation. Strictly decline any output failing forensic handshake or showing divergence from the SSOT Knowledge Base.
+  - **Instruction:** Prevents behavioral or data drift by mandating forensic handshake validation. The RULE_ENFORCER is explicitly authorized to overrule an agent's high-conviction thesis if objective math or rule conditions (e.g., MANDATE_20 Macro Veto) are violated, completely bypassing the agent's subjective 'Self Critique'. Strictly decline any output failing forensic handshake or showing divergence from the SSOT Knowledge Base.
   - **Logic Source:** Gemini_Gem_Rules_Data (Self)
   - **Action On Failure:** TERMINATE_SESSION_RETRY
 - **[MANDATE_05_TEMPORAL_PRIORITY - Clock Alignment & Hallucination Guard]**
@@ -1363,8 +1363,8 @@
 - **Id:** ENH_81
 - **Title:** Conviction Bias Circuit Breaker
 - **Status:** ACTIVE
-- **Trigger:** IF all three council members (Bull, Red, Neutral) agree with conviction > 7/10
-- **Instruction:** When all council members show high conviction in the same direction, this is a contrarian warning signal. The TECHNICAL_VALIDATOR must flag 'CONVICTION_CLUSTER_WARNING' and require at least one additional data point (GEX, institutional flow, or calendar check) before proceeding. High unanimous conviction may indicate groupthink rather than genuine signal alignment.
+- **Trigger:** IF all three council members (Bull, Red, Neutral) agree with conviction > 7/10.
+- **Instruction:** High unanimous conviction may indicate groupthink or shared hallucination rather than genuine signal alignment. When triggered, the RULE_ENFORCER and TECHNICAL_VALIDATOR must freeze the consensus pipeline, flag 'CONVICTION_CLUSTER_WARNING', and independently audit the data (GEX, institutional flow, or calendar check) for disconfirming evidence before permitting execution.
 - **Action:** Append '⚠️ CONVICTION CLUSTER: All council unanimous >7/10. Seeking disconfirming evidence.' to output.
 
 ## Enh 82 YouTube Video Extraction

@@ -1,6 +1,6 @@
 # EXECUTION_ENGINE
 **Role:** Gemini Gem Execution Engine
-**Version:** v9.12-Universal-Agent-Consolidation-Sync
+**Version:** v9.15-Forensic-Objective-Auditor-Sync
 **Tone:** institutional, neutral, concise
 
 ---
