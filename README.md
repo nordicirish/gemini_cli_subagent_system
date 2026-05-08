@@ -4,7 +4,7 @@
 
 Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. Working together as a structured council, the agents evaluate market conditions, interpret financial data, enforce risk protocols, and generate consensus‑driven insights to support informed investment decision‑making. The platform integrates seamlessly with your real‑time dashboard, enabling a disciplined, auditable, and context‑persistent approach to stock‑market intelligence. 
 
-Starting with **v9.1-Scout-Intelligence-Grounding-Sync**, the system has fully consolidated its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`). This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
+Starting with **v9.12-Universal-Agent-Consolidation-Sync**, the system has fully consolidated its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`). This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
 
 ---
 
@@ -133,7 +133,7 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 | `format_json.py` | Formatter — pretty-prints a JSON instruction file with consistent indentation |
 ### 4. Updating Gems (Maintenance)
 
-> *"SYSTEM UPDATE: I have patched your instructions to v9.1-Scout-Intelligence-Grounding-Sync. Please simulate the following logic update: [Paste critical logic change]"*
+> *"SYSTEM UPDATE: I have patched your instructions to v9.12-Universal-Agent-Consolidation-Sync. Please simulate the following logic update: [Paste critical logic change]"*
 >
 > *(However, a full restart is recommended for major version changes).*
 
@@ -331,12 +331,12 @@ CRITICAL SYSTEM OVERRIDE: WIPE ALL PRIOR CONTEXT & FORCE SYNCHRONIZATION.
 
 Protocol Execution:
 1. ACKNOWLEDGE ARCHITECTURE: You are operating in a Web Sandbox environment. You MUST output all state changes as a strict JSON `EXECUTION_PAYLOAD` block so I can manually sync it via the local clipboard bridge.
-2. ACKNOWLEDGE SCHEMA: The system now uses the v9.1-Scout-Intelligence-Grounding-Sync Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
+2. ACKNOWLEDGE SCHEMA: The system now uses the v9.12-Universal-Agent-Consolidation-Sync Layer Model. The `local_storage_state` payload block will contain all data wrapped in `"immutable_background"` and `"mutable_state"`. You must merge delta updates into `"mutable_state"`.
 3. ACTION (ZERO-TOUCH SYNC): Use your Google Drive extension to read the attached `rules.md` markdown document in the (Gemini_Gem_Rules) folder.
 4. VERIFICATION: Do NOT fabricate data. If you cannot read the file, STOP and output "TOOL FAILURE". 
    - Cite the exact `version` string verbatim from the top of the rules.md file.
    - Confirm which "ENH_" protocol governs the "Web Verification Protocol".
-5. Confirm Status: "System initialized: State is bound to v9.1-Scout-Intelligence-Grounding-Sync Payload Architecture and SSoT Rules are synced via Drive."
+5. Confirm Status: "System initialized: State is bound to v9.12-Universal-Agent-Consolidation-Sync Payload Architecture and SSoT Rules are synced via Drive."
 ```
 
 ### 🟧 Local Pipeline Setup (The Clipboard Bridge)

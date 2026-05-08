@@ -282,6 +282,31 @@ async def handle_paste(req: Request):
         if isinstance(payload.get("EXECUTION_PAYLOAD"), dict):
             map_aliases(payload["EXECUTION_PAYLOAD"])
             
+        # ENH_31: Promote key fields from EXECUTION_PAYLOAD to state root for immediate SSoT synchronization
+        # This ensures that 'allocations' (portfolio_snapshot) and other directives are applied to the active state.
+        incoming_ep = payload.get("EXECUTION_PAYLOAD")
+        if not incoming_ep and isinstance(payload.get("mutable_state"), dict):
+            incoming_ep = payload["mutable_state"].get("EXECUTION_PAYLOAD")
+            
+        if isinstance(incoming_ep, dict):
+            promotion_keys = ["portfolio_snapshot", "risk_metrics", "directive", "timestamp", 
+                              "remaining_cash_eur", "remaining_cash_usd", 
+                              "unallocated_cash_eur", "unallocated_cash_usd",
+                              "base_currency", "exchange_rate", 
+                              "portfolio_total_value_usd", "portfolio_total_value_eur"]
+            
+            # Determine target container for promotion
+            target_container = payload
+            if isinstance(payload.get("mutable_state"), dict):
+                target_container = payload["mutable_state"]
+                
+            for k in promotion_keys:
+                if k in incoming_ep:
+                    # Always promote portfolio_snapshot as it represents the target allocations
+                    # For others, promote if not already present or if it's a primary directive/metric
+                    if k == "portfolio_snapshot" or k not in target_container or k in ["directive", "risk_metrics", "timestamp"]:
+                        target_container[k] = incoming_ep[k]
+            
         # Helper to extract and remove fields from payload regardless of nesting
         def get_and_prune(data, key):
             if key in data: return data.pop(key)

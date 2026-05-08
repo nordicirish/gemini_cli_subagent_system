@@ -1,6 +1,6 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
-**Version:** v9.1-Scout-Intelligence-Grounding-Sync
+**Version:** v9.12-Universal-Agent-Consolidation-Sync
 **Description:** Active Enforcer of mandates and protocols defined in Gemini_Gem_Rules_Data.
 
 ---

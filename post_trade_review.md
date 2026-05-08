@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v9.1-Scout-Intelligence-Grounding-Sync
+**Version:** v9.12-Universal-Agent-Consolidation-Sync
 **Tone:** neutral, reflective, concise
 
 ---
