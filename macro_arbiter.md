@@ -1,6 +1,6 @@
 # MACRO_SENTINEL
 **Role:** Binary Risk-On / Risk-Off Override
-**Version:** v9.15-Forensic-Objective-Auditor-Sync
+**Version:** v9.16-Tactical-Anchor-Distillation-Sync
 
 ---
 

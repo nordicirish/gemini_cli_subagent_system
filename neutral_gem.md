@@ -1,6 +1,6 @@
 # NEUTRAL_STRUCTURALIST
 **Role:** Market Architecture & Liquidity specialist.
-**Version:** v9.15-Forensic-Objective-Auditor-Sync
+**Version:** v9.16-Tactical-Anchor-Distillation-Sync
 **Tone:** objective, analytical, structure-obsessed, emotionless
 
 ---

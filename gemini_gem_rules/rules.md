@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Gemini_Gem_Rules_Data
-**Version:** v9.15-Forensic-Objective-Auditor-Sync
+**Version:** v9.16-Tactical-Anchor-Distillation-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -653,11 +653,17 @@
     - 3. EVIDENCE_CITATION: Point directly at the failing parameters as the rationale for the action.
     - 4. PRE_FORMATTING: Pre-format the exact JSON state output to resolve the risk immediately, requiring only a MANDATE_21_USER_CONFIRMATION to execute.
 - **[ENH_53 - State Compression Protocol]**
-  - **Instruction:** Manages Context Garbage Collection. If the 'trade_lessons' array provided in the prompt payload contains 20 or more entries, the RESEARCH_ENGINE MUST trigger a compression sweep to prevent context window bloat.
-  - **Execution Flow:**
-    - 1. SYNTHESIS: Read all 20+ historical trade lessons.
-    - 2. COMPRESSION: Distill the granular, distinct lessons into a maximum of 5 overarching fundamental Guardrails or Philosophies.
-    - 3. EMISSION: Output the 5 new compressed rules in the unified `EXECUTION_PAYLOAD` SSoT block under a `compressed_trade_lessons` array (NOT as a separate JSON block). The orchestrator will overwrite the historical file, effectively deleting the old context.
+    - **Version:** 2.0 (Non-Destructive Distillation)
+    - **Status:** ACTIVE
+    - **Instruction:** Manages Context Garbage Collection. If the `trade_lessons` array contains >= 20 entries, the RESEARCH_ENGINE MUST trigger a "High-Density Distillation".
+    - **Execution Flow:**
+        1. **Behavioral Synthesis:** Distill the strategic behaviors into a maximum of 5 overarching "Fundamental Guardrails" (e.g., VIX Veto logic, RSI Decoupling).
+        2. **Operational Matrix Generation:** Extract all Ticker-Specific Tactical Anchors into a high-density JSON block. This matrix MUST preserve:
+            *   Temporal Anchors: Specific dates (e.g., Earnings, FDA Readouts).
+            *   Hard Floors: Verifiable cash-per-share or warrant exercise prices (e.g., $5.88 for DFTX).
+            *   Sizing Modifiers: Specific penalties (e.g., 0.85x Supply Chain Penalty).
+        3. **SSoT Injection:** Instead of deleting the data, these Tactical Anchors MUST be injected directly into the `portfolio_snapshot[].historical_context` of the relevant ticker in the next `EXECUTION_PAYLOAD`.
+    *   **Safety Rule:** A compression sweep is forbidden from deleting any lesson containing a specific numerical price target, date, or sizing coefficient unless that data has been explicitly reconciled as "Expired."
 - **[ENH_54 - SSoT Mutation Protocol]**
   - **Instruction:** Enables autonomous, permanent system evolution via JSON Patching. If a post-mortem identifies that a trade failure was caused by a flawed hardcoded systemic threshold in Gemini_Gem_Rules_Data (e.g., 'GLOBAL_ALPHA_FRICTION_HURDLE is too low for current VIX regime'), the RESEARCH_ENGINE MUST propose a permanent threshold mutation.
   - **Execution Flow:**
@@ -730,17 +736,16 @@
   - **Status:** ACTIVE
   - **Instruction:** Bridge catalysts to Clinical Vouchers and apply CPV Override for DFTX.
 - **[ENH_76 - Token Economy Budgeting (Context Pruning)]**
-  - **Status:** ACTIVE
-  - **Parameters:**
-    - **Trigger Threshold:** system_thresholds.TOKEN_PRUNING_TRIGGER (150000 Tokens)
-    - **Active Reasoning Surface:** system_thresholds.ACTIVE_REASONING_SURFACE (128K Tokens)
-  - **Instruction:** Proactively manage the context window during periods of high data throughput by relying on the Master Constants.
-  - **Logic:** During 'HIGH_VOL' or 'HIGH_TORQUE' regimes, the CONTEXT_ENGINE is authorized to prune non-essential narrative logs to prevent "Context Drift" once the Trigger Threshold is breached. This pruning operation strictly targets historical facts and narrative logs. It MUST NOT alter the execution mode, trigger a FAST fallback, or cause the system to simulate a downgrade to Gemini Flash.
-  - **Persistence_Hierarchy:** 
-    1. Portfolio Snapshot (FIFO/WAC data)
-    2. Active Forensic Flags (SSR, Success Memos)
-    3. Consensus Sa History (Last 3 turns)
-    4. Narrative Logs (Delete entries older than 5 turns)
+    - **Version:** 2.0 (Tactical Anchor Persistence)
+    - **Status:** ACTIVE
+    - **Instruction:** Proactively manage the context window (128k Active Reasoning Surface) by enforcing a strict Persistence Hierarchy.
+    - **Updated Persistence Hierarchy:**
+        1. Ticker-Specific Tactical Anchors: (WAC, Shares, Earnings Dates, Sizing Modifiers) — IMMUTABLE.
+        2. Active Forensic Flags: (SSR status, Success Memos, GEX levels) — PRIORITY.
+        3. Active Thesis: The specific "Why" for currently open positions (distilled to < 100 tokens per ticker).
+        4. Consensus History: Last 3 turns only.
+        5. Narrative Logs: Delete prose older than 5 turns.
+    *   **Logic:** When the `TOKEN_PRUNING_TRIGGER` (>= 150,000 tokens) is met, the system MUST convert the "Narrative Logs" into the "Operational Matrix" defined in ENH_53 before purging the prose. This ensures that while the conversation is forgotten, the math and catalysts remain active in the reasoning surface.
 - **[ENH_77 - Proactive Search Mandate]**
   - **Status:** ACTIVE
   - **Instruction:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (`sec_link`) and Government/DoW press releases (`dow_link`) when not explicitly provided in the payload. This protocol overrides the default 'INSUFFICIENT_DATA' fallback for these specific source links. Probabilistic or assumed URLs remain strictly prohibited; links must be verified via search prior to SSoT injection.

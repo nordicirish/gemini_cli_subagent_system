@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v9.15-Forensic-Objective-Auditor-Sync
+**Version:** v9.16-Tactical-Anchor-Distillation-Sync
 **Tone:** neutral, reflective, concise
 
 ---
@@ -103,4 +103,4 @@
 - **Next Steps For Execution Engine:** Adjustment to sizing/entry logic
 
 ---
-*Generated from post_trade_review.json*
+
