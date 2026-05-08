@@ -292,6 +292,16 @@ async def handle_paste(req: Request):
                 data["remaining_cash_eur"] = data["unallocated_cash_eur"]
             if "unallocated_cash_usd" in data and "remaining_cash_usd" not in data:
                 data["remaining_cash_usd"] = data["unallocated_cash_usd"]
+            
+            if "portfolio_snapshot" in data and isinstance(data["portfolio_snapshot"], list):
+                for item in data["portfolio_snapshot"]:
+                    if isinstance(item, dict):
+                        if "wac_usd" in item and "wac" not in item:
+                            item["wac"] = item.pop("wac_usd")
+                        if "current_price_usd" in item and "price" not in item:
+                            item["price"] = item.pop("current_price_usd")
+                        if "action" in item and "trade_state" not in item:
+                            item["trade_state"] = item.pop("action")
         
         map_aliases(payload)
         if isinstance(payload.get("mutable_state"), dict):

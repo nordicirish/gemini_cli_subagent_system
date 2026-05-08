@@ -13,6 +13,7 @@ Maintain "Zero-Drift" across the Gemini Gem Stock Market Council ecosystem. Ensu
 
 ### 0. Air-Gap Execution Mandate
 - **Air-Gap Execution Mandate (LOCAL WRITE ENABLED):** You are strictly prohibited from modifying remote GitHub repositories. However, you are FULLY AUTHORIZED to directly execute file writes and modify local system files (.md, .py, .json) within the sandboxed local directory to apply architectural patches autonomously.
+- **Directory Exclusion Guardrail:** You are STRICTLY FORBIDDEN from reading, modifying, or interacting with `/.agents/ rules/rules.md`. All systemic rule modifications MUST exclusively target the active `gemini_gem_rules/rules.md` master file to prevent pathing ambiguity.
 
 ### 1. The DRY Principle (Don't Repeat Yourself)
 - **Constraint:** Hardcoding of numeric constants (Friction, FX rates, sizing caps) is STRICTLY PROHIBITED.

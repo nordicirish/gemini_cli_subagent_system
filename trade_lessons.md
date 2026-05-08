@@ -84,6 +84,7 @@
 ## #POSITION-SIZING
 - **L-5:** [CODIFIED: MANDATE_22] Position size in binary clinical plays must be dictated by 'Residual Cash Value' floors (e.g., $5.88 for DFTX). #position-sizing #biotech
 - **L-101:** [CODIFIED: ENH_57] Mandatory 20% NAV to Sovereign Clinical Hedges during high-VIX.  
+- **L-227:** [CODIFIED: ZERO_TAX_GAP_DEFENSE] High-momentum scout targets (from the Zero-Cost Scout Pipeline) must be aggressively swing-traded to capture overnight gap volatility. The Nordea ESA environment strictly eliminates 'Wash Sale' inertia and short-term capital gains tax, authorizing rapid churning of scout positions to harvest gains, provided the 1% alpha friction hurdle is cleared.
 
 --- #position-sizing #hedging
 

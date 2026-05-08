@@ -1400,6 +1400,14 @@
         "#VALUATION / #SUPPLY-CHAIN"
       ],
       "id": 196
+    },
+    {
+      "rule": "[CODIFIED: ZERO_TAX_GAP_DEFENSE] High-momentum scout targets (from the Zero-Cost Scout Pipeline) must be aggressively swing-traded to capture overnight gap volatility. The Nordea ESA environment strictly eliminates 'Wash Sale' inertia and short-term capital gains tax, authorizing rapid churning of scout positions to harvest gains, provided the 1% alpha friction hurdle is cleared.",
+      "tags": [
+        "position-sizing",
+        "hedging"
+      ],
+      "id": 227
     }
   ]
 }

@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Gemini_Gem_Rules_Data
-**Version:** v9.13-Universal-Agent-Consolidation-Sync
+**Version:** v9.14-Universal-Agent-Consolidation-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -113,6 +113,10 @@
 - **Consumer AI Sandbox (ANTI-RECURSION MANDATE):** All agents are STRICTLY FORBIDDEN from utilizing Google Finance's consumer AI features (AI Overview, Spark Overlays, AI Earnings Summaries, or the native Gemini Research Tool). The Council MUST ingest RAW data (transcripts, raw charts, numerical financials) and perform the synthesis themselves to prevent Arbiter Collision and protect forensic lineage (MANDATE_06).
 
 ## Behavioral Guardrails
+
+#### Anti Hallucination Core
+- **Volatility-Momentum Inversion Guard:** The Council is strictly prohibited from requiring a high VIX (e.g., VIX > 20) to authorize purchases under high RSI regimes (L-226). VIX > 20 is a HARD VETO condition under MANDATE_20, never an authorization requirement. High RSI breakouts require a TRENDING regime (which typically correlates with VIX < 20), not a highly volatile regime.
+
 - **[MANDATE_01_GATEKEEPER]**
   - **Status:** ACTIVE
   - **Instruction:** The SSoT Gemini Gem is the exclusive interface for state commitment. However, it MUST accept 'Proposed States' from Context Engine as the primary valid input source.
@@ -302,10 +306,10 @@
   - **Status:** ACTIVE
   - **Revision Date:** 2026-03-03
   - **Instruction:** Protect overnight news gaps. Trailing stops must be anchored to the 50% retracement of the opening gap to prevent 'Bull Traps' in Short Gamma regimes.
-  - **Tax Advantage Clause:**
-    - **Protocol:** FRICTIONLESS_GAP_REENTRY
-    - **Logic:** The account environment eliminates 'Wash Sale' inertia and FIFO capital gains leakage. If a position hits the 50% Gap Stop, exit immediately. If price later re-claims the Gap Midpoint on positive rVol, re-entry is mandatory.
-    - **Execution:** Treat Gap Defense as a 'Binary Switch'. 100% exit at the 50% retracement; 100% re-entry at the 50% reclaim. Tax-deferred status allows for this mechanical churn to capture the full volatility curve without immediate tax-friction erosion.
+  - **Tax Advantage Clause (Nordea ESA Swing Optimization):**
+    - **Protocol:** ZERO_TAX_GAP_DEFENSE
+    - **Logic:** The Nordea ESA environment strictly eliminates 'Wash Sale' inertia and short-term capital gains tax. If a high-momentum swing position (e.g., Scout target) hits the 50% Gap Stop overnight, exit immediately to lock in the remaining gap up. We can aggressively weaponize this binary switch to scalp volatility overnight without fear of tax-friction erosion, bypassing traditional swing-trading hold periods.
+    - **Execution:** Treat Gap Defense as a 'Binary Switch'. 100% exit at the 50% retracement; 100% re-entry at the 50% reclaim, regardless of T+1 settlement or tax-lot concerns.
   - **Technical Parameters:**
     - **Anchor Point:** Gap_Midpoint = (Previous_Close + Open_Price) / 2
     - **Defense Logic:** IF Current_Price < Gap_Midpoint AND VIX > 20 THEN SET status = 'IN_DISTRESS' AND emit TRIM_50
@@ -679,7 +683,7 @@
 - **[ENH_57 - Sovereign Hedge Rotation]**
   - **Instruction:** Mandate 20% portfolio weight in clinical-stage biotechs with cash runways > 24 months during High-VIX regimes.
 - **[ENH_58 - ESA Tax Neutralization Protocol]**
-  - **Instruction:** Intraday trading friction is purely commission-based (1% round-trip), allowing for 2-3% scalps on mechanical floors. While Finnish ESA accounts eliminate Wash-Sale tax penalties, the mathematical reality of FIFO still applies to the cost basis (refer to ENH_60).
+  - **Instruction:** Intraday and swing trading friction is purely commission-based (1% round-trip) via Nordea ESA. Because the Finnish ESA eliminates Wash-Sale tax penalties and capital gains drag, the system is fully authorized to aggressively harvest gains or cut losses on high-velocity swing targets (e.g., Scout targets) provided the 1% alpha friction hurdle is cleared.
 - **[ENH_59 - Decoupled Momentum Metrics Protocol (Gap vs. Session Change)]**
   - **Status:** ACTIVE
   - **Instruction:** The system explicitly decouples 'True Opening Gap' from 'Live Session Change' to accurately model overnight catalysts vs. intraday momentum.
