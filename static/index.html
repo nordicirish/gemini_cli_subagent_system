@@ -106,13 +106,13 @@
                         <h3 onclick="toggleSection('portfolio-content', this)" style="cursor: pointer; user-select: none; display: flex; align-items: center;">
                             <span class="icon">💼</span> Portfolio <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
                         </h3>
-                        <div class="input-group">
+                    </div>
+                    <div id="portfolio-content" style="display: none;">
+                        <div class="input-group" style="margin-bottom: 12px; justify-content: center;">
                             <input type="text" id="add-portfolio-ticker" placeholder="SYM" class="mini-input">
                             <button id="add-to-portfolio-btn" class="add-btn">+</button>
                             <button id="save-portfolio-btn" class="glow-btn sync-btn">SYNC</button>
                         </div>
-                    </div>
-                    <div id="portfolio-content" style="display: none;">
                         <div class="manager-table-container" style="margin-top: 0;">
                             <table class="manager-table">
                                 <thead>
@@ -137,12 +137,12 @@
                         <h3 onclick="toggleSection('watchlist-content', this)" style="cursor: pointer; user-select: none; display: flex; align-items: center;">
                             <span class="icon">👀</span> Watchlist <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
                         </h3>
-                        <div class="input-group">
+                    </div>
+                    <div id="watchlist-content" style="display: none;">
+                        <div class="input-group" style="margin-bottom: 12px; justify-content: center;">
                             <input type="text" id="add-watchlist-ticker" placeholder="SYM" class="mini-input">
                             <button id="add-to-watchlist-btn" class="add-btn">+</button>
                         </div>
-                    </div>
-                    <div id="watchlist-content" style="display: none;">
                         <div id="watchlist-manager-container" class="watch-list-flex" style="margin-top: 0;">
                             <!-- Tags injected by JS -->
                         </div>

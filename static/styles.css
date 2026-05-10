@@ -375,7 +375,7 @@ h1 {
 /* ─── Main Grid ─── */
 .main-content {
     display: grid;
-    grid-template-columns: 1fr minmax(280px, 320px);
+    grid-template-columns: 1fr 260px;
     gap: 20px;
     align-items: start;
 }
@@ -396,7 +396,7 @@ h1 {
 
 .table-container table {
     width: 100%;
-    min-width: 1100px; /* Prevent column squashing ONLY in main table */
+    min-width: 1100px;
     border-collapse: collapse;
     text-align: left;
     font-family: var(--font-mono);
@@ -422,39 +422,30 @@ th {
     white-space: nowrap;
 }
 
-/* Sticky First Column (Ticker) ONLY (Main Table Only) */
-.table-container th:first-child, 
-.table-container td:first-child {
-    position: sticky;
-    left: 0;
-    z-index: 15; /* Higher than section headers */
-    background: var(--panel-bg-solid) !important;
-}
-
-/* Sticky First Column (Ticker) ONLY (Main Table Only) */
+/* Sticky Ticker Column (Main Table Only) */
 .table-container th:first-child, 
 .table-container td:first-child {
     position: sticky;
     left: 0;
     z-index: 15;
     background: var(--panel-bg-solid) !important;
-}
-
-/* Shadow only for the Ticker column to separate from data */
-.table-container th:first-child, 
-.table-container td:first-child {
     border-right: 1px solid var(--panel-border);
     box-shadow: 4px 0 8px rgba(0,0,0,0.3);
 }
 
-/* Section headers - Natural alignment */
+/* Header Tickers should be top-most */
+.table-container th:first-child {
+    z-index: 40; 
+}
+
+/* Section headers - Centered & Premium */
 .table-container .table-section-header td,
 .table-container .table-sub-header td {
     position: relative;
     z-index: 2;
-    padding-left: 24px !important; /* Standard padding */
+    padding: 14px 24px !important;
     background: var(--panel-bg-solid) !important;
-    text-align: left;
+    text-align: center;
     border-right: none;
     box-shadow: none;
 }
@@ -651,12 +642,13 @@ tbody tr:hover td {
 }
 
 .sidebar-card h3 {
-    font-size: 0.95rem;
-    font-weight: 700;
-    margin-bottom: 2px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    font-size: 1.1rem;
+    font-weight: 700;
 }
 
 .sidebar-card h3 .icon {
@@ -664,10 +656,11 @@ tbody tr:hover td {
     display: inline-flex;
 }
 
-.subtitle {
+.sidebar-card .subtitle {
     font-size: 0.72rem;
     color: var(--text-muted);
-    margin-bottom: 14px;
+    margin-bottom: 20px;
+    text-align: center;
     font-weight: 500;
     letter-spacing: 0.2px;
 }
@@ -894,13 +887,17 @@ textarea:focus {
 /* ─── Manager Cards (Portfolio/Watchlist) ─── */
 .manager-card .header-row {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column; /* Stack for centering */
     align-items: center;
-    margin-bottom: 12px;
+    gap: 12px;
+    margin-bottom: 16px;
 }
 
 .manager-card h3 {
     margin: 0 !important;
+    width: 100%;
+    text-align: center;
+    justify-content: center;
 }
 
 .input-group {
