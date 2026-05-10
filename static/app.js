@@ -5,9 +5,7 @@ const dTableBody = document.getElementById('table-body');
 const dStatus = document.getElementById('market-status');
 const dUpdated = document.getElementById('last-updated');
 const dIndicator = document.getElementById('live-indicator');
-const dtInput = document.getElementById('ticker-input');
-const dUpdateBtn = document.getElementById('update-tickers-btn');
-const dTStatus = document.getElementById('ticker-status');
+
 
 const dIndicesInput = document.getElementById('indices-input');
 const dUpdateIndicesBtn = document.getElementById('update-indices-btn');
@@ -18,14 +16,41 @@ let currentMacroTickers = [];
 let MACRO_LABELS = {};
 
 const dCopyBtn = document.getElementById('copy-json-btn');
+const dCopySessionBtn = document.getElementById('copy-session-btn');
 const dPasteBtn = document.getElementById('paste-payload-btn');
 const dDataStatus = document.getElementById('data-status');
 
-// Modal elements
-const dTickerModalOverlay = document.getElementById('ticker-modal-overlay');
-const dOpenModalBtn = document.getElementById('open-ticker-modal-btn');
-const dCloseModalBtn = document.getElementById('close-ticker-modal');
-const dAlertsPanel = document.getElementById('alerts-panel');
+// Manager Elements
+const dPortfolioBody = document.getElementById('portfolio-manager-body');
+const dWatchlistContainer = document.getElementById('watchlist-manager-container');
+const dAddPortfolioTicker = document.getElementById('add-portfolio-ticker');
+const dAddToPortfolioBtn = document.getElementById('add-to-portfolio-btn');
+const dSavePortfolioBtn = document.getElementById('save-portfolio-btn');
+const dAddWatchlistTicker = document.getElementById('add-watchlist-ticker');
+const dAddToWatchlistBtn = document.getElementById('add-to-watchlist-btn');
+
+
+// Helper for consistent UI feedback on copy/paste actions
+function showFeedback(btn, btnText, statusMsg, isError = false) {
+    if (btn.dataset.isFeedback === "true") return; // Prevent re-triggering during active feedback
+    
+    btn.dataset.isFeedback = "true";
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = btnText;
+    btn.classList.add(isError ? 'btn-error' : 'btn-success');
+    
+    dDataStatus.textContent = statusMsg;
+    dDataStatus.className = `status-message ${isError ? 'text-red' : 'text-green'}`;
+    
+    setTimeout(() => {
+        btn.innerHTML = originalHtml;
+        btn.classList.remove('btn-error', 'btn-success');
+        dDataStatus.textContent = '';
+        btn.dataset.isFeedback = "false";
+    }, 2500);
+}
+
+
 
 const dIndicesModalOverlay = document.getElementById('indices-modal-overlay');
 const dOpenIndicesBtn = document.getElementById('open-indices-modal-btn');
@@ -39,15 +64,18 @@ let latestMacroData = {};
 function openModal(overlay) { overlay.classList.add('active'); }
 function closeModal(overlay) { overlay.classList.remove('active'); }
 
-// Ticker Modal
-dOpenModalBtn.addEventListener('click', () => {
-    openModal(dTickerModalOverlay);
-    dtInput.focus();
-});
-dCloseModalBtn.addEventListener('click', () => closeModal(dTickerModalOverlay));
-dTickerModalOverlay.addEventListener('click', (e) => {
-    if (e.target === dTickerModalOverlay) closeModal(dTickerModalOverlay);
-});
+// Section Collapse Toggle
+window.toggleSection = function(contentId, headerElement) {
+    const content = document.getElementById(contentId);
+    const chevron = headerElement.querySelector('.chevron');
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        if (chevron) chevron.style.transform = 'rotate(0deg)';
+    } else {
+        content.style.display = 'none';
+        if (chevron) chevron.style.transform = 'rotate(-90deg)';
+    }
+};
 
 // Indices Modal
 dOpenIndicesBtn.addEventListener('click', () => {
@@ -62,7 +90,6 @@ dIndicesModalOverlay.addEventListener('click', (e) => {
 // Escape to close any open modal
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-        closeModal(dTickerModalOverlay);
         closeModal(dIndicesModalOverlay);
     }
 });
@@ -111,6 +138,8 @@ let prevPrices = {};
 // Initialization
 async function init() {
     await fetchTickers();
+    await fetchPortfolio();
+    await fetchWatchlist();
     pollData();
     setInterval(pollData, 3000); // 3 sec polling
 }
@@ -120,7 +149,6 @@ async function fetchTickers() {
     try {
         const res = await fetch(`${API_BASE}/tickers`);
         const data = await res.json();
-        dtInput.value = data.tickers.join(', ');
         dIndicesInput.value = data.macro.join(', ');
         currentMacroTickers = data.macro;
         if (data.macro_labels) MACRO_LABELS = data.macro_labels;
@@ -129,35 +157,7 @@ async function fetchTickers() {
     }
 }
 
-// Update tickers list via POST
-dUpdateBtn.addEventListener('click', async () => {
-    const raw = dtInput.value;
-    const items = raw.split(/[\s,]+/).map(t => t.trim()).filter(t => t);
-    
-    dUpdateBtn.disabled = true;
-    dUpdateBtn.textContent = 'Updating...';
-    
-    try {
-        const res = await fetch(`${API_BASE}/tickers`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({tickers: items})
-        });
-        const data = await res.json();
-        if(data.status === 'success') {
-            dTStatus.textContent = 'Tracked tickers updated successfully.';
-            dTStatus.className = 'status-message text-green';
-            setTimeout(() => { dTStatus.textContent = ''; }, 3000);
-        }
-    } catch (e) {
-        console.error(e);
-        dTStatus.textContent = 'Failed to update tickers.';
-        dTStatus.className = 'status-message text-red';
-    } finally {
-        dUpdateBtn.disabled = false;
-        dUpdateBtn.textContent = 'Update Tickers';
-    }
-});
+
 
 // Update indices list via POST
 dUpdateIndicesBtn.addEventListener('click', async () => {
@@ -197,7 +197,6 @@ dCopyBtn.addEventListener('click', async () => {
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
         
-        // Build lightweight ticker snapshots
         const slimTickers = (state.tickers || []).map(t => ({
             ticker: t.ticker,
             price: t.price,
@@ -213,7 +212,6 @@ dCopyBtn.addEventListener('click', async () => {
             historical_context: t.historical_context
         }));
         
-        // Extract compact mutable_state from full SSOT
         const ssot = state.local_storage_state || {};
         const ms = ssot.mutable_state || {};
         const fi = ms.forensic_intelligence || {};
@@ -244,19 +242,36 @@ dCopyBtn.addEventListener('click', async () => {
             }
         };
         
-        // Output JSON Payload Only (no lessons)
         const jsonString = "```json\n" + JSON.stringify(turnPayload, null, 2) + "\n```";
-        
         await navigator.clipboard.writeText(jsonString);
-        
-        dDataStatus.textContent = 'Turn data copied (lightweight)!';
-        dDataStatus.className = 'status-message text-green';
-        setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
+        showFeedback(dCopyBtn, "✅ Copied!", "Turn data copied (lightweight)!");
     } catch (e) {
         console.error(e);
-        dDataStatus.textContent = 'Failed to copy data.';
-        dDataStatus.className = 'status-message text-red';
-        setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
+        showFeedback(dCopyBtn, "❌ Error", "Failed to copy data.", true);
+    }
+});
+
+// Copy Session Init Handler (Full SSOT + Tickers + Lessons)
+dCopySessionBtn.addEventListener('click', async () => {
+    try {
+        const res = await fetch(`${API_BASE}/data`);
+        const state = await res.json();
+        
+        const sessionPayload = {
+            _meta: state._meta,
+            timestamp: state.timestamp,
+            status: state.status,
+            tickers: state.tickers,
+            local_storage_state: state.local_storage_state,
+            trade_lessons: state.trade_lessons
+        };
+        
+        const jsonString = "```json\n" + JSON.stringify(sessionPayload, null, 2) + "\n```";
+        await navigator.clipboard.writeText(jsonString);
+        showFeedback(dCopySessionBtn, "✅ Copied!", "Full session initialization data copied!");
+    } catch (e) {
+        console.error(e);
+        showFeedback(dCopySessionBtn, "❌ Error", "Failed to copy session data.", true);
     }
 });
 
@@ -265,7 +280,6 @@ dCopyBtn.addEventListener('click', async () => {
 // Paste Payload Handler
 dPasteBtn.addEventListener('click', async () => {
     dPasteBtn.disabled = true;
-    dPasteBtn.textContent = 'Ingesting...';
     try {
         const text = await navigator.clipboard.readText();
         if (!text) throw new Error("Clipboard empty");
@@ -278,19 +292,15 @@ dPasteBtn.addEventListener('click', async () => {
         
         const data = await res.json();
         if (data.status === 'success') {
-            dDataStatus.textContent = 'Payload successfully ingested!';
-            dDataStatus.className = 'status-message text-green';
+            showFeedback(dPasteBtn, "✅ Ingested!", "Payload successfully ingested!");
         } else {
             throw new Error(data.message);
         }
     } catch (e) {
         console.error("Paste Error: ", e);
-        dDataStatus.textContent = e.message || 'Failed to paste/parse payload.';
-        dDataStatus.className = 'status-message text-red';
+        showFeedback(dPasteBtn, "❌ Error", e.message || "Failed to ingest payload.", true);
     } finally {
-        setTimeout(() => { dDataStatus.textContent = ''; }, 3000);
         dPasteBtn.disabled = false;
-        dPasteBtn.textContent = 'Paste Execution Payload';
     }
 });
 
@@ -323,16 +333,18 @@ function renderTable(tickers, state) {
         scouts: []
     };
 
+    const userWatchlist = new Set((state.watchlist || []).map(s => s.toUpperCase()));
+
     tickers.forEach(t => {
         const sym = t.ticker.toUpperCase();
         if (MACRO_TICKERS.includes(sym)) return;
 
         if (heldTickers.has(sym)) {
             groups.held.push(t);
-        } else if (t.institutional_status === "Unverified Institutional Status") {
-            groups.scouts.push(t);
-        } else {
+        } else if (userWatchlist.has(sym)) {
             groups.watchlist.push(t);
+        } else {
+            groups.scouts.push(t);
         }
     });
 
@@ -373,9 +385,10 @@ function renderTable(tickers, state) {
             trendHtml = `<span class="trend-tag flat">— Flat</span>`;
         }
 
+        const scoutBadge = row._isScout ? `<span class="scout-badge">SCOUT</span>` : '';
         return `
             <tr>
-                <td class="ticker-cell">${sym}</td>
+                <td class="ticker-cell">${sym}${scoutBadge}</td>
                 <td class="${pClass}">${p}</td>
                 <td class="${gapColor}">${row.gap_percent > 0 ? '+' : ''}${row.gap_percent.toFixed(2)}%</td>
                 <td>${formatVol(row.volume)}</td>
@@ -399,25 +412,36 @@ function renderTable(tickers, state) {
         `;
     };
 
-    const renderHeader = (label) => `
-        <tr class="table-section-header">
+    const renderHeader = (label, cls = '') => `
+        <tr class="table-section-header ${cls}">
             <td colspan="10">${label}</td>
         </tr>
     `;
 
     if (groups.held.length > 0) {
-        html += renderHeader('Institutional Portfolio');
+        html += renderHeader('Your Portfolio', 'portfolio-header');
         groups.held.forEach(t => html += renderRow(t));
     }
 
-    if (groups.watchlist.length > 0) {
-        html += renderHeader('Strategic Watchlist');
-        groups.watchlist.forEach(t => html += renderRow(t));
-    }
+    if (groups.watchlist.length > 0 || groups.scouts.length > 0) {
+        html += renderHeader('Strategic Watchlist', 'watchlist-header');
+        
+        if (groups.watchlist.length > 0) {
+            groups.watchlist.forEach(t => html += renderRow(t));
+        }
 
-    if (groups.scouts.length > 0) {
-        html += renderHeader('Scout Intelligence Candidates');
-        groups.scouts.forEach(t => html += renderRow(t));
+        if (groups.scouts.length > 0) {
+            html += `
+                <tr class="table-sub-header scout-header">
+                    <td colspan="10">Scout Intelligence Suggestions</td>
+                </tr>
+            `;
+            groups.scouts.forEach(t => {
+                // Add scout indicator to the row object for renderRow to pick up
+                t._isScout = true; 
+                html += renderRow(t);
+            });
+        }
     }
 
     dTableBody.innerHTML = html;
@@ -425,17 +449,27 @@ function renderTable(tickers, state) {
 
 async function pollData() {
     try {
+        // Refresh managers if not focused
+        const active = document.activeElement;
+        if (!active || (!active.classList.contains('portfolio-input') && active !== dAddWatchlistTicker)) {
+            fetchPortfolio();
+            fetchWatchlist();
+        }
+
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
 
         if (state && Object.keys(state).length > 0) {
             dIndicator.classList.add('active');
-            dStatus.textContent = state.status || 'UNKNOWN';
+            let displayStatus = state.status || 'FETCHING DATA...';
+            if (displayStatus === 'UNKNOWN') displayStatus = 'FETCHING DATA...';
+            dStatus.textContent = displayStatus;
             
             let statColor = 'var(--green)';
             if(state.status === 'PRE-MARKET') statColor = 'var(--accent)';
             else if(state.status === 'AFTER-HOURS') statColor = 'var(--purple)';
             else if(state.status === 'CLOSED') statColor = 'var(--red)';
+            else if(displayStatus === 'FETCHING DATA...') statColor = 'var(--yellow)';
             dStatus.style.color = statColor;
 
             // Updated time
@@ -486,28 +520,31 @@ async function pollData() {
                 dDynamicMacroCards.innerHTML = hudHtml;
                 
                 // Alerts mapping
-                const alertsContainer = document.getElementById('alerts-container');
+                const alertsContent = document.getElementById('alerts-content');
+                const topBar = document.getElementById('top-alert-bar');
                 const vix = state.tickers.find(t => t.ticker === '^VIX');
                 const ief = state.tickers.find(t => t.ticker === 'IEF');
                 let alertsHtml = '';
+                
                 if(vix && vix.price > 20 && vix.gap_percent > 2.0) {
-                    alertsHtml += `<div class="alert-item risk">FEAR ALERT: VIX Volatility elevated (Gap +${vix.gap_percent.toFixed(2)}%)</div>`;
+                    alertsHtml += `<div class="alert-item critical">⚠️ FEAR ALERT: VIX SPIKING (+${vix.gap_percent.toFixed(2)}%)</div>`;
                 }
                 if(ief && ief.gap_percent < -0.15) {
-                    alertsHtml += `<div class="alert-item risk">BOND ALERT: Yields rising rapidly. High Risk Environment.</div>`;
+                    alertsHtml += `<div class="alert-item warning">📉 BOND ALERT: YIELDS RISING (BOND PRICE DROP)</div>`;
                 }
+                
                 if(alertsHtml) {
-                    alertsContainer.innerHTML = alertsHtml;
-                    dAlertsPanel.classList.add('has-alerts');
+                    alertsContent.innerHTML = alertsHtml;
+                    topBar.classList.add('has-alerts');
                 } else {
-                    alertsContainer.innerHTML = '<p class="empty-state">All clear — no active alerts.</p>';
-                    dAlertsPanel.classList.remove('has-alerts');
+                    alertsContent.innerHTML = '<span class="empty-state">NO ACTIVE ALERTS</span>';
+                    topBar.classList.remove('has-alerts');
                 }
             }
 
         } else {
              dIndicator.classList.remove('active');
-             dStatus.textContent = 'BOOTING / AWAITING TICK...';
+             dStatus.textContent = 'FETCHING DATA...';
              dStatus.style.color = 'var(--yellow)';
         }
 
@@ -522,22 +559,174 @@ async function pollData() {
 // Start
 init();
 
+// Portfolio Logic
+async function fetchPortfolio() {
+    if (document.activeElement && document.activeElement.closest('.manager-table')) return;
+    try {
+        const res = await fetch(`${API_BASE}/basket`);
+        const data = await res.json();
+        renderPortfolio(data);
+    } catch (e) { console.error("Portfolio fetch failed", e); }
+}
+
+function renderPortfolio(portfolio) {
+    if (!dPortfolioBody) return;
+    let html = '';
+    portfolio.forEach((item, index) => {
+        html += `
+            <tr data-index="${index}">
+                <td style="color: var(--accent); font-weight: 700; font-size: 0.8rem;">${item.ticker}</td>
+                <td><input type="number" class="portfolio-input" data-key="shares" value="${item.shares || 0}"></td>
+                <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${item.wac || 0}"></td>
+                <td><button class="delete-btn" onclick="deleteFromPortfolio(${index})">&times;</button></td>
+            </tr>
+        `;
+    });
+    dPortfolioBody.innerHTML = html;
+}
+
+async function addToPortfolio() {
+    const ticker = dAddPortfolioTicker.value.trim().toUpperCase();
+    if (!ticker) return;
+    const portfolio = getCurrentPortfolio();
+    if (portfolio.find(i => i.ticker === ticker)) return;
+    portfolio.push({ ticker, shares: 0, wac: 0 });
+    dAddPortfolioTicker.value = '';
+    await savePortfolio(portfolio);
+}
+
+function getCurrentPortfolio() {
+    const rows = dPortfolioBody.querySelectorAll('tr');
+    const portfolio = [];
+    rows.forEach(row => {
+        portfolio.push({
+            ticker: row.cells[0].textContent,
+            shares: parseFloat(row.querySelector('[data-key="shares"]').value) || 0,
+            wac: parseFloat(row.querySelector('[data-key="wac"]').value) || 0
+        });
+    });
+    return portfolio;
+}
+
+async function savePortfolio(portfolio) {
+    const btn = dSavePortfolioBtn;
+    const originalText = btn.innerHTML;
+    btn.innerHTML = "WAIT...";
+    btn.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/basket`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(portfolio || getCurrentPortfolio())
+        });
+        if (res.ok) {
+            btn.innerHTML = "SYNC ✅";
+            await fetchPortfolio();
+        }
+    } catch (e) { console.error("Portfolio update failed", e); }
+    finally {
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }, 1500);
+    }
+}
+
+async function deleteFromPortfolio(index) {
+    const portfolio = getCurrentPortfolio();
+    portfolio.splice(index, 1);
+    await savePortfolio(portfolio);
+}
+
+// Watchlist Logic
+async function fetchWatchlist() {
+    if (document.activeElement === dAddWatchlistTicker) return;
+    try {
+        const res = await fetch(`${API_BASE}/watchlist`);
+        const data = await res.json();
+        renderWatchlist(data);
+    } catch (e) { console.error("Watchlist fetch failed", e); }
+}
+
+function renderWatchlist(list) {
+    if (!dWatchlistContainer || !Array.isArray(list)) return;
+    let html = '';
+    list.forEach((ticker, index) => {
+        html += `
+            <div class="watch-tag">
+                <span>${ticker}</span>
+                <button class="delete-btn" onclick="deleteFromWatchlist(${index})" style="font-size: 0.9rem;">&times;</button>
+            </div>
+        `;
+    });
+    dWatchlistContainer.innerHTML = html;
+}
+
+async function addToWatchlist() {
+    const ticker = dAddWatchlistTicker.value.trim().toUpperCase();
+    if (!ticker) return;
+    try {
+        const res = await fetch(`${API_BASE}/watchlist`);
+        const list = await res.json();
+        if (list.includes(ticker)) return;
+        list.push(ticker);
+        await saveWatchlist(list);
+        dAddWatchlistTicker.value = '';
+    } catch (e) {}
+}
+
+async function deleteFromWatchlist(index) {
+    try {
+        const res = await fetch(`${API_BASE}/watchlist`);
+        const list = await res.json();
+        list.splice(index, 1);
+        await saveWatchlist(list);
+    } catch (e) {}
+}
+
+async function saveWatchlist(list) {
+    try {
+        const res = await fetch(`${API_BASE}/watchlist`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(list)
+        });
+        if (res.ok) await fetchWatchlist();
+    } catch (e) { console.error("Watchlist update failed", e); }
+}
+
+// Toggle section visibility
+function toggleSection(id, header) {
+    const el = document.getElementById(id);
+    const chevron = header.querySelector('.chevron');
+    if (el.style.display === 'none') {
+        el.style.display = 'block';
+        if (chevron) chevron.style.transform = 'rotate(0deg)';
+    } else {
+        el.style.display = 'none';
+        if (chevron) chevron.style.transform = 'rotate(-90deg)';
+    }
+}
+
+// Global Exports
+window.deleteFromPortfolio = deleteFromPortfolio;
+window.deleteFromWatchlist = deleteFromWatchlist;
+window.toggleSection = toggleSection;
+
+dAddToPortfolioBtn.addEventListener('click', addToPortfolio);
+dSavePortfolioBtn.addEventListener('click', () => savePortfolio());
+dAddToWatchlistBtn.addEventListener('click', addToWatchlist);
+
 async function copyEODReviewPayload() {
+    const btn = document.getElementById('btn-eod-review');
     try {
         const response = await fetch('/api/eod_review_payload');
         const data = await response.json();
         
         await navigator.clipboard.writeText(data.payload);
-        
-        // Visual feedback for the user
-        const btn = document.getElementById('btn-eod-review');
-        const originalText = btn.innerText;
-        btn.innerText = "✅ EOD Payload Copied!";
-        setTimeout(() => btn.innerText = originalText, 2000);
-        
-        alert("EOD Review Payload copied! Please paste this directly into your Review Engine Gem.");
+        showFeedback(btn, "✅ EOD Copied!", "EOD Review Payload copied to clipboard!");
     } catch (error) {
         console.error("Failed to copy EOD payload:", error);
-        alert("Error fetching the EOD log. Ensure decision_log.json exists.");
+        showFeedback(btn, "❌ Error", "Failed to fetch EOD log.", true);
     }
 }

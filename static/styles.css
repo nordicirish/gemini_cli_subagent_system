@@ -95,61 +95,85 @@ header.glass-panel {
 }
 
 /* ─── Alerts Panel (macro row) ─── */
-.alerts-panel {
-    padding: 16px 20px;
-    border-radius: var(--radius-lg);
-    flex: 0 0 300px;
-    width: 300px;
-    max-width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    position: relative;
-    overflow: hidden;
-}
-
-.alerts-panel::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, var(--red), transparent);
-    opacity: 0.4;
-}
-
-.alerts-header {
+/* ─── Top Alert Bar (Ticker Style) ─── */
+.top-alert-bar {
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--panel-border);
+    padding: 6px 16px;
+    height: 32px;
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    font-family: var(--font-mono);
+    border-radius: var(--radius-sm);
+    margin-bottom: -4px;
+    width: 100%;
+}
+
+.alerts-ticker {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    width: 100%;
+}
+
+.ticker-label {
+    font-size: 0.65rem;
+    font-weight: 800;
     color: var(--text-muted);
+    letter-spacing: 1px;
+    white-space: nowrap;
 }
 
-.alerts-icon {
-    font-size: 0.9rem;
+.ticker-content {
+    display: flex;
+    gap: 20px;
+    overflow: hidden;
+    flex: 1;
 }
 
-.alerts-panel .alert-item {
-    margin-bottom: 0;
-    padding: 8px 12px;
+.alert-item {
     font-size: 0.72rem;
-    line-height: 1.35;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    animation: alert-slide-in 0.3s ease-out;
 }
 
-.alerts-panel .empty-state {
-    font-size: 0.75rem;
-    padding: 2px 0;
+.alert-item.critical {
+    color: var(--red);
+    background: rgba(255, 68, 68, 0.1);
+    border: 1px solid rgba(255, 68, 68, 0.2);
 }
 
-/* ─── Alerts with glow when active ─── */
-.alerts-panel.has-alerts {
-    border-color: rgba(248, 81, 73, 0.2);
-    box-shadow: var(--shadow-card), 0 0 20px rgba(248, 81, 73, 0.06);
+.alert-item.warning {
+    color: var(--yellow);
+    background: rgba(255, 187, 0, 0.1);
+    border: 1px solid rgba(255, 187, 0, 0.2);
+}
+
+.alert-item.info {
+    color: var(--accent);
+    background: rgba(0, 243, 255, 0.1);
+    border: 1px solid rgba(0, 243, 255, 0.2);
+}
+
+.top-alert-bar.has-alerts {
+    background: linear-gradient(90deg, rgba(255, 68, 68, 0.05), rgba(0, 0, 0, 0.4));
+    border-bottom: 1px solid rgba(255, 68, 68, 0.3);
+}
+
+@keyframes alert-slide-in {
+    from { opacity: 0; transform: translateX(10px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+.empty-state {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    opacity: 0.5;
+    letter-spacing: 2px;
 }
 
 /* ─── Modal Overlay ─── */
@@ -288,23 +312,22 @@ h1 {
     50%      { opacity: 0.4; }
 }
 
-/* ─── Macro HUD ─── */
 .macro-hud {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 16px;
-    align-items: stretch;
 }
 
 .macro-card {
-    flex: 1;
     min-width: 0;
-    padding: 20px 24px;
+    padding: 16px 20px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    align-items: center;
+    text-align: center;
+    justify-content: center;
     position: relative;
     overflow: hidden;
-    text-align: center;
 }
 
 .macro-card::before {
@@ -352,9 +375,15 @@ h1 {
 /* ─── Main Grid ─── */
 .main-content {
     display: grid;
-    grid-template-columns: 1fr 300px;
-    gap: 16px;
+    grid-template-columns: 1fr minmax(280px, 320px);
+    gap: 20px;
     align-items: start;
+}
+
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
 }
 
 /* ─── Data Table ─── */
@@ -362,10 +391,12 @@ h1 {
     overflow-x: auto;
     padding: 0;
     min-height: 0;
+    -webkit-overflow-scrolling: touch;
 }
 
-table {
+.table-container table {
     width: 100%;
+    min-width: 1100px; /* Prevent column squashing ONLY in main table */
     border-collapse: collapse;
     text-align: left;
     font-family: var(--font-mono);
@@ -375,11 +406,11 @@ table {
 thead {
     position: sticky;
     top: 0;
-    z-index: 2;
+    z-index: 30;
 }
 
 th {
-    padding: 12px 18px;
+    padding: 12px 24px;
     font-family: var(--font-sans);
     font-size: 0.65rem;
     color: var(--text-muted);
@@ -391,18 +422,65 @@ th {
     white-space: nowrap;
 }
 
+/* Sticky First Column (Ticker) ONLY (Main Table Only) */
+.table-container th:first-child, 
+.table-container td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 15; /* Higher than section headers */
+    background: var(--panel-bg-solid) !important;
+}
+
+/* Sticky First Column (Ticker) ONLY (Main Table Only) */
+.table-container th:first-child, 
+.table-container td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 15;
+    background: var(--panel-bg-solid) !important;
+}
+
+/* Shadow only for the Ticker column to separate from data */
+.table-container th:first-child, 
+.table-container td:first-child {
+    border-right: 1px solid var(--panel-border);
+    box-shadow: 4px 0 8px rgba(0,0,0,0.3);
+}
+
+/* Section headers - Natural alignment */
+.table-container .table-section-header td,
+.table-container .table-sub-header td {
+    position: relative;
+    z-index: 2;
+    padding-left: 24px !important; /* Standard padding */
+    background: var(--panel-bg-solid) !important;
+    text-align: left;
+    border-right: none;
+    box-shadow: none;
+}
+
+/* Header Tickers should be top-most */
+.table-container th:first-child {
+    z-index: 20; 
+}
+
 td {
-    padding: 13px 18px;
+    padding: 13px 24px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     white-space: nowrap;
+    background: transparent;
 }
 
-tr:last-child td {
-    border-bottom: none;
-}
-
-tbody tr {
-    transition: background-color var(--transition);
+/* Mobile Condensing */
+@media (max-width: 768px) {
+    th, td {
+        padding: 10px 12px !important;
+        font-size: 0.75rem;
+    }
+    th:first-child, td:first-child {
+        padding-left: 16px !important;
+        padding-right: 16px !important;
+    }
 }
 
 tbody tr:hover td {
@@ -417,7 +495,7 @@ tbody tr:hover td {
 
 .table-section-header td {
     padding: 8px 18px !important;
-    font-size: 0.68rem !important;
+    font-size: 0.7rem !important;
     font-weight: 700 !important;
     text-transform: uppercase !important;
     letter-spacing: 2px !important;
@@ -425,6 +503,44 @@ tbody tr:hover td {
     border-bottom: 1px solid var(--panel-border) !important;
     border-top: 1px solid var(--panel-border) !important;
     opacity: 0.8;
+}
+
+.table-section-header.portfolio-header td {
+    color: var(--accent) !important;
+    background: rgba(88, 166, 255, 0.05) !important;
+}
+
+.table-section-header.watchlist-header td {
+    color: var(--purple) !important;
+    background: rgba(188, 140, 255, 0.05) !important;
+}
+
+.table-sub-header td {
+    padding: 8px 18px !important;
+    font-size: 0.7rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1.5px !important;
+    opacity: 0.7;
+}
+
+.table-sub-header.scout-header td {
+    color: var(--yellow) !important;
+    background: rgba(210, 153, 34, 0.03) !important;
+    border-top: 1px dashed rgba(210, 153, 34, 0.2) !important;
+}
+
+.scout-badge {
+    font-size: 0.6rem;
+    padding: 2px 6px;
+    background: rgba(255, 255, 0, 0.1);
+    color: var(--yellow);
+    border: 1px solid rgba(255, 255, 0, 0.2);
+    border-radius: 4px;
+    margin-left: 10px;
+    font-weight: 800;
+    vertical-align: middle;
+    letter-spacing: 0.5px;
 }
 
 .ticker-cell {
@@ -623,6 +739,20 @@ textarea:focus {
     border-color: rgba(88, 166, 255, 0.4);
 }
 
+.glow-btn.btn-success {
+    background: var(--green-dim) !important;
+    border-color: var(--green) !important;
+    color: var(--green) !important;
+    box-shadow: 0 0 15px rgba(63, 185, 80, 0.2) !important;
+}
+
+.glow-btn.btn-error {
+    background: var(--red-dim) !important;
+    border-color: var(--red) !important;
+    color: var(--red) !important;
+    box-shadow: 0 0 15px rgba(248, 81, 73, 0.2) !important;
+}
+
 .btn-row {
     display: flex;
     flex-direction: column;
@@ -720,16 +850,26 @@ textarea:focus {
     }
 }
 
+@media (max-width: 1200px) {
+    .main-content {
+        flex-direction: column;
+    }
+    .sidebar {
+        width: 100%;
+        max-width: 100%;
+    }
+}
+
 @media (max-width: 768px) {
     html { font-size: 14px; }
     .app-container { padding: 12px 14px 28px; gap: 12px; }
-    .macro-hud { grid-template-columns: 1fr; }
-    .macro-val { font-size: 1.6rem; }
+    .macro-card { flex: 1 1 100%; }
     header.glass-panel { padding: 12px 16px; }
-    .header-content { flex-direction: column; gap: 8px; align-items: flex-start; }
-    .system-status { gap: 16px; }
-    .sidebar { flex-direction: column; }
-    .sidebar-card { min-width: unset; }
+    .header-content { flex-direction: column; gap: 12px; align-items: center; text-align: center; }
+    .system-status { flex-wrap: wrap; justify-content: center; gap: 12px; }
+    .top-alert-bar { height: auto; padding: 8px 16px; }
+    .ticker-content { overflow-x: auto; white-space: nowrap; }
+    .indices-grid { grid-template-columns: 1fr; }
 }
 
 /* ─── Scrollbar ─── */
@@ -749,6 +889,156 @@ textarea:focus {
 
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.14);
+}
+
+/* ─── Manager Cards (Portfolio/Watchlist) ─── */
+.manager-card .header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.manager-card h3 {
+    margin: 0 !important;
+}
+
+.input-group {
+    display: flex;
+    gap: 6px;
+}
+
+.mini-input {
+    width: 50px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--panel-border);
+    color: var(--text-main);
+    border-radius: 4px;
+    font-size: 0.7rem;
+    padding: 3px 6px;
+    outline: none;
+    font-family: var(--font-mono);
+}
+
+.mini-input:focus {
+    border-color: var(--accent);
+}
+
+.add-btn {
+    background: var(--green-dim);
+    color: var(--green);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all var(--transition);
+}
+
+.add-btn:hover {
+    background: var(--green);
+    color: #000;
+}
+
+.manager-table-container {
+    max-height: 200px;
+    overflow-y: auto;
+    margin-top: 8px;
+}
+
+.manager-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+    table-layout: fixed; /* Force column control */
+}
+
+.manager-table th {
+    padding: 6px 4px;
+    text-align: left;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--panel-border);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: transparent;
+}
+
+.manager-table td {
+    padding: 8px 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.manager-table th:nth-child(1) { width: 35%; }
+.manager-table th:nth-child(2) { width: 25%; }
+.manager-table th:nth-child(3) { width: 30%; }
+.manager-table th:nth-child(4) { width: 10%; }
+
+.manager-table input {
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-main);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    padding: 2px 4px;
+    border-radius: 2px;
+}
+
+.manager-table input:focus {
+    border-color: var(--accent);
+    background: rgba(255, 255, 255, 0.05);
+    outline: none;
+}
+
+.delete-btn {
+    background: transparent;
+    border: none;
+    color: var(--red);
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 0 4px;
+    opacity: 0.6;
+    transition: opacity var(--transition);
+}
+
+.delete-btn:hover {
+    opacity: 1;
+}
+
+.watch-list-flex {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.watch-tag {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid var(--panel-border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    transition: border-color var(--transition);
+}
+
+.watch-tag:hover {
+    border-color: var(--panel-border-hover);
+}
+
+.watch-tag span {
+    color: var(--text-secondary);
+}
+
+.sync-btn {
+    width: auto;
+    padding: 4px 10px;
+    font-size: 0.65rem;
 }
 
 /* ─── Indices Modal ─── */

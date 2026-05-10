@@ -11,12 +11,22 @@
 <body>
     <div class="app-container">
 
+        <!-- ─── Top Alert Bar ─── -->
+        <div id="top-alert-bar" class="top-alert-bar">
+            <div id="alerts-container" class="alerts-ticker">
+                <span class="ticker-label">SYSTEM ALERTS:</span>
+                <div id="alerts-content" class="ticker-content">
+                    <span class="empty-state">NO ACTIVE ALERTS</span>
+                </div>
+            </div>
+        </div>
+
         <!-- ─── Header ─── -->
         <header class="glass-panel">
             <div class="header-content">
                 <div class="brand">
                     <div class="pulse-indicator" id="live-indicator"></div>
-                    <h1>Gemini Gem Dashboard <span class="version">v17.1</span></h1>
+                    <h1>Gemini Gem Dashboard <span class="version">v18.1</span></h1>
                 </div>
                 <div class="system-status">
                     <div class="status-item">
@@ -30,23 +40,15 @@
                         <span class="label">Updated:</span>
                         <span id="last-updated" class="value">—</span>
                     </div>
+                    <button id="open-indices-modal-btn" class="glow-btn outline" style="width: auto; padding: 4px 12px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; gap: 6px; margin-left: 10px; line-height: 1;">⚙️ INDICES</button>
                 </div>
             </div>
         </header>
 
-        <!-- ─── Macro HUD + Alerts ─── -->
+        <!-- ─── Macro HUD ─── -->
         <section class="macro-hud" id="macro-hud">
             <div id="dynamic-macro-cards" style="display: contents;">
                 <!-- Cards injected by JS -->
-            </div>
-            <div class="alerts-panel glass-panel" id="alerts-panel">
-                <div class="alerts-header">
-                    <span class="alerts-icon">⚡</span>
-                    <span>Alerts</span>
-                </div>
-                <div id="alerts-container">
-                    <p class="empty-state">No active alerts.</p>
-                </div>
             </div>
         </section>
 
@@ -77,46 +79,80 @@
 
             <!-- Sidebar -->
             <aside class="sidebar">
-                <!-- Data Operations -->
+                <!-- Outbound Data Operations -->
                 <div class="sidebar-card glass-panel">
-                    <h3><span class="icon">🔗</span> Data Operations</h3>
-                    <p class="subtitle">Interact with LLM</p>
+                    <h3><span class="icon">📤</span> Outbound Data</h3>
+                    <p class="subtitle">Extract data for LLM context</p>
                     <div class="btn-row">
                         <button id="copy-json-btn" class="glow-btn">📋 Copy Turn Data</button>
-                        <button id="paste-payload-btn" class="glow-btn outline">📥 Paste Execution Payload</button>
+                        <button id="copy-session-btn" class="glow-btn outline">📂 Copy Session Init</button>
+                        <button id="btn-eod-review" onclick="copyEODReviewPayload()" class="glow-btn outline">🕒 Copy EOD Review</button>
                     </div>
-                    <div class="btn-row" style="margin-top: 8px;">
-                        <button id="btn-eod-review" onclick="copyEODReviewPayload()" class="glow-btn outline" style="width: 100%;">
-                            📋 Copy EOD Review Payload
-                        </button>
-                    </div>
-                    <div id="data-status" class="status-message"></div>
                 </div>
 
-                <!-- Management Buttons -->
+                <!-- Inbound Data Operations -->
                 <div class="sidebar-card glass-panel">
+                    <h3><span class="icon">📥</span> Inbound Payload</h3>
+                    <p class="subtitle">Sync SSoT from Gem output</p>
                     <div class="btn-row">
-                        <button id="open-ticker-modal-btn" class="glow-btn outline">📊 Manage Tickers</button>
-                        <button id="open-indices-modal-btn" class="glow-btn outline">📈 Indices</button>
+                        <button id="paste-payload-btn" class="glow-btn">📥 Paste Execution Payload</button>
+                    </div>
+                    <div id="data-status" class="status-message" style="margin-top: 6px; min-height: 0;"></div>
+                </div>
+
+                <!-- Portfolio Manager -->
+                <div class="sidebar-card glass-panel manager-card">
+                    <div class="header-row">
+                        <h3 onclick="toggleSection('portfolio-content', this)" style="cursor: pointer; user-select: none; display: flex; align-items: center;">
+                            <span class="icon">💼</span> Portfolio <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                        </h3>
+                        <div class="input-group">
+                            <input type="text" id="add-portfolio-ticker" placeholder="SYM" class="mini-input">
+                            <button id="add-to-portfolio-btn" class="add-btn">+</button>
+                            <button id="save-portfolio-btn" class="glow-btn sync-btn">SYNC</button>
+                        </div>
+                    </div>
+                    <div id="portfolio-content" style="display: none;">
+                        <div class="manager-table-container" style="margin-top: 0;">
+                            <table class="manager-table">
+                                <thead>
+                                    <tr>
+                                        <th>SYM</th>
+                                        <th>AMT</th>
+                                        <th>WAC</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="portfolio-manager-body">
+                                    <!-- Rows injected by JS -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
+
+                <!-- Watchlist Manager -->
+                <div class="sidebar-card glass-panel manager-card">
+                    <div class="header-row">
+                        <h3 onclick="toggleSection('watchlist-content', this)" style="cursor: pointer; user-select: none; display: flex; align-items: center;">
+                            <span class="icon">👀</span> Watchlist <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                        </h3>
+                        <div class="input-group">
+                            <input type="text" id="add-watchlist-ticker" placeholder="SYM" class="mini-input">
+                            <button id="add-to-watchlist-btn" class="add-btn">+</button>
+                        </div>
+                    </div>
+                    <div id="watchlist-content" style="display: none;">
+                        <div id="watchlist-manager-container" class="watch-list-flex" style="margin-top: 0;">
+                            <!-- Tags injected by JS -->
+                        </div>
+                    </div>
+                </div>
+
+
             </aside>
         </main>
 
-    </div>
-
-    <!-- ─── Ticker Management Modal ─── -->
-    <div class="modal-overlay" id="ticker-modal-overlay">
-        <div class="modal glass-panel">
-            <div class="modal-header">
-                <h3>📊 Ticker Management</h3>
-                <button class="modal-close" id="close-ticker-modal">&times;</button>
-            </div>
-            <p class="subtitle">Edit tracked assets (comma or space separated)</p>
-            <textarea id="ticker-input" rows="4" placeholder="AAPL, MSFT, TSLA..."></textarea>
-            <button id="update-tickers-btn" class="glow-btn">Update Tickers</button>
-            <div id="ticker-status" class="status-message"></div>
-        </div>
     </div>
 
     <!-- ─── Indices Modal ─── -->

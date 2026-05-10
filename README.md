@@ -103,6 +103,21 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 
 ---
 
+### 🖥️ Institutional Dashboard (v9.5+)
+
+The Gemini Council Dashboard provides a high-density, real-time visualization of the system's active state. It has been hardened for institutional-grade monitoring with the following features:
+
+1.  **Sticky Ticker Architecture**: A responsive grid system that locks the asset "Ticker" column and "Header Labels" during scrolling. This ensures full context is maintained even on mobile or ultra-narrow displays when analyzing 10+ columns of financial data.
+2.  **Top Alert Bar (System Ticker)**: Critical risk notifications and system status updates have been migrated to a dedicated, high-visibility ticker bar at the top of the interface, preventing layout displacement in the main data area.
+3.  **Regime-Based Color Coding**: The asset table is dynamically segmented into three priority tiers:
+    *   💎 **Your Portfolio** (Cyan): Active institutional holdings.
+    *   👀 **Strategic Watchlist** (Purple): High-conviction setups currently in the observation gate.
+    *   🔭 **Scout Intelligence** (Yellow): Autonomous screening candidates awaiting agentic grounding.
+4.  **Manager Interface**: Integrated sidebar tools for rapid portfolio and watchlist adjustments, featuring collapsible sections and smooth-animation chevrons to minimize cognitive load.
+5.  **Macro HUD**: Real-time monitoring of key indices (SPY, VIX, VIXY) with dynamic price-flash animations for immediate trend-shift detection.
+
+---
+
 ### 3. Setup Instructions (Markdown) — One per Gem
 
 | File | Gem Role | Gemini Mode | Purpose |

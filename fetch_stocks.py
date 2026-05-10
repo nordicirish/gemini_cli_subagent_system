@@ -40,8 +40,8 @@ POLYGON_API_KEY = config.get("POLYGON_API_KEY")
 USE_FINNHUB = True
 USE_POLYGON = False  # keep false unless you want Polygon volume fallback
 
-# TICKERS and MACRO_TICKERS persistence logic
-TICKERS = config.get("TICKERS", [
+# WATCHLIST_TICKERS and MACRO_TICKERS persistence logic
+WATCHLIST_TICKERS = config.get("WATCHLIST", [
     'ONDS', 'UMAC', 'RCAT', 'DFTX', 'GLD'
 ])
 
@@ -54,8 +54,9 @@ MACRO_TICKERS = config.get("MACRO_TICKERS", [
     'GDX'
 ])
 
+PORTFOLIO_TICKERS = []
 SCOUT_TICKERS = []
-# Load SCOUT_TICKERS from local SSoT if available (Persistence Mandate)
+# Load TICKERS from local SSoT if available (Persistence Mandate)
 if os.path.exists('local_ssot_shadow.json'):
     try:
         with open('local_ssot_shadow.json', 'r') as f:
@@ -66,10 +67,15 @@ if os.path.exists('local_ssot_shadow.json'):
                 scouts = ssot_data["mutable_state"].get("scouted_assets_tracked")
             if isinstance(scouts, list):
                 SCOUT_TICKERS = [s for s in scouts if isinstance(s, str)]
+            
+            # Load Portfolio tickers
+            portfolio = ssot_data.get("mutable_state", {}).get("portfolio_snapshot", [])
+            if isinstance(portfolio, list):
+                PORTFOLIO_TICKERS = [p.get("ticker").upper() for p in portfolio if isinstance(p, dict) and p.get("ticker")]
     except:
         pass
 
-ALL_TICKERS = list(dict.fromkeys(TICKERS + MACRO_TICKERS + SCOUT_TICKERS)) # Deduplicated order
+ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS)) # Deduplicated order
 INVERSE_MACRO = ['^VIX', 'VIXY', 'UUP', 'IEF']
 
 MACRO_LABELS = {
@@ -90,8 +96,8 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 def save_config():
-    global config, TICKERS, MACRO_TICKERS
-    config["TICKERS"] = TICKERS
+    global config, WATCHLIST_TICKERS, MACRO_TICKERS
+    config["WATCHLIST"] = WATCHLIST_TICKERS
     config["MACRO_TICKERS"] = MACRO_TICKERS
     with open('config.json', 'w') as f:
         json.dump(config, f, indent=4)
@@ -119,7 +125,7 @@ def get_data():
 
 @app.get("/api/tickers")
 def get_tickers():
-    return JSONResponse({"tickers": TICKERS, "macro": MACRO_TICKERS, "macro_labels": MACRO_LABELS})
+    return JSONResponse({"tickers": WATCHLIST_TICKERS, "macro": MACRO_TICKERS, "macro_labels": MACRO_LABELS})
 
 @app.get("/api/eod_review_payload")
 async def get_eod_review_payload():
@@ -152,14 +158,67 @@ async def get_eod_review_payload():
 
 @app.post("/api/tickers")
 async def update_tickers(req: Request):
-    global TICKERS, ALL_TICKERS
+    global WATCHLIST_TICKERS, ALL_TICKERS
     data = await req.json()
     new_tickers = data.get("tickers", [])
     valid_tickers = [t.upper() for t in new_tickers if t]
-    TICKERS = valid_tickers
-    ALL_TICKERS = TICKERS + MACRO_TICKERS
+    WATCHLIST_TICKERS = valid_tickers
+    ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
     save_config()
-    return JSONResponse({"status": "success", "tickers": TICKERS})
+    return JSONResponse({"status": "success", "tickers": WATCHLIST_TICKERS})
+
+@app.get("/api/basket")
+def get_basket():
+    ssot_file = 'local_ssot_shadow.json'
+    if os.path.exists(ssot_file):
+        try:
+            with open(ssot_file, 'r') as f:
+                ssot = json.load(f)
+                return JSONResponse(ssot.get("mutable_state", {}).get("portfolio_snapshot", []))
+        except:
+            return JSONResponse([])
+    return JSONResponse([])
+
+@app.post("/api/basket")
+async def save_basket(req: Request):
+    ssot_file = 'local_ssot_shadow.json'
+    new_basket = await req.json()
+    if os.path.exists(ssot_file):
+        try:
+            with open(ssot_file, 'r') as f:
+                ssot = json.load(f)
+            
+            if "mutable_state" not in ssot:
+                ssot["mutable_state"] = {}
+            ssot["mutable_state"]["portfolio_snapshot"] = new_basket
+            
+            with open(ssot_file, 'w') as f:
+                json.dump(ssot, f, indent=2)
+            
+            # Update global trackers
+            global PORTFOLIO_TICKERS, ALL_TICKERS
+            PORTFOLIO_TICKERS = [p.get("ticker").upper() for p in new_basket if isinstance(p, dict) and p.get("ticker")]
+            ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+            
+            return JSONResponse({"status": "success"})
+        except Exception as e:
+            return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    return JSONResponse({"status": "error", "message": "SSoT not found"}, status_code=404)
+
+@app.get("/api/watchlist")
+def get_watchlist():
+    return JSONResponse(WATCHLIST_TICKERS)
+
+@app.post("/api/watchlist")
+async def save_watchlist(req: Request):
+    global WATCHLIST_TICKERS, ALL_TICKERS
+    new_watchlist = await req.json()
+    if isinstance(new_watchlist, list):
+        WATCHLIST_TICKERS = [t.upper() for t in new_watchlist if isinstance(t, str)]
+        ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+        save_config()
+        return JSONResponse({"status": "success"})
+    return JSONResponse({"status": "error", "message": "Invalid data format"}, status_code=400)
 
 @app.post("/api/macro")
 async def update_macro_tickers(req: Request):
@@ -168,7 +227,7 @@ async def update_macro_tickers(req: Request):
     new_macro = data.get("macro", [])
     valid_macro = [t.upper() for t in new_macro if t]
     MACRO_TICKERS = valid_macro
-    ALL_TICKERS = TICKERS + MACRO_TICKERS
+    ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
     save_config()
     return JSONResponse({"status": "success", "macro": MACRO_TICKERS})
 
@@ -580,7 +639,7 @@ async def handle_paste(req: Request):
         if isinstance(new_scouts, list):
             global SCOUT_TICKERS, ALL_TICKERS
             SCOUT_TICKERS = list(set(new_scouts))
-            ALL_TICKERS = list(dict.fromkeys(TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+            ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
             
         def _normalize_lessons(lessons_list):
             normalized = []
@@ -1214,7 +1273,7 @@ async def run_finnhub_scout_sweep(target_sectors):
             if s not in SCOUT_TICKERS:
                 SCOUT_TICKERS.append(s)
         # Update systemic ALL_TICKERS queue (Deduplicated)
-        ALL_TICKERS = list(dict.fromkeys(TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+        ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
     
     return new_scouts
 
@@ -2348,6 +2407,7 @@ def run_daemon():
                     "session": cache.session.get(sym),
                     "session_liquidity": cache.session_liquidity.get(sym),
                     "status": "ACTIVE",
+                    "institutional_status": "Unverified Institutional Status" if sym in SCOUT_TICKERS else "Active",
                     
                     # Prices
                     "price": float(p),
@@ -2478,6 +2538,7 @@ def run_daemon():
                 "status": status,
                 "is_heavy_refresh": False,
                 "tickers": data,
+                "watchlist": WATCHLIST_TICKERS,
                 "local_storage_state": supplemental_ssot,
                 "trade_lessons": supplemental_lessons
             }
