@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Gemini_Gem_Rules_Data
-**Version:** v9.18-Autonomous-Rule-Promotion-Sync
+**Version:** v9.20-DecisionLog-Engine-Integration
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---

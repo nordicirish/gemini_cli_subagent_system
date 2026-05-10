@@ -352,6 +352,7 @@ The dashboard provides **two copy modes** to optimize token usage:
 |--------|---------|-------------|
 | **📋 Copy Turn Data** | Slim tickers (`price`, `vwap`, `gap_percent`, `rsi`, `atr_percent`, `net_gex_total`, `dealer_posture`, `score`, `trend`, `signal`) + compact `mutable_state` (`unallocated_cash_eur`, `total_liquidity_eur`, `risk_regime`, slim `portfolio_snapshot`) | Every turn during an active LLM session — lightweight, token-efficient |
 | **📋 Copy Session Init** | Full SSOT (`local_ssot_shadow.json`), full ticker data, and `trade_lessons.md` registry | Session initialization, start of day, or when trade lessons have changed |
+| **📋 Copy EOD Review Payload**| Full `decision_log.json` 20-day history wrapped in `MANDATE_26` directive | Market close, to execute the automated Review Engine backtest |
 
 **Workflow:**
 1. **Initialize:** Click **"Copy Session Init"** and paste into the Orchestrator Gem to bootstrap a new session with full context.
@@ -376,7 +377,13 @@ Increment the sync_id before outputting.
 
 For all subsequent turns during the session, use **"Copy Turn Data"** instead — it sends only lightweight ticker snapshots and a compact portfolio summary, keeping token usage minimal.
 
-### End of Day Close
+### 🟢 End of Day Review (MANDATE_26)
+At market close, use the automated End-of-Day loop to audit the session's logic:
+1. **Fetch:** Click **"📋 Copy EOD Review Payload"** in the dashboard sidebar. This reads `decision_log.json` and automatically wraps the 20-day trailing decision history inside the strict `MANDATE_26_POST_TRADE_REVIEW` prompt.
+2. **Execute:** Paste the payload into the dedicated **Review Engine Gem** (`post_trade_review.md`).
+3. **Ingest:** The system grades its historical assumptions and generates new rules. Paste the output JSON back into the dashboard via **"Paste Execution Payload"** to merge the new lessons.
+
+### End of Day Close (Manual Backup)
 Run this at the end of each session to perform a final audit and generate the EOD backup:
 
 ```

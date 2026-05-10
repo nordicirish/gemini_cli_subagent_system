@@ -521,3 +521,23 @@ async function pollData() {
 
 // Start
 init();
+
+async function copyEODReviewPayload() {
+    try {
+        const response = await fetch('/api/eod_review_payload');
+        const data = await response.json();
+        
+        await navigator.clipboard.writeText(data.payload);
+        
+        // Visual feedback for the user
+        const btn = document.getElementById('btn-eod-review');
+        const originalText = btn.innerText;
+        btn.innerText = "✅ EOD Payload Copied!";
+        setTimeout(() => btn.innerText = originalText, 2000);
+        
+        alert("EOD Review Payload copied! Please paste this directly into your Review Engine Gem.");
+    } catch (error) {
+        console.error("Failed to copy EOD payload:", error);
+        alert("Error fetching the EOD log. Ensure decision_log.json exists.");
+    }
+}

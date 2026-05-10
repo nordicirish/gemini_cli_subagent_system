@@ -121,6 +121,35 @@ def get_data():
 def get_tickers():
     return JSONResponse({"tickers": TICKERS, "macro": MACRO_TICKERS, "macro_labels": MACRO_LABELS})
 
+@app.get("/api/eod_review_payload")
+async def get_eod_review_payload():
+    log_file = "decision_log.json"
+    try:
+        with open(log_file, "r") as f:
+            decision_log = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        decision_log = []
+
+    # Construct the automated prompt instruction
+    eod_prompt = (
+        "SYSTEM DIRECTIVE: EXECUTE [MANDATE_26_POST_TRADE_REVIEW]\n\n"
+        "You are operating as the Review Engine. I am providing the continuous "
+        "decision log of the Council's trades over the trailing 20-day period. "
+        "You are mandated to execute an End-of-Day historical backtest.\n\n"
+        "INSTRUCTIONS:\n"
+        "1. Grade the historical `agreement_score_sa` and `trade_state` assumptions "
+        "against the realized price action for each ticker.\n"
+        "2. Distinguish between mechanistic flow misfires (e.g., rebalancing windows) "
+        "and fundamental logic breakdowns.\n"
+        "3. If a systemic vulnerability is identified, generate a corrective rule.\n"
+        "4. You MUST output any new codified rules natively inside the JSON `EXECUTION_PAYLOAD` "
+        "under the `new_trade_lessons` array so I can merge them into the SSoT.\n\n"
+        "DECISION LOG DATA:\n"
+        f"```json\n{json.dumps(decision_log, indent=4)}\n```"
+    )
+    
+    return {"payload": eod_prompt}
+
 @app.post("/api/tickers")
 async def update_tickers(req: Request):
     global TICKERS, ALL_TICKERS
