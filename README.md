@@ -121,7 +121,7 @@ To combat confirmation bias, the Consensus Council must argue against themselves
 | `macro_narrative_engine.md` | **Macro-Narrative Engine** | THINKING | Macro narrative, sector rotation, forensic signal attribution |
 | `structural_engine.md` | **Structural Risk Engine** | FLASH | Forensic dilution detection — shelf offerings, warrant walls, PIPE |
 | `post_trade_review.md` | **Review Engine** | PRO | Post-trade reflection — thesis vs. outcome, misfire detection |
-| `antigravity.md` | **Engine Custodian** | N/A | **The Grounding Guard**: Establishes the Antigravity persona to enforce mathematical rigor, logic sync, and scout integrity across all engines. |
+| `antigravity.md` | **Engine Custodian** | N/A | **The Grounding Guard**: Not a gem but an Antigravity based agent. Establishes the Antigravity persona to enforce mathematical rigor, logic sync, and scout integrity across all engines when ai codes updates to the system. |
 
 ### Python Utilities
 
@@ -149,7 +149,7 @@ The background daemon runs in a loop, fetching live data while a **FastAPI** `uv
 
 - **Macro HUD**: Dynamic top-row tracking `^VIX`, `VIXY`, `IEF`, and `UUP` with custom system alerts.
 - **Live Equity Table**: Displays VWAP Distance, Net GEX, Trend Scores, RSI, and Health Scores.
-- **Copy/Paste Integrations**: Two-tier copy system — **Copy Turn Data** (lightweight per-turn payload with slim tickers + compact mutable state) and **Copy Session Init** (full SSOT + tickers + trade lessons for new sessions). A **Paste Execution Payload** button ingests Gemini outputs back to automatically mutate `local_ssot_shadow.json`.
+- **Copy/Paste Integrations**: Two-tier copy system — **Copy Turn Data** (lightweight per-turn payload with slim tickers + compact mutable state) and **Copy Session Init** (full SSOT + tickers + trade lessons for new sessions). A **Paste Execution Payload** button ingests Gemini outputs back to automatically mutate `local_ssot_shadow.json` and append historical logic to `decision_log.json`.
 
 ### 2. Paste Into a Gem Conversation
 Open the relevant Gemini Gem (e.g., the Terminal Orchestrator). **IMPORTANT: Ensure you have manually selected your preferred model mode (e.g., "Gemini 3.1 Pro" or "Thinking") in the chat interface. Thinking mode is recommended.** Paste the dashboard payload. The Gem parses the financial data and routes it through the appropriate engine pipeline.
@@ -182,7 +182,7 @@ The **Execution Engine** relies on the **Deterministic Consensus Protocol (MANDA
 Every turn concludes with the Gem outputting a precise JSON block named `EXECUTION_PAYLOAD`.
 1. Copy this JSON block from the Gemini UI.
 2. Click **"Paste Payload"** on your dashboard sidebar.
-3. The vanilla JS frontend routes the payload to the Python orchestrator, which natively parses the clipboard, validates the JSON/Markdown, and seamlessly writes the state to `local_ssot_shadow.json` and the `trade_lessons.md` registry.
+3. The vanilla JS frontend routes the payload to the Python orchestrator, which natively parses the clipboard, validates the JSON/Markdown, and seamlessly writes the state to `local_ssot_shadow.json`, appends turn-by-turn logic to `decision_log.json`, and updates the `trade_lessons.md` registry.
 
 ---
 
@@ -276,9 +276,10 @@ For each JSON file, create a new Gem in Google Gemini:
    - **Payload Injection (Live File Attachment):** To prevent 192K token timeout crashes during 'Thinking' mode, the full SSOT and trade_lessons files should NOT be pasted into the chat box or attached permanently to the Gem's Knowledge Base. Instead, you must attach the live 'local_ssot_shadow.json' and 'trade_lessons.md' files directly to your first chat message as live attachments.
 
 ### 5. Initialize Air-Gap State Files
-The system uses local JSON files to maintain your "State of the World" portfolio and history across sessions without encountering web latency. Before your first run, create these two empty files in the root directory:
+The system uses local JSON files to maintain your "State of the World" portfolio and history across sessions without encountering web latency. Before your first run, create these three empty files in the root directory:
 - `local_ssot_shadow.json` (Initialize with an empty object `{}`)
 - `trade_lessons.md` (Initialize with an empty Markdown registry)
+- `decision_log.json` (Initialize with an empty array `[]` for time-series backtesting)
 
 *(Note: These files are included in `.gitignore` to prevent accidentally committing your personal trading portfolio and history).*
 
@@ -426,6 +427,14 @@ The `scrutiny_audit` object contains the full council vote record:
 - `fatal_flaw_score` — Red Team severity (0–10)
 - `final_posture` — e.g., `BULLISH_STABLE`, `FRAGILE`, `NO_TRADE`
 - `agent_votes[]` — individual verdicts from each council member
+
+### Time-Series Decision Log (`decision_log.json`)
+
+The system maintains a continuous, sliding-window time-series ledger of all Council decisions. Because the Orchestrator's active context window must remain extremely lean, the `decision_log.json` safely archives the historical `trade_state` and `scrutiny_audit` metadata (such as the `agreement_score_sa` and individual `agent_votes`) generated at each turn. 
+
+**What it is used for:**
+- **Forensic Backtesting (`MANDATE_26`)**: The **Review Engine** (`post_trade_review.md`) uses this log to perform deep-dive 20-day historical backtests. It compares the Council's original thesis and conviction score against the realized price action to determine if a loss was a fundamental breakdown or merely mechanistic flow.
+- **Auditable Fidelity**: Ensures every execution and veto is permanently recorded with an ISO timestamp, allowing the user to trace the exact logic pathway of any given trade long after the active session has ended without bloating the `local_ssot_shadow.json`.
 
 ---
 

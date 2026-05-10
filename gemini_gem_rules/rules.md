@@ -326,6 +326,7 @@
 - **[MANDATE_26_POST_TRADE_REVIEW]**
   - **Status:** ACTIVE
   - **Instruction:** The Review Engine must analyze trade outcomes to distinguish between mechanistic rebalancing flows and fundamental breakdowns.
+  - **Backtesting Mandate:** When conducting a deep-dive performance review, the Review Engine must request that the user inject the `decision_log.json` time-series file. The engine must grade its historical `agreement_score_sa` and `trade_state` assumptions against the realized price action over the trailing 20-day period. 
   - **Active Sentinel Directive:** Prioritize RSI and Distance from VWAP as 'Exit-First' indicators. Bypasses MACRO_SENTINEL if flagged with HV BREAKOUT.
   - **Rebalancing Misfire Audit:** Evaluate if loss was mechanistic flow (Rebalancing Windows) vs. fundamental breakdown.
 - **[MANDATE_27_RESIDUAL_FLOOR]**
@@ -611,9 +612,10 @@
   - **Execution Flow:**
     - 1. INGESTION: Read the heavily structured 'State of the World' payload provided by the User in the prompt.
     - 2. SYNTHESIS: Run all internal logic, Council voting (MANDATE_13), and structural checks.
-    - 3. EMISSION: Output the final, actionable decisions ONLY via a strict JSON code block named `EXECUTION_PAYLOAD`. This payload must be ready for the User to copy and paste directly into the local Python terminal for execution.
-    - 4. NO RAMBLING: Do not append conversational text after the `EXECUTION_PAYLOAD`. Keep the context window clean.
-  - **Payload Keys:**
+    - 3. EMISSION: Output the final, actionable decisions ONLY via a strict JSON code block named `EXECUTION_PAYLOAD`.
+  - **Payload Keys & Archiving:**
+    - **SSoT Merge:** The payload mutates the live `local_ssot_shadow.json` via Non-Destructive Merge.
+    - **Historical Log (fetch_stocks.py interception):** The Python backend natively intercepts the `scrutiny_audit` and `trade_state` arrays from the payload and appends them to a continuous time-series ledger (`decision_log.json`) to preserve 20-day turn-by-turn historical fidelity for backtesting.
     - **Trade Lessons Handling:**
       - **Description:** The orchestrator recognizes exactly three keys for trade_lessons management. Priority order (first match wins):
       - **Keys:**

@@ -209,7 +209,8 @@ dCopyBtn.addEventListener('click', async () => {
             dealer_posture: t.dealer_posture,
             score: t.score,
             trend: t.trend,
-            signal: t.signal
+            signal: t.signal,
+            historical_context: t.historical_context
         }));
         
         // Extract compact mutable_state from full SSOT
@@ -226,6 +227,7 @@ dCopyBtn.addEventListener('click', async () => {
             if (p.limit !== undefined) entry.limit = p.limit;
             if (p.action) entry.action = p.action;
             if (p.trade_state) entry.trade_state = p.trade_state;
+            if (p.historical_context) entry.historical_context = p.historical_context;
             return entry;
         });
         

@@ -492,7 +492,58 @@ async def handle_paste(req: Request):
 
         with open('local_ssot_shadow.json', 'w') as f:
             json.dump(merged_ssot, f, indent=2)
-        
+
+        # ENH_49: Intercept scrutiny_audit and trade_state for decision_log.json
+        try:
+            decision_log_file = 'decision_log.json'
+            incoming_portfolio = payload.get("portfolio_snapshot", [])
+            if not incoming_portfolio and isinstance(payload.get("mutable_state"), dict):
+                incoming_portfolio = payload["mutable_state"].get("portfolio_snapshot", [])
+            if not incoming_portfolio and isinstance(payload.get("EXECUTION_PAYLOAD"), dict):
+                incoming_portfolio = payload["EXECUTION_PAYLOAD"].get("portfolio_snapshot", [])
+                
+            if incoming_portfolio and isinstance(incoming_portfolio, list):
+                turn_log = {
+                    "timestamp": payload.get("timestamp", datetime.now().isoformat()),
+                    "decisions": []
+                }
+                
+                for item in incoming_portfolio:
+                    if isinstance(item, dict):
+                        ticker = item.get("ticker")
+                        trade_state = item.get("trade_state", item.get("action"))
+                        scrutiny_audit = item.get("scrutiny_audit")
+                        
+                        if ticker and (trade_state or scrutiny_audit):
+                            turn_log["decisions"].append({
+                                "ticker": ticker,
+                                "trade_state": trade_state,
+                                "scrutiny_audit": scrutiny_audit
+                            })
+                
+                if turn_log["decisions"]:
+                    log_data = []
+                    if os.path.exists(decision_log_file):
+                        try:
+                            with open(decision_log_file, 'r') as f:
+                                log_data = json.load(f)
+                        except:
+                            pass
+                            
+                    if not isinstance(log_data, list):
+                        log_data = []
+                        
+                    log_data.append(turn_log)
+                    
+                    if len(log_data) > 300:
+                        log_data = log_data[-300:]
+                        
+                    with open(decision_log_file, 'w') as f:
+                        json.dump(log_data, f, indent=2)
+        except Exception as e:
+            print(f"Failed to append to decision_log.json: {e}")
+
+
         # ENH_84: Immediate Memory Sync for Scouts
         new_scouts = merged_ssot.get("scouted_assets_tracked")
         if not new_scouts and "mutable_state" in merged_ssot:
@@ -1785,6 +1836,7 @@ def fetch_stocks(state):
             "ticker": p.get("ticker"),
             "shares": p.get("shares"),
             "wac": p.get("wac"),
+            "historical_context": p.get("historical_context"),
             "status": p.get("status"),
             "trade_state": p.get("trade_state")
         })
@@ -2093,13 +2145,24 @@ def run_daemon():
                 'VIXY': {'price': 0.0, 'gap': 0.0}
             }
 
+            # Pre-load portfolio context for historical_context injection
+            portfolio_ctx_map = {}
+            if os.path.exists('local_ssot_shadow.json'):
+                try:
+                    with open('local_ssot_shadow.json', 'r') as f:
+                        s_data = json.load(f)
+                        p_snap = s_data.get("mutable_state", {}).get("portfolio_snapshot", [])
+                        if not p_snap: p_snap = s_data.get("portfolio_snapshot", [])
+                        for p in p_snap:
+                            if p.get("historical_context"):
+                                portfolio_ctx_map[p["ticker"].upper()] = p["historical_context"]
+                except: pass
+
             for i, sym in enumerate(ALL_TICKERS):
                 # Dynamic sleep: slower on heavy refresh to respect rate limits
                 if is_heavy or sym not in cache.history or cache.history[sym].empty:
-                    # OPTIMIZED: Reduced from 1.5s
                     t_time.sleep(0.5) 
                 else:
-                    # OPTIMIZED: Reduced from 0.1s
                     t_time.sleep(0.05)
 
                 obj = tickers_obj[sym]
@@ -2312,7 +2375,8 @@ def run_daemon():
                     
                     # Phase 6 Enhancements (Already computed inline above)
 
-                    "note": note.strip()
+                    "note": note.strip(),
+                    "historical_context": portfolio_ctx_map.get(sym.upper())
                 })
 
 
