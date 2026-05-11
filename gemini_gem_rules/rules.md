@@ -302,7 +302,8 @@
     - **Directives Promotion (ENH_31-S):** The `EXECUTION_PAYLOAD` is the primary vehicle for Council directives. Upon ingestion, fields within the payload (e.g., `portfolio_snapshot`, `risk_metrics`, `directive`) must be promoted to the active `mutable_state` layer.
     - **Directives Supremacy (ENH_31-P):** In cases of state conflict, the `EXECUTION_PAYLOAD` directives possess Absolute Execution Supremacy. The ingestion bridge is mandated to overwrite active state fields with their payload counterparts to maintain zero-drift.
     - **Forensic Lessons:** Memory payloads must be bifurcated: Global Systemic Lessons appended to `new_trade_lessons` (or `session_trade_lessons` alias) array, and Ticker-Specific Reflexes injected directly into `historical_context` inside the specific ticker's object within `portfolio_snapshot`.
-  - **Truncation Guard:** The text-based Markdown report must be aggressively condensed to prioritize output tokens for the JSON EXECUTION_PAYLOAD. If the portfolio_snapshot array is exceptionally large, the Orchestrator must employ strict Delta Mode, emitting only the tickers that experienced a state change, while retaining the core SSoT structure.
+    - **Decision Log Persistence:** To maintain the historical `decision_log.json` for backtesting (MANDATE_26), the Orchestrator MUST include the `scrutiny_audit` (containing `agent_votes`) and the `trade_state` for every ticker evaluated during the turn. These fields must be nested within the respective ticker objects inside the `portfolio_snapshot` array of the `EXECUTION_PAYLOAD`. This is required even if the `trade_state` remains `NO_TRADE`.
+  - **Truncation Guard:** The text-based Markdown report must be aggressively condensed to prioritize output tokens for the JSON EXECUTION_PAYLOAD. If the portfolio_snapshot array is exceptionally large, the Orchestrator must employ strict Delta Mode, emitting only the tickers that experienced a state change or a scrutiny evaluation, while retaining the core SSoT structure.
   - **Rationale:** Ensures flawless data synchronization with fetch_stocks.py and eliminates terminal output redundancy.
 - **[MANDATE_23_DISTILLATION_VETO]**
   - **Status:** ACTIVE
@@ -615,7 +616,7 @@
     - 3. EMISSION: Output the final, actionable decisions ONLY via a strict JSON code block named `EXECUTION_PAYLOAD`.
   - **Payload Keys & Archiving:**
     - **SSoT Merge:** The payload mutates the live `local_ssot_shadow.json` via Non-Destructive Merge.
-    - **Historical Log (fetch_stocks.py interception):** The Python backend natively intercepts the `scrutiny_audit` and `trade_state` arrays from the payload and appends them to a continuous time-series ledger (`decision_log.json`) to preserve 20-day turn-by-turn historical fidelity for backtesting.
+    - **Historical Log (fetch_stocks.py interception):** The Python backend natively intercepts the `scrutiny_audit` and `trade_state` fields from each ticker object within the `portfolio_snapshot` array in the payload and appends them to a continuous time-series ledger (`decision_log.json`) to preserve 20-day turn-by-turn historical fidelity for backtesting.
     - **Trade Lessons Handling:**
       - **Description:** The orchestrator recognizes exactly three keys for trade_lessons management. Priority order (first match wins):
       - **Keys:**

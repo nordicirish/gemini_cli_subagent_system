@@ -410,17 +410,23 @@ async def handle_paste(req: Request):
                               "base_currency", "exchange_rate", 
                               "portfolio_total_value_usd", "portfolio_total_value_eur"]
             
+            # Source of truth can be at the root of incoming_ep or inside its mutable_state
+            ep_source = incoming_ep
+            if "mutable_state" in incoming_ep and isinstance(incoming_ep["mutable_state"], dict):
+                # If ep has mutable_state, merge its keys into a temporary source
+                ep_source = _deep_merge(incoming_ep, incoming_ep["mutable_state"])
+
             # Determine target container for promotion
             target_container = payload
             if isinstance(payload.get("mutable_state"), dict):
                 target_container = payload["mutable_state"]
                 
             for k in promotion_keys:
-                if k in incoming_ep:
+                if k in ep_source:
                     # Always promote portfolio_snapshot as it represents the target allocations
                     # For others, promote if not already present or if it's a primary directive/metric
                     if k == "portfolio_snapshot" or k not in target_container or k in ["directive", "risk_metrics", "timestamp"]:
-                        target_container[k] = incoming_ep[k]
+                        target_container[k] = ep_source[k]
             
         # Helper to extract and remove fields from payload regardless of nesting
         def get_and_prune(data, key):
@@ -589,6 +595,8 @@ async def handle_paste(req: Request):
                 incoming_portfolio = payload["mutable_state"].get("portfolio_snapshot", [])
             if not incoming_portfolio and isinstance(payload.get("EXECUTION_PAYLOAD"), dict):
                 incoming_portfolio = payload["EXECUTION_PAYLOAD"].get("portfolio_snapshot", [])
+                if not incoming_portfolio and isinstance(payload["EXECUTION_PAYLOAD"].get("mutable_state"), dict):
+                    incoming_portfolio = payload["EXECUTION_PAYLOAD"]["mutable_state"].get("portfolio_snapshot", [])
                 
             if incoming_portfolio and isinstance(incoming_portfolio, list):
                 turn_log = {

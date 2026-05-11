@@ -639,6 +639,11 @@ tbody tr:hover td {
 
 .sidebar-card {
     padding: 20px;
+    transition: padding var(--transition);
+}
+
+.sidebar-card.minimized {
+    padding: 12px 20px;
 }
 
 .sidebar-card h3 {
@@ -887,10 +892,16 @@ textarea:focus {
 /* ─── Manager Cards (Portfolio/Watchlist) ─── */
 .manager-card .header-row {
     display: flex;
-    flex-direction: column; /* Stack for centering */
+    flex-direction: row;
     align-items: center;
+    justify-content: center;
     gap: 12px;
     margin-bottom: 16px;
+    transition: margin-bottom var(--transition);
+}
+
+.manager-card.minimized .header-row {
+    margin-bottom: 0;
 }
 
 .manager-card h3 {
@@ -898,6 +909,8 @@ textarea:focus {
     width: 100%;
     text-align: center;
     justify-content: center;
+    cursor: pointer;
+    user-select: none;
 }
 
 .input-group {

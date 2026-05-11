@@ -64,18 +64,7 @@ let latestMacroData = {};
 function openModal(overlay) { overlay.classList.add('active'); }
 function closeModal(overlay) { overlay.classList.remove('active'); }
 
-// Section Collapse Toggle
-window.toggleSection = function(contentId, headerElement) {
-    const content = document.getElementById(contentId);
-    const chevron = headerElement.querySelector('.chevron');
-    if (content.style.display === 'none') {
-        content.style.display = 'block';
-        if (chevron) chevron.style.transform = 'rotate(0deg)';
-    } else {
-        content.style.display = 'none';
-        if (chevron) chevron.style.transform = 'rotate(-90deg)';
-    }
-};
+
 
 // Indices Modal
 dOpenIndicesBtn.addEventListener('click', () => {
@@ -699,12 +688,16 @@ async function saveWatchlist(list) {
 function toggleSection(id, header) {
     const el = document.getElementById(id);
     const chevron = header.querySelector('.chevron');
+    const card = header.closest('.sidebar-card');
+    
     if (el.style.display === 'none') {
         el.style.display = 'block';
         if (chevron) chevron.style.transform = 'rotate(0deg)';
+        if (card) card.classList.remove('minimized');
     } else {
         el.style.display = 'none';
         if (chevron) chevron.style.transform = 'rotate(-90deg)';
+        if (card) card.classList.add('minimized');
     }
 }
 
