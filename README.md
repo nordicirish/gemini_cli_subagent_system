@@ -59,6 +59,26 @@ To prevent the LLM reasoning engines from hallucinating software structures whil
 2. **Rules / Protocols (`ENH_01` to `ENH_52`)**: These govern **Financial Execution & Domain Knowledge**. These are the fluid, quantitative strategies telling the system *how to trade*. 
    - *Example:* `ENH_45` (Macro Shock Veto), `ENH_50` (Pre-Trade Formulation), `ENH_36` (Post-14:30 Liquidity Gates).
 
+## Mandate Registry
+- MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)
+- MANDATE_02: WRITE_AUTHORITY (Terminal State Commit)
+- MANDATE_03: VALIDATION_PROTOCOL (Risk & Regulatory Gates)
+- MANDATE_04: DRIFT_CONTROL (Forensic Handshake Enforcement)
+- MANDATE_05: TEMPORAL_PRIORITY (User Timestamp Override)
+- MANDATE_06: COORDINATION (Technical Validator Sign-off)
+- MANDATE_07: MODEL_TRANSPARENCY (Diagnostic Compute Visibility)
+- MANDATE_08: SCHEMA_ENFORCEMENT (Forensic Field Validation)
+- MANDATE_09: STATE_EMISSION (Untruncated JSON Requirement)
+- MANDATE_10: SCHEMA_VALIDATION (Narrative & Array Checks)
+- MANDATE_11: RESEARCH_SYNC (Trading_Research Folder Link)
+- MANDATE_12: BOOT_SYNC (Session Start File Fetch)
+- MANDATE_13: CONSENSUS_SCRUTINY (Weighted Agent Voting)
+- MANDATE_14: ALPHA_CATALYST (Bullish Advocate Lens)
+- MANDATE_15: ADVERSARIAL_REVIEW (Red Team Lens)
+- MANDATE_16: STRUCTURAL_NEUTRALITY (Liquidity Lens)
+- MANDATE_17: REGIME_SYNC (Dynamic Weighting & Meta-Arbiter)
+- MANDATE_28: HEURISTIC_VETO (Cognitive Drift Prevention)
+
 ### The Live-Web SSoT Architecture (v8.6+)
 Unlike earlier versions that relied on static data, v8.6-Forensic-Zero-Hallucination-Sync implements **Grounding via Native Google Search**. Agents are now mandated to explicitly invoke Google Search to verify catalysts, news, and disconfirming evidence in real-time.
 *   **The Processor:** The sandboxed Gemini Web UI acts as a stateless, high-powered reasoning engine with live web access.
@@ -220,6 +240,7 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 | **Air-Gap Execution** | `PROTOCOL_0` | Antigravity uses Direct Local File Mutation but cannot simulate remote GitHub pushes |
 | **Prediction Market Sync** | `MVP_v1.0` | Macro Sentinel evaluates Kalshi/Polymarket probability pricing for Tier 1 events |
 | **Flash-Tier Scrutiny** | `ENH_78` | Hardens data integrity during high-velocity analysis via cross-reference grounding |
+| **Heuristic Veto** | `MANDATE_28` | Explicitly forbids WAC Anchoring, Sunk Cost Bias, and Binary Catalyst Mirages |
 | **State Emission** | `MANDATE_09` | Optimized non-destructive merge; emits delta payloads |
 
 ---
@@ -426,9 +447,10 @@ Upload the `antigravity.md` file along with your other project instructions to y
 **Result:** Antigravity will automatically hunt for hardcoded numbers, update forensic math proofs (MANDATE_06), and ensure engine versioning is consistent.
 
 ### 🛡️ Curator & Scout Protocols
-Starting with **v9.1**, Antigravity enforces the following system-wide behaviors:
+Starting with **v9.40**, Antigravity enforces the following system-wide behaviors:
 1. **The Curator Protocol (ENH_92)**: Authorizes the Orchestrator to expand concise summaries into multi-paragraph **Executive Reports** upon explicit user request (e.g., "Forensic deep-dive").
 2. **Scout Intelligence Integrity (ENH_84)**: Mandates the preservation and flagging of technical "Scout Candidates" from the Python backend to ensure they reach the Council for institutional grounding.
+3. **Implementation Philosophy (Karpathy-Claude)**: Adheres to surgical code changes, simplicity-first design, and goal-driven execution to minimize speculative abstractions.
 
 ---
 
@@ -450,13 +472,16 @@ The `scrutiny_audit` object contains the full council vote record:
 - `final_posture` — e.g., `BULLISH_STABLE`, `FRAGILE`, `NO_TRADE`
 - `agent_votes[]` — individual verdicts from each council member
 
+**SSoT Hygiene Note:** To prevent state bloat, `scrutiny_audit` and ephemeral `EXECUTION_PAYLOAD` blocks are automatically stripped from `local_ssot_shadow.json` during ingestion and preserved exclusively in the `decision_log.json`.
+
 ### Time-Series Decision Log (`decision_log.json`)
 
 The system maintains a continuous, sliding-window time-series ledger of all Council decisions. Because the Orchestrator's active context window must remain extremely lean, the `decision_log.json` safely archives the historical `trade_state` and `scrutiny_audit` metadata (such as the `agreement_score_sa` and individual `agent_votes`) generated at each turn. 
 
 **What it is used for:**
 - **Forensic Backtesting (`MANDATE_26`)**: The **Review Engine** (`post_trade_review.md`) uses this log to perform deep-dive 20-day historical backtests. It compares the Council's original thesis and conviction score against the realized price action to determine if a loss was a fundamental breakdown or merely mechanistic flow.
-- **Auditable Fidelity**: Ensures every execution and veto is permanently recorded with an ISO timestamp, allowing the user to trace the exact logic pathway of any given trade long after the active session has ended without bloating the `local_ssot_shadow.json`.
+- **High-Fidelity State Capture**: Archives the full market environment (Regime, VIX, Liquidity) and per-ticker `price_at_eval` snapshots at the moment of decision.
+- **Auditable Fidelity**: Ensures every execution and veto is permanently recorded with an ISO timestamp and a `trigger_context` (Routine Scan vs. User Request), allowing the user to trace the exact logic pathway of any given trade long after the active session has ended without bloating the `local_ssot_shadow.json`.
 
 ---
 

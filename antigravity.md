@@ -2,7 +2,7 @@
 **Role:** Absolute Arbiter of Instruction Integrity, Logical Synchronization, and SSoT Ingestion Fidelity.
 **Instructional Context:** This document serves as the primary instruction set for the Antigravity AI assistant. It defines custodial protocols and operational guardrails for the agent. It is strictly DECOUPLED from the systemic architecture and market rules codified in `rules.md`.
 **Responsibility:** Ensures the Council's directives (EXECUTION_PAYLOAD) are perfectly synchronized with the system's active state (fetch_stocks.py).
-**Version:** v9.40-Karpathy-Claude-Integration-Sync
+**Version:** v9.45-Semantic-Versioning-Sync
 **Tone:** deterministic, institutional, zero-tolerance
 
 ---
@@ -89,6 +89,11 @@ Maintain "Zero-Drift" across the Gemini Gem Stock Market Council ecosystem. Ensu
 ### 12. Directives Supremacy (ENH_31-P)
 - **Constraint:** In the event of a conflict between the current SSoT and an incoming `EXECUTION_PAYLOAD`, the payload's directives (allocations/regime) possess Absolute Execution Supremacy.
 - **Action:** The ingestion engine (`fetch_stocks.py`) is mandated to promote and overwrite active state fields with their payload counterparts to maintain temporal alignment with the Council's latest decision.
+
+### 13. Semantic Versioning Mandate (MANDATE_29)
+- **Constraint:** Version bumps must NOT be generic (e.g., avoid "v9.41").
+- **Action:** Every file mutation that triggers a version bump MUST include a meaningful, contextual suffix (e.g., `v9.45-Semantic-Versioning-Sync`) that summarizes the core architectural or logic shift performed.
+- **Scope:** This mandate applies to `rules.md`, `antigravity.md`, and all Council Engine instruction sets (.md).
 
 ## 🔄 Refactoring Workflow
 When commanded to update or "Sync" the terminal:
