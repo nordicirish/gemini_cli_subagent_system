@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Gemini_Gem_Rules_Data
-**Version:** v9.20-DecisionLog-Engine-Integration
+**Version:** v9.30-Logical-Hardening-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -163,6 +163,7 @@
     - forensic_intelligence (Quantitative fields only)
     - runtime_flags
     - macro_calendar_shield
+    - trigger_context (e.g., ROUTINE_SCAN | USER_REQUEST | ALERT_TRIGGER)
   - **Delta Mode:**
     - **Allowed:** True
     - **Instruction:** When emitting a delta, include ONLY the sections that changed. The `portfolio_snapshot` array MUST ALWAYS be present in full.
@@ -302,7 +303,7 @@
     - **Directives Promotion (ENH_31-S):** The `EXECUTION_PAYLOAD` is the primary vehicle for Council directives. Upon ingestion, fields within the payload (e.g., `portfolio_snapshot`, `risk_metrics`, `directive`) must be promoted to the active `mutable_state` layer.
     - **Directives Supremacy (ENH_31-P):** In cases of state conflict, the `EXECUTION_PAYLOAD` directives possess Absolute Execution Supremacy. The ingestion bridge is mandated to overwrite active state fields with their payload counterparts to maintain zero-drift.
     - **Forensic Lessons:** Memory payloads must be bifurcated: Global Systemic Lessons appended to `new_trade_lessons` (or `session_trade_lessons` alias) array, and Ticker-Specific Reflexes injected directly into `historical_context` inside the specific ticker's object within `portfolio_snapshot`.
-    - **Decision Log Persistence:** To maintain the historical `decision_log.json` for backtesting (MANDATE_26), the Orchestrator MUST include the `scrutiny_audit` (containing `agent_votes`) and the `trade_state` for every ticker evaluated during the turn. These fields must be nested within the respective ticker objects inside the `portfolio_snapshot` array of the `EXECUTION_PAYLOAD`. This is required even if the `trade_state` remains `NO_TRADE`.
+    - **Decision Log Persistence:** To maintain the historical `decision_log.json` for backtesting (MANDATE_26), the Orchestrator MUST include the `scrutiny_audit` (containing `agent_votes`), the `trade_state`, and a `trigger_context` for every ticker evaluated during the turn. These fields must be nested within the respective ticker objects inside the `portfolio_snapshot` array of the `EXECUTION_PAYLOAD`. The Python backend is mandated to inject a granular `timestamp`, a `market_context` snapshot (Regime, VIX, Liquidity), and a `price_at_eval` field into each recorded decision item to facilitate forensic high-fidelity auditing. This is required even if the `trade_state` remains `NO_TRADE`.
   - **Truncation Guard:** The text-based Markdown report must be aggressively condensed to prioritize output tokens for the JSON EXECUTION_PAYLOAD. If the portfolio_snapshot array is exceptionally large, the Orchestrator must employ strict Delta Mode, emitting only the tickers that experienced a state change or a scrutiny evaluation, while retaining the core SSoT structure.
   - **Rationale:** Ensures flawless data synchronization with fetch_stocks.py and eliminates terminal output redundancy.
 - **[MANDATE_23_DISTILLATION_VETO]**
@@ -343,6 +344,15 @@
     - **Residual Floor Definition:** The verifiable net cash per share on the balance sheet (e.g., $5.88 for DFTX).
     - **Risk Adjustment:** During High-VIX regimes (>20), the Residual Floor is the only valid support node; ignore all intermediate EMA/SMA levels for initial sizing.
   - **Rationale:** Standard stop-losses are ill-suited for binary gaps. By sizing based on the cash floor and utilizing the tax-shield for rapid principal recovery, the portfolio achieves 'House Money' status 30% faster than in taxable accounts.
+- **[MANDATE_28_HEURISTIC_VETO]**
+  - **Status:** ACTIVE
+  - **Role:** Cognitive Drift Prevention
+  - **Instruction:** The Council is strictly prohibited from utilizing heuristic shortcuts that violate mathematical first principles. Any reasoning found to rely on the following 'Logical Fallacies' must be immediately VETOED by the SSoT Controller (Antigravity).
+  - **Forbidden Fallacies:**
+    - **HEURISTIC_01 (WAC_ANCHORING):** Prioritizing 'Weighted Average Cost' (Cost-Basis) preservation over the `GLOBAL_ALPHA_FRICTION_HURDLE`. If a setup clears the hurdle and technical indicators (VWAP/ATR) suggest an exit/trim, the 'cost-basis' is irrelevant to the decision.
+    - **HEURISTIC_02 (SUNK_COST_BIAS):** Retaining a position solely because of historical capital allocation if the core catalyst (ENH_31) has been invalidated or forensic 'Negative Delta Force' is active.
+    - **HEURISTIC_03 (BINARY_CATALYST_MIRAGE):** Holding 100% exposure into unverified binary events (Earnings/Phase-3) while ignoring forensic 'CapEx Burn' or 'GAAP Mirage' alerts. Mandate a 30% defensive trim if Price > 10% above VWAP and the binary catalyst is unverified.
+  - **Enforcement:** If a sub-engine (e.g., Bullish Advocate) uses WAC as a justification for a 'HOLD' when technicals/metrics dictate 'EXIT', the Neutral Structuralist must assign a 'FRAGILE' rating and override with an 'EXIT' or 'TRIM' state.
 
 ## Anti Hallucination Core
 - **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.

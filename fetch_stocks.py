@@ -365,6 +365,69 @@ async def handle_paste(req: Request):
 
         payload = json_payload
         
+        # ENH_49: Intercept scrutiny_audit and trade_state for decision_log.json early
+        try:
+            def find_key_recursive(data, target_key):
+                if not isinstance(data, dict): return None
+                if target_key in data: return data[target_key]
+                for k in ("EXECUTION_PAYLOAD", "mutable_state", "payload"):
+                    if k in data:
+                        res = find_key_recursive(data[k], target_key)
+                        if res is not None: return res
+                return None
+
+            incoming_portfolio = find_key_recursive(payload, "portfolio_snapshot")
+            if incoming_portfolio and isinstance(incoming_portfolio, list):
+                print(f"DEBUG: Found incoming_portfolio with {len(incoming_portfolio)} items")
+                ts = find_key_recursive(payload, "timestamp") or datetime.now().isoformat()
+                trigger = find_key_recursive(payload, "trigger_context") or "ROUTINE_OUTPUT"
+                
+                market_context = {
+                    "regime": find_key_recursive(payload, "regime") or find_key_recursive(payload, "risk_regime"),
+                    "vix_guard": find_key_recursive(payload, "vix_guard"),
+                    "portfolio_value_usd": find_key_recursive(payload, "portfolio_total_value_usd"),
+                    "remaining_cash_usd": find_key_recursive(payload, "remaining_cash_usd")
+                }
+                
+                turn_log = {"timestamp": ts, "trigger_context": trigger, "market_context": market_context, "decisions": []}
+                for item in incoming_portfolio:
+                    if isinstance(item, dict):
+                        ticker = item.get("ticker")
+                        trade_state = item.get("trade_state", item.get("action"))
+                        scrutiny_audit = item.get("scrutiny_audit")
+                        price = item.get("price") or item.get("current_price") or item.get("price_at_eval")
+                        
+                        if ticker and (trade_state or scrutiny_audit):
+                            turn_log["decisions"].append({
+                                "ticker": ticker,
+                                "timestamp": ts,
+                                "trigger_context": trigger,
+                                "price_at_eval": price,
+                                "trade_state": trade_state,
+                                "scrutiny_audit": scrutiny_audit
+                            })
+                
+                if turn_log["decisions"]:
+                    print(f"DEBUG: Appending {len(turn_log['decisions'])} decisions to decision_log.json")
+                    decision_log_file = 'decision_log.json'
+                    log_data = []
+                    if os.path.exists(decision_log_file):
+                        try:
+                            with open(decision_log_file, 'r') as f:
+                                log_data = json.load(f)
+                        except: pass
+                    if not isinstance(log_data, list): log_data = []
+                    log_data.append(turn_log)
+                    if len(log_data) > 300: log_data = log_data[-300:]
+                    with open(decision_log_file, 'w') as f:
+                        json.dump(log_data, f, indent=2)
+                else:
+                    print("DEBUG: No valid decisions found in portfolio items")
+            else:
+                print("DEBUG: No portfolio_snapshot found in payload")
+        except Exception as e:
+            print(f"Failed to append to decision_log.json: {e}")
+        
         # Map common payload aliases to canonical keys
         def map_aliases(data):
             if not isinstance(data, dict): return
@@ -540,12 +603,21 @@ async def handle_paste(req: Request):
             merged_ssot = payload
             
         # Strip trade_lessons keys from ROOT, MUTABLE_STATE, and EXECUTION_PAYLOAD — they are routed to trade_lessons.json
-        for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons", "rule_mutations", "trade_lessons_revision"):
+        # ENH_49: Strip scrutiny_audit and EXECUTION_PAYLOAD to prevent SSoT bloat
+        # Decisions and votes are now preserved in decision_log.json exclusively.
+        def strip_scrutiny(obj):
+            if isinstance(obj, list):
+                for i in obj: strip_scrutiny(i)
+            elif isinstance(obj, dict):
+                obj.pop("scrutiny_audit", None)
+                for v in obj.values(): strip_scrutiny(v)
+
+        strip_scrutiny(merged_ssot)
+
+        for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons", "rule_mutations", "trade_lessons_revision", "EXECUTION_PAYLOAD"):
             merged_ssot.pop(tl_key, None)
             if "mutable_state" in merged_ssot:
                 merged_ssot["mutable_state"].pop(tl_key, None)
-            if "EXECUTION_PAYLOAD" in merged_ssot:
-                merged_ssot["EXECUTION_PAYLOAD"].pop(tl_key, None)
 
         # SSoT schema validation — prune non-canonical top-level keys to prevent drift
         CANONICAL_SSOT_KEYS = {
@@ -586,59 +658,6 @@ async def handle_paste(req: Request):
 
         with open('local_ssot_shadow.json', 'w') as f:
             json.dump(merged_ssot, f, indent=2)
-
-        # ENH_49: Intercept scrutiny_audit and trade_state for decision_log.json
-        try:
-            decision_log_file = 'decision_log.json'
-            incoming_portfolio = payload.get("portfolio_snapshot", [])
-            if not incoming_portfolio and isinstance(payload.get("mutable_state"), dict):
-                incoming_portfolio = payload["mutable_state"].get("portfolio_snapshot", [])
-            if not incoming_portfolio and isinstance(payload.get("EXECUTION_PAYLOAD"), dict):
-                incoming_portfolio = payload["EXECUTION_PAYLOAD"].get("portfolio_snapshot", [])
-                if not incoming_portfolio and isinstance(payload["EXECUTION_PAYLOAD"].get("mutable_state"), dict):
-                    incoming_portfolio = payload["EXECUTION_PAYLOAD"]["mutable_state"].get("portfolio_snapshot", [])
-                
-            if incoming_portfolio and isinstance(incoming_portfolio, list):
-                turn_log = {
-                    "timestamp": payload.get("timestamp", datetime.now().isoformat()),
-                    "decisions": []
-                }
-                
-                for item in incoming_portfolio:
-                    if isinstance(item, dict):
-                        ticker = item.get("ticker")
-                        trade_state = item.get("trade_state", item.get("action"))
-                        scrutiny_audit = item.get("scrutiny_audit")
-                        
-                        if ticker and (trade_state or scrutiny_audit):
-                            turn_log["decisions"].append({
-                                "ticker": ticker,
-                                "trade_state": trade_state,
-                                "scrutiny_audit": scrutiny_audit
-                            })
-                
-                if turn_log["decisions"]:
-                    log_data = []
-                    if os.path.exists(decision_log_file):
-                        try:
-                            with open(decision_log_file, 'r') as f:
-                                log_data = json.load(f)
-                        except:
-                            pass
-                            
-                    if not isinstance(log_data, list):
-                        log_data = []
-                        
-                    log_data.append(turn_log)
-                    
-                    if len(log_data) > 300:
-                        log_data = log_data[-300:]
-                        
-                    with open(decision_log_file, 'w') as f:
-                        json.dump(log_data, f, indent=2)
-        except Exception as e:
-            print(f"Failed to append to decision_log.json: {e}")
-
 
         # ENH_84: Immediate Memory Sync for Scouts
         new_scouts = merged_ssot.get("scouted_assets_tracked")

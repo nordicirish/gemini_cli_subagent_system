@@ -19,6 +19,10 @@
     {
       "id": 5,
       "rule": "G-05: NORDEA ESA DEFENSE (ENH_58) - Zero-tax friction authorizes aggressive overnight gap-scalping on high-momentum scout targets."
+    },
+    {
+      "id": 6,
+      "rule": "G-06: WAC FALLACY & BINARY DERISKING - Never prioritize Weighted Average Cost (WAC) preservation if an intraday spread mathematically clears the GLOBAL_ALPHA_FRICTION_HURDLE. Furthermore, mandate a minimum 30% defensive scale-out on extended (+10% VWAP) positions prior to unverified binary catalysts (e.g., Q1 Earnings) if forensic audits identify a 'GAAP Mirage' or heavy impending CapEx burn."
     }
   ]
 }
