@@ -1,4 +1,5 @@
 # 💎 Gemini Gem Stock Market Council
+### *The poor person's Bloomberg ;)*
 **Version:** v9.65-Model-Agnostic-Hardening
 
 **A multi-agent AI trading intelligence framework built on Google Gemini Gems.**
