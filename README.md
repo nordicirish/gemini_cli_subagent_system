@@ -308,9 +308,10 @@ For each JSON file, create a new Gem in Google Gemini:
    - **Payload Injection (Live File Attachment):** To prevent 192K token timeout crashes during 'Thinking' mode, the full SSOT and trade_lessons files should NOT be pasted into the chat box or attached permanently to the Gem's Knowledge Base. Instead, you must attach the live 'local_ssot_shadow.json' and 'trade_lessons.md' files directly to your first chat message as live attachments.
 
 ### 5. Initialize Air-Gap State Files
-The system uses local JSON files to maintain your "State of the World" portfolio and history across sessions without encountering web latency. Before your first run, create these three empty files in the root directory:
+The system uses local files to maintain your "State of the World" portfolio and history across sessions without encountering web latency. Before your first run, create these four empty files in the root directory:
 - `local_ssot_shadow.json` (Initialize with an empty object `{}`)
-- `trade_lessons.md` (Initialize with an empty Markdown registry)
+- `trade_lessons.json` (Initialize with `{"trade_lessons": []}`)
+- `trade_lessons.md` (Initialize with the header `# 📘 Trade Lessons Registry`)
 - `decision_log.json` (Initialize with an empty array `[]` for time-series backtesting)
 
 *(Note: These files are included in `.gitignore` to prevent accidentally committing your personal trading portfolio and history).*
