@@ -20,6 +20,7 @@ Thumbs.db
 
 # Local Air-Gapped State Files
 local_ssot_shadow.json
+decision_log.json
 # trade_lessons.json
 
 # Helper Scripts

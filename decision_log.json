@@ -1322,5 +1322,329 @@
         }
       }
     ]
+  },
+  {
+    "timestamp": "2026-05-11 18:11:57",
+    "trigger_context": "ROUTINE_OUTPUT",
+    "market_context": {
+      "regime": "MELT_UP",
+      "vix_guard": "DISENGAGED",
+      "portfolio_value_usd": null,
+      "remaining_cash_usd": null
+    },
+    "decisions": [
+      {
+        "ticker": "UMAC",
+        "timestamp": "2026-05-11 18:11:57",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 14.84,
+        "trade_state": "TRANCHE_1_LIMIT_PENDING",
+        "scrutiny_audit": {
+          "agreement_score_sa": 0.95,
+          "fatal_flaw_score": 0,
+          "final_posture": "ACTIVE_TRANCHE_MANAGEMENT",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "EXECUTE_TRANCHE",
+              "confidence": 0.95,
+              "self_critique": "Optimistic about higher prices for the secondary tranche."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "EXECUTE_TRANCHE",
+              "confidence": 0.85,
+              "self_critique": "Nervous about delaying the full 30% G-06 requirement."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "EXECUTE_TRANCHE",
+              "confidence": 1.0,
+              "self_critique": "Friction hurdle cleanly cleared on the 10% slice."
+            }
+          ]
+        }
+      },
+      {
+        "ticker": "DFTX",
+        "timestamp": "2026-05-11 18:11:57",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 22.11,
+        "trade_state": "NO_TRADE",
+        "scrutiny_audit": {
+          "agreement_score_sa": 0.85,
+          "fatal_flaw_score": 2,
+          "final_posture": "STABLE",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "HOLD",
+              "confidence": 0.9,
+              "self_critique": "Clinical pipeline derisked by cash runway."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "HOLD",
+              "confidence": 0.65,
+              "self_critique": "No near-term dilution risk identified."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "HOLD",
+              "confidence": 0.85,
+              "self_critique": "Residual floor sizing logic remains valid."
+            }
+          ]
+        }
+      },
+      {
+        "ticker": "MU",
+        "timestamp": "2026-05-11 18:11:57",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 788.29,
+        "trade_state": "NO_TRADE",
+        "scrutiny_audit": {
+          "agreement_score_sa": 0.95,
+          "fatal_flaw_score": 0,
+          "final_posture": "STABLE",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "HOLD",
+              "confidence": 1.0,
+              "self_critique": "Ignoring the potential for a late-session macro fade."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "HOLD",
+              "confidence": 0.85,
+              "self_critique": "CapEx trap risk mitigated by current momentum."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "HOLD",
+              "confidence": 0.95,
+              "self_critique": "Momentum metrics decouple authorized per ENH_86."
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-05-11 18:13:15",
+    "trigger_context": "ROUTINE_OUTPUT",
+    "market_context": {
+      "regime": "MELT_UP",
+      "vix_guard": "DISENGAGED",
+      "portfolio_value_usd": null,
+      "remaining_cash_usd": null
+    },
+    "decisions": [
+      {
+        "ticker": "UMAC",
+        "timestamp": "2026-05-11 18:13:15",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 14.84,
+        "trade_state": "TRANCHE_1_LIMIT_PENDING",
+        "scrutiny_audit": {
+          "agreement_score_sa": 1.0,
+          "fatal_flaw_score": 0,
+          "final_posture": "ACTIVE_TRANCHE_MANAGEMENT",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "PROPOSE_G07",
+              "confidence": 1.0,
+              "self_critique": "None. Tranching maximizes nimbleness."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "PROPOSE_G07",
+              "confidence": 1.0,
+              "self_critique": "None. Eliminates monolithic block execution risk."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "PROPOSE_G07",
+              "confidence": 1.0,
+              "self_critique": "Mathematically sound execution logic."
+            }
+          ]
+        }
+      },
+      {
+        "ticker": "DFTX",
+        "timestamp": "2026-05-11 18:13:15",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 22.11,
+        "trade_state": "NO_TRADE",
+        "scrutiny_audit": {
+          "agreement_score_sa": 0.85,
+          "fatal_flaw_score": 2,
+          "final_posture": "STABLE",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "HOLD",
+              "confidence": 0.9,
+              "self_critique": "Clinical pipeline derisked by cash runway."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "HOLD",
+              "confidence": 0.65,
+              "self_critique": "No near-term dilution risk identified."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "HOLD",
+              "confidence": 0.85,
+              "self_critique": "Residual floor sizing logic remains valid."
+            }
+          ]
+        }
+      },
+      {
+        "ticker": "MU",
+        "timestamp": "2026-05-11 18:13:15",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 788.29,
+        "trade_state": "NO_TRADE",
+        "scrutiny_audit": {
+          "agreement_score_sa": 0.95,
+          "fatal_flaw_score": 0,
+          "final_posture": "STABLE",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "HOLD",
+              "confidence": 1.0,
+              "self_critique": "Ignoring the potential for a late-session macro fade."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "HOLD",
+              "confidence": 0.85,
+              "self_critique": "CapEx trap risk mitigated by current momentum."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "HOLD",
+              "confidence": 0.95,
+              "self_critique": "Momentum metrics decouple authorized per ENH_86."
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-05-11 18:38:38",
+    "trigger_context": "ROUTINE_OUTPUT",
+    "market_context": {
+      "regime": "MELT_UP",
+      "vix_guard": "DISENGAGED",
+      "portfolio_value_usd": null,
+      "remaining_cash_usd": null
+    },
+    "decisions": [
+      {
+        "ticker": "UMAC",
+        "timestamp": "2026-05-11 18:38:38",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 15.19,
+        "trade_state": "TRANCHE_2_LIMIT_PENDING",
+        "scrutiny_audit": {
+          "agreement_score_sa": 0.95,
+          "fatal_flaw_score": 0,
+          "final_posture": "ACTIVE_TRANCHE_MANAGEMENT",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "SET_LIMIT_15.80",
+              "confidence": 0.95,
+              "self_critique": "Assuming momentum sustains to hit the new mathematical ATR ceiling."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "SET_LIMIT_15.80",
+              "confidence": 0.85,
+              "self_critique": "Accepting the chart breakout despite the increasing LONG_GAMMA wall."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "SET_LIMIT_15.80",
+              "confidence": 1.0,
+              "self_critique": "ATR expansion mathematics validate the upward target revision."
+            }
+          ]
+        }
+      },
+      {
+        "ticker": "DFTX",
+        "timestamp": "2026-05-11 18:38:38",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 22.08,
+        "trade_state": "NO_TRADE",
+        "scrutiny_audit": {
+          "agreement_score_sa": 0.85,
+          "fatal_flaw_score": 2,
+          "final_posture": "STABLE",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "HOLD",
+              "confidence": 0.9,
+              "self_critique": "Clinical pipeline derisked by cash runway."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "HOLD",
+              "confidence": 0.65,
+              "self_critique": "No near-term dilution risk identified."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "HOLD",
+              "confidence": 0.85,
+              "self_critique": "Residual floor sizing logic remains valid."
+            }
+          ]
+        }
+      },
+      {
+        "ticker": "MU",
+        "timestamp": "2026-05-11 18:38:38",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 782.47,
+        "trade_state": "NO_TRADE",
+        "scrutiny_audit": {
+          "agreement_score_sa": 0.9,
+          "fatal_flaw_score": 2,
+          "final_posture": "STABLE",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "HOLD",
+              "confidence": 0.9,
+              "self_critique": "Ignoring the intraday liquidity wash below VWAP."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "HOLD",
+              "confidence": 0.8,
+              "self_critique": "CapEx trap risk mitigated by current momentum."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "HOLD",
+              "confidence": 0.95,
+              "self_critique": "Momentum metrics decouple authorized per ENH_86."
+            }
+          ]
+        }
+      }
+    ]
   }
 ]
