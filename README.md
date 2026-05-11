@@ -1,4 +1,5 @@
 # 💎 Gemini Gem Stock Market Council
+**Version:** v9.65-Model-Agnostic-Hardening
 
 **A multi-agent AI trading intelligence framework built on Google Gemini Gems.**
 
@@ -255,29 +256,24 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 
 ### 1. Install Python Dependencies
 ```bash
-pip install yfinance pandas numpy requests scipy pyperclip
+pip install yfinance pandas numpy requests scipy pyperclip fastapi uvicorn
 ```
 
 ### 2. Create `config.json`
+The system relies on `config.json` for all API keys, asset tracking, and scout sector targeting (ENH_83).
 ```json
 {
   "FINNHUB_API_KEY": "your_finnhub_api_key_here",
-  "POLYGON_API_KEY": "your_polygon_api_key_here"
+  "POLYGON_API_KEY": "your_polygon_api_key_here",
+  "MACRO_TICKERS": ["^VIX", "VIXY", "IEF", "UUP", "SPY"],
+  "WATCHLIST": ["RKLB", "RCAT", "PLTR"],
+  "SCOUT_CATEGORIES": ["Technology", "Healthcare", "AI & Data"]
 }
 ```
 
-### 3. Configure Tickers
-Edit `fetch_stocks.py` to set your portfolio and macro benchmark tickers separately:
-```python
-# Portfolio / watched tickers
-TICKERS = ['ONDS', 'UMAC', 'RCAT', 'DFTX', 'RKLB', 'PLTR']
-
-# Macro benchmarks & risk indicators
-MACRO_TICKERS = ['IEF', '^VIX', 'VIXY', 'UUP']
-
-# Combined list used by the dashboard
-ALL_TICKERS = TICKERS + MACRO_TICKERS
-```
+### 3. Dynamic Configuration
+> [!IMPORTANT]
+> **No Code Changes Required**: Starting with v9.0, you no longer need to edit `fetch_stocks.py` to change tickers. All portfolio curation and scout sector targeting is handled dynamically via the **Dashboard UI** and persisted automatically to `config.json`.
 > [!TIP]
 > **Dynamic Ticker Intelligence**: While the core list of tickers is defined in `fetch_stocks.py`, all ticker-specific metadata, event dates (e.g., Innovation Days, Funding Expiries), and forensic "Reflexes" are now managed via the **`trade_lessons.md`** registry. This allows the system to maintain "Perishable Intelligence" without modifying the static core rules.
 
