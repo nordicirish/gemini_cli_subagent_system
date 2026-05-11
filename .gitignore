@@ -23,7 +23,9 @@ local_ssot_shadow.json
 decision_log.json
 # trade_lessons.json
 
+# Decision Log Related
+scratch/test_decision_log.py
+
 # Helper Scripts
 compare_json.py
 format_json.py
-
