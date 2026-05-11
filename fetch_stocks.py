@@ -56,6 +56,17 @@ MACRO_TICKERS = config.get("MACRO_TICKERS", [
 
 PORTFOLIO_TICKERS = []
 SCOUT_TICKERS = []
+SCOUT_CATEGORIES = config.get("SCOUT_CATEGORIES", [
+    "Technology", "Healthcare", "Financials", "Energy", "Industrials", 
+    "Consumer Discretionary", "Consumer Staples", "Utilities", 
+    "Real Estate", "Materials", "Communication Services"
+])
+
+# Force save if missing to populate config.json (Bootstrap)
+if "SCOUT_CATEGORIES" not in config:
+    config["SCOUT_CATEGORIES"] = SCOUT_CATEGORIES
+    with open('config.json', 'w') as f:
+        json.dump(config, f, indent=4)
 # Load TICKERS from local SSoT if available (Persistence Mandate)
 if os.path.exists('local_ssot_shadow.json'):
     try:
@@ -96,9 +107,10 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 def save_config():
-    global config, WATCHLIST_TICKERS, MACRO_TICKERS
+    global config, WATCHLIST_TICKERS, MACRO_TICKERS, SCOUT_CATEGORIES
     config["WATCHLIST"] = WATCHLIST_TICKERS
     config["MACRO_TICKERS"] = MACRO_TICKERS
+    config["SCOUT_CATEGORIES"] = SCOUT_CATEGORIES
     with open('config.json', 'w') as f:
         json.dump(config, f, indent=4)
 
@@ -125,7 +137,27 @@ def get_data():
 
 @app.get("/api/tickers")
 def get_tickers():
-    return JSONResponse({"tickers": WATCHLIST_TICKERS, "macro": MACRO_TICKERS, "macro_labels": MACRO_LABELS})
+    return JSONResponse({
+        "tickers": WATCHLIST_TICKERS, 
+        "macro": MACRO_TICKERS, 
+        "macro_labels": MACRO_LABELS,
+        "scout_categories": SCOUT_CATEGORIES
+    })
+
+@app.get("/api/scout_categories")
+def get_scout_categories():
+    return JSONResponse(SCOUT_CATEGORIES)
+
+@app.post("/api/scout_categories")
+async def save_scout_categories(req: Request):
+    global SCOUT_CATEGORIES
+    new_categories = await req.json()
+    if isinstance(new_categories, list):
+        # Sanitize: Ensure only valid strings are kept
+        SCOUT_CATEGORIES = [str(c).strip() for c in new_categories if c]
+        save_config()
+        return JSONResponse({"status": "success", "categories": SCOUT_CATEGORIES})
+    return JSONResponse({"status": "error", "message": "Invalid data format"}, status_code=400)
 
 @app.get("/api/eod_review_payload")
 async def get_eod_review_payload():

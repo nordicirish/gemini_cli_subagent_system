@@ -29,6 +29,12 @@ const dSavePortfolioBtn = document.getElementById('save-portfolio-btn');
 const dAddWatchlistTicker = document.getElementById('add-watchlist-ticker');
 const dAddToWatchlistBtn = document.getElementById('add-to-watchlist-btn');
 
+// Scout Elements
+const dScoutContainer = document.getElementById('scout-categories-container');
+const dAddScoutCategory = document.getElementById('add-scout-category');
+const dAddScoutCategoryBtn = document.getElementById('add-scout-category-btn');
+const dSaveScoutCategoriesBtn = document.getElementById('save-scout-categories-btn');
+
 
 // Helper for consistent UI feedback on copy/paste actions
 function showFeedback(btn, btnText, statusMsg, isError = false) {
@@ -129,6 +135,7 @@ async function init() {
     await fetchTickers();
     await fetchPortfolio();
     await fetchWatchlist();
+    await fetchScoutCategories();
     pollData();
     setInterval(pollData, 3000); // 3 sec polling
 }
@@ -701,14 +708,85 @@ function toggleSection(id, header) {
     }
 }
 
+// Scout Logic
+async function fetchScoutCategories() {
+    try {
+        const res = await fetch(`${API_BASE}/scout_categories`);
+        const data = await res.json();
+        renderScoutCategories(data);
+    } catch (e) { console.error("Scout categories fetch failed", e); }
+}
+
+function renderScoutCategories(list) {
+    if (!dScoutContainer || !Array.isArray(list)) return;
+    let html = '';
+    list.forEach((category, index) => {
+        html += `
+            <div class="watch-tag" style="background: rgba(255, 184, 0, 0.1); border-color: rgba(255, 184, 0, 0.3);">
+                <span style="color: #ffb800; font-size: 0.7rem; font-weight: 600;">${category}</span>
+                <button class="delete-btn" onclick="deleteFromScoutCategory(${index})" style="font-size: 0.9rem; color: #ffb800;">&times;</button>
+            </div>
+        `;
+    });
+    if (html === '') html = '<span class="empty-state" style="font-size: 0.6rem;">No sectors defined.</span>';
+    dScoutContainer.innerHTML = html;
+}
+
+async function addToScoutCategories() {
+    const category = dAddScoutCategory.value.trim();
+    if (!category) return;
+    try {
+        const res = await fetch(`${API_BASE}/scout_categories`);
+        const list = await res.json();
+        if (list.includes(category)) return;
+        list.push(category);
+        await saveScoutCategories(list);
+        dAddScoutCategory.value = '';
+    } catch (e) {}
+}
+
+async function deleteFromScoutCategory(index) {
+    try {
+        const res = await fetch(`${API_BASE}/scout_categories`);
+        const list = await res.json();
+        list.splice(index, 1);
+        await saveScoutCategories(list);
+    } catch (e) {}
+}
+
+async function saveScoutCategories(list) {
+    const btn = dSaveScoutCategoriesBtn;
+    const originalText = btn.innerHTML;
+    btn.innerHTML = "...";
+    try {
+        const res = await fetch(`${API_BASE}/scout_categories`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(list || getLocalScoutCategories())
+        });
+        if (res.ok) await fetchScoutCategories();
+    } catch (e) { console.error("Scout categories update failed", e); }
+    finally {
+        btn.innerHTML = originalText;
+    }
+}
+
+function getLocalScoutCategories() {
+    const tags = dScoutContainer.querySelectorAll('.watch-tag span');
+    return Array.from(tags).map(t => t.textContent);
+}
+
 // Global Exports
 window.deleteFromPortfolio = deleteFromPortfolio;
 window.deleteFromWatchlist = deleteFromWatchlist;
+window.deleteFromScoutCategory = deleteFromScoutCategory;
 window.toggleSection = toggleSection;
 
 dAddToPortfolioBtn.addEventListener('click', addToPortfolio);
 dSavePortfolioBtn.addEventListener('click', () => savePortfolio());
 dAddToWatchlistBtn.addEventListener('click', addToWatchlist);
+dAddScoutCategoryBtn.addEventListener('click', addToScoutCategories);
+dSaveScoutCategoriesBtn.addEventListener('click', () => saveScoutCategories());
 
 async function copyEODReviewPayload() {
     const btn = document.getElementById('btn-eod-review');

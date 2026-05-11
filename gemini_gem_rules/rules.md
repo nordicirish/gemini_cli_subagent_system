@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
-**Role:** Gemini_Gem_Rules_Data
-**Version:** v9.30-Logical-Hardening-Sync
+**Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
+**Version:** v9.50-Scout-Category-Management-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -771,6 +771,7 @@
 - **[ENH_84 - Zero-Cost Scout Pipeline]**
   - **Status:** ACTIVE
   - **Objective:** Enable high-velocity technical screening without incurring premium API costs or context window bloat.
+  - **Category Management:** Target sectors for screening are user-curated via the Dashboard UI and synchronized through `config.json` (GICS sectors recommended).
   - **Workflow:**
     - 1. **Python Sweep:** The `fetch_stocks.py` daemon executes a broad technical sweep (SMA50/200, RVOL) via the Finnhub free-tier API.
     - 2. **Candidate Selection:** The backend sorts passing tickers and selects a MAXIMUM of 2 "Scout Candidates" per heavy cycle to protect the Orchestrator's 128K ACTIVE_REASONING_SURFACE.

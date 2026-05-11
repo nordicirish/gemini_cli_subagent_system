@@ -149,6 +149,26 @@
                     </div>
                 </div>
 
+                <!-- Scout Intelligence Manager -->
+                <div class="sidebar-card glass-panel manager-card minimized">
+                    <div class="header-row">
+                        <h3 onclick="toggleSection('scout-content', this)">
+                            <span class="icon">🔭</span> Scout Intelligence <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                        </h3>
+                    </div>
+                    <div id="scout-content" style="display: none;">
+                        <p class="subtitle" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 8px;">Edit target sectors for autonomous screening</p>
+                        <div class="input-group" style="margin-bottom: 12px; justify-content: center;">
+                            <input type="text" id="add-scout-category" placeholder="Category" class="mini-input" style="width: 100px;">
+                            <button id="add-scout-category-btn" class="add-btn">+</button>
+                            <button id="save-scout-categories-btn" class="glow-btn sync-btn">SYNC</button>
+                        </div>
+                        <div id="scout-categories-container" class="watch-list-flex" style="margin-top: 0; min-height: 40px; border: 1px dashed var(--panel-border); padding: 8px; border-radius: 4px;">
+                            <!-- Tags injected by JS -->
+                        </div>
+                    </div>
+                </div>
+
 
             </aside>
         </main>
