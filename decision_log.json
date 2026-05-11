@@ -1646,5 +1646,97 @@
         }
       }
     ]
+  },
+  {
+    "timestamp": "2026-05-11 19:04:00",
+    "trigger_context": "ROUTINE_OUTPUT",
+    "market_context": {
+      "regime": "MELT_UP",
+      "vix_guard": "DISENGAGED",
+      "portfolio_value_usd": null,
+      "remaining_cash_usd": null
+    },
+    "decisions": [
+      {
+        "ticker": "RKLB",
+        "timestamp": "2026-05-11 19:04:00",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 119.78,
+        "trade_state": "NEW_POSITION_ACQUIRED",
+        "scrutiny_audit": {
+          "agreement_score_sa": 0.95,
+          "fatal_flaw_score": 0,
+          "final_posture": "ACTIVE_MOMENTUM",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "BUY",
+              "confidence": 1.0,
+              "self_critique": "Ignoring the elevated VWAP extension."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "BUY",
+              "confidence": 0.85,
+              "self_critique": "Accepting the extension risk to avoid the UMAC GAAP Mirage trap."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "BUY",
+              "confidence": 1.0,
+              "self_critique": "Cash sweep math perfectly aligns with G-05 parameters."
+            }
+          ]
+        }
+      },
+      {
+        "ticker": "UMAC",
+        "timestamp": "2026-05-11 19:04:00",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 15.135,
+        "trade_state": "TRANCHE_2_LIMIT_PENDING",
+        "scrutiny_audit": {
+          "agreement_score_sa": 1.0,
+          "fatal_flaw_score": 0,
+          "final_posture": "ACTIVE_TRANCHE_MANAGEMENT",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "HOLD_LIMIT",
+              "confidence": 1.0,
+              "self_critique": "Acknowledging that rebuying breaks momentum logic."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "HOLD_LIMIT",
+              "confidence": 1.0,
+              "self_critique": "Defending the G-06 risk parameter absolutely."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "HOLD_LIMIT",
+              "confidence": 1.0,
+              "self_critique": "Structural integrity maintained."
+            }
+          ]
+        }
+      },
+      {
+        "ticker": "DFTX",
+        "timestamp": "2026-05-11 19:04:00",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 21.94,
+        "trade_state": "NO_TRADE",
+        "scrutiny_audit": null
+      },
+      {
+        "ticker": "MU",
+        "timestamp": "2026-05-11 19:04:00",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 796.11,
+        "trade_state": "NO_TRADE",
+        "scrutiny_audit": null
+      }
+    ]
   }
 ]
