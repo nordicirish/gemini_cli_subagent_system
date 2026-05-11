@@ -709,84 +709,81 @@ function toggleSection(id, header) {
 }
 
 // Scout Logic
+const VERIFIED_SCOUT_SECTORS = [
+    "Technology", "Healthcare", "Financials", "Energy", "Industrials", 
+    "Consumer Discretionary", "Consumer Staples", "Utilities", 
+    "Real Estate", "Materials", "Communication Services",
+    "AI & Data", "Aerospace & Defense", "Biotech", "Semiconductors"
+];
+
 async function fetchScoutCategories() {
     try {
         const res = await fetch(`${API_BASE}/scout_categories`);
-        const data = await res.json();
-        renderScoutCategories(data);
+        const activeCategories = await res.json();
+        renderScoutCategories(activeCategories);
     } catch (e) { console.error("Scout categories fetch failed", e); }
 }
 
-function renderScoutCategories(list) {
-    if (!dScoutContainer || !Array.isArray(list)) return;
+function renderScoutCategories(activeList) {
+    if (!dScoutContainer) return;
+    const activeSet = new Set(activeList);
+    
     let html = '';
-    list.forEach((category, index) => {
+    VERIFIED_SCOUT_SECTORS.forEach(sector => {
+        const isActive = activeSet.has(sector);
+        const style = isActive 
+            ? 'background: rgba(0, 255, 148, 0.2); border-color: var(--green); color: var(--green);' 
+            : 'background: rgba(255, 255, 255, 0.03); border-color: var(--panel-border); color: var(--text-dim);';
+        
         html += `
-            <div class="watch-tag" style="background: rgba(255, 184, 0, 0.1); border-color: rgba(255, 184, 0, 0.3);">
-                <span style="color: #ffb800; font-size: 0.7rem; font-weight: 600;">${category}</span>
-                <button class="delete-btn" onclick="deleteFromScoutCategory(${index})" style="font-size: 0.9rem; color: #ffb800;">&times;</button>
-            </div>
+            <button class="scout-toggle-btn" 
+                    onclick="toggleScoutCategory('${sector}')" 
+                    style="padding: 4px 8px; border-radius: 4px; border: 1px solid; font-size: 0.65rem; font-weight: 600; cursor: pointer; transition: all 0.2s; ${style}">
+                ${sector}
+            </button>
         `;
     });
-    if (html === '') html = '<span class="empty-state" style="font-size: 0.6rem;">No sectors defined.</span>';
-    dScoutContainer.innerHTML = html;
+    dScoutContainer.innerHTML = `<div style="display: flex; flex-wrap: wrap; gap: 6px;">${html}</div>`;
 }
 
-async function addToScoutCategories() {
-    const category = dAddScoutCategory.value.trim();
-    if (!category) return;
+async function toggleScoutCategory(sector) {
     try {
         const res = await fetch(`${API_BASE}/scout_categories`);
-        const list = await res.json();
-        if (list.includes(category)) return;
-        list.push(category);
+        let list = await res.json();
+        
+        if (list.includes(sector)) {
+            list = list.filter(c => c !== sector);
+        } else {
+            list.push(sector);
+        }
+        
         await saveScoutCategories(list);
-        dAddScoutCategory.value = '';
-    } catch (e) {}
-}
-
-async function deleteFromScoutCategory(index) {
-    try {
-        const res = await fetch(`${API_BASE}/scout_categories`);
-        const list = await res.json();
-        list.splice(index, 1);
-        await saveScoutCategories(list);
-    } catch (e) {}
+    } catch (e) { console.error("Toggle failed", e); }
 }
 
 async function saveScoutCategories(list) {
-    const btn = dSaveScoutCategoriesBtn;
-    const originalText = btn.innerHTML;
-    btn.innerHTML = "...";
     try {
         const res = await fetch(`${API_BASE}/scout_categories`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(list || getLocalScoutCategories())
+            body: JSON.stringify(list)
         });
-        if (res.ok) await fetchScoutCategories();
+        if (res.ok) {
+            const updated = await res.json();
+            renderScoutCategories(updated.categories);
+        }
     } catch (e) { console.error("Scout categories update failed", e); }
-    finally {
-        btn.innerHTML = originalText;
-    }
-}
-
-function getLocalScoutCategories() {
-    const tags = dScoutContainer.querySelectorAll('.watch-tag span');
-    return Array.from(tags).map(t => t.textContent);
 }
 
 // Global Exports
 window.deleteFromPortfolio = deleteFromPortfolio;
 window.deleteFromWatchlist = deleteFromWatchlist;
-window.deleteFromScoutCategory = deleteFromScoutCategory;
+window.toggleScoutCategory = toggleScoutCategory;
 window.toggleSection = toggleSection;
 
 dAddToPortfolioBtn.addEventListener('click', addToPortfolio);
 dSavePortfolioBtn.addEventListener('click', () => savePortfolio());
 dAddToWatchlistBtn.addEventListener('click', addToWatchlist);
-dAddScoutCategoryBtn.addEventListener('click', addToScoutCategories);
-dSaveScoutCategoriesBtn.addEventListener('click', () => saveScoutCategories());
 
 async function copyEODReviewPayload() {
     const btn = document.getElementById('btn-eod-review');
@@ -801,3 +798,14 @@ async function copyEODReviewPayload() {
         showFeedback(btn, "❌ Error", "Failed to fetch EOD log.", true);
     }
 }
+
+// ─── Mobile Quick Action Bridge ───
+const dMobileCopyBtn = document.getElementById('mobile-copy-json-btn');
+const dMobilePasteBtn = document.getElementById('mobile-paste-payload-btn');
+const dMobileCopySessionBtn = document.getElementById('mobile-copy-session-btn');
+const dMobileEODBtn = document.getElementById('mobile-btn-eod-review');
+
+if (dMobileCopyBtn) dMobileCopyBtn.addEventListener('click', () => dCopyBtn.click());
+if (dMobilePasteBtn) dMobilePasteBtn.addEventListener('click', () => dPasteBtn.click());
+if (dMobileCopySessionBtn) dMobileCopySessionBtn.addEventListener('click', () => dCopySessionBtn.click());
+if (dMobileEODBtn) dMobileEODBtn.addEventListener('click', () => copyEODReviewPayload());

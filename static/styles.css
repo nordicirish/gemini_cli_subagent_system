@@ -720,6 +720,16 @@ textarea:focus {
     transform: scale(0.98);
 }
 
+.glow-btn.mini {
+    padding: 6px 10px;
+    font-size: 0.65rem;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+}
+
 .glow-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
@@ -868,7 +878,18 @@ textarea:focus {
     .top-alert-bar { height: auto; padding: 8px 16px; }
     .ticker-content { overflow-x: auto; white-space: nowrap; }
     .indices-grid { grid-template-columns: 1fr; }
+
+    .desktop-only { display: none !important; }
+    .quick-action-bar.mobile-only { 
+        display: flex; 
+        gap: 8px;
+        padding: 8px;
+        border-radius: var(--radius-sm);
+        margin-bottom: 4px;
+    }
 }
+
+.quick-action-bar { display: none; }
 
 /* ─── Scrollbar ─── */
 ::-webkit-scrollbar {

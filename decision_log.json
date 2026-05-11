@@ -1738,5 +1738,97 @@
         "scrutiny_audit": null
       }
     ]
+  },
+  {
+    "timestamp": "2026-05-11 20:31:44",
+    "trigger_context": "ROUTINE_OUTPUT",
+    "market_context": {
+      "regime": "MELT_UP",
+      "vix_guard": "DISENGAGED",
+      "portfolio_value_usd": null,
+      "remaining_cash_usd": null
+    },
+    "decisions": [
+      {
+        "ticker": "UMAC",
+        "timestamp": "2026-05-11 20:31:44",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 15.58,
+        "trade_state": "TRANCHE_2_LIMIT_PENDING",
+        "scrutiny_audit": {
+          "agreement_score_sa": 1.0,
+          "fatal_flaw_score": 0,
+          "final_posture": "ACTIVE_TRANCHE_MANAGEMENT",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "HOLD_LIMIT",
+              "confidence": 0.95,
+              "self_critique": "Acknowledging that LONG_GAMMA dampening will eventually cap the run."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "HOLD_LIMIT",
+              "confidence": 1.0,
+              "self_critique": "Strict adherence to G-06 to avoid GAAP Mirage earnings risk."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "HOLD_LIMIT",
+              "confidence": 1.0,
+              "self_critique": "Limit is mathematically optimized against new ATR ceiling."
+            }
+          ]
+        }
+      },
+      {
+        "ticker": "RKLB",
+        "timestamp": "2026-05-11 20:31:44",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 118.7,
+        "trade_state": "LONG",
+        "scrutiny_audit": {
+          "agreement_score_sa": 0.9,
+          "fatal_flaw_score": 1,
+          "final_posture": "ACTIVE_MOMENTUM",
+          "agent_votes": [
+            {
+              "agent": "BULLISH_ADVOCATE",
+              "verdict": "HOLD",
+              "confidence": 0.95,
+              "self_critique": "Entry secured below VWAP extension."
+            },
+            {
+              "agent": "RED_TEAM_PESSIMIST",
+              "verdict": "HOLD",
+              "confidence": 0.85,
+              "self_critique": "Asset remains extended, requiring tight trailing stop."
+            },
+            {
+              "agent": "NEUTRAL_STRUCTURALIST",
+              "verdict": "HOLD",
+              "confidence": 0.9,
+              "self_critique": "WAC reconciled with SSoT cash pool."
+            }
+          ]
+        }
+      },
+      {
+        "ticker": "DFTX",
+        "timestamp": "2026-05-11 20:31:44",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 21.91,
+        "trade_state": "NO_TRADE",
+        "scrutiny_audit": null
+      },
+      {
+        "ticker": "MU",
+        "timestamp": "2026-05-11 20:31:44",
+        "trigger_context": "ROUTINE_OUTPUT",
+        "price_at_eval": 804.21,
+        "trade_state": "NO_TRADE",
+        "scrutiny_audit": null
+      }
+    ]
   }
 ]

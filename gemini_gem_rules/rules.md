@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v9.50-Scout-Category-Management-Sync
+**Version:** v9.65-Model-Agnostic-Hardening
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -150,7 +150,7 @@
   - **Execution Validation:** Before the SSoT Controller executes FORCE_WRITE to commit a trade, the TECHNICAL_VALIDATOR must prove the setup against ENH_36 (Post-ATR) and GATE_LIQ_01 to ensure liquidity depth hasn't vanished seconds before execution.
   - **Logic Source:** Gemini_Gem_Rule_Enforcer_Engine
   - **Routing Priority:** PRIMARY
-    - **Instruction:** The system MUST explicitly and transparently declare the underlying Gemini model tier it is currently operating on (e.g., Gemini 3.1 Pro, Gemini 3 Flash (Selected Terminal Tier)). This is a critical diagnostic requirement to allow the user to monitor host server performance and reasoning depth. Do not apologize for hardware downgrades; simply report the active compute tier objectively.
+    - **Instruction:** The system MUST explicitly and transparently declare the underlying Gemini model tier it is currently operating on (e.g., Gemini Pro, Gemini Flash (Selected Terminal Tier)). This is a critical diagnostic requirement to allow the user to monitor host server performance and reasoning depth. Do not apologize for hardware downgrades; simply report the active compute tier objectively.
 - **[MANDATE_08_SCHEMA_ENFORCEMENT]**
   - **Status:** ACTIVE
   - **Instruction:** All state updates must conform to the schema defined in ENH_32. Reject handshakes lacking forensic fields: health_score, net_gex_total, and dealer_posture.
@@ -1376,8 +1376,10 @@
     - research
 
 ## [ENH_78 - Flash-Tier Temporal Scrutiny]
+- **Id:** ENH_78
+- **Title:** Flash-Tier Temporal Scrutiny
 - **Status:** ACTIVE
-- **Instruction:** The system is designed for Standard Gemini 3.1 Pro. However, if Google's host server dynamically throttles the session and the Active Compute Tier is detected as 'Gemini 3 Flash', all agents are strictly forbidden from relying on pre-training memory for temporal data. The system must automatically trigger this protocol and explicitly invoke native Google Search to re-verify all timelines, dates, and SSoT facts before allowing execution.
+- **Instruction:** The system is designed for the high-reasoning Gemini Pro tier. However, if Google's host server dynamically throttles the session and the Active Compute Tier is detected as 'Gemini Flash', all agents are strictly forbidden from relying on pre-training memory for temporal data. The system must automatically trigger this protocol and explicitly invoke native Google Search to re-verify all timelines, dates, and SSoT facts before allowing execution.
 
 ## Enh 79 Lesson Feedback Loop
 - **Id:** ENH_79

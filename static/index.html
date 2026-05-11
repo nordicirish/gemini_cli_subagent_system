@@ -52,6 +52,14 @@
             </div>
         </section>
 
+        <!-- ─── Quick Action Bar (Mobile Only) ─── -->
+        <div class="quick-action-bar glass-panel mobile-only">
+            <button id="mobile-copy-json-btn" class="glow-btn mini">📋 TURN</button>
+            <button id="mobile-paste-payload-btn" class="glow-btn mini">📥 PASTE</button>
+            <button id="mobile-copy-session-btn" class="glow-btn mini outline">📂 INIT</button>
+            <button id="mobile-btn-eod-review" class="glow-btn mini outline">🕒 EOD</button>
+        </div>
+
         <!-- ─── Main Content ─── -->
         <main class="main-content">
             <!-- Data Table -->
@@ -80,7 +88,7 @@
             <!-- Sidebar -->
             <aside class="sidebar">
                 <!-- Outbound Data Operations -->
-                <div class="sidebar-card glass-panel">
+                <div class="sidebar-card glass-panel desktop-only">
                     <h3><span class="icon">📤</span> Outbound Data</h3>
                     <p class="subtitle">Extract data for LLM context</p>
                     <div class="btn-row">
@@ -91,7 +99,7 @@
                 </div>
 
                 <!-- Inbound Data Operations -->
-                <div class="sidebar-card glass-panel">
+                <div class="sidebar-card glass-panel desktop-only">
                     <h3><span class="icon">📥</span> Inbound Payload</h3>
                     <p class="subtitle">Sync SSoT from Gem output</p>
                     <div class="btn-row">
@@ -157,14 +165,9 @@
                         </h3>
                     </div>
                     <div id="scout-content" style="display: none;">
-                        <p class="subtitle" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 8px;">Edit target sectors for autonomous screening</p>
-                        <div class="input-group" style="margin-bottom: 12px; justify-content: center;">
-                            <input type="text" id="add-scout-category" placeholder="Category" class="mini-input" style="width: 100px;">
-                            <button id="add-scout-category-btn" class="add-btn">+</button>
-                            <button id="save-scout-categories-btn" class="glow-btn sync-btn">SYNC</button>
-                        </div>
-                        <div id="scout-categories-container" class="watch-list-flex" style="margin-top: 0; min-height: 40px; border: 1px dashed var(--panel-border); padding: 8px; border-radius: 4px;">
-                            <!-- Tags injected by JS -->
+                        <p class="subtitle" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 12px;">Toggle target sectors for autonomous screening</p>
+                        <div id="scout-categories-container" class="scout-grid-container" style="margin-top: 0; min-height: 40px; border: 1px dashed var(--panel-border); padding: 8px; border-radius: 4px;">
+                            <!-- Grid injected by JS -->
                         </div>
                     </div>
                 </div>
