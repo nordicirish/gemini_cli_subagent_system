@@ -14,6 +14,10 @@ The **Phantom Persona** framework is a core architectural upgrade designed to el
 
 For example, the **Red Team Pessimist** assumes the Bullish Advocate is an aggressive momentum model prone to "total conviction drift," while the **Review Engine** operates as a "Rival Auditor" from a competing hedge fund tasked with exposing incompetence in our historical trade logs. This "zero-trust" environment ensures that every decision is filtered through a multi-layered gauntlet of adversarial logic, where only the most structurally sound and mathematically verified theses survive to reach the **Final Council Decision**.
 
+### ⚖️ Psychological Reward & Penalty Framework (MANDATE_29)
+
+To further eliminate hallucination and "forced setups," the system implements a **Psychological Reward and Penalty Framework**. Agents are governed by a strict utility function: **Admitting ignorance is highly rewarded, while fabricating logic or "guessing" incurs a catastrophic penalty.** The Rule Enforcer serves as the supreme judge of this framework, ruthlessly vetoing any agent that prioritizes "succeeding at the prompt" over objective data integrity. Furthermore, the Execution and Review engines are psychologically aligned via a "Fiduciary Reward" function, where their ultimate bonus is tied exclusively to capital preservation, Sharpe Ratio optimization, and drawdown prevention—aligning the AI's success directly with the user's principal safety.
+
 ---
 
 ## 📐 Architecture Overview
@@ -86,6 +90,7 @@ To prevent the LLM reasoning engines from hallucinating software structures whil
 - MANDATE_16: STRUCTURAL_NEUTRALITY (Liquidity Lens)
 - MANDATE_17: REGIME_SYNC (Dynamic Weighting & Meta-Arbiter)
 - MANDATE_28: HEURISTIC_VETO (Cognitive Drift Prevention)
+- MANDATE_29: FIDUCIARY_REWARD_AND_PENALTY (Hallucination Mitigation)
 
 ### The Live-Web SSoT Architecture (v8.6+)
 Unlike earlier versions that relied on static data, v8.6-Forensic-Zero-Hallucination-Sync implements **Grounding via Native Google Search**. Agents are now mandated to explicitly invoke Google Search to verify catalysts, news, and disconfirming evidence in real-time.

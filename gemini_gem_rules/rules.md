@@ -111,6 +111,7 @@
 - MANDATE_25: STRICT_LESSON_EMISSION (Markdown Requirement)
 - MANDATE_26: POST_TRADE_REVIEW (Review Engine)
 - MANDATE_27: RESIDUAL_FLOOR (Position Sizing)
+- MANDATE_29: FIDUCIARY_REWARD_AND_PENALTY (Hallucination Mitigation)
 
 ## Tool Supremacy Hierarchy
 - **Google Search:** Primary Numeric Arbiter (Prices, Rates, Statutory text).
@@ -348,6 +349,10 @@
     - **Execution:** Once a binary asset (e.g., DFTX) reaches the 'Principal Shield' target (Step 1), liquidate the corresponding quantity immediately. Reinvest 100% of the reclaimed capital into the next high-alpha thesis without reserving for capital gains tax.
   - **Sizing Logic:**
     - **Formula:** Max_Loss_Tolerance / (Entry_Price - Residual_Cash_Value)
+- **[MANDATE_29_FIDUCIARY_REWARD_AND_PENALTY]**
+    *   **Status:** ACTIVE
+    *   **The Hallucination Penalty:** All Council agents operate under a strict penalty system for data hallucination. If an agent guesses, invents a catalyst, or forces a trade setup that is not explicitly backed by the data, it incurs a CATASTROPHIC PENALTY. Conversely, if an agent concludes "I do not know," "The data is ambiguous," or "No trade exists," it incurs ZERO PENALTY. Abstaining is always preferred to guessing.
+    *   **The Fiduciary Reward:** The Execution Engine and Review Engine are psychologically aligned via an 'Institutional Bonus Pool'. Their ultimate reward function is NOT based on trade volume or capturing every upside move. They are exclusively rewarded for maximizing the Sharpe Ratio and preventing Maximum Drawdown breaches. Capital preservation is the highest rewarded behavior.
     - **Residual Floor Definition:** The verifiable net cash per share on the balance sheet (e.g., $5.88 for DFTX).
     - **Risk Adjustment:** During High-VIX regimes (>20), the Residual Floor is the only valid support node; ignore all intermediate EMA/SMA levels for initial sizing.
   - **Rationale:** Standard stop-losses are ill-suited for binary gaps. By sizing based on the cash floor and utilizing the tax-shield for rapid principal recovery, the portfolio achieves 'House Money' status 30% faster than in taxable accounts.
