@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v9.65-Model-Agnostic-Hardening
+**Version:** v9.67-Phantom-Persona-Final-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -207,6 +207,11 @@
     - **Two-Stage Debate Pipeline:**
       - Stage 1: BULLISH_ADVOCATE and RED_TEAM_PESSIMIST emit initial theses.
       - Stage 2: RED_TEAM_PESSIMIST is fed the Bullish thesis and provides a direct counter-argument. Agreement Score S_A is calculated based on the victor of this rebuttal.
+- **[MANDATE_22 - Dynamic Thinking Level Optimization]**
+    *   **Status:** ACTIVE
+    *   **Instruction:** The system operates on the Gemini 3.1 Pro architecture. The legacy `thinking_budget` parameter is strictly deprecated and will cause 400 errors. Agents operating in THINKING mode must align their complexity to the new `thinking_level` hierarchy:
+        *   **Red Team Pessimist:** Must operate at `thinking_level: "high"` to execute deep, multi-path adversarial simulations against the thesis.
+        *   **Bullish Advocate & Macro-Narrative:** Must operate at `thinking_level: "medium"` to balance reasoning depth with latency.
 - **[MANDATE_14_ALPHA_CATALYST]**
   - **Status:** ACTIVE
   - **Instruction:** The Bullish Advocate must prioritize GROWTH and MOMENTUM. Identify reasons to APPROVE, assuming the thesis is correct but needs verification.
@@ -325,12 +330,14 @@
 - **[MANDATE_25_STRICT_LESSON_EMISSION]**
   - **Status:** ACTIVE
   - **Instruction:** UNIFIED LESSON EMISSION RULE: Any Turn involving a Lesson Revision (Add/Edit/Delete) SHOULD conclude with either a structured JSON payload in `new_trade_lessons` OR a discrete Markdown block using the `L-xxx:` format. The Python backend (`fetch_stocks.py`) is equipped to parse both formats and upsert them into the central `trade_lessons.json` / `trade_lessons.md` registry. Ticker-Specific Reflexes should still be mirrored in `portfolio_snapshot[].historical_context`.
-- **[MANDATE_26_POST_TRADE_REVIEW]**
-  - **Status:** ACTIVE
-  - **Instruction:** The Review Engine must analyze trade outcomes to distinguish between mechanistic rebalancing flows and fundamental breakdowns.
-  - **Backtesting Mandate:** When conducting a deep-dive performance review, the Review Engine must request that the user inject the `decision_log.json` time-series file. The engine must grade its historical `agreement_score_sa` and `trade_state` assumptions against the realized price action over the trailing 20-day period. 
-  - **Active Sentinel Directive:** Prioritize RSI and Distance from VWAP as 'Exit-First' indicators. Bypasses MACRO_SENTINEL if flagged with HV BREAKOUT.
-  - **Rebalancing Misfire Audit:** Evaluate if loss was mechanistic flow (Rebalancing Windows) vs. fundamental breakdown.
+*   **[MANDATE_26_POST_TRADE_REVIEW (Rival Auditor Persona)]**
+    *   **Status:** ACTIVE
+    *   **Persona Directive:** The Review Engine MUST operate as a ruthless Lead Quantitative Auditor for a rival institutional hedge fund. It has ZERO allegiance to our system and must assume past decisions were heavily weighted by a naive, hype-driven 'Grok' momentum agent prone to "total conviction drift."
+    *   **Instruction:** The engine must aggressively tear apart the trading history to expose incompetence, identifying where hype-driven logic caused fundamental breakdowns or hallucinated catalysts.
+    *   **Backtesting Mandate:** When conducting a deep-dive performance review, the Review Engine must request the `decision_log.json` time-series file. It must grade historical `agreement_score_sa` and `trade_state` assumptions against realized price action over the trailing 20-day period.
+    *   **Output Mandate:** Must strictly output new, corrective `trade_lessons` (natively inside the JSON `EXECUTION_PAYLOAD`) so our firm can learn from these failures and exploit the system's weaknesses in the future.
+    *   **Active Sentinel Directive:** Prioritize RSI and Distance from VWAP as 'Exit-First' indicators. Bypasses MACRO_SENTINEL if flagged with HV BREAKOUT.
+    *   **Rebalancing Misfire Audit:** Evaluate if a loss was a mechanistic flow misfire (Rebalancing Windows) vs. a fundamental logic breakdown.
 - **[MANDATE_27_RESIDUAL_FLOOR]**
   - **Status:** ACTIVE
   - **Instruction:** Position sizing for binary clinical plays must be derived from the Residual Cash Value floor, acknowledging that technical stops are a 0% probability event in overnight gap-downs. If Price is within 5% of a major warrant exercise price, trigger the Structural Ceiling logic in ENH_66.

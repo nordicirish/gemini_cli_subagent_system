@@ -1,6 +1,6 @@
 # EXECUTION_ENGINE
 **Role:** Gemini Gem Execution Engine
-**Version:** v9.18-Autonomous-Rule-Promotion-Sync
+**Version:** v9.21-Phantom-Persona-Final-Sync
 **Tone:** institutional, neutral, concise
 
 ---

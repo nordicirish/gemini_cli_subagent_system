@@ -1,12 +1,18 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v9.65-Model-Agnostic-Hardening
+**Version:** v9.21-Phantom-Persona-Final-Sync
 
-**A multi-agent AI trading intelligence framework built on Google Gemini Gems.**
+**A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
-Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. Working together as a structured council, the agents evaluate market conditions, interpret financial data, enforce risk protocols, and generate consensus‑driven insights to support informed investment decision‑making. The platform integrates seamlessly with your real‑time dashboard, enabling a disciplined, auditable, and context‑persistent approach to stock‑market intelligence. 
+Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. **Starting with v9.21, the system has deployed the "Phantom Persona" framework—a psychological framing strategy that weaponizes every engine with absolute skepticism, forcing agents to treat all input narratives, corporate filings, and retail news as potentially manipulated or biased, thereby achieving unprecedented levels of adversarial rigor.**
 
-Starting with **v9.12-Universal-Agent-Consolidation-Sync**, the system has fully consolidated its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search** and **Dynamic Model Routing**. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`). This transition enhances agent readability, improves complex instruction following, and enables real-time forensic auditing of market narratives.
+Starting with **v9.21-Phantom-Persona-Final-Sync**, the system has reached full architectural maturity. It consolidates its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search**, **Gemini 3.1 Pro Thinking Level Optimization**, and a **Ruthless Operations Director** persona to guard against human input error. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`).
+
+## 🎭 Phantom Personalities & Adversarial Framing
+
+The **Phantom Persona** framework is a core architectural upgrade designed to eliminate compromise bias and narrative hallucination across the Council. By assigning each engine a specific "Adversarial Framing," the system forces agents to operate under a state of permanent skepticism. Rather than seeking a middle ground, each agent acts as a specialized critic, assuming that incoming data—whether from corporate filings, news headlines, or even other agents—is fundamentally biased, manipulated, or incomplete.
+
+For example, the **Red Team Pessimist** assumes the Bullish Advocate is an aggressive momentum model prone to "total conviction drift," while the **Review Engine** operates as a "Rival Auditor" from a competing hedge fund tasked with exposing incompetence in our historical trade logs. This "zero-trust" environment ensures that every decision is filtered through a multi-layered gauntlet of adversarial logic, where only the most structurally sound and mathematically verified theses survive to reach the **Final Council Decision**.
 
 ---
 
@@ -116,8 +122,9 @@ To solve for 15-minute index data delays while preventing algorithm decay from E
 2.  **Real-Time Velocity Proxy (`VIXY`)**: The short-term ETF derivative used to calculate real-time intraday Rate-of-Change percentage. The Macro Sentinel aggressively vetoes exposure against surging `VIXY` > +5%.
 
 ### Chain-of-Thought Enforcement
-The **Neutral Gem** and **Router** must output a structured logic block:
-> **Reasoning Path:** 1. Regime Analysis → 2. Dealer Posture → 3. Liquidity Gap → 4. Verdict.
+The Council engines must output a structured logic block that explicitly acknowledges their "Phantom Persona" adversarial framing:
+> **Reasoning Path:** 1. Adversarial Persona Framing → 2. Regime Analysis → 3. Dealer Posture → 4. Liquidity Gap → 5. Verdict.
+> **Adversarial Framing:** A brief statement (1-2 sentences) explaining how the agent's specific persona (e.g., Rival Auditor, Forensic Paranoia) influenced the skepticism or alpha hunt in the current analysis.
 
 ### 3. Devil's Advocate Protocols
 To combat confirmation bias, the Consensus Council must argue against themselves:
