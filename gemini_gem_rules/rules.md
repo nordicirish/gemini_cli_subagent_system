@@ -1,6 +1,6 @@
 # Gemini_Gem_Rules_Data
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v9.68-Phantom-Persona-Final-Sync
+**Version:** v9.69-Rigid-Output-Schema-Override
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
