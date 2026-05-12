@@ -273,14 +273,16 @@ dCopySessionBtn.addEventListener('click', async () => {
             _meta: state._meta,
             timestamp: state.timestamp,
             status: state.status,
-            tickers: filteredTickers
+            tickers: filteredTickers,
+            local_storage_state: state.local_storage_state,
+            trade_lessons: state.trade_lessons
         };
         
-        const bootPrompt = "SYSTEM BOOT: Initialize Council with the provided Session context. Execute Stage 0 Data Sync and provide a top-level market posture assessment.";
+        const bootPrompt = "SYSTEM BOOT: Initialize Council with the provided SSoT and Session context. Execute Stage 0 Data Sync and provide a top-level market posture assessment.";
         const jsonString = bootPrompt + "\n\n```json\n" + JSON.stringify(sessionPayload, null, 2) + "\n```";
         
         await navigator.clipboard.writeText(jsonString);
-        showFeedback(dCopySessionBtn, "✅ Copied!", "Session context copied & Log cleared!");
+        showFeedback(dCopySessionBtn, "✅ Copied!", "Full session initialization data copied (Filtered Tickers) & Log cleared!");
     } catch (e) {
         console.error(e);
         showFeedback(dCopySessionBtn, "❌ Error", "Failed to copy session data.", true);
@@ -397,11 +399,16 @@ function renderTable(tickers, state) {
             trendHtml = `<span class="trend-tag flat">— Flat</span>`;
         }
 
+        const dayColor = row.session_change_pct > 0 ? 'text-green' : row.session_change_pct < 0 ? 'text-red' : 'text-white';
+        const openColor = row.change_from_open_pct > 0 ? 'text-green' : row.change_from_open_pct < 0 ? 'text-red' : 'text-white';
+        // Note: gapColor is already declared at line 378
+
         const scoutBadge = row._isScout ? `<span class="scout-badge">SCOUT</span>` : '';
         return `
             <tr>
                 <td class="ticker-cell">${sym}${scoutBadge}</td>
                 <td class="${pClass}">${p}</td>
+                <td class="${dayColor}">${row.session_change_pct > 0 ? '+' : ''}${row.session_change_pct.toFixed(2)}%</td>
                 <td class="${gapColor}">${row.gap_percent > 0 ? '+' : ''}${row.gap_percent.toFixed(2)}%</td>
                 <td>${formatVol(row.volume)}</td>
                 <td>${row.atr_percent.toFixed(2)}%</td>
@@ -426,7 +433,7 @@ function renderTable(tickers, state) {
 
     const renderHeader = (label, cls = '') => `
         <tr class="table-section-header ${cls}">
-            <td colspan="10">${label}</td>
+            <td colspan="11">${label}</td>
         </tr>
     `;
 
@@ -445,7 +452,7 @@ function renderTable(tickers, state) {
         if (groups.scouts.length > 0) {
             html += `
                 <tr class="table-sub-header scout-header">
-                    <td colspan="10">Scout Intelligence Suggestions</td>
+                    <td colspan="11">Scout Intelligence Suggestions</td>
                 </tr>
             `;
             groups.scouts.forEach(t => {
@@ -542,7 +549,7 @@ async function pollData() {
                     alertsHtml += `<div class="alert-item critical">⚠️ FEAR ALERT: VIX SPIKING (+${vix.gap_percent.toFixed(2)}%)</div>`;
                 }
                 if(ief && ief.gap_percent < -0.15) {
-                    alertsHtml += `<div class="alert-item warning">📉 BOND ALERT: YIELDS RISING (BOND PRICE DROP)</div>`;
+                    alertsHtml += `<div class="alert-item warning">📉 BOND ALERT: YIELDS RISING</div>`;
                 }
                 
                 if(alertsHtml) {

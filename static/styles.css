@@ -107,7 +107,7 @@ header.glass-panel {
     align-items: center;
     font-family: var(--font-mono);
     border-radius: var(--radius-sm);
-    margin-bottom: 12px;
+    margin-bottom: 0;
     width: 100%;
     overflow: hidden;
     position: relative;
@@ -129,10 +129,11 @@ header.glass-panel {
     letter-spacing: 1px;
     white-space: nowrap;
     background: rgba(13, 17, 23, 1);
-    padding-right: 30px;
+    padding: 0 20px;
     height: 100%;
     display: flex;
     align-items: center;
+    justify-content: center;
     z-index: 50;
     flex-shrink: 0;
     box-shadow: 15px 0 25px rgba(13, 17, 23, 0.9);

@@ -409,6 +409,52 @@ async def handle_paste(req: Request):
 
         payload = json_payload
         
+        # Map common payload aliases to canonical keys
+        def map_aliases(data):
+            if not isinstance(data, dict): return
+            if "portfolio" in data and "portfolio_snapshot" not in data:
+                data["portfolio_snapshot"] = data.pop("portfolio")
+            if "instructions" in data and "portfolio_snapshot" not in data:
+                data["portfolio_snapshot"] = data.pop("instructions")
+            if "tickers" in data and "portfolio_snapshot" not in data:
+                # Only alias if it's a list of dicts (actual portfolio items)
+                if isinstance(data["tickers"], list) and len(data["tickers"]) > 0 and isinstance(data["tickers"][0], dict):
+                    data["portfolio_snapshot"] = data.pop("tickers")
+            
+            if "council_debate" in data and isinstance(data["council_debate"], dict):
+                cd = data["council_debate"]
+                if "bullish_advocate" in cd and "bullish" not in cd: cd["bullish"] = cd.pop("bullish_advocate")
+                if "red_team_pessimist" in cd and "red_team" not in cd: cd["red_team"] = cd.pop("red_team_pessimist")
+                if "neutral_gex" in cd and "neutral" not in cd: cd["neutral"] = cd.pop("neutral_gex")
+                if "neutral_structuralist" in cd and "neutral" not in cd: cd["neutral"] = cd.pop("neutral_structuralist")
+
+            if "terminal_state" in data and "state_context" not in data:
+                data["state_context"] = data.pop("terminal_state")
+            if "forensic_alerts" in data and "forensic_intelligence" not in data:
+                data["forensic_intelligence"] = data.pop("forensic_alerts")
+            if "allocations" in data and "portfolio_snapshot" not in data:
+                data["portfolio_snapshot"] = data.pop("allocations")
+            if "unallocated_cash_eur" in data and "remaining_cash_eur" not in data:
+                data["remaining_cash_eur"] = data["unallocated_cash_eur"]
+            if "unallocated_cash_usd" in data and "remaining_cash_usd" not in data:
+                data["remaining_cash_usd"] = data["unallocated_cash_usd"]
+            
+            if "portfolio_snapshot" in data and isinstance(data["portfolio_snapshot"], list):
+                for item in data["portfolio_snapshot"]:
+                    if isinstance(item, dict):
+                        if "wac_usd" in item and "wac" not in item:
+                            item["wac"] = item.pop("wac_usd")
+                        if "current_price_usd" in item and "price" not in item:
+                            item["price"] = item.pop("current_price_usd")
+                        if "action" in item and "trade_state" not in item:
+                            item["trade_state"] = item.pop("action")
+
+        # Apply mapping recursively to known payload containers
+        map_aliases(payload)
+        for k in ("EXECUTION_PAYLOAD", "mutable_state", "payload"):
+            if isinstance(payload.get(k), dict):
+                map_aliases(payload[k])
+
         # ENH_49: Intercept scrutiny_audit and trade_state for decision_log.json early
         try:
             def find_key_recursive(data, target_key):
@@ -433,7 +479,15 @@ async def handle_paste(req: Request):
                     "remaining_cash_usd": find_key_recursive(payload, "remaining_cash_usd")
                 }
                 
-                turn_log = {"timestamp": ts, "trigger_context": trigger, "market_context": market_context, "decisions": []}
+                council_debate = find_key_recursive(payload, "council_debate")
+                
+                turn_log = {
+                    "timestamp": ts, 
+                    "trigger_context": trigger, 
+                    "market_context": market_context, 
+                    "council_debate": council_debate,
+                    "decisions": []
+                }
                 for item in incoming_portfolio:
                     if isinstance(item, dict):
                         ticker = item.get("ticker")
@@ -472,37 +526,7 @@ async def handle_paste(req: Request):
         except Exception as e:
             print(f"Failed to append to decision_log.json: {e}")
         
-        # Map common payload aliases to canonical keys
-        def map_aliases(data):
-            if not isinstance(data, dict): return
-            if "portfolio" in data and "portfolio_snapshot" not in data:
-                data["portfolio_snapshot"] = data.pop("portfolio")
-            if "terminal_state" in data and "state_context" not in data:
-                data["state_context"] = data.pop("terminal_state")
-            if "forensic_alerts" in data and "forensic_intelligence" not in data:
-                data["forensic_intelligence"] = data.pop("forensic_alerts")
-            if "allocations" in data and "portfolio_snapshot" not in data:
-                data["portfolio_snapshot"] = data.pop("allocations")
-            if "unallocated_cash_eur" in data and "remaining_cash_eur" not in data:
-                data["remaining_cash_eur"] = data["unallocated_cash_eur"]
-            if "unallocated_cash_usd" in data and "remaining_cash_usd" not in data:
-                data["remaining_cash_usd"] = data["unallocated_cash_usd"]
-            
-            if "portfolio_snapshot" in data and isinstance(data["portfolio_snapshot"], list):
-                for item in data["portfolio_snapshot"]:
-                    if isinstance(item, dict):
-                        if "wac_usd" in item and "wac" not in item:
-                            item["wac"] = item.pop("wac_usd")
-                        if "current_price_usd" in item and "price" not in item:
-                            item["price"] = item.pop("current_price_usd")
-                        if "action" in item and "trade_state" not in item:
-                            item["trade_state"] = item.pop("action")
-        
-        map_aliases(payload)
-        if isinstance(payload.get("mutable_state"), dict):
-            map_aliases(payload["mutable_state"])
-        if isinstance(payload.get("EXECUTION_PAYLOAD"), dict):
-            map_aliases(payload["EXECUTION_PAYLOAD"])
+        # Aliases mapped above
             
         # ENH_31: Promote key fields from EXECUTION_PAYLOAD to state root for immediate SSoT synchronization
         # This ensures that 'allocations' (portfolio_snapshot) and other directives are applied to the active state.
@@ -937,6 +961,7 @@ class MarketDataCache:
         self.after_hours_price: dict[str, float] = {}
         self.pre_market_volume: dict[str, int] = {}
         self.after_hours_volume: dict[str, int] = {}
+        self.change_from_open: dict[str, float] = {}
         self.cycles: int = 0
         self.vwap_pointer: int = 0
 
@@ -1853,6 +1878,17 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
                         raw_gap = ((true_gap_price - reg_close) / reg_close) * 100
                     
             cache.gaps[symbol] = raw_gap
+            
+            # --- Daily Change from Open (requested by user) ---
+            if reg_open and float(reg_open) > 0:
+                cache.change_from_open[symbol] = ((price - float(reg_open)) / float(reg_open)) * 100
+            else:
+                # If batch quote open is missing, try chart open
+                c_open = _get_chart_open(symbol)
+                if c_open and c_open > 0:
+                    cache.change_from_open[symbol] = ((price - c_open) / c_open) * 100
+                else:
+                    cache.change_from_open[symbol] = 0.0
 
         if pre_price is not None:
             cache.pre_market_price[symbol] = pre_price
@@ -2489,6 +2525,7 @@ def run_daemon():
                     # Returns
                     # session_change_pct: required by ENH_FIN_02 Protective Exit Override logic
                     "session_change_pct": float(cache.session_change.get(sym, 0)),
+                    "change_from_open_pct": float(cache.change_from_open.get(sym, 0)),
                     "gap_percent": float(gap),
                     "pre_market_change_percent": float(cache.pre_market_change.get(sym, 0)),
                     "after_hours_change_percent": float(cache.after_hours_change.get(sym, 0)),
