@@ -256,20 +256,31 @@ dCopySessionBtn.addEventListener('click', async () => {
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
         
+        const ssot = state.local_storage_state || {};
+        const ms = ssot.mutable_state || {};
+        const portfolio = ms.portfolio_snapshot || [];
+        const heldTickers = new Set(portfolio.map(p => p.ticker.toUpperCase()));
+        
+        // Filter tickers to only Held + Macro to prevent LLM context overload
+        const filteredTickers = (state.tickers || []).filter(t => {
+            const sym = t.ticker.toUpperCase();
+            const isHeld = heldTickers.has(sym);
+            const isMacro = (currentMacroTickers || []).map(m => m.toUpperCase()).includes(sym);
+            return isHeld || isMacro;
+        });
+
         const sessionPayload = {
             _meta: state._meta,
             timestamp: state.timestamp,
             status: state.status,
-            tickers: state.tickers,
-            local_storage_state: state.local_storage_state,
-            trade_lessons: state.trade_lessons
+            tickers: filteredTickers
         };
         
-        const bootPrompt = "SYSTEM BOOT: Initialize Council with the provided SSoT and Session context. Execute Stage 0 Data Sync and provide a top-level market posture assessment.";
+        const bootPrompt = "SYSTEM BOOT: Initialize Council with the provided Session context. Execute Stage 0 Data Sync and provide a top-level market posture assessment.";
         const jsonString = bootPrompt + "\n\n```json\n" + JSON.stringify(sessionPayload, null, 2) + "\n```";
         
         await navigator.clipboard.writeText(jsonString);
-        showFeedback(dCopySessionBtn, "✅ Copied!", "Full session initialization data copied & Log cleared!");
+        showFeedback(dCopySessionBtn, "✅ Copied!", "Session context copied & Log cleared!");
     } catch (e) {
         console.error(e);
         showFeedback(dCopySessionBtn, "❌ Error", "Failed to copy session data.", true);
@@ -535,10 +546,15 @@ async function pollData() {
                 }
                 
                 if(alertsHtml) {
-                    alertsContent.innerHTML = alertsHtml;
+                    if (alertsContent.innerHTML !== alertsHtml) {
+                        alertsContent.innerHTML = alertsHtml;
+                    }
                     topBar.classList.add('has-alerts');
                 } else {
-                    alertsContent.innerHTML = '<span class="empty-state">NO ACTIVE ALERTS</span>';
+                    const emptyState = '<span class="empty-state">NO ACTIVE ALERTS</span>';
+                    if (alertsContent.innerHTML !== emptyState) {
+                        alertsContent.innerHTML = emptyState;
+                    }
                     topBar.classList.remove('has-alerts');
                 }
             }

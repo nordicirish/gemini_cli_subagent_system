@@ -1,12 +1,12 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v9.21-Phantom-Persona-Final-Sync
+**Version:** v9.22-Phantom-Persona-Final-Sync
 
 **A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
 Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. **Starting with v9.21, the system has deployed the "Phantom Persona" framework—a psychological framing strategy that weaponizes every engine with absolute skepticism, forcing agents to treat all input narratives, corporate filings, and retail news as potentially manipulated or biased, thereby achieving unprecedented levels of adversarial rigor.**
 
-Starting with **v9.21-Phantom-Persona-Final-Sync**, the system has reached full architectural maturity. It consolidates its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search**, **Gemini 3.1 Pro Thinking Level Optimization**, and a **Ruthless Operations Director** persona to guard against human input error. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`).
+Starting with **v9.22-Phantom-Persona-Final-Sync**, the system has reached full architectural maturity. It consolidates its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search**, **Gemini 3.1 Pro Thinking Level Optimization**, and a **Professional Master Router** to ensure high-fidelity data integrity. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`).
 
 ## 🎭 Phantom Personalities & Adversarial Framing
 
@@ -20,7 +20,8 @@ To further eliminate hallucination and "forced setups," the system implements a 
 
 ### 🔄 Session Initialization & Forensic History Management
 The dashboard now includes integrated management for session transitions and historical auditing:
-*   **Unified Session Init:** The "Copy Session Init" button now automatically clears the `decision_log.json` and prepends a `SYSTEM BOOT` directive to the payload, ensuring a clean state and immediate council orientation upon ingestion.
+*   **Optimized Session Init:** The "Copy Session Init" button triggers an automated cleanup: it clears the `decision_log.json` and generates a lightweight `SYSTEM BOOT` payload. This payload is filtered to only include **Held Portfolio Assets** and **Macro Indicators**, preventing LLM context overload while ensuring the Council is immediately oriented to active risk.
+*   **Smooth Marquee Ticker:** A hardware-accelerated, real-time alert bar provides scrolling system and market warnings with "hover-to-pause" functionality for forensic inspection.
 *   **Forensic History Control:** A dedicated **"Clear Decision Log"** button allows for manual wiping of historical trade logs, facilitating rapid backtesting resets.
 *   **Automated Backtesting:** The **"Copy EOD Review"** button aggregates the trailing decision log into a structured "Lead Quantitative Auditor" prompt for systemic performance reviews.
 
