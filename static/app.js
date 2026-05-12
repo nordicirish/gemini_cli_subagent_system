@@ -250,6 +250,9 @@ dCopyBtn.addEventListener('click', async () => {
 // Copy Session Init Handler (Full SSOT + Tickers + Lessons)
 dCopySessionBtn.addEventListener('click', async () => {
     try {
+        // Wire clearing to session init as requested
+        await fetch(`${API_BASE}/clear_decision_log`, { method: 'POST' });
+
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
         
@@ -262,9 +265,11 @@ dCopySessionBtn.addEventListener('click', async () => {
             trade_lessons: state.trade_lessons
         };
         
-        const jsonString = "```json\n" + JSON.stringify(sessionPayload, null, 2) + "\n```";
+        const bootPrompt = "SYSTEM BOOT: Initialize Council with the provided SSoT and Session context. Execute Stage 0 Data Sync and provide a top-level market posture assessment.";
+        const jsonString = bootPrompt + "\n\n```json\n" + JSON.stringify(sessionPayload, null, 2) + "\n```";
+        
         await navigator.clipboard.writeText(jsonString);
-        showFeedback(dCopySessionBtn, "✅ Copied!", "Full session initialization data copied!");
+        showFeedback(dCopySessionBtn, "✅ Copied!", "Full session initialization data copied & Log cleared!");
     } catch (e) {
         console.error(e);
         showFeedback(dCopySessionBtn, "❌ Error", "Failed to copy session data.", true);
@@ -798,6 +803,33 @@ async function copyEODReviewPayload() {
         showFeedback(btn, "❌ Error", "Failed to fetch EOD log.", true);
     }
 }
+
+// Clear Decision Log Handler
+const dClearLogBtn = document.getElementById('clear-log-btn');
+if (dClearLogBtn) {
+    dClearLogBtn.addEventListener('click', async () => {
+        if (!confirm("Are you sure you want to clear the entire Decision Log? This cannot be undone.")) return;
+        
+        dClearLogBtn.disabled = true;
+        try {
+            const res = await fetch(`${API_BASE}/clear_decision_log`, {
+                method: 'POST'
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                showFeedback(dClearLogBtn, "✅ Cleared!", "Decision log successfully wiped!");
+            } else {
+                throw new Error(data.message);
+            }
+        } catch (e) {
+            console.error("Clear Log Error: ", e);
+            showFeedback(dClearLogBtn, "❌ Error", e.message || "Failed to clear log.", true);
+        } finally {
+            dClearLogBtn.disabled = false;
+        }
+    });
+}
+
 
 // ─── Mobile Quick Action Bridge ───
 const dMobileCopyBtn = document.getElementById('mobile-copy-json-btn');

@@ -18,6 +18,12 @@ For example, the **Red Team Pessimist** assumes the Bullish Advocate is an aggre
 
 To further eliminate hallucination and "forced setups," the system implements a **Psychological Reward and Penalty Framework**. Agents are governed by a strict utility function: **Admitting ignorance is highly rewarded, while fabricating logic or "guessing" incurs a catastrophic penalty.** The Rule Enforcer serves as the supreme judge of this framework, ruthlessly vetoing any agent that prioritizes "succeeding at the prompt" over objective data integrity. Furthermore, the Execution and Review engines are psychologically aligned via a "Fiduciary Reward" function, where their ultimate bonus is tied exclusively to capital preservation, Sharpe Ratio optimization, and drawdown prevention—aligning the AI's success directly with the user's principal safety.
 
+### 🔄 Session Initialization & Forensic History Management
+The dashboard now includes integrated management for session transitions and historical auditing:
+*   **Unified Session Init:** The "Copy Session Init" button now automatically clears the `decision_log.json` and prepends a `SYSTEM BOOT` directive to the payload, ensuring a clean state and immediate council orientation upon ingestion.
+*   **Forensic History Control:** A dedicated **"Clear Decision Log"** button allows for manual wiping of historical trade logs, facilitating rapid backtesting resets.
+*   **Automated Backtesting:** The **"Copy EOD Review"** button aggregates the trailing decision log into a structured "Lead Quantitative Auditor" prompt for systemic performance reviews.
+
 ---
 
 ## 📐 Architecture Overview

@@ -87,6 +87,7 @@ if os.path.exists('local_ssot_shadow.json'):
         pass
 
 ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS)) # Deduplicated order
+
 INVERSE_MACRO = ['^VIX', 'VIXY', 'UUP', 'IEF']
 
 MACRO_LABELS = {
@@ -187,6 +188,17 @@ async def get_eod_review_payload():
     )
     
     return {"payload": eod_prompt}
+
+@app.post("/api/clear_decision_log")
+async def clear_decision_log():
+    log_file = "decision_log.json"
+    try:
+        with open(log_file, "w") as f:
+            json.dump([], f)
+        return JSONResponse({"status": "success", "message": "Decision log cleared."})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
 
 @app.post("/api/tickers")
 async def update_tickers(req: Request):
