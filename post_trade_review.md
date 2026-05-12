@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v9.76-Global-Version-Parity-Mandate
+**Version:** v9.77-Validated-Lessons-Integration
 **Tone:** neutral, reflective, concise
 
 ---
