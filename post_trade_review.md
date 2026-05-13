@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v9.77-Validated-Lessons-Integration
+**Version:** v9.78-L8-L9-Lesson-Integration
 **Tone:** neutral, reflective, concise
 
 ---
@@ -62,7 +62,7 @@
     - **Check:**
       - **Field:** entry_date
       - **Operator:** WITHIN
-      - **Reference:** Gemini_Gem_Rules_Data > temporal_events (ANNUAL_RESET_WINDOW | MID_QUARTER_REVIEW_WINDOWS | QUARTERLY_ROLL_WINDOWS)
+      - **Reference:** Gemini_Gem_Working_Data_Store > temporal_events (ANNUAL_RESET_WINDOW | MID_QUARTER_REVIEW_WINDOWS | QUARTERLY_ROLL_WINDOWS)
     - **Emit True:**
       - **Tag:** REBALANCING_WINDOW_MISFIRE
       - **Enh Ref:** ENH_46

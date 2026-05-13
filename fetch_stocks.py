@@ -434,10 +434,15 @@ async def handle_paste(req: Request):
                 data["forensic_intelligence"] = data.pop("forensic_alerts")
             if "allocations" in data and "portfolio_snapshot" not in data:
                 data["portfolio_snapshot"] = data.pop("allocations")
-            if "unallocated_cash_eur" in data and "remaining_cash_eur" not in data:
-                data["remaining_cash_eur"] = data["unallocated_cash_eur"]
-            if "unallocated_cash_usd" in data and "remaining_cash_usd" not in data:
-                data["remaining_cash_usd"] = data["unallocated_cash_usd"]
+            if "unallocated_cash_eur" in data and "remaining_cash_eur" in data:
+                data.pop("remaining_cash_eur", None)
+            if "unallocated_cash_usd" in data and "remaining_cash_usd" in data:
+                data.pop("remaining_cash_usd", None)
+            
+            if "remaining_cash_eur" in data and "unallocated_cash_eur" not in data:
+                data["unallocated_cash_eur"] = data.pop("remaining_cash_eur")
+            if "remaining_cash_usd" in data and "unallocated_cash_usd" not in data:
+                data["unallocated_cash_usd"] = data.pop("remaining_cash_usd")
             
             if "portfolio_snapshot" in data and isinstance(data["portfolio_snapshot"], list):
                 for item in data["portfolio_snapshot"]:
@@ -460,7 +465,7 @@ async def handle_paste(req: Request):
             def find_key_recursive(data, target_key):
                 if not isinstance(data, dict): return None
                 if target_key in data: return data[target_key]
-                for k in ("EXECUTION_PAYLOAD", "mutable_state", "payload"):
+                for k in ("EXECUTION_PAYLOAD", "mutable_state", "state_context", "payload"):
                     if k in data:
                         res = find_key_recursive(data[k], target_key)
                         if res is not None: return res
@@ -534,18 +539,24 @@ async def handle_paste(req: Request):
         if not incoming_ep and isinstance(payload.get("mutable_state"), dict):
             incoming_ep = payload["mutable_state"].get("EXECUTION_PAYLOAD")
             
+        # Determine source of truth for promotion (dict or root payload if flag is True)
+        ep_source = None
         if isinstance(incoming_ep, dict):
+            ep_source = incoming_ep
+        elif incoming_ep is True:
+            ep_source = payload
+
+        if ep_source:
             promotion_keys = ["portfolio_snapshot", "risk_metrics", "directive", "timestamp", 
                               "remaining_cash_eur", "remaining_cash_usd", 
                               "unallocated_cash_eur", "unallocated_cash_usd",
                               "base_currency", "exchange_rate", 
                               "portfolio_total_value_usd", "portfolio_total_value_eur"]
             
-            # Source of truth can be at the root of incoming_ep or inside its mutable_state
-            ep_source = incoming_ep
-            if "mutable_state" in incoming_ep and isinstance(incoming_ep["mutable_state"], dict):
-                # If ep has mutable_state, merge its keys into a temporary source
-                ep_source = _deep_merge(incoming_ep, incoming_ep["mutable_state"])
+            # Source data can be at the root of ep_source or inside its mutable_state
+            source_data = ep_source
+            if "mutable_state" in ep_source and isinstance(ep_source["mutable_state"], dict):
+                source_data = _deep_merge(ep_source, ep_source["mutable_state"])
 
             # Determine target container for promotion
             target_container = payload
@@ -693,9 +704,9 @@ async def handle_paste(req: Request):
             "runtime_flags", "macro_calendar_shield", "active_orders",
             "fin_account_gate", "registry_pointers", "overnight_posture",
             "strategy_timing", "lesson_integration", "immutable_background", "mutable_state",
-            "remaining_cash_usd", "remaining_cash_eur", "unallocated_cash_eur", "unallocated_cash_usd", 
+            "unallocated_cash_eur", "unallocated_cash_usd", 
             "portfolio_total_value_usd", "portfolio_total_value_eur", "base_currency", "exchange_rate",
-            "scouted_assets_tracked", "risk_metrics", "directive", "timestamp", "EXECUTION_PAYLOAD", "_meta"
+            "scouted_assets_tracked", "risk_metrics", "directive", "EXECUTION_PAYLOAD", "_meta"
         }
         
         # Prune from root

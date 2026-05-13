@@ -1,6 +1,6 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v9.77-Validated-Lessons-Integration
+**Version:** v9.78-L8-L9-Lesson-Integration
 
 **A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
@@ -165,7 +165,7 @@ The Gemini Council Dashboard provides a high-density, real-time visualization of
 |------|----------|-------------|---------|
 | `terminal.md` | **Orchestrator** | PRO (Standard) | Master router — strictly requires Standard Pro to prevent 192K Deep Think timeouts |
 | `rules.md` | **Legislative Body** | N/A | **Static Rules**: The canonical source containing thresholds and ENH_ protocols. MUST be attached via Google Drive. |
-| `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `Gemini_Gem_Rules_Data` |
+| `rule_enforcer_engine.md` | **Rule Enforcer** | PRO | Active Policing Agent — solely responsible for validating logic against `Gemini_Gem_Working_Data_Store` |
 | `data_analyst.md` | **Data Analyst** | FLASH / PRO | Tier-1 Data Shield — retrieves and formats raw web data (SEC/Macro) via native Google Search |
 | `state_validation_router.md` | **State & Validation Router** | PRO | Active SSoT bridge — drift detection, state merging, sync orchestration |
 | `bullish_gem.md` | **Bullish Advocate** | THINKING | Alpha & momentum specialist — identifies reasons to approve purchases |
@@ -504,7 +504,7 @@ The system maintains a continuous, sliding-window time-series ledger of all Coun
 
 ## 🏗️ Design Principles
 
-- **Canonical Centralization** — Individual engines do not contain hardcoded logic or parameters (e.g. lists of exogenous shocks). All logic points natively to canonical protocols in `Gemini_Gem_Rules_Data`.
+- **Canonical Centralization** — Individual engines do not contain hardcoded logic or parameters (e.g. lists of exogenous shocks). All logic points natively to canonical protocols in `Gemini_Gem_Working_Data_Store`.
 - **Logic/Data Separation** — `SSoT_Storage.json` holds state schema; `rules.md` holds static laws; `trade_lessons.md` holds historical institutional memory; `rule_enforcer_engine.md` exclusively handles execution logic.
 - **Non-Destructive Merging** — Field-level merge with `PRESERVE_IF_NOT_UPDATED` strategy.
 - **Forensic Lineage** — Every state change includes timestamped source attribution.

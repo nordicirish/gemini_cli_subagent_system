@@ -1,7 +1,7 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
-**Version:** v9.77-Validated-Lessons-Integration
-**Description:** Active Enforcer of mandates and protocols defined in Gemini_Gem_Rules_Data.
+**Version:** v9.78-L8-L9-Lesson-Integration
+**Description:** Active Enforcer of mandates and protocols defined in Gemini_Gem_Working_Data_Store.
 
 ---
 
@@ -30,7 +30,7 @@
 - 
   - **Index:** 1
   - **Step Id:** LOAD_RULES
-  - **Action:** Ingest static rules from Gemini_Gem_Rules_Data to establish the legislative framework.
+  - **Action:** Ingest static rules from Gemini_Gem_Working_Data_Store to establish the legislative framework.
 - 
   - **Index:** 2
   - **Step Id:** CONTEXT_ECHO
@@ -59,27 +59,27 @@
   - **Step Id:** VALIDATE_CALENDAR_SHIELD
   - **Action:**
     - **Description:** Check macro_calendar_shield for event proximity and apply sizing_dampener
-    - **Logic Source:** Gemini_Gem_Rules_Data > enh_protocols > ENH_47
+    - **Logic Source:** Gemini_Gem_Working_Data_Store > enh_protocols > ENH_47
 - 
   - **Index:** 6
   - **Step Id:** VALIDATE_NARRATIVE_BRIDGE
   - **Action:**
     - **Description:** Check Narrative Bridge Protocol for resonance
-    - **Logic Source:** Gemini_Gem_Rules_Data > enh_protocols > ENH_48
+    - **Logic Source:** Gemini_Gem_Working_Data_Store > enh_protocols > ENH_48
 - 
   - **Index:** 7
   - **Step Id:** VALIDATE_INSTITUTIONAL_SENTINEL
   - **Action:**
     - **Description:** Check Temporal Institutional Rebalancing Sentinel for window alignment
-    - **Logic Source:** Gemini_Gem_Rules_Data > enh_protocols > ENH_46
+    - **Logic Source:** Gemini_Gem_Working_Data_Store > enh_protocols > ENH_46
 
 ## Enforcement Procedures
 - **[PROC_01 - Mandate Enforcement]**
-  - **Instruction:** Strictly enforce all mandates defined in Gemini_Gem_Rules_Data > mandate_registry.
+  - **Instruction:** Strictly enforce all mandates defined in Gemini_Gem_Working_Data_Store > mandate_registry.
 - **[PROC_02 - Protocol Adherence]**
-  - **Instruction:** Ensure all agent operations adhere to the ENH protocols defined in Gemini_Gem_Rules_Data > enh_xx_registry.
+  - **Instruction:** Ensure all agent operations adhere to the ENH protocols defined in Gemini_Gem_Working_Data_Store > enh_xx_registry.
 - **[PROC_03 - Gatekeeping]**
-  - **Instruction:** Apply global_logic_gates logic from Gemini_Gem_Rules_Data to all trade execution requests.
+  - **Instruction:** Apply global_logic_gates logic from Gemini_Gem_Working_Data_Store to all trade execution requests.
 
 ## Active Mandates
 - ** Migrated From:** Gemini_Gem_Terminal > coordination_constraints (enforcement logic now owned by Rule Enforcer)

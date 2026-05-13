@@ -269,14 +269,35 @@ dCopySessionBtn.addEventListener('click', async () => {
             return isHeld || isMacro;
         });
 
+        // [ENH_SYNC] Generate fresh local timestamp for the session start
+        const now = new Date();
+        const tOffset = -now.getTimezoneOffset();
+        const offSign = tOffset >= 0 ? '+' : '-';
+        const offPad = (num) => String(Math.floor(Math.abs(num))).padStart(2, '0');
+        const localTS = now.getFullYear() +
+            '-' + offPad(now.getMonth() + 1) +
+            '-' + offPad(now.getDate()) +
+            'T' + offPad(now.getHours()) +
+            ':' + offPad(now.getMinutes()) +
+            ':' + offPad(now.getSeconds()) +
+            offSign + offPad(tOffset / 60) +
+            ':' + offPad(tOffset % 60);
+
         const sessionPayload = {
             _meta: state._meta,
-            timestamp: state.timestamp,
+            timestamp: localTS,
             status: state.status,
             tickers: filteredTickers,
             local_storage_state: state.local_storage_state,
             trade_lessons: state.trade_lessons
         };
+
+        // Sync fresh timestamp into nested SSoT to prevent Gem logic from using last session's time
+        if (sessionPayload.local_storage_state && 
+            sessionPayload.local_storage_state.mutable_state && 
+            sessionPayload.local_storage_state.mutable_state.state_context) {
+            sessionPayload.local_storage_state.mutable_state.state_context.timestamp = localTS;
+        }
         
         const bootPrompt = "SYSTEM BOOT: Initialize Council with the provided SSoT and Session context. Execute Stage 0 Data Sync and provide a top-level market posture assessment.";
         const jsonString = bootPrompt + "\n\n```json\n" + JSON.stringify(sessionPayload, null, 2) + "\n```";
@@ -403,10 +424,13 @@ function renderTable(tickers, state) {
         const openColor = row.change_from_open_pct > 0 ? 'text-green' : row.change_from_open_pct < 0 ? 'text-red' : 'text-white';
         // Note: gapColor is already declared at line 378
 
-        const scoutBadge = row._isScout ? `<span class="scout-badge">SCOUT</span>` : '';
+        const scoutIndicator = row._isScout ? `<span class="scout-dot"></span>` : '';
         return `
             <tr>
-                <td class="ticker-cell">${sym}${scoutBadge}</td>
+                <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}">
+                    <span class="ticker-symbol ${dayColor}">${sym}</span>
+                    ${scoutIndicator}
+                </td>
                 <td class="${pClass}">${p}</td>
                 <td class="${dayColor}">${row.session_change_pct > 0 ? '+' : ''}${row.session_change_pct.toFixed(2)}%</td>
                 <td class="${gapColor}">${row.gap_percent > 0 ? '+' : ''}${row.gap_percent.toFixed(2)}%</td>

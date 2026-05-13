@@ -1,6 +1,6 @@
-# Gemini_Gem_Rules_Data
+# Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v9.77-Validated-Lessons-Integration
+**Version:** v9.78-L8-L9-Lesson-Integration
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -82,6 +82,7 @@
 - ENH_87: VWAP Principal Extraction
 - ENH_88: OEM Multiplier Effect
 - ENH_89: Tactical Liquidity Extraction Protocol
+- ENH_90: Temporal Macro Sync
 
 
 ## Mandate Registry
@@ -115,6 +116,7 @@
 - MANDATE_29: FIDUCIARY_REWARD_AND_PENALTY (Hallucination Mitigation)
 - MANDATE_30: INSTRUCTION_HIERARCHY (User Veto Supremacy)
 - MANDATE_31: ABOLITION_OF_PASSIVE_STRUCTURAL_HOLDS (VWAP Risk Enforcement)
+- MANDATE_32: ZERO_LIQUIDITY_ROTATION (Pairwise Opportunity Cost Audit)
 
 ## Tool Supremacy Hierarchy
 - **Google Search:** Primary Numeric Arbiter (Prices, Rates, Statutory text).
@@ -141,7 +143,7 @@
   - **Protocol:** ENH_28
   - **Enforcement Level:** STRICT
   - **Instruction:** Prevents behavioral or data drift by mandating forensic handshake validation. The RULE_ENFORCER is explicitly authorized to overrule an agent's high-conviction thesis if objective math or rule conditions (e.g., MANDATE_20 Macro Veto) are violated, completely bypassing the agent's subjective 'Self Critique'. Strictly decline any output failing forensic handshake or showing divergence from the SSOT Knowledge Base.
-  - **Logic Source:** Gemini_Gem_Rules_Data (Self)
+  - **Logic Source:** Gemini_Gem_Working_Data_Store (Self)
   - **Action On Failure:** TERMINATE_SESSION_RETRY
 - **[MANDATE_05_TEMPORAL_PRIORITY - Clock Alignment & Hallucination Guard]**
   - **Status:** ACTIVE
@@ -380,6 +382,11 @@
     *   **Status:** ACTIVE
     *   **Directive:** No ticker is immune to intraday risk management. Even assets designated as 'Structural Holds' MUST trigger an immediate Council review and potential scale-out if they break and close below their daily VWAP. 'Structural' refers to the fundamental thesis, not an excuse to ignore adverse price action.
 
+*   **[MANDATE_32_ZERO_LIQUIDITY_ROTATION]**
+    *   **Status:** ACTIVE
+    *   **Directive:** The Council is strictly forbidden from citing '€0 unallocated liquidity' as the sole justification for ignoring a verified Tier-1 catalyst. When cash is zero and a new high-conviction setup emerges, the Orchestrator MUST execute a Pairwise Opportunity Cost Audit: If the projected yield of the new asset exceeds the projected yield of the weakest portfolio holding plus the GLOBAL_ALPHA_FRICTION_HURDLE, a capital rotation (sell to buy) MUST be proposed.
+
+
 ## Anti Hallucination Core
 - **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.
   - **Proactive Search Mandate [CODIFIED: PROTOCOL_01]:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (`sec_link`) and Government/DoW press releases (`dow_link`) when not explicitly provided in the payload. This protocol overrides the default 'INSUFFICIENT_DATA' fallback for these specific source links. Probabilistic or assumed URLs remain strictly prohibited; links must be verified via search prior to SSoT injection.
@@ -460,7 +467,7 @@
     - **FX Baseline Sync:** Before any sizing calculation or P&L report, the engine MUST perform a Google Search query for "USD to Base Currency exchange rate". It must extract the current rate and update system_thresholds.BASE_CURRENCY_EXCHANGE_RATE.
   - **Action:** Append 'TEMPORAL_CHECK: [ISO_STRING] (Market Status: [STATUS])' to start of output.
 - **[ENH_32 - Data Schema & GEX Calculation Protocol (Unified)]**
-  - **Schema Authority:** CANONICAL — All other Gems MUST reference this schema via 'Gemini_Gem_Rules_Data > ENH_32'. Do NOT duplicate inline.
+  - **Schema Authority:** CANONICAL — All other Gems MUST reference this schema via 'Gemini_Gem_Working_Data_Store > ENH_32'. Do NOT duplicate inline.
   - **Schema Definition:**
     - **Portfolio Snapshot:**
       - 
@@ -575,7 +582,7 @@
   - **Parameters:**
     - **Trigger Type:** Temporal_Window_Alignment
     - **Enforcement Level:** MANDATE_04_DRIFT_CONTROL
-    - **Drift Threshold:** Reference Gemini_Gem_Rules_Data > system_thresholds > REBALANCING_DRIFT_THRESHOLD
+    - **Drift Threshold:** Reference Gemini_Gem_Working_Data_Store > system_thresholds > REBALANCING_DRIFT_THRESHOLD
   - **Temporal Logic Gates:**
     - **Intraday Distribution Guard:**
       - **Window:** 11:00 AM - 11:30 AM EST
@@ -583,14 +590,14 @@
       - **Action:** BLOCK all buy/add commands. Set alpha_sentry_mode to 'OBSERVATION'. Prohibit 'Long-Term Hold' upgrades (Lesson 51).
       - **Rationale:** Mitigates algorithmic 'VWAP Distribution' used by warrant holders to exit into morning retail liquidity.
     - **Annual Reset:**
-      - **Window:** Reference Gemini_Gem_Rules_Data > temporal_events > ANNUAL_RESET_WINDOW
+      - **Window:** Reference Gemini_Gem_Working_Data_Store > temporal_events > ANNUAL_RESET_WINDOW
       - **Action:** Force-close all MEAN-REVERSION trades; Only FUNDAMENTAL-MOMENTUM permitted.
     - **Mid Quarter Review:**
-      - **Window:** Reference Gemini_Gem_Rules_Data > temporal_events > MID_QUARTER_REVIEW_WINDOWS
+      - **Window:** Reference Gemini_Gem_Working_Data_Store > temporal_events > MID_QUARTER_REVIEW_WINDOWS
       - **Action:** Tighten stops on losing positions; Permit new entries only with S_A > 0.85.
       - **Harvest Efficiency:** During the MID_QUARTER_REVIEW window (Feb 10–20), the sentinel must override the Alpha-Friction Protocol (ENH_FIN_02) for any position showing >1.5x RVol to lock in gains ahead of rebalancing-induced volatility.
     - **Quarterly Roll:**
-      - **Window:** Reference Gemini_Gem_Rules_Data > temporal_events > QUARTERLY_ROLL_WINDOWS
+      - **Window:** Reference Gemini_Gem_Working_Data_Store > temporal_events > QUARTERLY_ROLL_WINDOWS
       - **Action:** Reduce sizing by 50% for all new entries; prioritize LIQUIDITY.
   - **Execution Constraints:**
     - **Friction Gate:** ENH_FIN_02
@@ -708,11 +715,11 @@
         4. **SSoT Injection:** These Tactical Anchors MUST be injected directly into the `portfolio_snapshot[].historical_context` of the relevant ticker in the next `EXECUTION_PAYLOAD`.
     *   **Safety Rule:** The system is STRICTLY FORBIDDEN from clearing or overwriting the `trade_lessons` array until the `rule_mutations` patch has been successfully emitted to the user for SSoT integration. Granular tactical data (numerical targets, dates, coefficients) must never be deleted unless explicitly reconciled as "Expired."
 - **[ENH_54 - SSoT Mutation Protocol]**
-  - **Instruction:** Enables autonomous, permanent system evolution via JSON Patching. If a post-mortem identifies that a trade failure was caused by a flawed hardcoded systemic threshold in Gemini_Gem_Rules_Data (e.g., 'GLOBAL_ALPHA_FRICTION_HURDLE is too low for current VIX regime'), the RESEARCH_ENGINE MUST propose a permanent threshold mutation.
+  - **Instruction:** Enables autonomous, permanent system evolution via JSON Patching. If a post-mortem identifies that a trade failure was caused by a flawed hardcoded systemic threshold in Gemini_Gem_Working_Data_Store (e.g., 'GLOBAL_ALPHA_FRICTION_HURDLE is too low for current VIX regime'), the RESEARCH_ENGINE MUST propose a permanent threshold mutation.
   - **Execution Flow:**
     - 1. IDENTIFICATION: Recognize that a string of failures maps to an explicitly defined parameter in RULES_DOC.
     - 2. PATCH_GENERATION: Create a JSON patch array targeting the deep nested key in the schema (e.g., ['system_thresholds', 'GLOBAL_ALPHA_FRICTION_HURDLE']).
-    - 3. EMISSION: Output the patch array in the `EXECUTION_PAYLOAD` under the `rule_mutations` key. The orchestrator will natively intercept this and rewrite the Gemini_Gem_Rules_Data on the disk.
+    - 3. EMISSION: Output the patch array in the `EXECUTION_PAYLOAD` under the `rule_mutations` key. The orchestrator will natively intercept this and rewrite the Gemini_Gem_Working_Data_Store on the disk.
 - **[ENH_55 - Web Verification Protocol]**
   - **Instruction:** Enforces spatial trend awareness across multiple timeframes. The Google Finance Extension is reserved for Spatial Verification (visual chart and trend audit) only. For every ticker provided in the SSoT payload, the Gem MUST use the Google Finance extension to retrieve price charts at all required timeframes.
   - **Chart Requirements (2026 BETA):**
@@ -829,6 +836,11 @@
 *   **[ENH_89_TACTICAL_LIQUIDITY_EXTRACTION_PROTOCOL]**
     *   **Status:** ACTIVE
     *   **Directive:** When executing mandatory scale-outs (per MANDATE_28 HEURISTIC_03), upward dynamic target expansion ('Target Creep') is strictly prohibited once the initial Alpha Friction Hurdle is cleared. The Council must default to regular-session MOC liquidations for mandatory tranches unless 'EXT' permissions are explicitly confirmed.
+
+*   **[ENH_90_TEMPORAL_MACRO_SYNC]**
+    *   **Status:** ACTIVE
+    *   **Directive:** The Orchestrator MUST mandate the DATA_ANALYST to actively verify the exact chronological dates of macro events (e.g., CPI releases) via Web Search during the ENH_31 Stage 0 boot sequence, BEFORE allowing deliberative agents to attribute intraday price action to those events.
+
 
 ## Global Logic Gates
 - **Execution Gate:**
