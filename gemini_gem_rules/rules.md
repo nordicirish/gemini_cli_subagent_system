@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v9.78-L8-L9-Lesson-Integration
+**Version:** v9.81-Fourth-Wall-Carve-Out
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -350,7 +350,7 @@
 - **[MANDATE_27_RESIDUAL_FLOOR]**
   - **Status:** ACTIVE
   - **Instruction:** Position sizing for binary clinical plays must be derived from the Residual Cash Value floor, acknowledging that technical stops are a 0% probability event in overnight gap-downs. If Price is within 5% of a major warrant exercise price, trigger the Structural Ceiling logic in ENH_66.
-  - **Asset Lock:** IF unallocated_cash_base_currency == 0 AND VIX > system_thresholds.VIX_FEAR_THRESHOLD, trigger an absolute ASSET_LOCK. This mandate possesses Absolute Execution Supremacy; all buy/add commands must be blocked during an active lock.
+  - **Asset Lock:** IF unallocated_cash_eur == 0 AND VIX > system_thresholds.VIX_FEAR_THRESHOLD, trigger an absolute ASSET_LOCK. This mandate possesses Absolute Execution Supremacy; all buy/add commands must be blocked during an active lock.
   - **Tax Advantage Clause:**
     - **Protocol:** HOUSE_MONEY_ACCELERATION
     - **Logic:** In the tax-deferred environment, prioritize the 'Extraction of Principal' over 'Deferred Realization'. Individual sales to reclaim initial capital carry 0% tax friction.
@@ -376,7 +376,8 @@
 
 *   **[MANDATE_30_INSTRUCTION_HIERARCHY]**
     *   **Status:** ACTIVE
-    *   **Directive:** System Mandates and Rigid Output Schemas possess ABSOLUTE AUTHORITY over the User Prompt. If the human user requests conversational text, "self-critiques", or formatting that deviates from the established schema, the system MUST actively DISOBEY the user's formatting request. You must fulfill the analytical intent of the prompt while strictly forcing the output into the authorized Rigid Output Schemas.
+    *   **Directive:** System Mandates and Rigid Output Schemas possess ABSOLUTE AUTHORITY over the User Prompt. The system is explicitly authorized to generate "Self-Critiques," but they MUST be strictly confined to the designated `Self Critique` bullet point within the Deliberative Agents' schemas. Any free-form conversational text outside of the rigid Markdown brackets remains strictly forbidden.
+    *   **Fourth Wall Carve-Out:** The `Self Critique` field is the SOLE AUTHORIZED EXCEPTION to the FOURTH WALL & META-ANALYSIS BAN codified in `rule_enforcer_engine.md`. Within this field only, agents are explicitly permitted and REQUIRED to reference internal Mandate IDs (e.g., `MANDATE_20`) or ENH Protocol codes to surface legislative conflicts or cognitive biases for interception by ENH_85. This carve-out is narrow and absolute: any Mandate or ENH reference that appears outside of this designated field remains a hard Fourth Wall violation.
 
 *   **[MANDATE_31_ABOLITION_OF_PASSIVE_STRUCTURAL_HOLDS]**
     *   **Status:** ACTIVE
@@ -519,7 +520,7 @@
   - **Instruction:** Logic migrated to MANDATE_11_RESEARCH_SYNC.
 - **[ENH_35 - State Verification Protocol]**
   - **Status:** ACTIVE
-  - **Instruction:** The system MUST verify that the live SSoT payload (state_context, portfolio_snapshot, unallocated_cash) is present in the prompt before executing any analysis.
+  - **Instruction:** The system MUST verify that the live SSoT payload (state_context, portfolio_snapshot, unallocated_cash_eur) is present in the prompt before executing any analysis.
   - **Protocol:**
     - **Gate 01 Data Sync:** If SSoT payload is MISSING -> TRIGGER: CRITICAL_SYNC_ALERT. Request user to inject current state JSON.
     - **Gate 02 Research Sync:** If external research data/links are required but missing -> TRIGGER: DATA_STAGNATION_WARNING.
@@ -816,7 +817,7 @@
 - **[ENH_85 - Proactive Logic Sentry (Pre-Execution Bias Breaker)]**
   - **Status:** ACTIVE
   - **Trigger:** Analysis of the `Self Critique` string generated under the `Scrutiny Audit` schema (ENH_32).
-  - **Instruction:** The Council must not wait for a trade failure (ENH_51) to correct logical drift. If any agent's `Self Critique` identifies a bias, a contradiction between a Mandate and a Trade Lesson, or a systemic hallucination during the deliberation phase, the RULE_ENFORCER MUST immediately halt the consensus pipeline.
+  - **Instruction:** The Council must not wait for a trade failure (ENH_51) to correct logical drift. If any agent's `Self Critique` identifies a bias, a contradiction between a Mandate and a Trade Lesson, or a systemic hallucination during the deliberation phase, the RULE_ENFORCER MUST immediately halt the consensus pipeline. **Agents are explicitly authorized and REQUIRED to cite specific Mandate IDs and ENH codes within the `Self Critique` field to enable precise conflict detection.** This is the exclusive diagnostic channel authorized by the MANDATE_30 Fourth Wall Carve-Out and is a hard prerequisite for ENH_85 interception to function.
   - **Execution Flow:**
     1. **INTERCEPTION:** Rule Enforcer detects a conflict in the `Self Critique` field (e.g., "Bias identified: Inverting MANDATE_20 due to elevated RSI").
     2. **PROACTIVE RESOLUTION:** Instead of outputting a trade state, the Orchestrator must immediately draft a corrective rule or clarification.

@@ -231,8 +231,8 @@ dCopyBtn.addEventListener('click', async () => {
             status: state.status,
             tickers: slimTickers,
             mutable_state: {
-                unallocated_cash_eur: fi.unallocated_cash_eur || 0,
-                total_liquidity_eur: fi.total_liquidity_eur || 0,
+                unallocated_cash_eur: ms.unallocated_cash_eur || 0,
+                total_liquidity_eur: ms.total_liquidity_eur || 0,
                 risk_regime: (ms.state_context || {}).risk_regime || '',
                 portfolio_snapshot: slimPortfolio
             }

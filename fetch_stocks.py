@@ -2115,7 +2115,7 @@ def fetch_stocks(state):
         "tickers": compact_tickers,
         "portfolio": compact_portfolio,
         "macro": macro_est,
-        "unallocated_cash": ms.get("forensic_intelligence", {}).get("unallocated_cash_eur", 0)
+        "unallocated_cash_eur": ms.get("unallocated_cash_eur", 0)
     }
 
     # 2. Qualitative Lessons (Markdown)
