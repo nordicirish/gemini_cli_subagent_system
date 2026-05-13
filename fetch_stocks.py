@@ -747,6 +747,52 @@ async def handle_paste(req: Request):
             SCOUT_TICKERS = list(set(new_scouts))
             ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
             
+        def _prune_lessons(deletions):
+            if not deletions: return
+            
+            # 1. JSON Pruning
+            lessons_file = 'trade_lessons.json'
+            if os.path.exists(lessons_file):
+                try:
+                    with open(lessons_file, 'r', encoding='utf-8') as f:
+                        l_data = json.load(f)
+                    if "trade_lessons" in l_data:
+                        initial_count = len(l_data["trade_lessons"])
+                        for d in deletions:
+                            target_id = str(d.get("id")).strip().upper()
+                            l_data["trade_lessons"] = [
+                                l for l in l_data["trade_lessons"]
+                                if not (isinstance(l, dict) and (str(l.get("id")).upper() == target_id or str(l.get("rule", "")).upper().startswith(target_id + ":")))
+                            ]
+                        if len(l_data["trade_lessons"]) < initial_count:
+                            with open(lessons_file, 'w', encoding='utf-8') as f:
+                                json.dump(l_data, f, indent=2)
+                except Exception as e: print(f"JSON Pruning Error: {e}")
+
+            # 2. Markdown Pruning (Regex)
+            md_file = 'trade_lessons.md'
+            if os.path.exists(md_file):
+                try:
+                    with open(md_file, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                    
+                    new_lines = []
+                    for line in lines:
+                        should_skip = False
+                        for d in deletions:
+                            tid = str(d.get("id")).strip()
+                            # Match bullet start and the target ID (e.g. L-8) anywhere in the line
+                            if re.search(rf'^\s*-\s+.*?\b{re.escape(tid)}\b', line):
+                                should_skip = True
+                                break
+                        if not should_skip:
+                            new_lines.append(line)
+                    
+                    if len(new_lines) < len(lines):
+                        with open(md_file, 'w', encoding='utf-8') as f:
+                            f.writelines(new_lines)
+                except Exception as e: print(f"MD Pruning Error: {e}")
+
         def _normalize_lessons(lessons_list):
             normalized = []
             for i, item in enumerate(lessons_list):
@@ -780,7 +826,15 @@ async def handle_paste(req: Request):
             incoming_lessons.extend(extracted_trade_lessons)
 
         if incoming_lessons:
-            final_normalized = []
+            # ENH: Handle Explicit Deletions first
+            deletions = [l for l in incoming_lessons if isinstance(l, dict) and l.get("action") == "DELETE"]
+            if deletions:
+                _prune_lessons(deletions)
+                # Filter out deletions from incoming list so they aren't processed as additions
+                incoming_lessons = [l for l in incoming_lessons if not (isinstance(l, dict) and l.get("action") == "DELETE")]
+
+            if incoming_lessons:
+                final_normalized = []
             existing_data = None
             if os.path.exists(lessons_file):
                 try:
