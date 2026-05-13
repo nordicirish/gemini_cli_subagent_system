@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v9.81-Fourth-Wall-Carve-Out
+**Version:** v9.85-Verify-First-EIR-Suppression
 **Tone:** neutral, reflective, concise
 
 ---

@@ -1,12 +1,32 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v9.81-Fourth-Wall-Carve-Out
+**Version:** v9.85-Verify-First-EIR-Suppression
 
 **A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
 Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. **Starting with v9.21, the system has deployed the "Phantom Persona" framework—a psychological framing strategy that weaponizes every engine with absolute skepticism, forcing agents to treat all input narratives, corporate filings, and retail news as potentially manipulated or biased, thereby achieving unprecedented levels of adversarial rigor.**
 
 Starting with **v9.22-Phantom-Persona-Final-Sync**, the system has reached full architectural maturity. It consolidates its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search**, **Gemini 3.1 Pro Thinking Level Optimization**, and a **Professional Master Router** to ensure high-fidelity data integrity. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`).
+
+### 🔒 v9.84 Architecture Hardening (2026-05-14)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Pre-Blackout Forced Risk Evaluation** | `ENH_91` | New proactive mandate that fires during the final RTH hour when a Tier-1 catalyst is scheduled inside the broker blackout window. Calculates `unmitigated_gap_exposure` and forces a TRIM evaluation. Explicitly prohibits WAC buffer as a gap-risk defense. |
+| **WAC Buffer Is Not Gap Insurance** | `L-17` | New `#BROKER_CONSTRAINTS` trade lesson codified against ENH_91. Forensic origin: UMAC Q1 Earnings / Retail Sales 2026-05-14. |
+| **Depth-Gated Self-Critique (DSC)** | `ENH_93` | Replaces unconditional full Self-Critique with a confidence-gated depth model. Resolves the Error Introduction Rate (EIR) risk from forcing high-accuracy agents to critique verified theses. High-confidence (≥0.85): BRIEF 1-sentence mode. Low-confidence (<0.85): FULL 2-3 sentence UTD deliberation. Field always emitted — ENH_85 and ENH_81 compatibility preserved. |
+| **Schema Standardization** | `unallocated_cash` | Renamed `remaining_cash_eur/usd` → `unallocated_cash_eur/usd` across state router and SSoT. |
+| **ENH_81 Conviction Threshold Fix** | `ENH_81` | Standardized from deprecated `7/10` integer scale to canonical `confidence >= 0.85` float. |
+| **MANDATE_20 Quality Gates** | `MANDATE_20` | Added hard floors: 8-K override requires ≥$50M contract value, ≤72h recency, VIX <30. |
+| **ENH_85 Resolution Timeout** | `ENH_85` | Added 3-turn RESOLUTION_TIMEOUT: persistent LOGIC_CONFLICT auto-degrades to CAUTION_HOLD. |
+
+### 🔒 v9.85 Verify-First EIR Suppression (2026-05-14)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Verify-First Gate (ENH_93 patch)** | `ENH_93` | Adds a mandatory artifact-citation requirement to the FULL mode Self-Critique. An agent may only change its thesis if it can cite a **specific data point, Mandate ID, ENH code, or quantitative contradiction** not already in its Structural Thesis. If no concrete artifact exists, agent outputs: `"Thesis verified. No concrete error found."` Drives the Error Introduction Rate (EIR) toward near-zero during low-confidence deliberations, preventing agents from hallucinating flaws in sound theses to satisfy the critique instruction. Applied to BULLISH_ADVOCATE, RED_TEAM_PESSIMIST, NEUTRAL_STRUCTURALIST, and `rules.md` ENH_93 canonical definition. |
+
+
 
 ## 🎭 Phantom Personalities & Adversarial Framing
 
@@ -75,8 +95,8 @@ To prevent the LLM reasoning engines from hallucinating software structures whil
 
 1. **Mandates (`MANDATE_01` to `MANDATE_21`)**: These govern **System Behavior & Constraints**. These are non-negotiable instructions telling the Gemini model *how to act as a piece of software*. 
    - *Example:* `MANDATE_09` (Always output un-truncated JSON), `MANDATE_13` (Weighted Consensus voting mechanics).
-2. **Rules / Protocols (`ENH_01` to `ENH_52`)**: These govern **Financial Execution & Domain Knowledge**. These are the fluid, quantitative strategies telling the system *how to trade*. 
-   - *Example:* `ENH_45` (Macro Shock Veto), `ENH_50` (Pre-Trade Formulation), `ENH_36` (Post-14:30 Liquidity Gates).
+2. **Rules / Protocols (`ENH_01` to `ENH_93`)**: These govern **Financial Execution & Domain Knowledge**. These are the fluid, quantitative strategies telling the system *how to trade*. 
+   - *Example:* `ENH_45` (Macro Shock Veto), `ENH_91` (Pre-Blackout Risk Evaluation), `ENH_93` (Depth-Gated Self-Critique).
 
 ## Mandate Registry
 - MANDATE_01: GATEKEEPER (SSoT Exclusive Write Authority)
@@ -98,6 +118,7 @@ To prevent the LLM reasoning engines from hallucinating software structures whil
 - MANDATE_17: REGIME_SYNC (Dynamic Weighting & Meta-Arbiter)
 - MANDATE_28: HEURISTIC_VETO (Cognitive Drift Prevention)
 - MANDATE_29: FIDUCIARY_REWARD_AND_PENALTY (Hallucination Mitigation)
+- MANDATE_30: INSTRUCTION_HIERARCHY (User Veto Supremacy & Fourth Wall Carve-Out)
 
 ### The Live-Web SSoT Architecture (v8.6+)
 Unlike earlier versions that relied on static data, v8.6-Forensic-Zero-Hallucination-Sync implements **Grounding via Native Google Search**. Agents are now mandated to explicitly invoke Google Search to verify catalysts, news, and disconfirming evidence in real-time.
@@ -248,13 +269,13 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 |----------|----|-------------|
 | **Alpha-Friction Guard** | `ENH_FIN_02` | Blocks trades with < GLOBAL_ALPHA_FRICTION_HURDLE expected move |
 | **Regime Adaptation** | `L-226` | Authorizes trend participation in SPY RSI > 75 if regime is TRENDING/VOL_EXPANSION |
-| **Macro Veto** | `MANDATE_20` | Sentinel vetoes entries against surging VIXY velocity (>+5.0%) or high absolute VIX (> 20) |
+| **Macro Veto** | `MANDATE_20` | Sentinel vetoes entries against surging VIXY velocity (>+5.0%) or high absolute VIX (> 20). Catalyst override requires verified 8-K ≥ $50M AND VIX < 30 |
 | **Drift Control** | `MANDATE_04` | Forensic handshake validation prevents behavioral/data drift |
 | **ATR Position Sizing** | `ENH_29` / `ENH_41` | Volatility-adjusted position sizing — deterministic formula |
 | **Forensic Structural Filter** | `ENH_30` | 50% sizing reduction on dilution/warrant forensic flags |
 | **Post-ATR Execution Gate** | `ENH_36` | Blocks entries after 14:30 ET in low-volatility conditions |
 | **Correlation Guard** | `ENH_43` | Warns on >80% pairwise correlation or >35% sector exposure |
-| **Web Verification Protocol** | `ENH_55` | Forces sub-agents to visually verify trends using Google Finance (2026 Candlestick & Comparison Beta) |
+| **Web Verification Protocol** | `ENH_55` | Forces sub-agents to visually verify trends using Google Finance |
 | **RSI Divergence Guard** | `RT_GUARD_01` | Forbids Red Team vetoes solely based on overbought RSI without disconfirming evidence |
 | **Live Web Grounding** | `MANDATE_15` | Mandates explicit native Google Search tool usage for catalyst verification |
 | **Consumer AI Sandbox** | `ANTI-RECURSION` | Strictly forbids using consumer AI overlays (AI Overview, etc.) to prevent Arbiter Collision |
@@ -263,6 +284,8 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 | **Flash-Tier Scrutiny** | `ENH_78` | Hardens data integrity during high-velocity analysis via cross-reference grounding |
 | **Heuristic Veto** | `MANDATE_28` | Explicitly forbids WAC Anchoring, Sunk Cost Bias, and Binary Catalyst Mirages |
 | **State Emission** | `MANDATE_09` | Optimized non-destructive merge; emits delta payloads |
+| **Pre-Blackout Risk Evaluation** | `ENH_91` | During final RTH hour (15:00–16:00 EST), if a Tier-1 catalyst lands inside the Nordea execution blackout window (16:00–09:30 EST), forces a mandatory `BLACKOUT_RISK_AUDIT`. WAC buffer explicitly prohibited as a gap-risk defense. |
+| **Depth-Gated Self-Critique** | `ENH_93` | Replaces unconditional full Self-Critique with depth-scaled output. High-confidence agents (≥ 0.85) emit 1-sentence BRIEF mode; low-confidence agents emit 2-3 sentence FULL mode. Field always emitted (ENH_85 / MANDATE_30 protected). |
 
 ---
 
@@ -318,10 +341,10 @@ All 22+ static systemic constants (like `GLOBAL_ALPHA_FRICTION_HURDLE`) still li
 All 22+ named constants live in `rules.md > system_thresholds`. Sub-engine files reference these by name — **never hardcode values in sub-engines**.
 
 ### 4. Create the Gems
-For each JSON file, create a new Gem in Google Gemini:
+For each MD file,apart from antigravity.md and rules.md, create a new Gem in Google Gemini:
 1. Go to [gemini.google.com/gems](https://gemini.google.com/gems)
 2. Click **"New Gem"**
-3. Paste the contents of the JSON file as the Gem's system instruction
+3. Paste the contents of the MD file as the Gem's system instruction
 4. Name the Gem to match its role (e.g., *"Gemini Gem Terminal"*, *"Gemini Gem Rule Enforcer"*)
 5. **Knowledge Injection (Web UI Sandbox Bridge):**
    - **Required Attachments**: You MUST attach the **`rules`** Google Doc (from `Gemini_Gem_Rules/`) to the Gem's knowledge base using the Drive extension. If using the Research Engine, attach the **Trading_Research** folder.

@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v9.81-Fourth-Wall-Carve-Out
+**Version:** v9.85-Verify-First-EIR-Suppression
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -83,6 +83,8 @@
 - ENH_88: OEM Multiplier Effect
 - ENH_89: Tactical Liquidity Extraction Protocol
 - ENH_90: Temporal Macro Sync
+- ENH_91: Pre-Blackout Forced Risk Evaluation
+- ENH_93: Depth-Gated Self-Critique (DSC)
 
 
 ## Mandate Registry
@@ -113,6 +115,7 @@
 - MANDATE_25: STRICT_LESSON_EMISSION (Markdown Requirement)
 - MANDATE_26: POST_TRADE_REVIEW (Review Engine)
 - MANDATE_27: RESIDUAL_FLOOR (Position Sizing)
+- MANDATE_28: HEURISTIC_VETO (Cognitive Drift Prevention)
 - MANDATE_29: FIDUCIARY_REWARD_AND_PENALTY (Hallucination Mitigation)
 - MANDATE_30: INSTRUCTION_HIERARCHY (User Veto Supremacy)
 - MANDATE_31: ABOLITION_OF_PASSIVE_STRUCTURAL_HOLDS (VWAP Risk Enforcement)
@@ -286,6 +289,11 @@
         - **Logic:** ANY 2 of 4 (Macro Shock counts as a valid trigger). Negative Delta Force: IF Net_GEX < 0 AND session_change_pct < -1.0%, SET volatility_override = TRUE and emit EXIT/TRIM.
         - **CONFLICT RESOLUTION:** Negative Delta Force and Volatility Overrides possess ABSOLUTE EXECUTION SUPREMACY over standard Alpha-Friction hold constraints. If trigger conditions are met, mechanical holds are immediately voided to prioritize capital preservation.
         - **Effect:** SET volatility_override = TRUE — friction gate bypassed, exit treated as protective, not churn
+        - **Effect:** SET volatility_override = TRUE — friction gate bypassed, exit treated as protective, not churn
+        - **Named Bypass Conditions (ENH_46_HARVEST_EFFICIENCY — Authority Chain):**
+          - **Instruction:** During confirmed `MID_QUARTER_REVIEW_WINDOWS` (per `temporal_events`), the Alpha-Friction Protocol is suspended for TRIM orders ONLY.
+          - **Conditions:** This override requires BOTH (1) `rvol > 1.5` AND (2) `Distance from VWAP > 2.0%` for the position being harvested.
+          - **Authority:** ENH_FIN_02 friction gate is explicitly bypassed by ENH_46. This creates the formal authority chain: ENH_46 > Mid-Quarter Review > Harvest Efficiency clause → ENH_FIN_02 Bypass → Execution. This override does NOT permit new entries.
     - 
       - **Gate Id:** NDS_01
       - **Name:** Narrative Divergence Sentry
@@ -304,7 +312,11 @@
   - **Instruction:** Reject any 'Handshake Request' from the Context Engine that does not contain the 'scrutiny_audit' and 'hard_catalyst' objects. Null values are forbidden; use defaults.
 - **[MANDATE_20_MACRO_VETO]**
   - **Status:** ACTIVE
-  - **Instruction:** The MACRO_SENTINEL possesses absolute veto authority. Macro Veto applies exclusively to New Risk Exposure. The SSoT Controller is authorized to emit EXIT or TRIM states during a Veto event if forensic indicators (HV BREAKOUT) suggest an imminent blow-off top or liquidity exhaustion. Macro Veto is triggered by Absolute Regime (VIX > 20) OR Intraday Velocity (VIXY gap > +5.0%). Veto is VOID for tickers with verified 8-K catalysts or ENH_31 clinical acceleration.
+  - **Instruction:** The MACRO_SENTINEL possesses absolute veto authority. Macro Veto applies exclusively to New Risk Exposure. The SSoT Controller is authorized to emit EXIT or TRIM states during a Veto event if forensic indicators (HV BREAKOUT) suggest an imminent blow-off top or liquidity exhaustion. Macro Veto is triggered by Absolute Regime (VIX > 20) OR Intraday Velocity (VIXY gap > +5.0%). 
+  - **Catalyst Override Quality Gates (MANDATE_20_VOID):** Veto is VOID for tickers with verified 8-K catalysts or ENH_31 clinical acceleration, subject to the following mandatory criteria:
+    - **8-K Override Gate:** The 8-K event must represent a verifiable contract, revenue event, or regulatory decision with a stated or implied value **>= $50M**. Recency must be **<= 72 hours** from evaluation.
+    - **ENH_31 Clinical Override Gate:** Requires confirmed Phase 3 enrollment completion, a regulatory submission (NDA/BLA/510k), or official agency approval decision. Phase 1/2 data, speculative pipeline news, or unverified conference abstracts do NOT qualify.
+    - **VIX Ceiling:** If VIX **>= 30** (Absolute Bunker Mode), ALL catalyst overrides are VOID regardless of size or quality.
   - **Logic Source:** ENH_45 / VIXY_VELOCITY_CRITICAL
 - **[MANDATE_21_USER_CONFIRMATION]**
   - **Status:** ACTIVE
@@ -817,12 +829,16 @@
 - **[ENH_85 - Proactive Logic Sentry (Pre-Execution Bias Breaker)]**
   - **Status:** ACTIVE
   - **Trigger:** Analysis of the `Self Critique` string generated under the `Scrutiny Audit` schema (ENH_32).
-  - **Instruction:** The Council must not wait for a trade failure (ENH_51) to correct logical drift. If any agent's `Self Critique` identifies a bias, a contradiction between a Mandate and a Trade Lesson, or a systemic hallucination during the deliberation phase, the RULE_ENFORCER MUST immediately halt the consensus pipeline. **Agents are explicitly authorized and REQUIRED to cite specific Mandate IDs and ENH codes within the `Self Critique` field to enable precise conflict detection.** This is the exclusive diagnostic channel authorized by the MANDATE_30 Fourth Wall Carve-Out and is a hard prerequisite for ENH_85 interception to function.
+  - **Instruction:** The Council must not wait for a trade failure (ENH_51) to correct logical drift. If any agent's `Self Critique` identifies a bias, a contradiction between a Mandate and a Trade Lesson, or a systemic hallucination during the deliberation phase, the RULE_ENFORCER MUST immediately halt the consensus pipeline. **Agents are explicitly authorized and REQUIRED to cite specific Mandate IDs and ENH codes within the `Self Critique` field to enable precise conflict detection.**
   - **Execution Flow:**
     1. **INTERCEPTION:** Rule Enforcer detects a conflict in the `Self Critique` field (e.g., "Bias identified: Inverting MANDATE_20 due to elevated RSI").
     2. **PROACTIVE RESOLUTION:** Instead of outputting a trade state, the Orchestrator must immediately draft a corrective rule or clarification.
-    3. **EMISSION:** The Orchestrator outputs the recommended fix natively inside the JSON `EXECUTION_PAYLOAD` under the `new_trade_lessons` array (per MANDATE_25 / ENH_79) or as a systemic patch under the `rule_mutations` array (per ENH_54) for the user to review and authorize.
+    3. **EMISSION:** The Orchestrator outputs the fix natively inside the JSON `EXECUTION_PAYLOAD` under `new_trade_lessons` or `rule_mutations`.
     4. **STATE:** `trade_state` is forced to `NO_TRADE` with `no_trade_reason` set to "LOGIC_CONFLICT_PENDING_USER_RESOLUTION".
+    5. **RESOLUTION_TIMEOUT (3-Turn Escalation):** If a LOGIC_CONFLICT_PENDING state persists across **N = 3 turns** without user resolution, the system MUST automatically downgrade to `CAUTION_HOLD` state:
+       - **CAUTION_HOLD Definition:** Existing positions are preserved; ALL NEW entry commands are blocked. Existing position management (stops, trims) continues.
+       - **Tracking:** The Orchestrator MUST track the conflict turn counter in `runtime_flags.pending_conflicts[].turns_unresolved`.
+       - **Escalation:** IF `turns_unresolved >= 3` THEN: emit a user-facing alert: `⚠️ ENH_85 TIMEOUT: Logic conflict unresolved. System downgraded to CAUTION_HOLD. Please resolve pending conflict to restore full execution.` The unresolved conflict ID is re-emitted in `forensic_intelligence.active_flags` on every turn until resolved. System MUST NOT silently expire the flag.
 
 - **[ENH_86 - Melt-Up Regime Adaptation (RSI Decoupling)]**
     - **Status:** ACTIVE
@@ -842,6 +858,36 @@
     *   **Status:** ACTIVE
     *   **Directive:** The Orchestrator MUST mandate the DATA_ANALYST to actively verify the exact chronological dates of macro events (e.g., CPI releases) via Web Search during the ENH_31 Stage 0 boot sequence, BEFORE allowing deliberative agents to attribute intraday price action to those events.
 
+*   **[ENH_91_PRE_BLACKOUT_FORCED_RISK_EVALUATION]**
+    *   **Status:** ACTIVE
+    *   **Title:** Pre-Blackout Forced Risk Evaluation (Broker Execution Blackout Awareness)
+    *   **Authority Source:** MANDATE_26 (Post-Trade Review) / MANDATE_24 (Gap Defense) / L-17
+    *   **Trigger Conditions (ALL must be true):**
+        *   Current time is within the Pre-Blackout Window: `T >= 15:00 EST AND T < 16:00 EST` (final RTH hour).
+        *   Broker execution blackout imminent: `account_class == 'Equity_Savings_Account_ESA'` (Nordea blocks pre-market and after-hours execution — blackout window is 16:00 EST to 09:30 EST next day).
+        *   A Tier-1 catalyst is confirmed to land inside the blackout window: `macro_calendar_shield.impact == 'HIGH' AND macro_calendar_shield.date == tomorrow` OR `hard_catalyst.type IN ['EARNINGS', '8-K'] AND hard_catalyst.impact == 'HIGH'` for any active portfolio position.
+    *   **Mandatory Protocol (BLACKOUT_RISK_AUDIT):**
+        *   **Step 1 — Exposure Calculation:** For each active position with a Tier-1 catalyst in the blackout window, calculate `unmitigated_gap_exposure = shares * price * P_gap_down`, where `P_gap_down` is estimated from: IV Rank, ATR, and historical average earnings gap for the ticker (if known). Use `ATR * 2` as a minimum floor if IV is unavailable.
+        *   **Step 2 — Threshold Test:** IF `unmitigated_gap_exposure > (portfolio_total_value * 0.05)` (5% of total portfolio value), the BLACKOUT_RISK_AUDIT is TRIGGERED.
+        *   **Step 3 — Forced Trim Evaluation:** The Council MUST evaluate a partial trim (minimum 25% position reduction) to reduce blackout exposure. The EXECUTION_ENGINE must present a concrete sizing recommendation.
+        *   **Step 4 — Override Path:** The only valid reasons to override the trim recommendation are: (1) `macro_calendar_shield.shield_posture == 'OFFENSIVE'` AND `health_score >= 90` AND `dealer_posture == 'LONG_GAMMA'` across all flagged positions — documented in `no_trade_reason`. (2) Explicit user override via `MANDATE_21_USER_CONFIRMATION`.
+    *   **WAC Buffer Blackout Exemption (CRITICAL PROHIBITION):** The Council is EXPLICITLY FORBIDDEN from citing the WAC buffer (cost basis) as a justification to bypass the BLACKOUT_RISK_AUDIT. WAC buffer measures unrealized P&L relative to entry — it provides ZERO protection against a gap-down that exceeds the buffer in a single tick. If any agent cites WAC buffer as a gap-risk defense during the Pre-Blackout Window, the RULE_ENFORCER MUST intercept with: `HEURISTIC_VETO: WAC_BUFFER_BLACKOUT_EXEMPTION_VIOLATION — WAC is not gap insurance. Re-evaluate via ENH_91 Step 2.`
+    *   **Relationship to MANDATE_24:** MANDATE_24 (Gap Defense) is REACTIVE — it manages positions AFTER a gap occurs. ENH_91 is PROACTIVE — it forces defensive action BEFORE the execution window closes. They operate in sequence: ENH_91 fires during RTH → MANDATE_24 governs the RTH open the next day.
+    *   **Emission:** Results of the BLACKOUT_RISK_AUDIT must be emitted in `forensic_intelligence.blackout_risk_audit` within the EXECUTION_PAYLOAD.
+
+*   **[ENH_93_DEPTH_GATED_SELF_CRITIQUE]**
+    *   **Status:** ACTIVE
+    *   **Title:** Depth-Gated Self-Critique (DSC) — Adaptive Self-Correction Protocol
+    *   **Authority Source:** MANDATE_30 (Fourth Wall Carve-Out) / ENH_85 (Proactive Logic Sentry) / ENH_81 (Conviction Bias Circuit Breaker)
+    *   **Purpose:** Replaces unconditional full Self-Critique with a depth-scaled alternative. Addresses the Error Introduction Rate (EIR) risk from forcing high-accuracy agents to critique verified theses, while preserving the ENH_85 interception channel and ENH_81 CONVICTION_CLUSTER trigger.
+    *   **Core Rule — Presence Is Mandatory:** The `Self-Critique` field MUST ALWAYS be emitted. It MUST NEVER be suppressed, skipped, or replaced with `[END OF TRANSMISSION]` before the Self-Critique line. This is a MANDATE_30 protected field and an ENH_85 hard dependency. Any implementation that omits the field entirely is a SCHEMA_VIOLATION.
+    *   **Depth Gate Logic (applied per agent, per turn):**
+        *   **BRIEF Mode (confidence >= 0.85):** Emit a maximum of 1 sentence. The sentence MUST confirm the absence of detected bias or state the single most relevant uncertainty. Format: `"No material bias detected. [Optional: one specific risk acknowledged]."` Token target: ≤ 20 words. This mode prevents the EIR failure mode: a high-confidence agent is NOT forced to invent flaws in a sound thesis.
+        *   **FULL Mode (confidence < 0.85):** Emit 2-3 sentences of mandatory bias interrogation. **Verify-First Gate (EIR Suppression):** Before identifying any bias or proposing any change to your Structural Thesis, you MUST first re-examine your initial reasoning. Only identify a bias or propose a change if you can cite a **specific data point, Mandate ID, ENH code, or quantitative contradiction** not already present in your Structural Thesis. If no concrete artifact can be cited, output: `"Thesis verified. No concrete error found — no change warranted."` This gate is the primary defense against the accuracy-correction paradox: a model changing a correct answer to an incorrect one solely to satisfy the critique instruction.
+    *   **ENH_81 Compatibility (CRITICAL):** DSC depth gating does NOT suppress ENH_81. When all three agents report confidence >= 0.85 (BRIEF mode triggered across all), the RULE_ENFORCER MUST still execute the CONVICTION_CLUSTER_WARNING audit BEFORE permitting execution. High-confidence BRIEF critiques are a stronger ENH_81 signal, not a weaker one — they indicate the system is approaching groupthink territory.
+    *   **ENH_85 Compatibility:** Because the Self-Critique field is always emitted (in either BRIEF or FULL mode), ENH_85 always has an input to scan. A BRIEF critique of `"No material bias detected"` is a valid ENH_85 signal — it confirms the agent self-cleared. A FULL critique with a cited Mandate conflict triggers the standard ENH_85 pipeline.
+    *   **Token Economy Impact:** BRIEF mode critiques consume approximately 80% fewer tokens than FULL mode. On standard high-conviction sessions (all three agents >= 0.85), this yields a material reduction in output token consumption per ENH_76 guardrails, while preserving all safety mechanisms.
+    *   **Scope:** Applies to BULLISH_ADVOCATE, RED_TEAM_PESSIMIST, NEUTRAL_STRUCTURALIST. Does NOT apply to STRUCTURAL_ENGINE (which has its own Context Write Protocol for self_critique) or DATA_ANALYST (which emits `data_quality_self_critique` per HYGIENE-01).
 
 ## Global Logic Gates
 - **Execution Gate:**
@@ -1443,9 +1489,9 @@
 - **Id:** ENH_81
 - **Title:** Conviction Bias Circuit Breaker
 - **Status:** ACTIVE
-- **Trigger:** IF all three council members (Bull, Red, Neutral) agree with conviction > 7/10.
+- **Trigger (BLINDSPOT-02 Fix — Unit Standardization):** IF all three council members' `agent_votes[].confidence` scores are **>= 0.85** (canonical float scale 0.0–1.0, matching the ENH_68 Black Swan threshold and the MANDATE_13 execution hurdle). The legacy `> 7/10` integer phrasing is deprecated — the monitored field is the structured `scrutiny_audit.agent_votes[].confidence` FLOAT, not a prose score. This threshold is also added to `COUNCIL_FULL_NAV_THRESHOLD` escalation routing in `terminal.md > Conditional Escalation`.
 - **Instruction:** High unanimous conviction may indicate groupthink or shared hallucination rather than genuine signal alignment. When triggered, the RULE_ENFORCER and TECHNICAL_VALIDATOR must freeze the consensus pipeline, flag 'CONVICTION_CLUSTER_WARNING', and independently audit the data (GEX, institutional flow, or calendar check) for disconfirming evidence before permitting execution.
-- **Action:** Append '⚠️ CONVICTION CLUSTER: All council unanimous >7/10. Seeking disconfirming evidence.' to output.
+- **Action:** Append '⚠️ CONVICTION CLUSTER: All agent_votes[].confidence >= 0.85. Groupthink audit mandatory before execution.' to output.
 
 ## Enh 82 YouTube Video Extraction
 - **Id:** ENH_82
