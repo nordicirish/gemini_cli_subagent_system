@@ -1,6 +1,6 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v9.87-UX-Forensic-Scout-Sync
+**Version:** v9.90-VWAP-Hardening-Sync
 
 **A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
@@ -19,6 +19,17 @@ Starting with **v9.22-Phantom-Persona-Final-Sync**, the system has reached full 
 | **ENH_81 Conviction Threshold Fix** | `ENH_81` | Standardized from deprecated `7/10` integer scale to canonical `confidence >= 0.85` float. |
 | **MANDATE_20 Quality Gates** | `MANDATE_20` | Added hard floors: 8-K override requires ≥$50M contract value, ≤72h recency, VIX <30. |
 | **ENH_85 Resolution Timeout** | `ENH_85` | Added 3-turn RESOLUTION_TIMEOUT: persistent LOGIC_CONFLICT auto-degrades to CAUTION_HOLD. |
+
+### 🔒 v9.88 Tactical Tranching & IR Defense (2026-05-15)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **IR Opacity Defense** | `ENH_95` | Classifies earnings format downgrades (Webinar → Dial-in) as deliberate concealment. Triggers DEFENSIVE_HOLD, tightening stops by 50%, and mandatory 10% trim. |
+| **Tactical Tranching** | `ENH_96` | Prohibits monolithic block orders at resistance. Mandates 10% micro-tranches to guarantee liquidity extraction. |
+| **Power Hour Integrity** | `ENH_97` | rVol > 2.0 after 15:30 validates "Institutional Graduation". Authorizes entries via Precision-Bid Pivots. |
+| **Melt-Up RSI Decoupling** | `ENH_86` | Suspends RSI mean-reversion logic (>75) IF VIX < 20 and Dealer Posture is LONG_GAMMA. Prevents premature exits during institutional melt-ups. |
+| **VWAP Stop & Liquidity Wash** | `ENH_87` | Establishes intraday VWAP as a hard capital deployment gate. Even in melt-ups, sub-VWAP assets are vetoed. Authorizes entries on VWAP "PIN" during SHORT_GAMMA. |
+| **Priority Ingestion** | `FETCH` | Re-ordered master ticker queue to prioritize Portfolio and Strategic Watchlist assets in all fetching cycles. |
 
 ### 🔒 v9.85 Verify-First EIR Suppression (2026-05-14)
 
@@ -102,6 +113,9 @@ The dashboard now includes integrated management for session transitions and his
                │      (Order Generation)     │
                └─────────────────────────────┘
 ```
+
+### 🏗️ Mirroring Architecture (ENH_98)
+To prevent reasoning drift during disconnected agentic turns, the system employs a **Mirroring Architecture**. When a critical protocol is codified in the Master SSoT (`rules.md`), the **Antigravity Custodian** proactively mirrors the relevant logic and behavioral triggers into the specific engine instruction sets (`.md`) responsible for its execution. This ensures that agents like the **Execution Engine** or **Bullish Advocate** remain grounded in high-fidelity rules without requiring a constant, exhaustive scan of the entire legislative registry for every granular sub-task.
 
 **Governance backbone:** The **Rule Enforcer** (`rule_enforcer_engine.md`) actively validates compliance, while `rules.md` serves as the authoritative legislative body containing the system thresholds, mandates, and enhancement protocols.
 

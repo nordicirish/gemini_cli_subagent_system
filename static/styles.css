@@ -94,6 +94,10 @@ header.glass-panel {
     border-radius: var(--radius-md);
 }
 
+.mobile-only {
+    display: none !important;
+}
+
 /* ─── Alerts Panel (macro row) ─── */
 /* ─── Top Alert Bar (Ticker Style) ─── */
 .top-alert-bar {
@@ -944,12 +948,18 @@ textarea:focus {
     .indices-grid { grid-template-columns: 1fr; }
 
     .desktop-only { display: none !important; }
+    .mobile-only { display: block !important; }
+    
     .quick-action-bar.mobile-only { 
-        display: flex; 
+        display: flex !important; 
         gap: 8px;
         padding: 8px;
         border-radius: var(--radius-sm);
         margin-bottom: 4px;
+    }
+    
+    #mobile-data-status.mobile-only {
+        display: block !important;
     }
 }
 

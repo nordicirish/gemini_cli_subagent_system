@@ -15,6 +15,8 @@ from scipy.stats import norm
 from yfinance.data import YfData
 from collections import defaultdict
 import threading
+import random
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
@@ -86,7 +88,7 @@ if os.path.exists('local_ssot_shadow.json'):
     except:
         pass
 
-ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS)) # Deduplicated order
+ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS)) # Deduplicated order
 
 INVERSE_MACRO = ['^VIX', 'VIXY', 'UUP', 'IEF']
 
@@ -241,7 +243,7 @@ async def update_tickers(req: Request):
     new_tickers = data.get("tickers", [])
     valid_tickers = [t.upper() for t in new_tickers if t]
     WATCHLIST_TICKERS = valid_tickers
-    ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+    ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
     save_config()
     return JSONResponse({"status": "success", "tickers": WATCHLIST_TICKERS})
 
@@ -278,7 +280,7 @@ async def save_basket(req: Request):
             # Update global trackers
             global PORTFOLIO_TICKERS, ALL_TICKERS
             PORTFOLIO_TICKERS = [p.get("ticker").upper() for p in new_basket if isinstance(p, dict) and p.get("ticker")]
-            ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+            ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
             
             return JSONResponse({"status": "success"})
         except Exception as e:
@@ -295,7 +297,7 @@ async def save_watchlist(req: Request):
     new_watchlist = await req.json()
     if isinstance(new_watchlist, list):
         WATCHLIST_TICKERS = [t.upper() for t in new_watchlist if isinstance(t, str)]
-        ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+        ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
         save_config()
         return JSONResponse({"status": "success"})
     return JSONResponse({"status": "error", "message": "Invalid data format"}, status_code=400)
@@ -307,7 +309,7 @@ async def update_macro_tickers(req: Request):
     new_macro = data.get("macro", [])
     valid_macro = [t.upper() for t in new_macro if t]
     MACRO_TICKERS = valid_macro
-    ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+    ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
     save_config()
     return JSONResponse({"status": "success", "macro": MACRO_TICKERS})
 
@@ -791,7 +793,7 @@ async def handle_paste(req: Request):
         if isinstance(new_scouts, list):
             global SCOUT_TICKERS, ALL_TICKERS
             SCOUT_TICKERS = list(set(new_scouts))
-            ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+            ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
             
         def _prune_lessons(deletions):
             if not deletions: return
@@ -1451,10 +1453,14 @@ async def run_finnhub_scout_sweep(target_sectors):
     current_all_upper = [t.upper() for t in ALL_TICKERS]
     tickers_to_scan = [t for t in tickers_to_scan if t.upper() not in current_all_upper]
     
+    random.shuffle(tickers_to_scan)
+    # Strictly limit to top 15 candidates to scan to keep cycle under 20s
+    tickers_to_scan = tickers_to_scan[:15]
+    
     candidates = []
     for symbol in tickers_to_scan:
-        # Rate Limit Protection: 30 calls/sec -> throttle to 0.05s
-        await asyncio.sleep(0.05) 
+        # Rate Limit Protection: 60 calls/min -> throttle to 1.1s
+        await asyncio.sleep(1.1) 
         
         candles = get_finnhub_candles(symbol)
         if not candles or candles.get('s') != 'ok':
@@ -1493,11 +1499,11 @@ async def run_finnhub_scout_sweep(target_sectors):
             if s not in SCOUT_TICKERS:
                 SCOUT_TICKERS.append(s)
         # Update systemic ALL_TICKERS queue (Deduplicated)
-        # Prune SCOUT_TICKERS to keep only the most recent 6 candidates
-        if len(SCOUT_TICKERS) > 6:
-            SCOUT_TICKERS = SCOUT_TICKERS[-6:]
+        # Prune SCOUT_TICKERS to keep only the most recent 5 candidates
+        if len(SCOUT_TICKERS) > 5:
+            SCOUT_TICKERS = SCOUT_TICKERS[-5:]
             
-        ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+        ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
     
     return new_scouts
 
@@ -1759,9 +1765,9 @@ def get_gex_profile(ticker_obj, spot_price):
 
 def update_history_and_technicals(symbol, t_obj):
     try:
-        hist = t_obj.history(period="2y", interval="1d")
+        hist = t_obj.history(period="1y", interval="1d")
         if hist.empty:
-            hist = t_obj.history(period="1y", interval="1d")
+            hist = t_obj.history(period="6mo", interval="1d")
         if hist.empty:
             hist = t_obj.history(period="3mo", interval="1d")
         if hist.empty:
@@ -2468,6 +2474,30 @@ def run_daemon():
                 'VIXY': {'price': 0.0, 'gap': 0.0}
             }
 
+
+
+            # [OPTIMIZATION] Parallel Heavy Refresh
+            if is_heavy:
+                print(f"{YELLOW}Parallelizing heavy technical sync for {len(ALL_TICKERS)} tickers...{RESET}")
+                def prefetch_heavy_data(sym):
+                    try:
+                        # Add a small staggered delay to prevent micro-hammering YF
+                        t_time.sleep(random.uniform(0.1, 0.5))
+                        obj = tickers_obj[sym]
+                        # 1. History & Technicals
+                        update_history_and_technicals(sym, obj)
+                        # 2. GEX (Requires a spot price)
+                        q = batch_quotes.get(sym, {})
+                        spot = q.get('regularMarketPrice') or q.get('preMarketPrice') or q.get('postMarketPrice') or cache.prices.get(sym)
+                        if spot and float(spot) > 0:
+                            cache.gex[sym] = get_gex_profile(obj, float(spot))
+                    except Exception as e:
+                        print(f"Prefetch error for {sym}: {e}")
+
+                with ThreadPoolExecutor(max_workers=6) as executor:
+                    executor.map(prefetch_heavy_data, ALL_TICKERS)
+                print(f"{GREEN}Parallel sync complete.{RESET}")
+
             # Pre-load portfolio context for historical_context injection
             portfolio_ctx_map = {}
             if os.path.exists('local_ssot_shadow.json'):
@@ -2482,33 +2512,32 @@ def run_daemon():
                 except: pass
 
             for i, sym in enumerate(ALL_TICKERS):
-                # Dynamic sleep: slower on heavy refresh to respect rate limits
-                if is_heavy or sym not in cache.history or cache.history[sym].empty:
+                # Dynamic sleep: much faster now that heavy lifting is parallelized
+                if is_heavy:
+                    t_time.sleep(0.01) # Minimal stagger
+                elif sym not in cache.history or cache.history[sym].empty:
                     t_time.sleep(0.5) 
                 else:
                     t_time.sleep(0.05)
 
                 obj = tickers_obj[sym]
 
-                if is_heavy or sym not in cache.history or cache.history[sym].empty:
+                # Only fetch sequentially if missing (Safety Fallback)
+                if sym not in cache.history or cache.history[sym].empty:
                     update_history_and_technicals(sym, obj)
 
                 update_price_tick(sym, obj, status, batch_quotes.get(sym))
 
-                # GEX is heavy, run only on heavy cycles after price is known
-                if is_heavy:
+                # GEX fallback if missing
+                if sym not in cache.gex:
                     spot_price = cache.prices.get(sym)
                     if spot_price and spot_price > 0:
-                        gex_profile = get_gex_profile(obj, spot_price)
-                        cache.gex[sym] = gex_profile
+                        cache.gex[sym] = get_gex_profile(obj, spot_price)
                     else:
                         cache.gex[sym] = {
-                            'net_gex': 0.0, 
-                            'flip_price': 0.0, 
-                            'inventory_velocity_delta': 0.0,
-                            'gex_slope': 0.0,
-                            'flip_proximity_percent': 0.0,
-                            'strike_oi_magnet': 0.0
+                            'net_gex': 0.0, 'flip_price': 0.0, 
+                            'inventory_velocity_delta': 0.0, 'gex_slope': 0.0,
+                            'flip_proximity_percent': 0.0, 'strike_oi_magnet': 0.0
                         }
 
                 p = float(cache.prices.get(sym, 0))

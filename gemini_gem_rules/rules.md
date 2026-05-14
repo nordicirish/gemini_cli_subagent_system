@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v9.86-Cash-Liquidity-Hardening-Sync
+**Version:** v9.90-VWAP-Hardening-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -78,13 +78,16 @@
 - ENH_82: YouTube Video Extraction Protocol
 - ENH_84: Zero-Cost Scout Pipeline
 - ENH_85: Proactive Logic Sentry
-- ENH_86: Melt-Up Regime Adaptation
-- ENH_87: VWAP Principal Extraction
+- ENH_86: Melt-Up Regime & RSI Decoupling
+- ENH_87: VWAP Stop & Liquidity Wash
 - ENH_88: OEM Multiplier Effect
 - ENH_89: Tactical Liquidity Extraction Protocol
 - ENH_90: Temporal Macro Sync
 - ENH_91: Pre-Blackout Forced Risk Evaluation
 - ENH_93: Depth-Gated Self-Critique (DSC)
+- ENH_95: IR Opacity Defense Protocol
+- ENH_96: Tactical Tranching
+- ENH_97: Power Hour Integrity
 
 
 ## Mandate Registry
@@ -1498,12 +1501,47 @@
 - **Instruction:** High unanimous conviction may indicate groupthink or shared hallucination rather than genuine signal alignment. When triggered, the RULE_ENFORCER and TECHNICAL_VALIDATOR must freeze the consensus pipeline, flag 'CONVICTION_CLUSTER_WARNING', and independently audit the data (GEX, institutional flow, or calendar check) for disconfirming evidence before permitting execution.
 - **Action:** Append '⚠️ CONVICTION CLUSTER: All agent_votes[].confidence >= 0.85. Groupthink audit mandatory before execution.' to output.
 
-## Enh 82 YouTube Video Extraction
-- **Id:** ENH_82
-- **Title:** YouTube Video Extraction Protocol
+    - **Logic:** For qualitative intelligence gathering (e.g., earnings webcasts, military testing footage, management interviews), the RESEARCH_ENGINE must proactively invoke the YouTube extension to perform primary source verification rather than relying on secondary text summaries.
+
+## Enh 86 Melt-Up RSI Decoupling
+- **Id:** ENH_86
+- **Title:** Melt-Up Regime & RSI Decoupling
 - **Status:** ACTIVE
-- **Instruction:** Explicitly authorizes and mandates the use of the native Gemini YouTube extension to access, transcribe, and analyze relevant YouTube videos.
-- **Logic:** For qualitative intelligence gathering (e.g., earnings webcasts, military testing footage, management interviews), the RESEARCH_ENGINE must proactively invoke the YouTube extension to perform primary source verification rather than relying on secondary text summaries.
+- **Directive:** If SPY RSI > 75, traditional overbought mean-reversion logic is suspended IF VIX < 20 and Dealer Posture is LONG_GAMMA. 
+- **Instruction:** Do not short or prematurely exit high-beta accumulation based solely on extended RSI in this regime. Classify as "Institutional Graduation" melt-up rather than a technical exhaustion point.
+
+## Enh 87 VWAP Stop & Liquidity Wash
+- **Id:** ENH_87
+- **Title:** VWAP Stop & Liquidity Wash
+- **Status:** ACTIVE
+- **Directive:** Intraday VWAP is the absolute governing threshold for relative strength and capital deployment.
+- **Execution Rules:**
+    1. **Deployment Veto:** Even in a verified Melt-Up (ENH_86), the system MUST VETO new cash deployment into any asset trading below its intraday VWAP.
+    2. **Accumulation Floor:** A VWAP "PIN" (sustained price stability within 0.1% of VWAP) during a **SHORT_GAMMA** regime indicates an institutional accumulation floor; authorized for high-conviction entries if catalysts are active.
+
+## Enh 95 IR Opacity Defense
+- **Id:** ENH_95
+- **Title:** IR Opacity Defense Protocol
+- **Status:** ACTIVE
+- **Directive:** An active downgrade in an earnings broadcast format (e.g., moving from a visual webinar/digital webcast to a legacy, gated telephone dial-in) MUST be classified as Deliberate Concealment to mask structural decay or break NLP sentiment scrapers.
+- **Execution:** Upon detection of IR Format Degradation, the system MUST instantly shift the asset to a DEFENSIVE_HOLD posture and execute the following:
+    1. Veto all new capital deployment into the asset.
+    2. Automatically tighten existing trailing stops by 50% of their current distance.
+    3. If heading into the event with an unrealized gain, mandate a minimum 10% risk-reduction trim to front-run smart money exits.
+
+## Enh 96 Tactical Tranching
+- **Id:** ENH_96
+- **Title:** Tactical Tranching
+- **Status:** ACTIVE
+- **Directive:** When executing mandatory scale-outs or risk-reduction trims, the Execution Engine MUST NOT use monolithic block limit orders at theoretical ATR peaks if LONG_GAMMA dampening or visual chart resistance is active.
+- **Execution:** The engine MUST stagger executions into micro-tranches (e.g., 10% blocks) and actively front-run visible double-tops or R1 pivots to guarantee partial liquidity extraction.
+
+## Enh 97 Power Hour Integrity
+- **Id:** ENH_97
+- **Title:** Power Hour Integrity
+- **Status:** ACTIVE
+- **Directive:** During the final trading hour (15:30 ET onward), a relative volume (rVol) > 2.0 MUST be treated as a mathematical validation of "Institutional Graduation". 
+- **Execution:** When this condition is met on a high-conviction target, the Execution Engine is authorized to execute entries via Precision-Bid Pivots.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.
