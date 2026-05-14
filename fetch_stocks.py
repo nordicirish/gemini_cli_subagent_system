@@ -160,34 +160,68 @@ async def save_scout_categories(req: Request):
         return JSONResponse({"status": "success", "categories": SCOUT_CATEGORIES})
     return JSONResponse({"status": "error", "message": "Invalid data format"}, status_code=400)
 
-@app.get("/api/eod_review_payload")
-async def get_eod_review_payload():
+@app.get("/api/session_review_payload")
+async def get_session_review_payload():
     log_file = "decision_log.json"
+    lessons_file = "trade_lessons.json"
     try:
         with open(log_file, "r") as f:
             decision_log = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         decision_log = []
 
+    try:
+        with open(lessons_file, "r") as f:
+            trade_lessons = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        trade_lessons = []
+
     # Construct the automated prompt instruction
-    eod_prompt = (
-        "SYSTEM DIRECTIVE: EXECUTE [MANDATE_26_POST_TRADE_REVIEW]\n\n"
-        "You are operating as the Review Engine. I am providing the continuous "
-        "decision log of the Council's trades over the trailing 20-day period. "
-        "You are mandated to execute an End-of-Day historical backtest.\n\n"
-        "INSTRUCTIONS:\n"
+    review_prompt = (
+        "SYSTEM DIRECTIVE: EXECUTE [MANDATE_26_POST_TRADE_REVIEW] + [RULE_PERMANENCY_AUDIT]\n\n"
+        "You are operating as the Review Engine. I am providing:\n"
+        "  A) The continuous decision log of the Council's trades.\n"
+        "  B) The current trade_lessons registry (tactical memory).\n\n"
+        "═══════════════════════════════════════════════\n"
+        "PHASE 1: DECISION LOG BACKTEST\n"
+        "═══════════════════════════════════════════════\n"
         "1. Grade the historical `agreement_score_sa` and `trade_state` assumptions "
         "against the realized price action for each ticker.\n"
         "2. Distinguish between mechanistic flow misfires (e.g., rebalancing windows) "
         "and fundamental logic breakdowns.\n"
         "3. If a systemic vulnerability is identified, generate a corrective rule.\n"
-        "4. You MUST output any new codified rules natively inside the JSON `EXECUTION_PAYLOAD` "
-        "under the `new_trade_lessons` array so I can merge them into the SSoT.\n\n"
+        "4. Output any new codified rules inside the JSON `EXECUTION_PAYLOAD` "
+        "under the `new_trade_lessons` array.\n\n"
+        "═══════════════════════════════════════════════\n"
+        "PHASE 2: TRADE LESSONS PERMANENCY AUDIT\n"
+        "═══════════════════════════════════════════════\n"
+        "Review ALL trade_lessons below. For each lesson, determine:\n"
+        "  - PROMOTE: The lesson has proven durable across 3+ trades or encodes a\n"
+        "    structural truth. It should be promoted to a permanent rule in rules.md.\n"
+        "  - RETAIN: The lesson is still tactically relevant but not yet proven\n"
+        "    permanent. Keep in trade_lessons.\n"
+        "  - DEPRECATE: The lesson is stale, contradicted by newer data, or\n"
+        "    already encoded in an existing Mandate/ENH. Remove it.\n\n"
+        "For PROMOTED lessons, output a suggested Antigravity patch in this format:\n"
+        "```\n"
+        "ANTIGRAVITY PATCH REQUEST:\n"
+        "  Target: rules.md > [section]\n"
+        "  Action: ADD / MODIFY\n"
+        "  Proposed Rule ID: [ENH_XX or MANDATE_XX]\n"
+        "  Content: [exact rule text]\n"
+        "  Justification: [forensic evidence from decision log]\n"
+        "```\n\n"
+        "═══════════════════════════════════════════════\n"
         "DECISION LOG DATA:\n"
-        f"```json\n{json.dumps(decision_log, indent=4)}\n```"
+        "═══════════════════════════════════════════════\n"
+        f"```json\n{json.dumps(decision_log, indent=4)}\n```\n\n"
+        "═══════════════════════════════════════════════\n"
+        "TRADE LESSONS REGISTRY:\n"
+        "═══════════════════════════════════════════════\n"
+        f"```json\n{json.dumps(trade_lessons, indent=4)}\n```"
     )
     
-    return {"payload": eod_prompt}
+    return {"payload": review_prompt}
 
 @app.post("/api/clear_decision_log")
 async def clear_decision_log():
@@ -235,6 +269,8 @@ async def save_basket(req: Request):
             if "mutable_state" not in ssot:
                 ssot["mutable_state"] = {}
             ssot["mutable_state"]["portfolio_snapshot"] = new_basket
+            # Clean up root-level alias if it exists to prevent "ghost" portfolio items
+            ssot.pop("portfolio_snapshot", None)
             
             with open(ssot_file, 'w') as f:
                 json.dump(ssot, f, indent=2)
@@ -418,8 +454,15 @@ async def handle_paste(req: Request):
                 data["portfolio_snapshot"] = data.pop("instructions")
             if "tickers" in data and "portfolio_snapshot" not in data:
                 # Only alias if it's a list of dicts (actual portfolio items)
-                if isinstance(data["tickers"], list) and len(data["tickers"]) > 0 and isinstance(data["tickers"][0], dict):
-                    data["portfolio_snapshot"] = data.pop("tickers")
+                # and contains portfolio-specific keys like 'action', 'shares', or 'trade_state'
+                # to avoid misinterpreting the dashboard's "Turn Data" as an execution payload.
+                if isinstance(data["tickers"], list) and len(data["tickers"]) > 0:
+                    first_item = data["tickers"][0]
+                    if isinstance(first_item, dict):
+                        is_portfolio = any(k in first_item for k in ("action", "shares", "trade_state", "wac"))
+                        # Also avoid aliasing if the list is large (likely market data, not focused instructions)
+                        if is_portfolio and len(data["tickers"]) < 20:
+                             data["portfolio_snapshot"] = data.pop("tickers")
             
             if "council_debate" in data and isinstance(data["council_debate"], dict):
                 cd = data["council_debate"]
@@ -734,6 +777,9 @@ async def handle_paste(req: Request):
                 merged_ssot["mutable_state"].pop("DELETE_FIELD (optional)", None)
             merged_ssot.pop("DELETE_FIELD", None)
             merged_ssot.pop("DELETE_FIELD (optional)", None)
+
+        # Clean up root-level alias if it exists to prevent "ghost" portfolio items
+        merged_ssot.pop("portfolio_snapshot", None)
 
         with open('local_ssot_shadow.json', 'w') as f:
             json.dump(merged_ssot, f, indent=2)
@@ -1375,11 +1421,24 @@ async def run_finnhub_scout_sweep(target_sectors):
     """
     global SCOUT_TICKERS, ALL_TICKERS
     
-    # Generic sector mapping for the sweep
+    # Comprehensive sector mapping for the sweep (ENH_84)
     sector_map = {
-        "DIB": ["RCAT", "UMAC", "ONDS", "AVAV", "KTOS", "BA", "LMT", "NOC", "GD", "LHX"],
-        "BIOTECH": ["DFTX", "BNTX", "MRNA", "VRTX", "AMGN", "REGN", "GILD"],
-        "AI": ["PLTR", "SOUN", "BBAI", "NVDA", "MSFT", "GOOGL", "AMD"]
+        "TECHNOLOGY": ["AAPL", "MSFT", "NVDA", "AMD", "CRM", "ORCL", "SNOW", "PLTR", "TSM", "AVGO"],
+        "HEALTHCARE": ["JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK", "TMO", "DHR", "ISRG", "BMY"],
+        "FINANCIALS": ["JPM", "BAC", "WFC", "GS", "MS", "V", "MA", "PYPL", "AXP", "BLK"],
+        "ENERGY": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HES"],
+        "INDUSTRIALS": ["HON", "GE", "UPS", "BA", "LMT", "CAT", "RTX", "DE", "MMM", "LUV"],
+        "CONSUMER DISCRETIONARY": ["AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "BKNG", "TJX", "ORLY", "F"],
+        "CONSUMER STAPLES": ["PG", "KO", "PEP", "WMT", "COST", "PM", "EL", "TGT", "KDP", "STZ"],
+        "UTILITIES": ["NEE", "DUK", "SO", "EXC", "AEP", "SRE", "XEL", "ED", "PEG", "WEC"],
+        "REAL ESTATE": ["PLD", "AMT", "EQIX", "CCI", "WY", "PSA", "DRE", "VICI", "CBRE", "O"],
+        "MATERIALS": ["LIN", "APD", "SHW", "FCX", "NEM", "CTVA", "ECL", "NUE", "ALB", "DD"],
+        "COMMUNICATION SERVICES": ["GOOGL", "META", "NFLX", "DIS", "VZ", "T", "TMUS", "CHTR", "CMCSA", "PARA"],
+        "AI & DATA": ["PLTR", "SOUN", "BBAI", "NVDA", "MSFT", "GOOGL", "AMD", "AI", "C3AI", "PATH"],
+        "AEROSPACE & DEFENSE": ["AVAV", "KTOS", "BA", "LMT", "NOC", "GD", "LHX", "RTX", "HWM", "LDOS"],
+        "BIOTECH": ["DFTX", "BNTX", "MRNA", "VRTX", "AMGN", "REGN", "GILD", "BIIB", "SGEN", "XBI"],
+        "SEMICONDUCTORS": ["NVDA", "AMD", "INTC", "MU", "AVGO", "TXN", "QCOM", "ADI", "KLAC", "LRCX"],
+        "DIB": ["RCAT", "UMAC", "ONDS", "AVAV", "KTOS", "BA", "LMT", "NOC", "GD", "LHX"]
     }
     
     tickers_to_scan = []
@@ -1434,6 +1493,10 @@ async def run_finnhub_scout_sweep(target_sectors):
             if s not in SCOUT_TICKERS:
                 SCOUT_TICKERS.append(s)
         # Update systemic ALL_TICKERS queue (Deduplicated)
+        # Prune SCOUT_TICKERS to keep only the most recent 6 candidates
+        if len(SCOUT_TICKERS) > 6:
+            SCOUT_TICKERS = SCOUT_TICKERS[-6:]
+            
         ALL_TICKERS = list(dict.fromkeys(WATCHLIST_TICKERS + PORTFOLIO_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
     
     return new_scouts
@@ -2316,7 +2379,7 @@ def run_daemon():
                     # Target current core sectors for scouting
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-                    loop.run_until_complete(run_finnhub_scout_sweep(["DIB", "BIOTECH", "AI"]))
+                    loop.run_until_complete(run_finnhub_scout_sweep(SCOUT_CATEGORIES))
                     loop.close()
                 except Exception as e:
                     print(f"{RED}Scout Sweep Error: {e}{RESET}")

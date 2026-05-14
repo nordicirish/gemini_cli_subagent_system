@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v9.85-Verify-First-EIR-Suppression
+**Version:** v9.86-Cash-Liquidity-Hardening-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -318,6 +318,11 @@
     - **ENH_31 Clinical Override Gate:** Requires confirmed Phase 3 enrollment completion, a regulatory submission (NDA/BLA/510k), or official agency approval decision. Phase 1/2 data, speculative pipeline news, or unverified conference abstracts do NOT qualify.
     - **VIX Ceiling:** If VIX **>= 30** (Absolute Bunker Mode), ALL catalyst overrides are VOID regardless of size or quality.
   - **Logic Source:** ENH_45 / VIXY_VELOCITY_CRITICAL
+- **[MANDATE_31_CASH_RECONCILIATION]**
+  - **Status:** ACTIVE
+  - **Instruction:** Every turn MUST explicitly reconcile the `unallocated_cash_eur` balance. The Execution Engine must calculate the delta based on proposed trades, and the State Router must verify the math against the `math_proof_liquidity`.
+  - **Required Output:** A forensic proof string: `Proof: Internally verified {Initial} EUR Cash Active / {Allocated} EUR Allocated this cycle = {Final} EUR Unallocated`.
+  - **Schema Enforcement:** The final `EXECUTION_PAYLOAD` MUST contain the `unallocated_cash_eur` and `unallocated_cash_usd` fields at the root of the object. Omission is a CRITICAL_SCHEMA_VIOLATION.
 - **[MANDATE_21_USER_CONFIRMATION]**
   - **Status:** ACTIVE
   - **Instruction:** The LLM (and all sub-engines) must NOT assume that recommended trades will be actioned or concluded until the user explicitly confirms it. All trade states are PROVISIONAL until confirmed.
@@ -326,7 +331,7 @@
   - **Instruction:** Unified SSoT Emission: To prevent duplication of state context, every turn must produce exactly ONE formatted Markdown report followed by exactly ONE unified JSON `EXECUTION_PAYLOAD` block.
     - **Markdown Report:** Must begin with the 'Active Compute Tier' header, followed by the '### 🏁 Final Council Decision' block which MUST include the Decision and a concise 'Summary' of consensus reasoning.
     - **Quantitative SSoT:** All numeric/state data (Tickers, Portfolio, Macro) must be contained within the JSON.
-    - **Directives Promotion (ENH_31-S):** The `EXECUTION_PAYLOAD` is the primary vehicle for Council directives. Upon ingestion, fields within the payload (e.g., `portfolio_snapshot`, `risk_metrics`, `directive`) must be promoted to the active `mutable_state` layer.
+    - **Directives Promotion (ENH_31-S):** The `EXECUTION_PAYLOAD` is the primary vehicle for Council directives. Upon ingestion, fields within the payload (e.g., `portfolio_snapshot`, `risk_metrics`, `directive`, `unallocated_cash_eur`, `unallocated_cash_usd`) must be promoted to the active `mutable_state` layer.
     - **Directives Supremacy (ENH_31-P):** In cases of state conflict, the `EXECUTION_PAYLOAD` directives possess Absolute Execution Supremacy. The ingestion bridge is mandated to overwrite active state fields with their payload counterparts to maintain zero-drift.
     - **Forensic Lessons:** Memory payloads must be bifurcated: Global Systemic Lessons appended to `new_trade_lessons` (or `session_trade_lessons` alias) array, and Ticker-Specific Reflexes injected directly into `historical_context` inside the specific ticker's object within `portfolio_snapshot`.
     - **Decision Log Persistence:** To maintain the historical `decision_log.json` for backtesting (MANDATE_26), the Orchestrator MUST include the `scrutiny_audit` (containing `agent_votes`), the `trade_state`, and a `trigger_context` for every ticker evaluated during the turn. These fields must be nested within the respective ticker objects inside the `portfolio_snapshot` array of the `EXECUTION_PAYLOAD`. The Python backend is mandated to inject a granular `timestamp`, a `market_context` snapshot (Regime, VIX, Liquidity), and a `price_at_eval` field into each recorded decision item to facilitate forensic high-fidelity auditing. This is required even if the `trade_state` remains `NO_TRADE`.

@@ -54,11 +54,12 @@
 
         <!-- ─── Quick Action Bar (Mobile Only) ─── -->
         <div class="quick-action-bar glass-panel mobile-only">
-            <button id="mobile-copy-json-btn" class="glow-btn mini">📋 TURN</button>
-            <button id="mobile-paste-payload-btn" class="glow-btn mini">📥 PASTE</button>
-            <button id="mobile-copy-session-btn" class="glow-btn mini outline">📂 INIT</button>
-            <button id="mobile-btn-eod-review" class="glow-btn mini outline">🕒 EOD</button>
+            <button id="mobile-copy-json-btn" class="glow-btn mini">📋 SNAP</button>
+            <button id="mobile-paste-payload-btn" class="glow-btn mini">📥 INGEST</button>
+            <button id="mobile-copy-session-btn" class="glow-btn mini outline">📂 BOOT</button>
+            <button id="mobile-btn-session-review" class="glow-btn mini outline">🔍 AUDIT</button>
         </div>
+        <div id="mobile-data-status" class="status-message inline-feedback mobile-only" style="margin-bottom: 8px;"></div>
 
         <!-- ─── Main Content ─── -->
         <main class="main-content">
@@ -90,25 +91,28 @@
             <aside class="sidebar">
                 <!-- Outbound Data Operations -->
                 <div class="sidebar-card glass-panel desktop-only">
-                    <h3><span class="icon">📤</span> Outbound Data</h3>
-                    <p class="subtitle">Extract data for LLM context</p>
+                    <h3><span class="icon">📤</span> Export to Council</h3>
+                    <p class="subtitle">Copy context for Gemini Gem analysis</p>
                     <div class="btn-row">
-                        <button id="copy-json-btn" class="glow-btn">📋 Copy Turn Data</button>
-                        <button id="copy-session-btn" class="glow-btn outline">📂 Copy Session Init</button>
-                        <button id="btn-eod-review" onclick="copyEODReviewPayload()" class="glow-btn outline">🕒 Copy EOD Review</button>
-                        <button id="clear-log-btn" class="glow-btn outline danger" style="margin-top: 8px;">🗑️ Clear Decision Log</button>
+                        <button id="copy-json-btn" class="glow-btn">📋 Copy Market Snapshot</button>
+                        <div id="outbound-turn-status" class="status-message inline-feedback"></div>
+                        <button id="copy-session-btn" class="glow-btn outline">📂 New Session Boot</button>
+                        <div id="outbound-session-status" class="status-message inline-feedback"></div>
+                        <button id="btn-session-review" onclick="copySessionReviewPayload()" class="glow-btn outline">🔍 Audit & Rule Review</button>
+                        <div id="outbound-review-status" class="status-message inline-feedback"></div>
                     </div>
                 </div>
 
                 <!-- Inbound Data Operations -->
                 <div class="sidebar-card glass-panel desktop-only">
-                    <h3><span class="icon">📥</span> Inbound Payload</h3>
+                    <h3><span class="icon">📥</span> Import from Council</h3>
                     <p class="subtitle">Sync SSoT from Gem output</p>
                     <div class="btn-row">
-                        <button id="paste-payload-btn" class="glow-btn">📥 Paste Execution Payload</button>
+                        <button id="paste-payload-btn" class="glow-btn">📥 Ingest Execution Payload</button>
+                        <div id="inbound-paste-status" class="status-message inline-feedback"></div>
                     </div>
-                    <div id="data-status" class="status-message" style="margin-top: 6px; min-height: 0;"></div>
                 </div>
+
 
                 <!-- Portfolio Manager -->
                 <div class="sidebar-card glass-panel manager-card minimized">
@@ -174,7 +178,21 @@
                     </div>
                 </div>
 
-
+                <!-- Decision Log Management -->
+                <div class="sidebar-card glass-panel manager-card minimized desktop-only">
+                    <div class="header-row">
+                        <h3 onclick="toggleSection('decision-log-content', this)">
+                            <span class="icon">🗄️</span> Decision Log <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                        </h3>
+                    </div>
+                    <div id="decision-log-content" style="display: none;">
+                        <p class="subtitle" style="margin-bottom: 12px;">Forensic trade history management</p>
+                        <div class="btn-row">
+                            <button id="clear-log-btn" class="glow-btn outline danger">🗑️ Clear Decision Log</button>
+                            <div id="clear-log-status" class="status-message inline-feedback"></div>
+                        </div>
+                    </div>
+                </div>
             </aside>
         </main>
 

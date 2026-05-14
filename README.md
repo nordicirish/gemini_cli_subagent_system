@@ -1,6 +1,6 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v9.85-Verify-First-EIR-Suppression
+**Version:** v9.87-UX-Forensic-Scout-Sync
 
 **A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
@@ -26,7 +26,22 @@ Starting with **v9.22-Phantom-Persona-Final-Sync**, the system has reached full 
 |---|---|---|
 | **Verify-First Gate (ENH_93 patch)** | `ENH_93` | Adds a mandatory artifact-citation requirement to the FULL mode Self-Critique. An agent may only change its thesis if it can cite a **specific data point, Mandate ID, ENH code, or quantitative contradiction** not already in its Structural Thesis. If no concrete artifact exists, agent outputs: `"Thesis verified. No concrete error found."` Drives the Error Introduction Rate (EIR) toward near-zero during low-confidence deliberations, preventing agents from hallucinating flaws in sound theses to satisfy the critique instruction. Applied to BULLISH_ADVOCATE, RED_TEAM_PESSIMIST, NEUTRAL_STRUCTURALIST, and `rules.md` ENH_93 canonical definition. |
 
+### 🔒 v9.86 Cash Liquidity Hardening Sync (2026-05-14)
 
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Cash Reconciliation Protocol** | `MANDATE_31` | New systemic mandate requiring every turn to explicitly reconcile `unallocated_cash_eur`. Forces the Execution Engine to generate a `math_proof_liquidity` and the State Router to verify and emit updated cash balances in the `EXECUTION_PAYLOAD`. |
+| **Schema Integrity Hardening** | `MANDATE_08` | Added a `SCHEMA_INTEGRITY_VETO` to the Terminal Orchestrator. Master Router MUST block any payload that drops critical SSoT fields (Portfolio Snapshot, Cash, Risk Metrics) or deviates from the hardened JSON schema. |
+| **Thought Signature Lock** | `THOUGHT_SIG` | Immutable enforcement of the `"context_engineering_is_the_way to_go"` thoughtSignature to prevent logic degradation across the air-gap bridge. |
+
+### 🔒 v9.87 UX & Forensic Scout Hardening (2026-05-14)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Forensic UX Overhaul** | `UX_32` | Implemented semantic button renaming ("Market Snapshot", "Session Boot", "Audit Review") and per-button inline feedback architecture. Resolves feedback decoupling and improves operational clarity. |
+| **Dual-Audit Review Prompt** | `ENH_94` | Expanded the Session Review engine to include a **Rule Permanency Audit**. System now reviews `trade_lessons.json` for persistent tactical wins and generates "ANTIGRAVITY PATCH REQUESTS" for permanent promotion to `rules.md`. |
+| **Scout Category Grounding** | `ENH_84` | Decoupled the Scout Intelligence pipeline from hardcoded sectors. Technical sweep is now dynamically grounded in user-defined dashboard categories with a 6-ticker "Freshness Rotation" policy. |
+| **Minimizable Decision Log** | `UX_33` | Migrated the Decision Log management to a collapsible manager card at the bottom of the sidebar, unifying the interaction design across all state-management modules. |
 
 ## 🎭 Phantom Personalities & Adversarial Framing
 
@@ -40,10 +55,10 @@ To further eliminate hallucination and "forced setups," the system implements a 
 
 ### 🔄 Session Initialization & Forensic History Management
 The dashboard now includes integrated management for session transitions and historical auditing:
-*   **Optimized Session Init:** The "Copy Session Init" button triggers an automated cleanup: it clears the `decision_log.json` and generates a lightweight `SYSTEM BOOT` payload. This payload is filtered to only include **Held Portfolio Assets** and **Macro Indicators**, preventing LLM context overload while ensuring the Council is immediately oriented to active risk.
+*   **Optimized Session Init:** The "Copy Session Init" button generates a lightweight `SYSTEM BOOT` payload. This payload is filtered to only include **Held Portfolio Assets** and **Macro Indicators**, preventing LLM context overload while ensuring the Council is immediately oriented to active risk.
 *   **Smooth Marquee Ticker:** A hardware-accelerated, real-time alert bar provides scrolling system and market warnings with "hover-to-pause" functionality for forensic inspection.
 *   **Forensic History Control:** A dedicated **"Clear Decision Log"** button allows for manual wiping of historical trade logs, facilitating rapid backtesting resets.
-*   **Automated Backtesting:** The **"Copy EOD Review"** button aggregates the trailing decision log into a structured "Lead Quantitative Auditor" prompt for systemic performance reviews.
+*   **Automated Review Logic:** The **"Copy Session Review"** button aggregates the trailing decision log into a structured "Lead Quantitative Auditor" prompt for systemic performance reviews at any point during the session.
 
 ---
 
@@ -137,7 +152,7 @@ The system now enforces **adversarial reasoning**, **volatility awareness**, and
 1. **Normalized Registry Sync**: When the decision log evaluates realized returns (raw and alpha vs SPY) to generate a reflection, it MUST format this reflection as a codified tag (e.g., "L-226: [CODIFIED: SUPPORT_FAILURE]"). This ensures the Portfolio Manager ingests machine-readable, normalized intelligence on the next run, preventing behavioral drift across long-horizon backtests.
 2. **Flash-Tier Scrutiny (ENH_78)**: Hardens the data ingestion pipeline for high-velocity analysis, mandating cross-reference verification between live search and the SSoT.
 3. **Bifurcated Delivery**: Optimizes payload delivery by separating lightweight turn data from heavy session initialization context.
-4. **Scout Intelligence Pipeline (ENH_84)**: Implements autonomous, low-cost technical screening via the Finnhub API. Discovered candidates are injected into the SSoT with "Unverified Institutional Status" metadata to trigger mandatory agentic grounding.
+4. **Scout Intelligence Pipeline (ENH_84)**: Implements autonomous, low-cost technical screening via the Finnhub API. The sweep is dynamically grounded in user-defined categories (e.g., "AI & Data", "Biotech") and maintains a rotation of the 6 most recent high-conviction candidates. Discovered assets are injected into the SSoT with "Unverified Institutional Status" to trigger mandatory agentic grounding.
 
 ### 🧠 Console Architecture Principles (v4.1+)
 
@@ -175,8 +190,10 @@ The Gemini Council Dashboard provides a high-density, real-time visualization of
     *   💎 **Your Portfolio** (Cyan): Active institutional holdings.
     *   👀 **Strategic Watchlist** (Purple): High-conviction setups currently in the observation gate.
     *   🔭 **Scout Intelligence** (Yellow): Autonomous screening candidates awaiting agentic grounding.
-4.  **Manager Interface**: Integrated sidebar tools for rapid portfolio and watchlist adjustments, featuring collapsible sections and smooth-animation chevrons to minimize cognitive load.
+4.  **Manager Interface**: Integrated sidebar tools for rapid portfolio, watchlist, and decision log adjustments, featuring collapsible sections and smooth-animation chevrons to minimize cognitive load.
 5.  **Macro HUD**: Real-time monitoring of key indices (SPY, VIX, VIXY) with dynamic price-flash animations for immediate trend-shift detection.
+6.  **Semantic Data Operations**: Action buttons renamed for forensic clarity ("Copy Market Snapshot", "New Session Boot", "Audit & Rule Review").
+7.  **Inline Feedback Architecture**: Per-button status indicators provide immediate, localized confirmation for data operations across desktop and mobile surfaces.
 
 ---
 
@@ -427,8 +444,8 @@ The dashboard provides **two copy modes** to optimize token usage:
 | Button | Payload | When to Use |
 |--------|---------|-------------|
 | **📋 Copy Turn Data** | Slim tickers (`price`, `vwap`, `gap_percent`, `rsi`, `atr_percent`, `net_gex_total`, `dealer_posture`, `score`, `trend`, `signal`) + compact `mutable_state` (`unallocated_cash_eur`, `total_liquidity_eur`, `risk_regime`, slim `portfolio_snapshot`) | Every turn during an active LLM session — lightweight, token-efficient |
-| **📋 Copy Session Init** | Full SSOT (`local_ssot_shadow.json`), full ticker data, and `trade_lessons.md` registry | Session initialization, start of day, or when trade lessons have changed |
-| **📋 Copy EOD Review Payload**| Full `decision_log.json` 20-day history wrapped in `MANDATE_26` directive | Market close, to execute the automated Review Engine backtest |
+| **📋 Copy Session Init** | Full SSOT (`local_ssot_shadow.json`), full ticker data, and `trade_lessons.md` registry | Session initialization or start of day |
+| **📋 Copy Session Review Payload**| Full `decision_log.json` 20-day history wrapped in `MANDATE_26` directive | Any time, to execute the automated Review Engine historical backtest |
 
 **Workflow:**
 1. **Initialize:** Click **"Copy Session Init"** and paste into the Orchestrator Gem to bootstrap a new session with full context.
@@ -453,9 +470,9 @@ Increment the sync_id before outputting.
 
 For all subsequent turns during the session, use **"Copy Turn Data"** instead — it sends only lightweight ticker snapshots and a compact portfolio summary, keeping token usage minimal.
 
-### 🟢 End of Day Review (MANDATE_26)
-At market close, use the automated End-of-Day loop to audit the session's logic:
-1. **Fetch:** Click **"📋 Copy EOD Review Payload"** in the dashboard sidebar. This reads `decision_log.json` and automatically wraps the 20-day trailing decision history inside the strict `MANDATE_26_POST_TRADE_REVIEW` prompt.
+### 🟢 Session Review (MANDATE_26)
+At any point (typically after significant volatility or at market close), use the automated Session Review loop to audit the session's logic:
+1. **Fetch:** Click **"📋 Copy Session Review Payload"** in the dashboard sidebar. This reads `decision_log.json` and automatically wraps the 20-day trailing decision history inside the strict `MANDATE_26_POST_TRADE_REVIEW` prompt.
 2. **Execute:** Paste the payload into the dedicated **Review Engine Gem** (`post_trade_review.md`).
 3. **Ingest:** The system grades its historical assumptions and generates new rules. Paste the output JSON back into the dashboard via **"Paste Execution Payload"** to merge the new lessons.
 

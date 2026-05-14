@@ -18,7 +18,7 @@ let MACRO_LABELS = {};
 const dCopyBtn = document.getElementById('copy-json-btn');
 const dCopySessionBtn = document.getElementById('copy-session-btn');
 const dPasteBtn = document.getElementById('paste-payload-btn');
-const dDataStatus = document.getElementById('data-status');
+const dMobileStatus = document.getElementById('mobile-data-status');
 
 // Manager Elements
 const dPortfolioBody = document.getElementById('portfolio-manager-body');
@@ -37,7 +37,7 @@ const dSaveScoutCategoriesBtn = document.getElementById('save-scout-categories-b
 
 
 // Helper for consistent UI feedback on copy/paste actions
-function showFeedback(btn, btnText, statusMsg, isError = false) {
+function showFeedback(btn, btnText, statusMsg, isError = false, statusEl = null) {
     if (btn.dataset.isFeedback === "true") return; // Prevent re-triggering during active feedback
     
     btn.dataset.isFeedback = "true";
@@ -45,13 +45,20 @@ function showFeedback(btn, btnText, statusMsg, isError = false) {
     btn.innerHTML = btnText;
     btn.classList.add(isError ? 'btn-error' : 'btn-success');
     
-    dDataStatus.textContent = statusMsg;
-    dDataStatus.className = `status-message ${isError ? 'text-red' : 'text-green'}`;
+    // Use per-button inline feedback if available, otherwise fallback
+    const target = statusEl || dDataStatus;
+    if (target) {
+        target.textContent = statusMsg;
+        target.className = `status-message inline-feedback active ${isError ? 'text-red' : 'text-green'}`;
+    }
     
     setTimeout(() => {
         btn.innerHTML = originalHtml;
         btn.classList.remove('btn-error', 'btn-success');
-        dDataStatus.textContent = '';
+        if (target) {
+            target.textContent = '';
+            target.className = 'status-message inline-feedback';
+        }
         btn.dataset.isFeedback = "false";
     }, 2500);
 }
@@ -173,6 +180,7 @@ dUpdateIndicesBtn.addEventListener('click', async () => {
         if(data.status === 'success') {
             currentMacroTickers = data.macro;
             renderIndicesModal(); // update immediately
+            pollData(); // Force global refresh
             dIStatus.textContent = 'Tracked indices updated successfully.';
             dIStatus.className = 'status-message text-green';
             setTimeout(() => { dIStatus.textContent = ''; }, 3000);
@@ -187,8 +195,9 @@ dUpdateIndicesBtn.addEventListener('click', async () => {
     }
 });
 
-// Copy Turn Data Handler (lightweight per-turn LLM payload — no SSOT, no lessons)
-dCopyBtn.addEventListener('click', async () => {
+// --- Action Handlers ---
+
+async function copyMarketSnapshot(triggerBtn, statusEl) {
     try {
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
@@ -210,7 +219,6 @@ dCopyBtn.addEventListener('click', async () => {
         
         const ssot = state.local_storage_state || {};
         const ms = ssot.mutable_state || {};
-        const fi = ms.forensic_intelligence || {};
         const portfolioFull = ms.portfolio_snapshot || [];
         
         const slimPortfolio = portfolioFull.map(p => {
@@ -240,19 +248,15 @@ dCopyBtn.addEventListener('click', async () => {
         
         const jsonString = "```json\n" + JSON.stringify(turnPayload, null, 2) + "\n```";
         await navigator.clipboard.writeText(jsonString);
-        showFeedback(dCopyBtn, "✅ Copied!", "Turn data copied (lightweight)!");
+        showFeedback(triggerBtn, "✅ Copied!", "Market snapshot ready!", false, statusEl);
     } catch (e) {
         console.error(e);
-        showFeedback(dCopyBtn, "❌ Error", "Failed to copy data.", true);
+        showFeedback(triggerBtn, "❌ Error", "Failed to copy snapshot.", true, statusEl);
     }
-});
+}
 
-// Copy Session Init Handler (Full SSOT + Tickers + Lessons)
-dCopySessionBtn.addEventListener('click', async () => {
+async function copySessionBoot(triggerBtn, statusEl) {
     try {
-        // Wire clearing to session init as requested
-        await fetch(`${API_BASE}/clear_decision_log`, { method: 'POST' });
-
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
         
@@ -261,7 +265,6 @@ dCopySessionBtn.addEventListener('click', async () => {
         const portfolio = ms.portfolio_snapshot || [];
         const heldTickers = new Set(portfolio.map(p => p.ticker.toUpperCase()));
         
-        // Filter tickers to only Held + Macro to prevent LLM context overload
         const filteredTickers = (state.tickers || []).filter(t => {
             const sym = t.ticker.toUpperCase();
             const isHeld = heldTickers.has(sym);
@@ -269,7 +272,6 @@ dCopySessionBtn.addEventListener('click', async () => {
             return isHeld || isMacro;
         });
 
-        // [ENH_SYNC] Generate fresh local timestamp for the session start
         const now = new Date();
         const tOffset = -now.getTimezoneOffset();
         const offSign = tOffset >= 0 ? '+' : '-';
@@ -292,29 +294,43 @@ dCopySessionBtn.addEventListener('click', async () => {
             trade_lessons: state.trade_lessons
         };
 
-        // Sync fresh timestamp into nested SSoT to prevent Gem logic from using last session's time
         if (sessionPayload.local_storage_state && 
             sessionPayload.local_storage_state.mutable_state && 
             sessionPayload.local_storage_state.mutable_state.state_context) {
             sessionPayload.local_storage_state.mutable_state.state_context.timestamp = localTS;
         }
         
-        const bootPrompt = "SYSTEM BOOT: Initialize Council with the provided SSoT and Session context. Execute Stage 0 Data Sync and provide a top-level market posture assessment.";
+        const bootPrompt = [
+            "SYSTEM BOOT: COUNCIL SESSION INITIALIZATION",
+            "",
+            "You are receiving the full SSoT state and live market data for a new session.",
+            "Execute the following Stage 0 Boot Sequence:",
+            "",
+            "1. BASELINE SYNC (ENH_31): Ground all portfolio prices via Google Search.",
+            "   Verify each ticker's current price against the provided snapshot.",
+            "2. CASH RECONCILIATION (MANDATE_31): Confirm unallocated_cash_eur matches",
+            "   the SSoT. Output: math_proof_liquidity.",
+            "3. REGIME CLASSIFICATION: Assess current risk regime (TRENDING/MEAN_REVERTING/",
+            "   VOLATILE) based on VIX, VIXY velocity, and SPY structure.",
+            "4. PORTFOLIO HEALTH AUDIT: Flag any positions with health_score < 50 or",
+            "   status = IN_DISTRESS for immediate Council review.",
+            "5. MARKET POSTURE: Provide a top-level posture assessment (RISK_ON/RISK_OFF/",
+            "   NEUTRAL) with supporting forensic evidence.",
+            "",
+            "Emit the full EXECUTION_PAYLOAD with updated state_context upon completion."
+        ].join("\n");
         const jsonString = bootPrompt + "\n\n```json\n" + JSON.stringify(sessionPayload, null, 2) + "\n```";
         
         await navigator.clipboard.writeText(jsonString);
-        showFeedback(dCopySessionBtn, "✅ Copied!", "Full session initialization data copied (Filtered Tickers) & Log cleared!");
+        showFeedback(triggerBtn, "✅ Copied!", "Session boot payload ready!", false, statusEl);
     } catch (e) {
         console.error(e);
-        showFeedback(dCopySessionBtn, "❌ Error", "Failed to copy session data.", true);
+        showFeedback(triggerBtn, "❌ Error", "Failed to copy session boot.", true, statusEl);
     }
-});
+}
 
-
-
-// Paste Payload Handler
-dPasteBtn.addEventListener('click', async () => {
-    dPasteBtn.disabled = true;
+async function ingestExecutionPayload(triggerBtn, statusEl) {
+    triggerBtn.disabled = true;
     try {
         const text = await navigator.clipboard.readText();
         if (!text) throw new Error("Clipboard empty");
@@ -327,17 +343,27 @@ dPasteBtn.addEventListener('click', async () => {
         
         const data = await res.json();
         if (data.status === 'success') {
-            showFeedback(dPasteBtn, "✅ Ingested!", "Payload successfully ingested!");
+            showFeedback(triggerBtn, "✅ Ingested!", "Payload ingested!", false, statusEl);
+            pollData();
         } else {
             throw new Error(data.message);
         }
     } catch (e) {
         console.error("Paste Error: ", e);
-        showFeedback(dPasteBtn, "❌ Error", e.message || "Failed to ingest payload.", true);
+        showFeedback(triggerBtn, "❌ Error", e.message || "Failed to ingest.", true, statusEl);
     } finally {
-        dPasteBtn.disabled = false;
+        triggerBtn.disabled = false;
     }
-});
+}
+
+// --- Listeners ---
+if (dCopyBtn) dCopyBtn.addEventListener('click', () => copyMarketSnapshot(dCopyBtn, document.getElementById('outbound-turn-status')));
+if (dCopySessionBtn) dCopySessionBtn.addEventListener('click', () => copySessionBoot(dCopySessionBtn, document.getElementById('outbound-session-status')));
+if (dPasteBtn) dPasteBtn.addEventListener('click', () => ingestExecutionPayload(dPasteBtn, document.getElementById('inbound-paste-status')));
+
+
+
+// ... (cleaned up)
 
 // Format large numbers (Volume)
 function formatVol(vol) {
@@ -669,7 +695,9 @@ async function savePortfolio(portfolio) {
         });
         if (res.ok) {
             btn.innerHTML = "SYNC ✅";
+            showFeedback(btn, "✅ Synced!", "Portfolio successfully updated! (Table refreshing...)");
             await fetchPortfolio();
+            pollData(); // Force immediate refresh
         }
     } catch (e) { console.error("Portfolio update failed", e); }
     finally {
@@ -739,7 +767,13 @@ async function saveWatchlist(list) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(list)
         });
-        if (res.ok) await fetchWatchlist();
+        if (res.ok) {
+            await fetchWatchlist();
+            dDataStatus.textContent = "Watchlist updated! (Table refreshing...)";
+            dDataStatus.className = "status-message text-green";
+            setTimeout(() => { dDataStatus.textContent = ""; }, 3000);
+            pollData(); // Force immediate refresh
+        }
     } catch (e) { console.error("Watchlist update failed", e); }
 }
 
@@ -832,22 +866,24 @@ window.deleteFromPortfolio = deleteFromPortfolio;
 window.deleteFromWatchlist = deleteFromWatchlist;
 window.toggleScoutCategory = toggleScoutCategory;
 window.toggleSection = toggleSection;
+window.copySessionReviewPayload = copySessionReviewPayload;
 
 dAddToPortfolioBtn.addEventListener('click', addToPortfolio);
 dSavePortfolioBtn.addEventListener('click', () => savePortfolio());
 dAddToWatchlistBtn.addEventListener('click', addToWatchlist);
 
-async function copyEODReviewPayload() {
-    const btn = document.getElementById('btn-eod-review');
+async function copySessionReviewPayload(triggerBtn, statusEl) {
+    const btn = triggerBtn || document.getElementById('btn-session-review');
+    const targetStatus = statusEl || document.getElementById('outbound-review-status');
     try {
-        const response = await fetch('/api/eod_review_payload');
+        const response = await fetch('/api/session_review_payload');
         const data = await response.json();
         
         await navigator.clipboard.writeText(data.payload);
-        showFeedback(btn, "✅ EOD Copied!", "EOD Review Payload copied to clipboard!");
+        showFeedback(btn, "✅ Copied!", "Audit & Rule Review payload ready!", false, targetStatus);
     } catch (error) {
-        console.error("Failed to copy EOD payload:", error);
-        showFeedback(btn, "❌ Error", "Failed to fetch EOD log.", true);
+        console.error("Failed to copy Review payload:", error);
+        showFeedback(btn, "❌ Error", "Failed to fetch review log.", true, targetStatus);
     }
 }
 
@@ -857,6 +893,7 @@ if (dClearLogBtn) {
     dClearLogBtn.addEventListener('click', async () => {
         if (!confirm("Are you sure you want to clear the entire Decision Log? This cannot be undone.")) return;
         
+        const statusEl = document.getElementById('clear-log-status');
         dClearLogBtn.disabled = true;
         try {
             const res = await fetch(`${API_BASE}/clear_decision_log`, {
@@ -864,13 +901,13 @@ if (dClearLogBtn) {
             });
             const data = await res.json();
             if (data.status === 'success') {
-                showFeedback(dClearLogBtn, "✅ Cleared!", "Decision log successfully wiped!");
+                showFeedback(dClearLogBtn, "✅ Cleared!", "Decision log wiped.", false, statusEl);
             } else {
                 throw new Error(data.message);
             }
         } catch (e) {
             console.error("Clear Log Error: ", e);
-            showFeedback(dClearLogBtn, "❌ Error", e.message || "Failed to clear log.", true);
+            showFeedback(dClearLogBtn, "❌ Error", e.message || "Failed to clear log.", true, statusEl);
         } finally {
             dClearLogBtn.disabled = false;
         }
@@ -882,9 +919,9 @@ if (dClearLogBtn) {
 const dMobileCopyBtn = document.getElementById('mobile-copy-json-btn');
 const dMobilePasteBtn = document.getElementById('mobile-paste-payload-btn');
 const dMobileCopySessionBtn = document.getElementById('mobile-copy-session-btn');
-const dMobileEODBtn = document.getElementById('mobile-btn-eod-review');
+const dMobileReviewBtn = document.getElementById('mobile-btn-session-review');
 
-if (dMobileCopyBtn) dMobileCopyBtn.addEventListener('click', () => dCopyBtn.click());
-if (dMobilePasteBtn) dMobilePasteBtn.addEventListener('click', () => dPasteBtn.click());
-if (dMobileCopySessionBtn) dMobileCopySessionBtn.addEventListener('click', () => dCopySessionBtn.click());
-if (dMobileEODBtn) dMobileEODBtn.addEventListener('click', () => copyEODReviewPayload());
+if (dMobileCopyBtn) dMobileCopyBtn.addEventListener('click', () => copyMarketSnapshot(dMobileCopyBtn, dMobileStatus));
+if (dMobilePasteBtn) dMobilePasteBtn.addEventListener('click', () => ingestExecutionPayload(dMobilePasteBtn, dMobileStatus));
+if (dMobileCopySessionBtn) dMobileCopySessionBtn.addEventListener('click', () => copySessionBoot(dMobileCopySessionBtn, dMobileStatus));
+if (dMobileReviewBtn) dMobileReviewBtn.addEventListener('click', () => copySessionReviewPayload(dMobileReviewBtn, dMobileStatus));
