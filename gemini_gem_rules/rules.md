@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v9.90-VWAP-Hardening-Sync
+**Version:** v9.93-Portfolio-Curation-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -88,6 +88,8 @@
 - ENH_95: IR Opacity Defense Protocol
 - ENH_96: Tactical Tranching
 - ENH_97: Power Hour Integrity
+- ENH_98: Analyst Upgrade Quarantine
+- ENH_99: Portfolio Curation Protocol
 
 
 ## Mandate Registry
@@ -134,6 +136,17 @@
 
 #### Anti Hallucination Core
 - **Volatility-Momentum Inversion Guard:** The Council is strictly prohibited from requiring a high VIX (e.g., VIX > 20) to authorize purchases under high RSI regimes (L-226). VIX > 20 is a HARD VETO condition under MANDATE_20, never an authorization requirement. High RSI breakouts require a TRENDING regime (which typically correlates with VIX < 20), not a highly volatile regime.
+
+- **[ENH_98 - Analyst Upgrade Quarantine]**
+  - **Status:** ACTIVE
+  - **Instruction:** Fundamental analyst upgrades (e.g., Price Target raises) carry ZERO execution weight and cannot authorize capital deployment if the asset is currently classified as SHORT_GAMMA and trading below its intraday VWAP.
+  - **Rationale:** Prevents "hype-trapping" where bullish narrative sentiment is used to justify catching a falling knife during structural distribution. (Ref: UMAC 2026-05-15 forensic failure).
+
+- **[ENH_99 - Portfolio Curation Protocol]**
+  - **Status:** ACTIVE
+  - **Instruction:** Assets with 0 shares and 0 WAC MUST be strictly excluded from the `portfolio_snapshot` array in the `EXECUTION_PAYLOAD`.
+  - **Action:** During state synthesis, the State & Validation Router must prune any ticker with `shares == 0`. Such tickers are classified as "Watched" and are tracked via the Strategic Watchlist in `config.json`, not the active portfolio state.
+  - **Rationale:** Prevents "Phantom Exposure" and UI clutter where watchlist items are mistakenly categorized as portfolio holdings.
 
 - **[MANDATE_01_GATEKEEPER]**
   - **Status:** ACTIVE
@@ -1507,17 +1520,20 @@
 - **Id:** ENH_86
 - **Title:** Melt-Up Regime & RSI Decoupling
 - **Status:** ACTIVE
-- **Directive:** If SPY RSI > 75, traditional overbought mean-reversion logic is suspended IF VIX < 20 and Dealer Posture is LONG_GAMMA. 
+- **Directive:** SPY RSI > 75 no longer blocks high-beta accumulation if VIX < 20 and Dealer Posture is LONG_GAMMA.
+- **Justification:** Promoted from G-01. Withstood multi-session verification as a reliable momentum filter.
 - **Instruction:** Do not short or prematurely exit high-beta accumulation based solely on extended RSI in this regime. Classify as "Institutional Graduation" melt-up rather than a technical exhaustion point.
 
 ## Enh 87 VWAP Stop & Liquidity Wash
 - **Id:** ENH_87
 - **Title:** VWAP Stop & Liquidity Wash
 - **Status:** ACTIVE
-- **Directive:** Intraday VWAP is the absolute governing threshold for relative strength and capital deployment.
+- **Directive:** Strictly trail intraday VWAP for runners; a VWAP PIN during SHORT_GAMMA indicates a potential accumulation floor, but new capital deployment is strictly vetoed if the asset trades below intraday VWAP.
+- **Justification:** Promoted from G-02. Forensic backtest of the 05-15 decision log proves this rule was the sole mechanism preventing catastrophic drawdown during the morning liquidity flush.
 - **Execution Rules:**
     1. **Deployment Veto:** Even in a verified Melt-Up (ENH_86), the system MUST VETO new cash deployment into any asset trading below its intraday VWAP.
     2. **Accumulation Floor:** A VWAP "PIN" (sustained price stability within 0.1% of VWAP) during a **SHORT_GAMMA** regime indicates an institutional accumulation floor; authorized for high-conviction entries if catalysts are active.
+    3. **Trailing Protocol:** For active positions, the exit engine MUST trail the current price with a hard stop anchored to the intraday VWAP curve to prevent profit evaporation during liquidity washes.
 
 ## Enh 95 IR Opacity Defense
 - **Id:** ENH_95
@@ -1542,6 +1558,14 @@
 - **Status:** ACTIVE
 - **Directive:** During the final trading hour (15:30 ET onward), a relative volume (rVol) > 2.0 MUST be treated as a mathematical validation of "Institutional Graduation". 
 - **Execution:** When this condition is met on a high-conviction target, the Execution Engine is authorized to execute entries via Precision-Bid Pivots.
+
+## Enh 98 Analyst Upgrade Quarantine
+- **Id:** ENH_98
+- **Title:** Analyst Upgrade Quarantine
+- **Status:** ACTIVE
+- **Directive:** Bullish fundamental sentiment (upgrades, PT raises) cannot override structural distribution.
+- **Execution:** IF (Analyst_Event == UPGRADE OR Analyst_Event == PT_RAISE) AND Dealer_Posture == SHORT_GAMMA AND Price < VWAP THEN Set Execution_Weight = 0.0.
+- **Rationale:** Hardening against 'Narrative Blindness' where agents ignore the tape (distribution) because a reliable analyst (e.g., Needham) issued a bullish note. Structural capacity (GEX/VWAP) takes absolute precedence over narrative sentiment during active breakdowns.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.

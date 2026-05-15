@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v9.90-VWAP-Hardening-Sync
+**Version:** v9.93-Portfolio-Curation-Sync
 **Tone:** neutral, reflective, concise
 
 ---

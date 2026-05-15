@@ -1,6 +1,6 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v9.90-VWAP-Hardening-Sync
+**Version:** v9.94-Data-Reliability-Sync
 
 **A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
@@ -30,6 +30,18 @@ Starting with **v9.22-Phantom-Persona-Final-Sync**, the system has reached full 
 | **Melt-Up RSI Decoupling** | `ENH_86` | Suspends RSI mean-reversion logic (>75) IF VIX < 20 and Dealer Posture is LONG_GAMMA. Prevents premature exits during institutional melt-ups. |
 | **VWAP Stop & Liquidity Wash** | `ENH_87` | Establishes intraday VWAP as a hard capital deployment gate. Even in melt-ups, sub-VWAP assets are vetoed. Authorizes entries on VWAP "PIN" during SHORT_GAMMA. |
 | **Priority Ingestion** | `FETCH` | Re-ordered master ticker queue to prioritize Portfolio and Strategic Watchlist assets in all fetching cycles. |
+| **Analyst Upgrade Quarantine** | `ENH_98` | Mandatory zero-weight execution for PT raises/upgrades if asset is SHORT_GAMMA and sub-VWAP. Prevents hype-trapping during structural distribution. |
+| **Melt-Up & VWAP Hardening** | `ENH_86/87` | Hardened RSI decoupling and VWAP-anchored trailing stops. Promoted from G-01/G-02 after multi-session validation. |
+| **Portfolio Curation** | `ENH_99` | Mandatory pruning of 0-share assets from the portfolio state to prevent UI pollution and "Phantom Exposure". |
+
+### 🔒 v9.94 Data Reliability & Terminal UI Sync (2026-05-15)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **API Diversification** | `DATA_RELIABILITY` | Integrated Alpha Vantage (`GLOBAL_QUOTE`) as a high-reliability fallback to alleviate Yahoo Finance query limits during hard refreshes. |
+| **Refresh Optimization** | `PERFORMANCE` | Scaled `max_workers` to 15 and aggressively reduced intra-request staggering delays to significantly speed up the heavy data refresh cycle without triggering API blackout limits. |
+| **Scout Array Sanitation** | `DATA_GUARD` | Surgically updated Zero-Cost Scout arrays (removed invalid/delisted tickers like HES and C3AI) to prevent 404 blocking exceptions. |
+| **Forex Cash Manager** | `UI_UX` | Added a persistent, editable `CASH (€)` row to the terminal dashboard with real-time conversion to `$ USD` powered by a background `EURUSD=X` macro tracker. |
 
 ### 🔒 v9.85 Verify-First EIR Suppression (2026-05-14)
 

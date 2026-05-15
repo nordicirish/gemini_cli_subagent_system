@@ -643,12 +643,17 @@ async function fetchPortfolio() {
     } catch (e) { console.error("Portfolio fetch failed", e); }
 }
 
-function renderPortfolio(portfolio) {
+function renderPortfolio(data) {
     if (!dPortfolioBody) return;
     let html = '';
+    const portfolio = data.portfolio || [];
+    const cash = data.unallocated_cash_eur || 0;
+    const rate = data.eurusd_rate || 1.08;
+    const usd = (cash * rate).toFixed(2);
+    
     portfolio.forEach((item, index) => {
         html += `
-            <tr data-index="${index}">
+            <tr data-index="${index}" class="portfolio-item-row">
                 <td style="color: var(--accent); font-weight: 700; font-size: 0.8rem;">${item.ticker}</td>
                 <td><input type="number" class="portfolio-input" data-key="shares" value="${item.shares || 0}"></td>
                 <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${item.wac || 0}"></td>
@@ -656,6 +661,15 @@ function renderPortfolio(portfolio) {
             </tr>
         `;
     });
+
+    html += `
+        <tr class="cash-row" style="background: rgba(0, 255, 148, 0.05);">
+            <td style="color: var(--green); font-weight: 700; font-size: 0.75rem;">CASH (€)</td>
+            <td><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cash}" style="color: var(--green);"></td>
+            <td colspan="2" style="font-size: 0.75rem; color: var(--text-dim); text-align: left; padding-left: 8px;">$${usd}</td>
+        </tr>
+    `;
+
     dPortfolioBody.innerHTML = html;
 }
 
@@ -670,7 +684,7 @@ async function addToPortfolio() {
 }
 
 function getCurrentPortfolio() {
-    const rows = dPortfolioBody.querySelectorAll('tr');
+    const rows = dPortfolioBody.querySelectorAll('tr.portfolio-item-row');
     const portfolio = [];
     rows.forEach(row => {
         portfolio.push({
@@ -682,16 +696,26 @@ function getCurrentPortfolio() {
     return portfolio;
 }
 
-async function savePortfolio(portfolio) {
+function getCurrentCash() {
+    const cashInput = document.getElementById('cash-input-eur');
+    return cashInput ? parseFloat(cashInput.value) || 0 : 0;
+}
+async function savePortfolio(portfolioArr) {
     const btn = dSavePortfolioBtn;
     const originalText = btn.innerHTML;
     btn.innerHTML = "WAIT...";
     btn.disabled = true;
     try {
+        const pArray = portfolioArr || getCurrentPortfolio();
+        const cVal = getCurrentCash();
+        const payload = {
+            portfolio: pArray,
+            unallocated_cash_eur: cVal
+        };
         const res = await fetch(`${API_BASE}/basket`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(portfolio || getCurrentPortfolio())
+            body: JSON.stringify(payload)
         });
         if (res.ok) {
             btn.innerHTML = "SYNC ✅";

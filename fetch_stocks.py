@@ -38,6 +38,7 @@ with open('config.json', 'r') as f:
 # -----------------------------
 FINNHUB_API_KEY = config.get("FINNHUB_API_KEY")
 POLYGON_API_KEY = config.get("POLYGON_API_KEY")
+ALPHA_ADVANTAGE_API_KEY = config.get("ALPHA_ADVANTAGE_API_KEY")
 
 USE_FINNHUB = True
 USE_POLYGON = False  # keep false unless you want Polygon volume fallback
@@ -88,7 +89,7 @@ if os.path.exists('local_ssot_shadow.json'):
     except:
         pass
 
-ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS)) # Deduplicated order
+ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS + ["EURUSD=X"])) # Deduplicated order
 
 INVERSE_MACRO = ['^VIX', 'VIXY', 'UUP', 'IEF']
 
@@ -250,19 +251,33 @@ async def update_tickers(req: Request):
 @app.get("/api/basket")
 def get_basket():
     ssot_file = 'local_ssot_shadow.json'
+    eurusd = cache.prices.get("EURUSD=X", 1.08)
     if os.path.exists(ssot_file):
         try:
             with open(ssot_file, 'r') as f:
                 ssot = json.load(f)
-                return JSONResponse(ssot.get("mutable_state", {}).get("portfolio_snapshot", []))
+                ms = ssot.get("mutable_state", {})
+                return JSONResponse({
+                    "portfolio": ms.get("portfolio_snapshot", []),
+                    "unallocated_cash_eur": ms.get("unallocated_cash_eur", 0),
+                    "eurusd_rate": eurusd
+                })
         except:
-            return JSONResponse([])
-    return JSONResponse([])
+            pass
+    return JSONResponse({"portfolio": [], "unallocated_cash_eur": 0, "eurusd_rate": eurusd})
 
 @app.post("/api/basket")
 async def save_basket(req: Request):
     ssot_file = 'local_ssot_shadow.json'
-    new_basket = await req.json()
+    data = await req.json()
+    
+    if isinstance(data, list):
+        new_basket = data
+        new_cash = None
+    else:
+        new_basket = data.get("portfolio", [])
+        new_cash = data.get("unallocated_cash_eur", None)
+
     if os.path.exists(ssot_file):
         try:
             with open(ssot_file, 'r') as f:
@@ -271,6 +286,9 @@ async def save_basket(req: Request):
             if "mutable_state" not in ssot:
                 ssot["mutable_state"] = {}
             ssot["mutable_state"]["portfolio_snapshot"] = new_basket
+            if new_cash is not None:
+                ssot["mutable_state"]["unallocated_cash_eur"] = new_cash
+                
             # Clean up root-level alias if it exists to prevent "ghost" portfolio items
             ssot.pop("portfolio_snapshot", None)
             
@@ -280,11 +298,12 @@ async def save_basket(req: Request):
             # Update global trackers
             global PORTFOLIO_TICKERS, ALL_TICKERS
             PORTFOLIO_TICKERS = [p.get("ticker").upper() for p in new_basket if isinstance(p, dict) and p.get("ticker")]
-            ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+            ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS + ["EURUSD=X"]))
             
             return JSONResponse({"status": "success"})
         except Exception as e:
             return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    return JSONResponse({"status": "error", "message": "SSoT not found"}, status_code=404)
     return JSONResponse({"status": "error", "message": "SSoT not found"}, status_code=404)
 
 @app.get("/api/watchlist")
@@ -1386,6 +1405,26 @@ def get_finnhub_quote(symbol):
         pass
     return None, None
 
+def get_alpha_vantage_quote(symbol):
+    if not ALPHA_ADVANTAGE_API_KEY:
+        return None, None, None
+    try:
+        av_sym = symbol.replace("^", "") if "^" in symbol else symbol
+        url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={av_sym}&apikey={ALPHA_ADVANTAGE_API_KEY}"
+        r = requests.get(url, timeout=3)
+        if r.status_code == 200:
+            data = r.json()
+            if "Global Quote" in data and data["Global Quote"]:
+                quote = data["Global Quote"]
+                c = float(quote.get('05. price', 0))
+                pc = float(quote.get('08. previous close', 0))
+                v = int(quote.get('06. volume', 0))
+                if c > 0:
+                    return c, pc, v
+    except:
+        pass
+    return None, None, None
+
 def get_finnhub_candles(symbol, resolution='D', count=250):
     if not USE_FINNHUB:
         return None
@@ -1428,7 +1467,7 @@ async def run_finnhub_scout_sweep(target_sectors):
         "TECHNOLOGY": ["AAPL", "MSFT", "NVDA", "AMD", "CRM", "ORCL", "SNOW", "PLTR", "TSM", "AVGO"],
         "HEALTHCARE": ["JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK", "TMO", "DHR", "ISRG", "BMY"],
         "FINANCIALS": ["JPM", "BAC", "WFC", "GS", "MS", "V", "MA", "PYPL", "AXP", "BLK"],
-        "ENERGY": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HES"],
+        "ENERGY": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "HAL"],
         "INDUSTRIALS": ["HON", "GE", "UPS", "BA", "LMT", "CAT", "RTX", "DE", "MMM", "LUV"],
         "CONSUMER DISCRETIONARY": ["AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "BKNG", "TJX", "ORLY", "F"],
         "CONSUMER STAPLES": ["PG", "KO", "PEP", "WMT", "COST", "PM", "EL", "TGT", "KDP", "STZ"],
@@ -1436,7 +1475,7 @@ async def run_finnhub_scout_sweep(target_sectors):
         "REAL ESTATE": ["PLD", "AMT", "EQIX", "CCI", "WY", "PSA", "DRE", "VICI", "CBRE", "O"],
         "MATERIALS": ["LIN", "APD", "SHW", "FCX", "NEM", "CTVA", "ECL", "NUE", "ALB", "DD"],
         "COMMUNICATION SERVICES": ["GOOGL", "META", "NFLX", "DIS", "VZ", "T", "TMUS", "CHTR", "CMCSA", "PARA"],
-        "AI & DATA": ["PLTR", "SOUN", "BBAI", "NVDA", "MSFT", "GOOGL", "AMD", "AI", "C3AI", "PATH"],
+        "AI & DATA": ["PLTR", "SOUN", "BBAI", "NVDA", "MSFT", "GOOGL", "AMD", "AI", "CRWD", "PATH"],
         "AEROSPACE & DEFENSE": ["AVAV", "KTOS", "BA", "LMT", "NOC", "GD", "LHX", "RTX", "HWM", "LDOS"],
         "BIOTECH": ["DFTX", "BNTX", "MRNA", "VRTX", "AMGN", "REGN", "GILD", "BIIB", "SGEN", "XBI"],
         "SEMICONDUCTORS": ["NVDA", "AMD", "INTC", "MU", "AVGO", "TXN", "QCOM", "ADI", "KLAC", "LRCX"],
@@ -1820,11 +1859,11 @@ def update_history_and_technicals(symbol, t_obj):
                 except:
                     pass
 
-            if last_reg_close == 0.0 and len(close) >= 2:
+            if last_reg_close == 0.0 and len(close) >= 1:
                 if isinstance(close, (int, float, np.floating, np.integer)):
                     last_reg_close = float(close)
                 else:
-                    last_reg_close = to_float(close.iloc[-2])
+                    last_reg_close = to_float(close.iloc[-1])
 
             if last_reg_close == 0.0:
                 alt_pc = get_previous_close(symbol)
@@ -1914,10 +1953,12 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
     needs_pre_vol = (pre_vol == 0 and cache.pre_market_volume.get(symbol, 0) == 0)
     needs_post_vol = (status in ("AFTER-HOURS", "CLOSED") and post_vol == 0)
 
-    if price == 0 or needs_post_vol:
+    if price == 0 or status in ("PRE-MARKET", "AFTER-HOURS") or needs_post_vol:
         api_price, api_vol, api_pre_vol, api_post_vol = get_live_chart_data(symbol, status)
-        if price == 0 and api_price > 0:
-            price = api_price
+        # In off-hours, prioritize the live chart price over stale batch quote regularMarketPrice
+        if api_price > 0:
+            if price == 0 or status in ("PRE-MARKET", "AFTER-HOURS"):
+                price = api_price
         if vol == 0 and api_vol > 0:
             vol = api_vol
         
@@ -1937,6 +1978,13 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         fh_c, fh_pc = get_finnhub_quote(symbol)
         if fh_c:
             price = fh_c
+
+    if price == 0 and ALPHA_ADVANTAGE_API_KEY:
+        av_c, av_pc, av_v = get_alpha_vantage_quote(symbol)
+        if av_c:
+            price = av_c
+        if vol == 0 and av_v:
+            vol = av_v
 
     # --- Final fallback to fast_info ---
     try:
@@ -1977,11 +2025,12 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
             post_price = price
 
         techs = cache.technicals.get(symbol, {})
+        # --- BASELINE SELECTION ---
+        # Prioritize technicals (derived from actual history bars) over quote API's previousClose
+        # which can be inconsistent for small-cap/OTC stocks during session transitions.
         reg_close = techs.get("Last_Reg_Close", 0.0)
-
-        # Prefer batch quote's regularMarketPreviousClose (most authoritative source)
-        # fast_info.previous_close can be stale/inconsistent for small-cap stocks
-        if batch_prev_close and float(batch_prev_close) > 0:
+        
+        if reg_close == 0.0 and batch_prev_close and float(batch_prev_close) > 0:
             reg_close = float(batch_prev_close)
 
         # --- Session-aware returns ---
@@ -2142,6 +2191,7 @@ def fetch_stocks(state):
         ticker_payload = {
             "ticker": ticker_symbol,
             "price": t.get("price"),
+            "chg": t.get("session_change_pct"),
             "vwap": t.get("vwap"),
             "gap": t.get("gap_percent"),
             "net_gex": t.get("net_gex_total"),
@@ -2481,8 +2531,8 @@ def run_daemon():
                 print(f"{YELLOW}Parallelizing heavy technical sync for {len(ALL_TICKERS)} tickers...{RESET}")
                 def prefetch_heavy_data(sym):
                     try:
-                        # Add a small staggered delay to prevent micro-hammering YF
-                        t_time.sleep(random.uniform(0.1, 0.5))
+                        # Reduced stagger to significantly speed up hard refresh while maintaining safe limits
+                        t_time.sleep(random.uniform(0.01, 0.1))
                         obj = tickers_obj[sym]
                         # 1. History & Technicals
                         update_history_and_technicals(sym, obj)
@@ -2494,7 +2544,8 @@ def run_daemon():
                     except Exception as e:
                         print(f"Prefetch error for {sym}: {e}")
 
-                with ThreadPoolExecutor(max_workers=6) as executor:
+                # Increased max_workers to speed up the heavy data fetching process
+                with ThreadPoolExecutor(max_workers=15) as executor:
                     executor.map(prefetch_heavy_data, ALL_TICKERS)
                 print(f"{GREEN}Parallel sync complete.{RESET}")
 
