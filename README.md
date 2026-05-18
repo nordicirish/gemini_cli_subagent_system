@@ -1,12 +1,68 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v9.94-Data-Reliability-Sync
+**Version:** v10.02-SSR-Nullification-Sync
 
 **A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
 Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. **Starting with v9.21, the system has deployed the "Phantom Persona" framework—a psychological framing strategy that weaponizes every engine with absolute skepticism, forcing agents to treat all input narratives, corporate filings, and retail news as potentially manipulated or biased, thereby achieving unprecedented levels of adversarial rigor.**
 
 Starting with **v9.22-Phantom-Persona-Final-Sync**, the system has reached full architectural maturity. It consolidates its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search**, **Gemini 3.1 Pro Thinking Level Optimization**, and a **Professional Master Router** to ensure high-fidelity data integrity. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`).
+
+### 🔒 v10.02 SSR Nullification Sync (2026-05-18)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **SSR Immunity Nullification** | `ENH_16_D` | Invalidated LONG_GAMMA dealer shielding if asset triggers Rule 201 (SSR) by dropping >10%; permitted mechanical trims. |
+
+### 🔒 v10.01 Pre-Market Deadlock Sync (2026-05-18)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Pre-Market Deadlock Resolution** | `ENH_16_C` | Prevented passive HOLDs into the open on assets gapping down > 3% with Fragile consensus; mandated defensive stops or trims. |
+
+### 🔒 v10.00 Execution Hardening Sync (2026-05-18)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Execution Confirmation Flow** | `MANDATE_21` | Refactored backend and LLM rules to store trades as `proposed_portfolio_snapshot` until explicitly confirmed by the user. |
+| **Immediate Action Header** | `OUTPUT` | Amended terminal output template to put immediate buy/sell actions at the absolute top of the emission. |
+| **GEX Rate-Limit Guard** | `FIX` | Prevented GEX profiles from flipping to neutral by keeping old values on fetch failure and increasing poll delays. |
+| **Scout Auto-Clearing** | `FIX` | Fixed ghost tickers by auto-clearing scouts when no categories are selected in the dashboard. |
+
+### 🔒 v9.99 Hardening Sync (2026-05-18)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Institutional Peg & AH Gravity** | `MANDATE_34` | Prohibited chasing After-Hours momentum on assets pinning to whole numbers into the close without verified filings. |
+| **Intraday Low Hallucination Guard** | `ENH_77_B` | Mandated live search queries to verify absolute session lows for Rule 201 (SSR) triggers. |
+| **Passive Hold Override** | `ENH_16_B` | Enforced mandatory 25% risk-reduction trims when Council Agreement Score falls below 0.51 while asset bleeds below VWAP in SHORT_GAMMA or severe gap-down. |
+
+### 🔒 v9.98 Nordea ESA Defense Sync (2026-05-18)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Nordea ESA Defense** | `ENH_58` | Authorized aggressive overnight gap-scalping and bypassed the standard 0.6% FX friction hurdle strictly when deploying native EUR capital into OMXH/European equities within the Nordea Equity Savings Account (ESA). |
+
+### 🔒 v9.97 Routine Turn Directive Sync (2026-05-15)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Routine Turn Execution Directive** | `UI_UX` | Hardcoded a standardized 'SYSTEM DIRECTIVE' prompt into the `copyMarketSnapshot` clipboard output. This eliminates friction by autonomously commanding the Orchestrator to route the snapshot through the Consensus Pipeline without requiring manual prompt input from the user. |
+
+### 🔒 v9.96 Depth-Gated Chart Sync (2026-05-15)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Depth-Gated Web Verification** | `ENH_55` | Upgraded Google Finance visual chart audits to be STRICTLY DEPTH-GATED. Sub-engines are now prohibited from blindly fetching charts for the entire snapshot to prevent token bloat and execution latency. Chart verification is now only triggered on proposed state changes, volatility overrides (rVol > 1.5 or +/- 3.0% session change), or Council tie-breakers. |
+
+### 🔒 v9.95 VWAP, Gamma, & Friction Protocol Sync (2026-05-15)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Short Gamma Degradation Trims** | `MANDATE_33` | System MUST execute a mandatory 25% risk-reduction trim when a position falls >2% below VWAP during a SHORT_GAMMA regime, overriding passive hold inertia. |
+| **Alpha-Friction / Nordea ESA Protocol** | `ENH_FIN_02` | Mandates a +0.6% yield hurdle for US deployments to counter the 0.3% per-leg FX conversion drag on EUR-denominated ESAs. Prioritizes native European exchanges. |
+| **Analyst Upgrade Quarantine** | `ENH_98` | Fundamental upgrades carry ZERO execution weight if asset is SHORT_GAMMA or sub-VWAP, preventing algorithmic confirmation bias during active distribution. |
+| **VWAP Stop & Liquidity Wash** | `ENH_87` | Formalizes intraday VWAP as a hard capital deployment veto. VWAP PIN in SHORT_GAMMA is an accumulation floor. Prevents premature buys during morning flushes. |
 
 ### 🔒 v9.84 Architecture Hardening (2026-05-14)
 
@@ -318,7 +374,7 @@ Every turn concludes with the Gem outputting a precise JSON block named `EXECUTI
 | **Forensic Structural Filter** | `ENH_30` | 50% sizing reduction on dilution/warrant forensic flags |
 | **Post-ATR Execution Gate** | `ENH_36` | Blocks entries after 14:30 ET in low-volatility conditions |
 | **Correlation Guard** | `ENH_43` | Warns on >80% pairwise correlation or >35% sector exposure |
-| **Web Verification Protocol** | `ENH_55` | Forces sub-agents to visually verify trends using Google Finance |
+| **Web Verification Protocol** | `ENH_55` | Forces depth-gated visual verification of trends using Google Finance |
 | **RSI Divergence Guard** | `RT_GUARD_01` | Forbids Red Team vetoes solely based on overbought RSI without disconfirming evidence |
 | **Live Web Grounding** | `MANDATE_15` | Mandates explicit native Google Search tool usage for catalyst verification |
 | **Consumer AI Sandbox** | `ANTI-RECURSION` | Strictly forbids using consumer AI overlays (AI Overview, etc.) to prevent Arbiter Collision |

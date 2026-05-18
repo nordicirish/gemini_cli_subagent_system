@@ -154,12 +154,36 @@ def get_scout_categories():
 
 @app.post("/api/scout_categories")
 async def save_scout_categories(req: Request):
-    global SCOUT_CATEGORIES
+    global SCOUT_CATEGORIES, SCOUT_TICKERS, ALL_TICKERS
     new_categories = await req.json()
     if isinstance(new_categories, list):
         # Sanitize: Ensure only valid strings are kept
         SCOUT_CATEGORIES = [str(c).strip() for c in new_categories if c]
         save_config()
+        
+        # If no categories are selected, clear scouts immediately
+        if not SCOUT_CATEGORIES:
+            SCOUT_TICKERS = []
+            ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS))
+            
+            # Also update local_ssot_shadow.json to prevent reload on restart
+            ssot_file = 'local_ssot_shadow.json'
+            if os.path.exists(ssot_file):
+                try:
+                    with open(ssot_file, 'r') as f:
+                        ssot = json.load(f)
+                    
+                    # Clear in root and mutable_state
+                    if "scouted_assets_tracked" in ssot:
+                        ssot["scouted_assets_tracked"] = []
+                    if "mutable_state" in ssot and "scouted_assets_tracked" in ssot["mutable_state"]:
+                        ssot["mutable_state"]["scouted_assets_tracked"] = []
+                        
+                    with open(ssot_file, 'w') as f:
+                        json.dump(ssot, f, indent=2)
+                except Exception as e:
+                    print(f"Failed to clear scouts in SSoT: {e}")
+                    
         return JSONResponse({"status": "success", "categories": SCOUT_CATEGORIES})
     return JSONResponse({"status": "error", "message": "Invalid data format"}, status_code=400)
 
@@ -402,6 +426,34 @@ def _process_deletions(state, delete_list):
                 elif isinstance(parent, dict):
                     parent.pop(last_key, None)
 
+@app.post("/api/confirm_execution")
+async def confirm_execution():
+    ssot_file = 'local_ssot_shadow.json'
+    if os.path.exists(ssot_file):
+        try:
+            with open(ssot_file, 'r') as f:
+                ssot = json.load(f)
+            
+            # Move proposed_portfolio_snapshot to portfolio_snapshot
+            target = ssot.get("mutable_state", ssot)
+            if "proposed_portfolio_snapshot" in target:
+                target["portfolio_snapshot"] = target.pop("proposed_portfolio_snapshot")
+                
+                with open(ssot_file, 'w') as f:
+                    json.dump(ssot, f, indent=2)
+                
+                # Update global trackers
+                global PORTFOLIO_TICKERS, ALL_TICKERS
+                PORTFOLIO_TICKERS = [p.get("ticker").upper() for p in target["portfolio_snapshot"] if isinstance(p, dict) and p.get("ticker")]
+                ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS + ["EURUSD=X"]))
+                
+                return JSONResponse({"status": "success", "message": "Execution confirmed and SSoT updated."})
+            else:
+                return JSONResponse({"status": "error", "message": "No proposed portfolio snapshot found."}, status_code=400)
+        except Exception as e:
+            return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    return JSONResponse({"status": "error", "message": "SSoT file not found."}, status_code=404)
+
 @app.post("/api/paste")
 async def handle_paste(req: Request):
     try:
@@ -629,9 +681,11 @@ async def handle_paste(req: Request):
                 
             for k in promotion_keys:
                 if k in ep_source:
-                    # Always promote portfolio_snapshot as it represents the target allocations
+                    # Always promote portfolio_snapshot as proposed_portfolio_snapshot
                     # For others, promote if not already present or if it's a primary directive/metric
-                    if k == "portfolio_snapshot" or k not in target_container or k in ["directive", "risk_metrics", "timestamp"]:
+                    if k == "portfolio_snapshot":
+                        target_container["proposed_portfolio_snapshot"] = ep_source[k]
+                    elif k not in target_container or k in ["directive", "risk_metrics", "timestamp"]:
                         target_container[k] = ep_source[k]
             
         # Helper to extract and remove fields from payload regardless of nesting
@@ -1485,6 +1539,12 @@ async def run_finnhub_scout_sweep(target_sectors):
     tickers_to_scan = []
     for sector in target_sectors:
         tickers_to_scan.extend(sector_map.get(sector.upper(), []))
+        
+    # If no categories are selected, clear scouts to prevent ghost tickers
+    if not target_sectors:
+        SCOUT_TICKERS = []
+        ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS))
+        return []
     
     # Remove duplicates and already watched tickers
     # Remove duplicates and already watched tickers
@@ -1657,7 +1717,7 @@ def get_gex_profile(ticker_obj, spot_price):
     try:
         expirations = ticker_obj.options
         if not expirations:
-            return default_res
+            return None
         
         target_exps = expirations[:2]
         r = 0.045 # Approx risk-free rate
@@ -1702,7 +1762,7 @@ def get_gex_profile(ticker_obj, spot_price):
                 continue
 
         if not option_inventory:
-            return default_res
+            return None
 
         magnet_price = 0.0
         if strike_oi_map:
@@ -2403,9 +2463,17 @@ def run_daemon():
             spot = float(spot)
             cache.prices[sym] = spot
             print(f"  GEX [{idx+1}/{len(ALL_TICKERS)}] {sym}...", end="\r")
-            cache.gex[sym] = get_gex_profile(obj, spot)
+            new_gex = get_gex_profile(obj, spot)
+            if new_gex is not None:
+                cache.gex[sym] = new_gex
+            else:
+                cache.gex[sym] = {
+                    'net_gex': 0.0, 'flip_price': 0.0, 
+                    'inventory_velocity_delta': 0.0, 'gex_slope': 0.0,
+                    'flip_proximity_percent': 0.0, 'strike_oi_magnet': 0.0
+                }
             # GEX loop sleep (lines 914)
-            t_time.sleep(0.2)  # OPTIMIZED: Reduced from 2s
+            t_time.sleep(1.0)  # RESTORED: Increased from 0.2s to prevent rate limits
         else:
             cache.gex[sym] = {
                 'net_gex': 0.0, 'flip_price': 0.0,
@@ -2532,7 +2600,7 @@ def run_daemon():
                 def prefetch_heavy_data(sym):
                     try:
                         # Reduced stagger to significantly speed up hard refresh while maintaining safe limits
-                        t_time.sleep(random.uniform(0.01, 0.1))
+                        t_time.sleep(random.uniform(0.5, 1.5)) # Increased to prevent rate limits
                         obj = tickers_obj[sym]
                         # 1. History & Technicals
                         update_history_and_technicals(sym, obj)
@@ -2540,7 +2608,9 @@ def run_daemon():
                         q = batch_quotes.get(sym, {})
                         spot = q.get('regularMarketPrice') or q.get('preMarketPrice') or q.get('postMarketPrice') or cache.prices.get(sym)
                         if spot and float(spot) > 0:
-                            cache.gex[sym] = get_gex_profile(obj, float(spot))
+                            new_gex = get_gex_profile(obj, float(spot))
+                            if new_gex is not None:
+                                cache.gex[sym] = new_gex
                     except Exception as e:
                         print(f"Prefetch error for {sym}: {e}")
 
@@ -2583,7 +2653,15 @@ def run_daemon():
                 if sym not in cache.gex:
                     spot_price = cache.prices.get(sym)
                     if spot_price and spot_price > 0:
-                        cache.gex[sym] = get_gex_profile(obj, spot_price)
+                        new_gex = get_gex_profile(obj, spot_price)
+                        if new_gex is not None:
+                            cache.gex[sym] = new_gex
+                        else:
+                            cache.gex[sym] = {
+                                'net_gex': 0.0, 'flip_price': 0.0, 
+                                'inventory_velocity_delta': 0.0, 'gex_slope': 0.0,
+                                'flip_proximity_percent': 0.0, 'strike_oi_magnet': 0.0
+                            }
                     else:
                         cache.gex[sym] = {
                             'net_gex': 0.0, 'flip_price': 0.0, 

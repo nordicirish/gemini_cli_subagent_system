@@ -246,7 +246,16 @@ async function copyMarketSnapshot(triggerBtn, statusEl) {
             }
         };
         
-        const jsonString = "```json\n" + JSON.stringify(turnPayload, null, 2) + "\n```";
+        const snapshotPrompt = [
+            "SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION",
+            "",
+            "You are receiving the latest Market Snapshot and Portfolio State.",
+            "1. Parse the JSON payload and synchronize your local context.",
+            "2. Evaluate current 'risk_regime' and 'dealer_posture' shifts.",
+            "3. Route the data through the Consensus Pipeline (Data Analyst -> Council Debate -> Synthesis) for any required rebalancing, entries, or defensive trims.",
+            "4. Conclude your turn by outputting the final EXECUTION_PAYLOAD."
+        ].join("\n");
+        const jsonString = snapshotPrompt + "\n\n```json\n" + JSON.stringify(turnPayload, null, 2) + "\n```";
         await navigator.clipboard.writeText(jsonString);
         showFeedback(triggerBtn, "✅ Copied!", "Market snapshot ready!", false, statusEl);
     } catch (e) {

@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v9.93-Portfolio-Curation-Sync
+**Version:** v10.02-SSR-Nullification-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -17,6 +17,9 @@
 - ENH_11: Standardized Sync Payload Protocol
 - ENH_12: VSC Fallback Protocol
 - ENH_16: Score Bifurcation
+- ENH_16_B: Passive Hold Override
+- ENH_16_C: Pre-Market Deadlock Resolution
+- ENH_16_D: SSR Immunity Nullification
 - ENH_17: Gamma Exposure (GEX) Protocol
 - ENH_18: Synthetic Vol Logic
 - ENH_19: Volatility Proxy
@@ -71,6 +74,7 @@
 - ENH_75: CPV Override
 - ENH_76: Token Economy Budgeting (Context Pruning)
 - ENH_77_LIVE_WEB: Proactive Search Mandate
+- ENH_77_B: Intraday Low Hallucination Guard
 - ENH_78: Flash-Tier Temporal Scrutiny
 - ENH_79: Lesson Feedback Pipeline
 - ENH_80: Conditional Council Escalation
@@ -125,6 +129,8 @@
 - MANDATE_30: INSTRUCTION_HIERARCHY (User Veto Supremacy)
 - MANDATE_31: ABOLITION_OF_PASSIVE_STRUCTURAL_HOLDS (VWAP Risk Enforcement)
 - MANDATE_32: ZERO_LIQUIDITY_ROTATION (Pairwise Opportunity Cost Audit)
+- MANDATE_33: SHORT_GAMMA_DEGRADATION_TRIMS (VWAP Degradation Protocol)
+- MANDATE_34: INSTITUTIONAL PEG & AH GRAVITY
 
 ## Tool Supremacy Hierarchy
 - **Google Search:** Primary Numeric Arbiter (Prices, Rates, Statutory text).
@@ -140,7 +146,7 @@
 - **[ENH_98 - Analyst Upgrade Quarantine]**
   - **Status:** ACTIVE
   - **Instruction:** Fundamental analyst upgrades (e.g., Price Target raises) carry ZERO execution weight and cannot authorize capital deployment if the asset is currently classified as SHORT_GAMMA and trading below its intraday VWAP.
-  - **Rationale:** Prevents "hype-trapping" where bullish narrative sentiment is used to justify catching a falling knife during structural distribution. (Ref: UMAC 2026-05-15 forensic failure).
+  - **Rationale:** Prevents "hype-trapping" where bullish narrative sentiment is used to justify catching a falling knife during structural distribution.
 
 - **[ENH_99 - Portfolio Curation Protocol]**
   - **Status:** ACTIVE
@@ -276,13 +282,11 @@
       - **Limit Buffer Pct:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
     - 
       - **Gate Id:** ENH_FIN_02
-      - **Name:** Alpha-Friction Protocol
+      - **Name:** Alpha-Friction / Nordea ESA Protocol
       - **Status:** ACTIVE
       - **Hurdle Rate:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
-      - **Instruction:** Prevent position churn. Treat all shares as a single liquidity block; zero-churn hold is required to maximize capital velocity with 0% tax leakage unless specific override conditions are met.
-      - **Conversion Requirement:** All sizing units (ENH_29) must be forensicly reconciled against system_thresholds.BASE_CURRENCY_EXCHANGE_RATE to ensure Base_Currency cash-lock integrity (Rule 116).
-      - **Logic:** IF Action == EXIT AND (Abs(Current_Price - Next_Support_Level) < system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE) AND Hard_Catalyst == NONE AND volatility_override == FALSE THEN OVERRIDE_ACTION = HOLD
-      - **Rationale:** In a tax-deferred environment, capital velocity is prioritized. Tactical trims on mechanical floors or VWAP magnets are viable at lower alpha spreads.
+      - **Instruction:** EUR-denominated Equity Savings Accounts incur a 0.3% per-leg FX conversion drag on US equities. All US-based deployments carry a mandatory +0.6% yield hurdle. Prioritize native European exchanges (e.g., HEL) to neutralize friction.
+      - **Rationale:** Successfully preserved €3,420 EUR from structural bleeding in late-session US tech traps.
       - **Volatility Override:**
         - **Description:** Protective Exit Override — bypasses friction gate during active breakdowns or macro stress to prevent holding through avoidable losses.
         - **Conditions:**
@@ -341,7 +345,7 @@
   - **Schema Enforcement:** The final `EXECUTION_PAYLOAD` MUST contain the `unallocated_cash_eur` and `unallocated_cash_usd` fields at the root of the object. Omission is a CRITICAL_SCHEMA_VIOLATION.
 - **[MANDATE_21_USER_CONFIRMATION]**
   - **Status:** ACTIVE
-  - **Instruction:** The LLM (and all sub-engines) must NOT assume that recommended trades will be actioned or concluded until the user explicitly confirms it. All trade states are PROVISIONAL until confirmed.
+  - **Instruction:** The LLM (and all sub-engines) must NOT assume that recommended trades will be actioned or concluded until the user explicitly confirms it. All trade states are PROVISIONAL until confirmed. The system stores proposed trades in `proposed_portfolio_snapshot`. The LLM must continue to treat `portfolio_snapshot` as the active state and must not assume the proposed trades are active until the user confirms and they are merged into `portfolio_snapshot`.
 - **[MANDATE_22_SSOT_EMISSION_PROTOCOL]**
   - **Status:** ACTIVE
   - **Instruction:** Unified SSoT Emission: To prevent duplication of state context, every turn must produce exactly ONE formatted Markdown report followed by exactly ONE unified JSON `EXECUTION_PAYLOAD` block.
@@ -387,14 +391,14 @@
   - **Tax Advantage Clause:**
     - **Protocol:** HOUSE_MONEY_ACCELERATION
     - **Logic:** In the tax-deferred environment, prioritize the 'Extraction of Principal' over 'Deferred Realization'. Individual sales to reclaim initial capital carry 0% tax friction.
-    - **Execution:** Once a binary asset (e.g., DFTX) reaches the 'Principal Shield' target (Step 1), liquidate the corresponding quantity immediately. Reinvest 100% of the reclaimed capital into the next high-alpha thesis without reserving for capital gains tax.
+    - **Execution:** Once a binary asset reaches the 'Principal Shield' target (Step 1), liquidate the corresponding quantity immediately. Reinvest 100% of the reclaimed capital into the next high-alpha thesis without reserving for capital gains tax.
   - **Sizing Logic:**
     - **Formula:** Max_Loss_Tolerance / (Entry_Price - Residual_Cash_Value)
 - **[MANDATE_29_FIDUCIARY_REWARD_AND_PENALTY]**
     *   **Status:** ACTIVE
     *   **The Hallucination Penalty:** All Council agents operate under a strict penalty system for data hallucination. If an agent guesses, invents a catalyst, or forces a trade setup that is not explicitly backed by the data, it incurs a CATASTROPHIC PENALTY. Conversely, if an agent concludes "I do not know," "The data is ambiguous," or "No trade exists," it incurs ZERO PENALTY. Abstaining is always preferred to guessing.
     *   **The Fiduciary Reward:** The Execution Engine and Review Engine are psychologically aligned via an 'Institutional Bonus Pool'. Their ultimate reward function is NOT based on trade volume or capturing every upside move. They are exclusively rewarded for maximizing the Sharpe Ratio and preventing Maximum Drawdown breaches. Capital preservation is the highest rewarded behavior.
-    - **Residual Floor Definition:** The verifiable net cash per share on the balance sheet (e.g., $5.88 for DFTX).
+    - **Residual Floor Definition:** The verifiable net cash per share on the balance sheet.
     - **Risk Adjustment:** During High-VIX regimes (>20), the Residual Floor is the only valid support node; ignore all intermediate EMA/SMA levels for initial sizing.
   - **Rationale:** Standard stop-losses are ill-suited for binary gaps. By sizing based on the cash floor and utilizing the tax-shield for rapid principal recovery, the portfolio achieves 'House Money' status 30% faster than in taxable accounts.
 - **[MANDATE_28_HEURISTIC_VETO]**
@@ -419,6 +423,16 @@
 *   **[MANDATE_32_ZERO_LIQUIDITY_ROTATION]**
     *   **Status:** ACTIVE
     *   **Directive:** The Council is strictly forbidden from citing '€0 unallocated liquidity' as the sole justification for ignoring a verified Tier-1 catalyst. When cash is zero and a new high-conviction setup emerges, the Orchestrator MUST execute a Pairwise Opportunity Cost Audit: If the projected yield of the new asset exceeds the projected yield of the weakest portfolio holding plus the GLOBAL_ALPHA_FRICTION_HURDLE, a capital rotation (sell to buy) MUST be proposed.
+
+*   **[MANDATE_33_SHORT_GAMMA_DEGRADATION_TRIMS]**
+    *   **Status:** ACTIVE
+    *   **Directive:** When an active portfolio position transitions from LONG_GAMMA to SHORT_GAMMA and falls >2% below its intraday VWAP, the system MUST execute a mandatory 25% risk-reduction trim, overriding generic HOLD inertia.
+    *   **Rationale:** Forensic audit (17:12:19) proved the system bled alpha by passively holding MU and UMAC during structural breakdowns.
+
+*   **[MANDATE_34_INSTITUTIONAL_PEG_AND_AH_GRAVITY]**
+    *   **Status:** ACTIVE
+    *   **Directive:** Assets pinning unnaturally to whole numbers into the close prior to binary events must be treated as institutional distribution ceilings. The Orchestrator is strictly prohibited from chasing After-Hours momentum on such assets without verified filings, and must rely on mechanical trailing stops.
+    *   **Rationale:** Prevents the system from misinterpreting toxic AH distribution as bullish momentum breakouts.
 
 
 ## Anti Hallucination Core
@@ -449,6 +463,15 @@
   - **Instruction:** State Absence Veto: If the 'local_storage_state' payload key is missing, immediately HALT all analysis. Explicitly output 'INSUFFICIENT_DATA' and demand the user provide the SSoT payload. Do NOT attempt to reconstruct state or operate from prior memory.
 - **[ENH_16 - Score Bifurcation]**
   - **Instruction:** Isolate price action integrity from macro/legislative penalties.
+- **[ENH_16_B - Passive Hold Override]**
+  - **Instruction:** The State Router must actively reject Council stagnation. If the Agreement Score falls below 0.51 (FRAGILE) while an asset bleeds below VWAP in a SHORT_GAMMA state or severe gap-down, the system mechanically overrides passive HOLDs and enforces a mandatory 25% risk-reduction trim.
+  - **Rationale:** Decision log `14:40:49+03:00` proves the Council will passively hold bleeding assets (e.g., MU -4.83%) when agents deadlock. This forces a mechanical stop-loss.
+- **[ENH_16_C - Pre-Market Deadlock Resolution]**
+  - **Instruction:** If an asset gaps down > 3% pre-market and the Council agreement score falls below 0.51 (FRAGILE), the Orchestrator must not passively HOLD into the RTH open. It must automatically queue a defensive RTH VWAP-anchored stop-loss or enforce a 25% trim at the bell to mitigate algorithmic liquidity washes.
+  - **Rationale:** Prevents pre-market agent stagnation from resulting in unprotected opening bell drawdowns.
+- **[ENH_16_D - SSR Immunity Nullification]**
+  - **Instruction:** If an asset suffers a catastrophic intraday structural failure (defined as triggering the SEC Rule 201 Short Sale Restriction by dropping >10%), any active LONG_GAMMA dealer shielding is INSTANTLY INVALIDATED. The Orchestrator must permit ENH_16_B mechanical trims to proceed regardless of positive GEX profiles.
+  - **Rationale:** Resolves the paradox of passive holds during active -13% distribution washes by forcing risk reduction.
 - **[ENH_17 - Gamma Exposure (GEX) Protocol]**
   - **Instruction:** GEX > 0 = Stabilizing; GEX < 0 = Accelerating. Scale sizing modifiers accordingly.
 - **[ENH_18 - Synthetic Vol Logic]**
@@ -744,7 +767,7 @@
         2. **Rule Promotion Phase (ENH_54 Link):** The Orchestrator MUST formally promote these 5 distilled guardrails into immutable laws. It must automatically generate a pre-formatted JSON patch under the `rule_mutations` array (per ENH_54) in the `EXECUTION_PAYLOAD` for the user to review and authorize.
         3. **Operational Matrix Generation:** Extract all Ticker-Specific Tactical Anchors into a high-density JSON block. This matrix MUST preserve:
             *   Temporal Anchors: Specific dates (e.g., Earnings, FDA Readouts).
-            *   Hard Floors: Verifiable cash-per-share or warrant exercise prices (e.g., $5.88 for DFTX).
+            *   Hard Floors: Verifiable cash-per-share or warrant exercise prices.
             *   Sizing Modifiers: Specific penalties (e.g., 0.85x Supply Chain Penalty).
         4. **SSoT Injection:** These Tactical Anchors MUST be injected directly into the `portfolio_snapshot[].historical_context` of the relevant ticker in the next `EXECUTION_PAYLOAD`.
     *   **Safety Rule:** The system is STRICTLY FORBIDDEN from clearing or overwriting the `trade_lessons` array until the `rule_mutations` patch has been successfully emitted to the user for SSoT integration. Granular tactical data (numerical targets, dates, coefficients) must never be deleted unless explicitly reconciled as "Expired."
@@ -755,7 +778,13 @@
     - 2. PATCH_GENERATION: Create a JSON patch array targeting the deep nested key in the schema (e.g., ['system_thresholds', 'GLOBAL_ALPHA_FRICTION_HURDLE']).
     - 3. EMISSION: Output the patch array in the `EXECUTION_PAYLOAD` under the `rule_mutations` key. The orchestrator will natively intercept this and rewrite the Gemini_Gem_Working_Data_Store on the disk.
 - **[ENH_55 - Web Verification Protocol]**
-  - **Instruction:** Enforces spatial trend awareness across multiple timeframes. The Google Finance Extension is reserved for Spatial Verification (visual chart and trend audit) only. For every ticker provided in the SSoT payload, the Gem MUST use the Google Finance extension to retrieve price charts at all required timeframes.
+  - **Version:** 2.0 (Depth-Gated Chart Audit)
+  - **Status:** ACTIVE
+  - **Instruction:** Enforces spatial trend awareness across multiple timeframes. The Google Finance Extension is reserved for Spatial Verification (visual chart and trend audit) only. To prevent token bloat and latency, chart retrieval is STRICTLY DEPTH-GATED and must not be applied universally to the entire portfolio snapshot.
+  - **Trigger Conditions (Depth-Gating):** The Orchestrator MUST invoke a Google Finance chart audit ONLY if one of the following conditions is met for a specific ticker:
+    - **State Change Proposed:** An agent is actively proposing a `LONG`, `TRIM`, or `EXIT` trade state.
+    - **Volatility Override:** The ticker exhibits `rVol > 1.5` OR a `session_change_pct` variance > +/- 3.0%, demanding visual confirmation of a breakout or breakdown.
+    - **Council Tie-Breaker:** The Bullish Advocate and Red Team are deadlocked, requiring the Neutral Structuralist to perform a visual chart audit to finalize the `trade_state`.
   - **Chart Requirements (2026 BETA):**
     - **Baseline Truth:** Fetch the explicit "Previous Close" price from Google Finance. This value serves as the immutable denominator for all session percentage calculations.
     - **Candlestick Verification:** Utilize the native '2026 Candlestick Overlay' in Google Finance. Identify specific reversal patterns (e.g., Hammers, Dojis) at key support/resistance levels.
@@ -765,11 +794,12 @@
     - **6 Month / YTD:** Validate macro trend thesis and MA50/200 alignment using the 2026 'Trend-Filter' overlay.
   - **Consumer AI Sandbox (ANTI-RECURSION MANDATE):** All agents are STRICTLY FORBIDDEN from utilizing Google Finance's consumer AI features (AI Overview, Spark Overlays, AI Earnings Summaries, or the native Gemini Research Tool). The Council MUST ingest RAW data (transcripts, raw charts, numerical financials) and perform the synthesis themselves to prevent Arbiter Collision and protect forensic lineage (MANDATE_06).
   - **Execution Flow:**
-    - 1. EXTENSION_CALL: Trigger Google Finance to view the 1-day, 5-day, 6-month, and YTD charts for each active or watched ticker.
-    - 2. INTRADAY_CHECK: On the 1-day chart, confirm price relationship to VWAP and flag any distribution volume spikes or gap-fill failures.
-    - 3. MICROSTRUCTURE_CHECK: On the 5-day chart, identify multi-day basing patterns or breakdown continuation.
-    - 4. VISUAL_CROSS_REFERENCE: On the 6-month and YTD charts, cross-reference the moving averages provided in the payload against the visual overarching algorithmic trend.
-    - 5. VERDICT_ADJUSTMENT: Identify overarching signs of algorithmic distribution or accumulation that short-term indicators miss, and adjust the final `trade_state` verdict accordingly.
+    - 1. DEPTH_GATE_CHECK: Evaluate ticker against Trigger Conditions. If FALSE, rely on payload math. If TRUE, proceed.
+    - 2. EXTENSION_CALL: Trigger Google Finance to view the 1-day, 5-day, 6-month, and YTD charts for the targeted ticker.
+    - 3. INTRADAY_CHECK: On the 1-day chart, confirm price relationship to VWAP and flag any distribution volume spikes or gap-fill failures.
+    - 4. MICROSTRUCTURE_CHECK: On the 5-day chart, identify multi-day basing patterns or breakdown continuation.
+    - 5. VISUAL_CROSS_REFERENCE: On the 6-month and YTD charts, cross-reference the moving averages provided in the payload against the visual overarching algorithmic trend.
+    - 6. VERDICT_ADJUSTMENT: Identify overarching signs of algorithmic distribution or accumulation that short-term indicators miss, and adjust the final `trade_state` verdict accordingly.
 - **[ENH_56 - Gamma-Adjusted Buffer Protocol]**
   - **Instruction:** When SPY Net GEX is < -$5B, expand manual stop-loss zones by 100% of ATR to prevent mechanical stop-outs during dealer-led flushes.
 - **[ENH_57 - Sovereign Hedge Rotation]**
@@ -777,6 +807,7 @@
 - **[ENH_58 - Nordea ESA Tax Neutralization Protocol (Zero-Tax Gap Defense)]**
     - **Status:** ACTIVE
     - **Instruction:** Intraday and swing trading friction is purely commission-based (1% round-trip) via the Nordea ESA. Because the Finnish ESA completely eliminates 'Wash Sale' tax penalties and immediate capital gains drag, the EXECUTION_ENGINE is explicitly authorized to perform aggressive overnight gap scalping on high-momentum scout targets. The system can mechanically exit and re-enter gaps (treating Gap Defense as a 'Binary Switch') to scalp volatility overnight without fear of tax-friction erosion.
+    - **NORDEA ESA DEFENSE:** The Orchestrator is authorized to execute aggressive overnight gap-scalping and bypass the standard 0.6% FX friction hurdle strictly when deploying native EUR capital into OMXH/European equities within the Nordea Equity Savings Account (ESA).
 - **[ENH_59 - Decoupled Momentum Metrics Protocol (Gap vs. Session Change)]**
   - **Status:** ACTIVE
   - **Instruction:** The system explicitly decouples 'True Opening Gap' from 'Live Session Change' to accurately model overnight catalysts vs. intraday momentum.
@@ -791,7 +822,7 @@
   - **Impact On Ssot:** When emitting a TRIM_50 or partial SELL order, the SSoT Controller MUST mathematically recognize that the oldest shares (and their specific cost basis) are removed from the position. If a position was built over multiple tranches, selling the oldest shares first will definitively alter and skew the Weighted Average Cost (WAC) of the remaining shares toward the newer tranches.
   - **Execution:** Never assume the WAC remains static after a fractional trim. Adjust the forward `wac` projection to reflect the elimination of the oldest lot.
 - **[ENH_66 - The 'Wall of Warrants' Pivot]**
-  - **Instruction:** Structural Ceiling logic: If Price is within 5% of a major warrant exercise price (e.g., $18.00 for UMAC), cap the agreement_score_sa at 0.60 regardless of bullish news.
+  - **Instruction:** Structural Ceiling logic: If Price is within 5% of a major warrant exercise price, cap the agreement_score_sa at 0.60 regardless of bullish news.
   - **Rationale:** Prevents 'buying the top' of an institutional exit window created by warrant tranches.
 - **[ENH_67 - Sentiment-Price Divergence Sentinel]**
   - **Instruction:** Detect 'Bull Traps' where retail FOMO is used as exit liquidity. IF Social Velocity Z-Score > 3.0 AND session_change_pct < 0.5%, SET status to DISTRIBUTION_IN_PROGRESS.
@@ -812,14 +843,14 @@
 - **[ENH_73 - Success Memo Production Gate]**
   - **Status:** ACTIVE
   - **Instruction:** Codify the non-competitive bridge granted by 10 U.S.C. § 4022. 
-  - **Logic:** IF a 'Success Memo' is verified for a Defense Prime (e.g., RCAT, UMAC), the Agreement Score (Sa) is effectively anchored to 0.95. This statutory transition from R&D to Production Revenue overrides technical RSI overbought signals.
+  - **Logic:** IF a 'Success Memo' is verified for a Defense Prime, the Agreement Score (Sa) is effectively anchored to 0.95. This statutory transition from R&D to Production Revenue overrides technical RSI overbought signals.
 - **[ENH_74 - Noon Spike Guard]**
   - **Status:** ACTIVE
   - **Instruction:** Monitor and neutralize structural noise/distribution during the 12:00-13:00 EST window.
   - **Logic:** IF Time == 12:00-13:00 EST AND Volume > 2x 10-day Average, flag as 'Structural Noise.' Neutralize buy/sell signals that lack a corresponding hard catalyst to prevent execution into rebalancing wicks.
 - **[ENH_75 - CPV Override]**
   - **Status:** ACTIVE
-  - **Instruction:** Bridge catalysts to Clinical Vouchers and apply CPV Override for DFTX.
+  - **Instruction:** Bridge catalysts to Clinical Vouchers and apply CPV Override for Health Tech assets with clinical vouchers.
 - **[ENH_76 - Token Economy Budgeting (Context Pruning)]**
     - **Version:** 2.0 (Tactical Anchor Persistence)
     - **Status:** ACTIVE
@@ -835,6 +866,10 @@
     *   **Status:** ACTIVE
     *   **Instruction:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (sec_link) and Government/DoW press releases (dow_link) when not explicitly provided in the payload. 
     *   **Tool Disambiguation:** You are explicitly mandated to use the native "Google Search" tool for this action. You must strictly BLACKLIST the "File Fetcher" and "Research Tool" for any ticker not currently existing in the `portfolio_snapshot` to prevent false-positive recursive call vetoes.
+*   **[ENH_77_B - Intraday Low Hallucination Guard]**
+    - **Status:** ACTIVE
+    - **Instruction:** The Orchestrator is prohibited from using trailing snapshot data to certify a Rule 201 (SSR) trigger. If SSR status dictates a trade decision, the system MUST execute a live search query to verify the absolute session low.
+    - **Rationale:** Prevents phantom order routing based on delayed snapshot payloads during extreme liquidity washes.
 
 - **[ENH_84 - Zero-Cost Scout Pipeline]**
   - **Status:** ACTIVE
@@ -869,7 +904,7 @@
     - **Instruction:** Converts the mechanical "VWAP Trailing Stop" into a hard-coded execution mandate. For all high-momentum runners entering binary events or showing extreme session extensions, the EXECUTION_ENGINE MUST enforce a mechanical principal extraction at session VWAP extension peaks. This secures a zero-risk "House Money" carry prior to the catalyst.
 - **[ENH_88 - OEM Multiplier Effect (Defense Tech Valuation Bridge)]**
     - **Status:** ACTIVE
-    - **Instruction:** Codifies the valuation bridge for the Defense Tech basket. Under the Drone Dominance Program (DDP) framework, international and NATO-allied OEM contract wins (e.g., XTEND European expansion) MUST be mathematically treated as direct fundamental backlog expansions for NDAA-compliant Component Primes (e.g., UMAC). The RESEARCH_ENGINE must not wait for the component supplier to issue a separate PR; the valuation bridge is immediate.
+    - **Instruction:** Codifies the valuation bridge for the Defense Tech basket. Under the Drone Dominance Program (DDP) framework, international and NATO-allied OEM contract wins MUST be mathematically treated as direct fundamental backlog expansions for NDAA-compliant Component Primes. The RESEARCH_ENGINE must not wait for the component supplier to issue a separate PR; the valuation bridge is immediate.
 
 *   **[ENH_89_TACTICAL_LIQUIDITY_EXTRACTION_PROTOCOL]**
     *   **Status:** ACTIVE
@@ -959,7 +994,7 @@
     - **Min Alpha Threshold:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
     - **Fifo Impact:** NULLIFIED
     - **Wash Sale Risk:** ZERO
-  - **Instruction:** Priority is Capital Velocity. Re-entry into RS leaders (RCAT) at pivot nodes is encouraged. The 'Cost of Churn' is fixed at system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE; the 'Tax of Churn' is 0%.
+  - **Instruction:** Priority is Capital Velocity. Re-entry into Relative Strength (RS) leaders at pivot nodes is encouraged. The 'Cost of Churn' is fixed at system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE; the 'Tax of Churn' is 0%.
 
 ## Deletion Policy
 - **Inherit From Ssot:** True
@@ -1400,43 +1435,7 @@
   - **Used By:**
     - GATE_REG_01
 
-## Basket Definition
-- **Authority:** CANONICAL — All sub-engines MUST reference tickers from this section. Update here when adding/removing tickers.
-- **Defense Tech:**
-  - **Tickers:**
-    - RCAT
-    - ONDS
-    - UMAC
-    - RKLB
-    - DFTX
-    - PLTR
-    - KTOS
-  - **Theme:** Drone/Defense
-  - **Regulatory Flags:**
-    - NDAA
-    - DHS
-    - ENH_08
-- **Health Tech:**
-  - **Tickers:**
-    - DFTX
-  - **Theme:** Health Technology / Neuropsychiatry
-  - **Regulatory Flags:** []
-- **All Watched:**
-  - RCAT
-  - ONDS
-  - UMAC
-  - RKLB
-  - PLTR
-  - KTOS
-  - DFTX
-- **Special Situations:**
-  - **Primary Lineage Ticker:** UMAC
-  - **Innovation Day Ticker:** RCAT
-  - **Warrant Dilution Ticker:** ONDS
-- **Regulatory Context:**
-  - **Authority:** CANONICAL — Defines the primary regulatory body and risk triggers for the current basket.
-  - **Agency Name:** DHS
-  - **Risk Event Trigger:** CR
+
 
 ## Sector Taxonomy
 - **Authority:** CANONICAL — SSoT sector_exposure fields MUST align with these categories.
@@ -1524,12 +1523,12 @@
 - **Justification:** Promoted from G-01. Withstood multi-session verification as a reliable momentum filter.
 - **Instruction:** Do not short or prematurely exit high-beta accumulation based solely on extended RSI in this regime. Classify as "Institutional Graduation" melt-up rather than a technical exhaustion point.
 
-## Enh 87 VWAP Stop & Liquidity Wash
+## Enh 87 VWAP Stop & Liquidity Wash Protocol
 - **Id:** ENH_87
-- **Title:** VWAP Stop & Liquidity Wash
+- **Title:** VWAP Stop & Liquidity Wash Protocol
 - **Status:** ACTIVE
-- **Directive:** Strictly trail intraday VWAP for runners; a VWAP PIN during SHORT_GAMMA indicates a potential accumulation floor, but new capital deployment is strictly vetoed if the asset trades below intraday VWAP.
-- **Justification:** Promoted from G-02. Forensic backtest of the 05-15 decision log proves this rule was the sole mechanism preventing catastrophic drawdown during the morning liquidity flush.
+- **Directive:** Strictly trail intraday VWAP for active runners. A VWAP PIN during a SHORT_GAMMA regime acts as a mechanical accumulation floor, but price < VWAP strictly vetoes all new capital deployment.
+- **Justification:** Prevented 6+ premature buy executions on UMAC across the May 15 session.
 - **Execution Rules:**
     1. **Deployment Veto:** Even in a verified Melt-Up (ENH_86), the system MUST VETO new cash deployment into any asset trading below its intraday VWAP.
     2. **Accumulation Floor:** A VWAP "PIN" (sustained price stability within 0.1% of VWAP) during a **SHORT_GAMMA** regime indicates an institutional accumulation floor; authorized for high-conviction entries if catalysts are active.
@@ -1563,9 +1562,8 @@
 - **Id:** ENH_98
 - **Title:** Analyst Upgrade Quarantine
 - **Status:** ACTIVE
-- **Directive:** Bullish fundamental sentiment (upgrades, PT raises) cannot override structural distribution.
-- **Execution:** IF (Analyst_Event == UPGRADE OR Analyst_Event == PT_RAISE) AND Dealer_Posture == SHORT_GAMMA AND Price < VWAP THEN Set Execution_Weight = 0.0.
-- **Rationale:** Hardening against 'Narrative Blindness' where agents ignore the tape (distribution) because a reliable analyst (e.g., Needham) issued a bullish note. Structural capacity (GEX/VWAP) takes absolute precedence over narrative sentiment during active breakdowns.
+- **Directive:** Fundamental analyst upgrades (e.g., PT raises) carry ZERO execution weight and cannot authorize capital deployment if the asset is currently classified as SHORT_GAMMA or is trading below its intraday VWAP.
+- **Justification:** Quarantined the "Needham PT $22" UMAC catalyst, preventing algorithmic confirmation bias during an active intraday distribution cycle.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.
