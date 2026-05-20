@@ -164,7 +164,7 @@ async def save_scout_categories(req: Request):
         # If no categories are selected, clear scouts immediately
         if not SCOUT_CATEGORIES:
             SCOUT_TICKERS = []
-            ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS))
+            ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + ["EURUSD=X"]))
             
             # Also update local_ssot_shadow.json to prevent reload on restart
             ssot_file = 'local_ssot_shadow.json'
@@ -268,7 +268,7 @@ async def update_tickers(req: Request):
     new_tickers = data.get("tickers", [])
     valid_tickers = [t.upper() for t in new_tickers if t]
     WATCHLIST_TICKERS = valid_tickers
-    ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+    ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS + ["EURUSD=X"]))
     save_config()
     return JSONResponse({"status": "success", "tickers": WATCHLIST_TICKERS})
 
@@ -340,7 +340,7 @@ async def save_watchlist(req: Request):
     new_watchlist = await req.json()
     if isinstance(new_watchlist, list):
         WATCHLIST_TICKERS = [t.upper() for t in new_watchlist if isinstance(t, str)]
-        ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+        ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS + ["EURUSD=X"]))
         save_config()
         return JSONResponse({"status": "success"})
     return JSONResponse({"status": "error", "message": "Invalid data format"}, status_code=400)
@@ -352,7 +352,7 @@ async def update_macro_tickers(req: Request):
     new_macro = data.get("macro", [])
     valid_macro = [t.upper() for t in new_macro if t]
     MACRO_TICKERS = valid_macro
-    ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+    ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS + ["EURUSD=X"]))
     save_config()
     return JSONResponse({"status": "success", "macro": MACRO_TICKERS})
 
@@ -866,7 +866,7 @@ async def handle_paste(req: Request):
         if isinstance(new_scouts, list):
             global SCOUT_TICKERS, ALL_TICKERS
             SCOUT_TICKERS = list(set(new_scouts))
-            ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+            ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS + ["EURUSD=X"]))
             
         def _prune_lessons(deletions):
             if not deletions: return
@@ -1543,7 +1543,7 @@ async def run_finnhub_scout_sweep(target_sectors):
     # If no categories are selected, clear scouts to prevent ghost tickers
     if not target_sectors:
         SCOUT_TICKERS = []
-        ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS))
+        ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + ["EURUSD=X"]))
         return []
     
     # Remove duplicates and already watched tickers
@@ -1602,7 +1602,7 @@ async def run_finnhub_scout_sweep(target_sectors):
         if len(SCOUT_TICKERS) > 5:
             SCOUT_TICKERS = SCOUT_TICKERS[-5:]
             
-        ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS))
+        ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS + ["EURUSD=X"]))
     
     return new_scouts
 
@@ -1649,11 +1649,26 @@ def get_previous_close(symbol):
         r = safe_yf_get(url, timeout=2)
         data = r.json()
         result = data['chart']['result'][0]
+        timestamps = result.get('timestamp', [])
         q = result['indicators']['quote'][0]
         closes = q.get('close', [])
-        valid = [c for c in closes if c is not None]
-        if len(valid) >= 2:
-            return float(valid[-2])
+        
+        valid_bars = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
+        if not valid_bars:
+            return None
+            
+        ny_tz = ZoneInfo("America/New_York")
+        today_date = datetime.now(ny_tz).date()
+        
+        latest_ts, latest_close = valid_bars[-1]
+        latest_date = datetime.fromtimestamp(latest_ts, ZoneInfo("UTC")).astimezone(ny_tz).date()
+        
+        if latest_date == today_date:
+            if len(valid_bars) >= 2:
+                return float(valid_bars[-2][1])
+            return float(latest_close)
+        else:
+            return float(latest_close)
     except:
         pass
     return None
@@ -1913,17 +1928,26 @@ def update_history_and_technicals(symbol, t_obj):
 
             # --- Previous Regular Close ---
             last_reg_close = 0.0
-            if hasattr(t_obj, 'fast_info'):
+            if len(close) >= 1:
+                if isinstance(close, (int, float, np.floating, np.integer)):
+                    last_reg_close = float(close)
+                else:
+                    ny_tz = ZoneInfo("America/New_York")
+                    today_date = datetime.now(ny_tz).date()
+                    last_bar_date = hist.index[-1].date()
+                    if last_bar_date == today_date:
+                        if len(close) >= 2:
+                            last_reg_close = to_float(close.iloc[-2])
+                        else:
+                            last_reg_close = to_float(close.iloc[-1])
+                    else:
+                        last_reg_close = to_float(close.iloc[-1])
+
+            if last_reg_close == 0.0 and hasattr(t_obj, 'fast_info'):
                 try:
                     last_reg_close = float(t_obj.fast_info.previous_close)
                 except:
                     pass
-
-            if last_reg_close == 0.0 and len(close) >= 1:
-                if isinstance(close, (int, float, np.floating, np.integer)):
-                    last_reg_close = float(close)
-                else:
-                    last_reg_close = to_float(close.iloc[-1])
 
             if last_reg_close == 0.0:
                 alt_pc = get_previous_close(symbol)
@@ -2598,6 +2622,8 @@ def run_daemon():
             if is_heavy:
                 print(f"{YELLOW}Parallelizing heavy technical sync for {len(ALL_TICKERS)} tickers...{RESET}")
                 def prefetch_heavy_data(sym):
+                    if sym == 'EURUSD=X':
+                        return
                     try:
                         # Reduced stagger to significantly speed up hard refresh while maintaining safe limits
                         t_time.sleep(random.uniform(0.5, 1.5)) # Increased to prevent rate limits
@@ -2648,6 +2674,9 @@ def run_daemon():
                     update_history_and_technicals(sym, obj)
 
                 update_price_tick(sym, obj, status, batch_quotes.get(sym))
+
+                if sym == 'EURUSD=X':
+                    continue
 
                 # GEX fallback if missing
                 if sym not in cache.gex:

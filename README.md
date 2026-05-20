@@ -1,12 +1,28 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v10.05-Reasoning-Surface-Buffer
+**Version:** v10.07-Data-Integrity-Hardening
 
 **A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
 Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. **Starting with v9.21, the system has deployed the "Phantom Persona" framework—a psychological framing strategy that weaponizes every engine with absolute skepticism, forcing agents to treat all input narratives, corporate filings, and retail news as potentially manipulated or biased, thereby achieving unprecedented levels of adversarial rigor.**
 
 Starting with **v9.22-Phantom-Persona-Final-Sync**, the system has reached full architectural maturity. It consolidates its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search**, **Gemini 3.5 Pro Thinking Level Optimization**, and a **Professional Master Router** to ensure high-fidelity data integrity. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`).
+
+### 🔒 v10.07 Data Integrity Hardening (2026-05-20)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Day % Calculation Fix** | `DATA_INTEGRITY` | Corrected the intraday percentage change formula in `fetch_stocks.py` to use `previousClose` as the denominator instead of the current price, eliminating systematic over/under-reporting of daily moves across all tickers. |
+| **Cash UI Reactivity Fix** | `UI_UX` | Fixed the dashboard's editable `CASH (€)` row so that user modifications to the cash value now correctly trigger a `POST /api/config` write and a live USD conversion recalculation, resolving the silent-discard bug. |
+| **Scout FX Exclusion Hardening** | `ENH_84` | Hardened the EURUSD=X exclusion filter across both the backend data compilation loop and the frontend `renderTable` function to prevent the forex conversion ticker from appearing as an equity row in the Scout Intelligence section. |
+| **Cache-Busting Versioning** | `UI_UX` | Added a `?v=` query-string cache-buster to the `app.js` import in `index.html` to force browsers to bypass stale cached scripts after backend logic patches. |
+
+### 🔒 v10.06 FX Exclusion Sync (2026-05-20)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **FX Display Exclusion** | `UI_UX` | Excluded the forex exchange rate `EURUSD=X` from displaying inside the main equities tables (both frontend tables and backend console output), while preserving it in background threads for real-time portfolio currency conversions. |
+| **All Tickers Sync** | `DATA_INTEGRITY` | Hardened dynamic `ALL_TICKERS` compilation endpoints to ensure the dynamic FX tracking ticker (`EURUSD=X`) is persistently retained and updated. |
 
 ### 🔒 v10.05 Reasoning Surface Buffer (2026-05-20)
 
