@@ -8,14 +8,18 @@ from google import genai
 from google.genai import types
 
 # ---------------------------------------------------------------------------
-# Model definitions
+# Model definitions — v10.03-ESA-Deadlock-Sync
+# Per terminal.md > Mode Selection Matrix (Canonical)
 # ---------------------------------------------------------------------------
 MODEL_MAPPING = {
-    "PRO":      ["gemini-2.5-pro", "gemini-1.5-pro"],
+    "PRO":      ["gemini-2.5-pro", "gemini-2.0-pro-exp", "gemini-1.5-pro"],
     "FLASH":    ["gemini-2.5-flash", "gemma-4-31b-it", "gemini-1.5-flash"],
-    "GEMMA":    ["gemma-4-31b-it", "gemini-1.5-pro"],
-    "THINKING": ["gemini-2.5-flash", "gemini-1.5-pro"]
+    "GEMMA":    ["gemma-4-31b-it", "gemini-2.5-flash", "gemini-1.5-pro"],
+    "THINKING": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"],
+    "FAST":     ["gemini-2.5-flash", "gemma-4-31b-it", "gemini-1.5-flash"],
 }
+
+CACHE_VERSION = "GEM_CACHE_v10.03"
 
 
 # ---------------------------------------------------------------------------
@@ -35,11 +39,11 @@ class AgentFramework:
             self.client = genai.Client()
 
         self.agents = {}
-        
+
         # Caching state (ENH_CACHE_01)
         self.cached_content_name = None
         self.last_cache_hash = None
-        self.cache_disabled = False # New: Track Free Tier limitations
+        self.cache_disabled = False  # Track Free Tier limitations
 
     def log(self, message: str):
         """Helper to print to console and send to callback if exists."""
@@ -47,11 +51,11 @@ class AgentFramework:
         if self.log_callback:
             try:
                 self.log_callback(message)
-            except:
+            except Exception:
                 pass
 
     def _load_local_config(self) -> dict:
-        """Read config.json for Ollama settings (fails silently with defaults)."""
+        """Read config.json for settings (fails silently with defaults)."""
         try:
             with open("config.json", "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -61,28 +65,32 @@ class AgentFramework:
     def _get_cloud_models(self, mode: str) -> list:
         """Return the list of models for a cloud mode, respecting config.json overrides."""
         base_list = MODEL_MAPPING.get(mode, MODEL_MAPPING["PRO"])
-        # Override with config.json if present
         overrides = {
-            "gemini-2.5-pro": self._local_config.get("MODEL_PRO_1", "gemini-2.5-pro"),
-            "gemma-4-31b-it": self._local_config.get("MODEL_GEMMA", "gemma-4-31b-it"),
-            "gemini-2.5-flash": self._local_config.get("MODEL_FLASH", "gemini-2.5-flash"),
+            "gemini-2.5-pro":     self._local_config.get("MODEL_PRO_1",   "gemini-2.5-pro"),
+            "gemma-4-31b-it":     self._local_config.get("MODEL_GEMMA",   "gemma-4-31b-it"),
+            "gemini-2.5-flash":   self._local_config.get("MODEL_FLASH",   "gemini-2.5-flash"),
         }
         return [overrides.get(m, m) for m in base_list]
 
-
     def load_system_instruction(self, file_path: str) -> str:
-        """Loads a file and formats it as a string for the system prompt."""
+        """Loads a file and formats it as a string for the system prompt.
+        Prefers .md directly; falls back .json → .md if needed."""
+        # Prefer .md over .json (canonical format per v10.02)
         if not os.path.exists(file_path):
-            alt_path = file_path.replace('.json', '.md')
-            if os.path.exists(alt_path):
-                file_path = alt_path
+            # Try .md sibling
+            alt_md = file_path.replace(".json", ".md")
+            alt_json = file_path.replace(".md", ".json")
+            if os.path.exists(alt_md):
+                file_path = alt_md
+            elif os.path.exists(alt_json):
+                file_path = alt_json
             else:
                 raise FileNotFoundError(f"Missing instruction file: {file_path}")
-                
+
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
-            
-        if file_path.endswith('.json'):
+
+        if file_path.endswith(".json"):
             try:
                 return json.dumps(json.loads(content), indent=2)
             except json.JSONDecodeError:
@@ -95,68 +103,56 @@ class AgentFramework:
     # -----------------------------------------------------------------------
     def setup_context_cache(self, model: str = None, subagent_files: list = None):
         """
-        - **subagent_delegation_protocol**:
-          - **rule**: When calling a subagent (e.g., `ask_research_engine`), you MUST prepend the current `[SYSTEM_TIME]` tag to your query.
-        - **agent_orchestration_logic**:
-          - **rule**: Execute Torque-Based Triage per MANDATE_23.
-          - **protocol**:
-            - 1. Execute **Research Engine** to fetch data and assign **Torque Score**.
-            - 2. IF Torque < 5: Call `ask_neutral_structuralist` only.
-            - 3. IF Torque >= 5: Call `ask_council` (Bullish + Red Team + Structuralist).
-          - **objective**: Ensure institutional-grade scrutiny for binary events while maintaining high-speed throughput for informational updates.
-        - **enforce_role_isolation**: Subagent instructions must identify their Engine (e.g., 'You are the RESEARCH_ENGINE') to prevent role confusion.
-        Aggregates rules.md, trade_lessons.json, and subagent instructions into a 
+        Aggregates rules.md, trade_lessons.json, and subagent instructions into a
         CachedContent object to reduce latency and token usage.
+        Must be called AFTER sub_agent_configs is defined.
         """
-        if getattr(self, 'cache_disabled', False):
+        if getattr(self, "cache_disabled", False):
             return
 
         self.log(f"[System] Initializing Context Cache assessment for {model or 'default'}...")
-        
-        # 1. Collect all static content
+
         parts = []
-        
-        # Add Rules.md
+
+        # Add Rules.md (v10.02 canonical)
         rules_path = os.path.join("GEM_Trading_Rules", "rules.md")
         if os.path.exists(rules_path):
             with open(rules_path, "r", encoding="utf-8") as f:
-                parts.append(f"## CANONICAL RULES ENGINE\n{f.read()}\n\n")
-        
+                parts.append(f"## CANONICAL RULES ENGINE (v10.02)\n{f.read()}\n\n")
+
         # Add Trade Lessons
         if os.path.exists("trade_lessons.json"):
             with open("trade_lessons.json", "r", encoding="utf-8") as f:
                 parts.append(f"## TRADE LESSONS REPOSITORY\n{f.read()}\n\n")
-        
+
         # Add Subagent Instructions
         if subagent_files:
             for f_name in subagent_files:
                 try:
                     content = self.load_system_instruction(f_name)
                     parts.append(f"## SUBAGENT_INSTRUCTION: {f_name}\n{content}\n\n")
-                except:
+                except Exception:
                     continue
-        
+
         full_content = "".join(parts)
-        # Include model name in hash to force rebuild if model changes
-        content_hash = hashlib.md5((full_content + str(model)).encode('utf-8')).hexdigest()
-        
-        # 2. Check if cache is already valid
+        content_hash = hashlib.md5((full_content + str(model)).encode("utf-8")).hexdigest()
+
+        # Check if cache is already valid
         if self.last_cache_hash == content_hash and self.cached_content_name:
             self.log("[System] Context Cache hit (Hash matches). Skipping recreation.")
             return
 
-        # 3. Create new cache
         target_model = model if model else self._get_cloud_models("PRO")[0]
-        
+
         try:
             self.log(f"[System] Creating Context Cache for {target_model} (~{len(full_content)} chars)...")
             cache = self.client.caches.create(
                 model=target_model,
                 config=types.CreateCachedContentConfig(
-                    display_name=f"GEM_CACHE_v5.2_{content_hash[:8]}",
+                    display_name=f"{CACHE_VERSION}_{content_hash[:8]}",
                     contents=[types.Content(role="user", parts=[types.Part(text=full_content)])],
-                    ttl="7200s" # 2 hour TTL for stability
-                )
+                    ttl="7200s",  # 2-hour TTL
+                ),
             )
             self.cached_content_name = cache.name
             self.last_cache_hash = content_hash
@@ -164,7 +160,7 @@ class AgentFramework:
         except Exception as e:
             error_str = str(e)
             if "RESOURCE_EXHAUSTED" in error_str or "limit=0" in error_str:
-                self.log(f"[Warning] Context Cache DISABLED (Free Tier detected). Switching to Standard Inference.")
+                self.log("[Warning] Context Cache DISABLED (Free Tier detected). Switching to Standard Inference.")
                 self.cache_disabled = True
             else:
                 self.log(f"[System] Context Cache FAILED: {e}. Falling back to standard inference.")
@@ -181,7 +177,7 @@ class AgentFramework:
 
         for model_name in models:
             self.log(f"[Cloud Execution] Attempting with model: {model_name}...")
-            
+
             final_tools = []
             if tools:
                 for t in tools:
@@ -189,8 +185,8 @@ class AgentFramework:
                         final_tools.append(types.Tool(google_search=types.GoogleSearch()))
                     else:
                         final_tools.append(t)
-            
-            # --- Caching Association ---
+
+            # Cache association — PRO and THINKING modes only
             cache_to_use = None
             if self.cached_content_name and mode in ["PRO", "THINKING"]:
                 cache_to_use = self.cached_content_name
@@ -202,25 +198,20 @@ class AgentFramework:
                 tools=final_tools if final_tools else None,
                 cached_content=cache_to_use,
                 safety_settings=[
-                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE")
-                ]
+                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT",  threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT",  threshold="BLOCK_NONE"),
+                ],
             )
 
             def attempt_call():
                 if final_tools:
-                    chat = self.client.chats.create(
-                        model=model_name,
-                        config=config
-                    )
+                    chat = self.client.chats.create(model=model_name, config=config)
                     return chat.send_message(prompt)
                 else:
                     return self.client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                        config=config
+                        model=model_name, contents=prompt, config=config
                     )
 
             try:
@@ -229,7 +220,7 @@ class AgentFramework:
                 error_msg = str(e)
                 last_error = e
 
-                # If cache is invalid or expired, retry without cache immediately
+                # Cache expired/invalid — retry immediately without cache
                 if "cache" in error_msg.lower() and cache_to_use:
                     self.log("[System] Cache expired or invalid. Retrying without cache...")
                     self.cached_content_name = None
@@ -252,8 +243,10 @@ class AgentFramework:
                 elif "503" in error_msg or "unavailable" in error_msg.lower():
                     self.log(f"[System] 503 UNAVAILABLE for {model_name}. Retrying in 5s...")
                     time.sleep(5)
-                    try: return attempt_call()
-                    except Exception: pass
+                    try:
+                        return attempt_call()
+                    except Exception:
+                        pass
                     continue
 
                 elif "not found" in error_msg.lower():
@@ -264,18 +257,27 @@ class AgentFramework:
 
         raise RuntimeError(f"All models for mode {mode} failed. Last error: {last_error}")
 
-    def create_agent_tool(self, name, json_file, mode="PRO", agent_tools=None):
-        instruction = self.load_system_instruction(json_file)
+    def create_agent_tool(self, name, file_path, mode="PRO", agent_tools=None):
+        instruction = self.load_system_instruction(file_path)
         if self.cached_content_name:
-            instruction = f"{instruction}\n\nNOTE: You have access to the full CANONICAL RULES ENGINE and TRADE LESSONS in your cached context. Refer to them for all thresholds."
+            instruction += (
+                "\n\nNOTE: You have access to the full CANONICAL RULES ENGINE (v10.02) "
+                "and TRADE LESSONS in your cached context. "
+                "Refer to them for all thresholds and mandates."
+            )
+
         import datetime
-        # Force US/Eastern (New York) Time (EDT is UTC-4)
+        # Force US/Eastern (New York) Time — UTC-4 (EDT)
         now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
         ny_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
         current_year = now.year
-        
-        # Inject the "Absolute Truth" anchor into the system instruction
-        temporal_anchor = f"\n\n[SYSTEM_TIME (NEW YORK / ET): {ny_iso}]\n[PRODUCTION_ERA: {current_year}]\n[MANDATE]: The current year provided in the timestamp is the LIVE PRODUCTION ERA. Treat all data from this era as grounded reality, not a simulation."
+
+        temporal_anchor = (
+            f"\n\n[SYSTEM_TIME (NEW YORK / ET): {ny_iso}]\n"
+            f"[PRODUCTION_ERA: {current_year}]\n"
+            f"[MANDATE]: The current year provided in the timestamp is the LIVE PRODUCTION ERA. "
+            f"Treat all data from this era as grounded reality, not a simulation."
+        )
         final_instruction = instruction + temporal_anchor
 
         def call_subagent(query: str) -> str:
@@ -284,14 +286,16 @@ class AgentFramework:
                 prompt=f"[SYSTEM_TIME (NEW YORK / ET): {ny_iso}] {query}",
                 instruction=final_instruction,
                 mode=mode,
-                tools=agent_tools
+                tools=agent_tools,
             )
             res_text = ""
             try:
                 for part in response.candidates[0].content.parts:
-                    if part.text: res_text += part.text
-            except:
-                if hasattr(response, 'text'): res_text = response.text
+                    if part.text:
+                        res_text += part.text
+            except Exception:
+                if hasattr(response, "text"):
+                    res_text = response.text
             return res_text or str(response)
 
         call_subagent.__name__ = f"ask_{name.lower().replace(' ', '_')}"
@@ -300,6 +304,7 @@ class AgentFramework:
 
     def create_parallel_council_tool(self, agents_dict):
         def ask_council(queries: dict) -> str:
+            """Dispatch multiple council agents in parallel for 3x speed increase."""
             self.log(f"\n[Parallel Dispatcher] Initializing parallel session for {list(queries.keys())}...")
             results = {}
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(queries)) as executor:
@@ -314,9 +319,11 @@ class AgentFramework:
                         results[agent_name] = f"Error: Agent '{agent_name}' not found."
                 for future in concurrent.futures.as_completed(future_to_agent):
                     agent_name = future_to_agent[future]
-                    try: results[agent_name] = future.result()
-                    except Exception as exc: results[agent_name] = f"Error: {exc}"
-            self.log(f"[Parallel Dispatcher] All agents responded.")
+                    try:
+                        results[agent_name] = future.result()
+                    except Exception as exc:
+                        results[agent_name] = f"Error: {exc}"
+            self.log("[Parallel Dispatcher] All agents responded.")
             return json.dumps(results, indent=2)
 
         ask_council.__name__ = "ask_council"

@@ -3,208 +3,221 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GEM Trading Dashboard</title>
-    <link rel="stylesheet" href="styles.css?v=40">
-    <link rel="stylesheet" href="modern_ui.css?v=40">
+    <title>Gemini Gem Stock Market Council Dashboard</title>
+    <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
+    <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
-<body class="dark-theme">
+<body>
     <div class="app-container">
-        <!-- Header -->
-        <header class="glass-panel" style="z-index: 10000; position: relative;">
+
+        <!-- ─── Top Alert Bar ─── -->
+        <div id="top-alert-bar" class="top-alert-bar">
+            <div id="alerts-container" class="alerts-ticker">
+                <span class="ticker-label">SYSTEM ALERTS:</span>
+                <div id="alerts-content" class="ticker-content">
+                    <span class="empty-state">NO ACTIVE ALERTS</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── Header ─── -->
+        <header class="glass-panel">
             <div class="header-content">
                 <div class="brand">
                     <div class="pulse-indicator" id="live-indicator"></div>
-                    <h1>GEM Dashboard <span class="version">v17.2</span></h1>
+                    <h1>Gemini Gem Dashboard <span class="version">v18.2</span></h1>
                 </div>
                 <div class="system-status">
                     <div class="status-item">
-                        <span class="label">MARKET</span>
-                        <span id="market-status" class="value">CONNECTING...</span>
+                        <span class="label">Status:</span>
+                        <span id="market-status" class="value waiting">AWAITING CONNECTION...</span>
+                    </div>
+                    <div class="status-item" id="refresh-status-container" style="display: none;">
+                        <span id="refresh-status" class="value text-yellow" style="font-weight: bold;">⚡ HEAVY REFRESH</span>
                     </div>
                     <div class="status-item">
-                        <span class="label">UPDATED</span>
+                        <span class="label">Updated:</span>
                         <span id="last-updated" class="value">—</span>
                     </div>
-                    <button id="launch-chat-btn" class="glow-btn chat-launcher">
-                        <span>✦ Consult The AI Council</span>
-                    </button>
+                    <button id="open-indices-modal-btn" class="glow-btn outline" style="width: auto; padding: 4px 12px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; gap: 6px; margin-left: 10px; line-height: 1;">⚙️ INDICES</button>
                 </div>
             </div>
         </header>
 
-        <!-- System Warnings -->
-        <div id="system-warning-banner" class="warning-banner" style="display:none;">
-            <span class="warning-icon">⚠️</span>
-            <span id="system-warning-text" class="warning-text"></span>
+        <!-- ─── Macro HUD ─── -->
+        <section class="macro-hud" id="macro-hud">
+            <div id="dynamic-macro-cards" style="display: contents;">
+                <!-- Cards injected by JS -->
+            </div>
+        </section>
+
+        <!-- ─── Quick Action Bar (Mobile Only) ─── -->
+        <div class="quick-action-bar glass-panel mobile-only">
+            <button id="mobile-copy-json-btn" class="glow-btn mini">📋 SNAP</button>
+            <button id="mobile-paste-payload-btn" class="glow-btn mini">📥 INGEST</button>
+            <button id="mobile-copy-session-btn" class="glow-btn mini outline">📂 BOOT</button>
+            <button id="mobile-btn-session-review" class="glow-btn mini outline">🔍 AUDIT</button>
         </div>
+        <div id="mobile-data-status" class="status-message inline-feedback mobile-only"></div>
 
-        <!-- Main Dashboard Layout -->
-        <div class="dashboard-grid">
-            <!-- Left Column: Macro & Table -->
-            <div class="dashboard-left">
-                <!-- Macro Cards Section -->
-                <div id="dynamic-macro-cards" class="macro-grid">
-                    <!-- Cards injected by JS -->
-                </div>
-
-                <!-- Table Section -->
-                <div class="table-container glass-panel">
-                    <table class="modern-table">
-                        <thead>
-                            <tr>
-                                <th>TICKER</th>
-                                <th>PRICE</th>
-                                <th>GAP %</th>
-                                <th>VOLUME</th>
-                                <th>ATR %</th>
-                                <th>RSI</th>
-                                <th>VWAP</th>
-                                <th>TREND</th>
-                                <th>DEALER POSTURE</th>
-                                <th>SCORE</th>
-                            </tr>
-                        </thead>
-                        <tbody id="table-body">
-                            <!-- Data rows injected by JS -->
-                        </tbody>
-                    </table>
-                </div>
+        <!-- ─── Main Content ─── -->
+        <main class="main-content">
+            <!-- Data Table -->
+            <div class="table-container glass-panel">
+                <table id="data-table">
+                    <thead>
+                        <tr>
+                            <th>Ticker</th>
+                            <th>Price</th>
+                            <th>Day %</th>
+                            <th>Gap %</th>
+                            <th>Volume</th>
+                            <th>ATR %</th>
+                            <th>RSI</th>
+                            <th>VWAP</th>
+                            <th>Trend</th>
+                            <th>Dealer</th>
+                            <th class="score-col">Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <!-- Data rows injected by JS -->
+                    </tbody>
+                </table>
             </div>
 
-            <!-- Right Column: Alerts & Controls -->
-            <div class="dashboard-right">
-                <div id="alerts-panel" class="sidebar-card alerts-card glass-panel">
-                    <h3>⚡ ALERTS</h3>
-                    <div class="alerts-content">
-                        <div class="alert-item info">BOND ALERT: Yields rising rapidly. High Risk Environment.</div>
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <!-- Outbound Data Operations -->
+                <div class="sidebar-card glass-panel desktop-only">
+                    <h3><span class="icon">📤</span> Export to Council</h3>
+                    <p class="subtitle">Copy context for Gemini Gem analysis</p>
+                    <div class="btn-row">
+                        <button id="copy-json-btn" class="glow-btn">📋 Copy Market Snapshot</button>
+                        <div id="outbound-turn-status" class="status-message inline-feedback"></div>
+                        <button id="copy-session-btn" class="glow-btn outline">📂 New Session Boot</button>
+                        <div id="outbound-session-status" class="status-message inline-feedback"></div>
+                        <button id="btn-session-review" onclick="copySessionReviewPayload()" class="glow-btn outline">🔍 Audit & Rule Review</button>
+                        <div id="outbound-review-status" class="status-message inline-feedback"></div>
                     </div>
                 </div>
 
-                <div class="sidebar-card glass-panel basket-card">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                        <h3 style="margin: 0;">💼 BASKET</h3>
-                        <div style="display: flex; gap: 5px;">
-                            <input type="text" id="add-basket-ticker" placeholder="SYM" style="width: 40px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px; font-size: 0.7rem; padding: 2px 4px;">
-                            <button id="add-to-basket-btn" style="background: var(--accent-green); color: white; border: none; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; cursor: pointer;">+</button>
-                            <button id="save-basket-btn" style="background: var(--accent-blue); color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; cursor: pointer;">SYNC</button>
+                <!-- Inbound Data Operations -->
+                <div class="sidebar-card glass-panel desktop-only">
+                    <h3><span class="icon">📥</span> Import from Council</h3>
+                    <p class="subtitle">Sync SSoT from Gem output</p>
+                    <div class="btn-row">
+                        <button id="paste-payload-btn" class="glow-btn">📥 Ingest Execution Payload</button>
+                        <div id="inbound-paste-status" class="status-message inline-feedback"></div>
+                    </div>
+                </div>
+
+
+                <!-- Portfolio Manager -->
+                <div class="sidebar-card glass-panel manager-card minimized">
+                    <div class="header-row">
+                        <h3 onclick="toggleSection('portfolio-content', this)">
+                            <span class="icon">💼</span> Portfolio <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                        </h3>
+                    </div>
+                    <div id="portfolio-content" style="display: none;">
+                        <div class="input-group" style="margin-bottom: 12px; justify-content: center;">
+                            <input type="text" id="add-portfolio-ticker" placeholder="SYM" class="mini-input">
+                            <button id="add-to-portfolio-btn" class="add-btn">+</button>
+                            <button id="save-portfolio-btn" class="glow-btn sync-btn">SYNC</button>
+                        </div>
+                        <div class="manager-table-container" style="margin-top: 0;">
+                            <table class="manager-table">
+                                <thead>
+                                    <tr>
+                                        <th>SYM</th>
+                                        <th>AMT</th>
+                                        <th>WAC</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="portfolio-manager-body">
+                                    <!-- Rows injected by JS -->
+                                </tbody>
+                            </table>
                         </div>
                     </div>
-                    <div id="basket-container" style="max-height: 200px; overflow-y: auto;">
-                        <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
-                            <thead>
-                                <tr style="text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                                    <th style="padding: 4px;">SYM</th>
-                                    <th style="padding: 4px;">AMT</th>
-                                    <th style="padding: 4px;">UAC ($)</th>
-                                    <th style="padding: 4px;"></th>
-                                </tr>
-                            </thead>
-                            <tbody id="basket-body">
-                                <!-- Basket rows injected here -->
-                            </tbody>
-                        </table>
-                    </div>
                 </div>
 
-                <div class="sidebar-card glass-panel watch-card">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                        <h3 style="margin: 0;">👀 WATCH LIST</h3>
-                        <div style="display: flex; gap: 5px;">
-                            <input type="text" id="add-watch-ticker" placeholder="SYM" style="width: 40px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px; font-size: 0.7rem; padding: 2px 4px;">
-                            <button id="add-to-watch-btn" style="background: var(--accent-green); color: white; border: none; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; cursor: pointer;">+</button>
+                <!-- Watchlist Manager -->
+                <div class="sidebar-card glass-panel manager-card minimized">
+                    <div class="header-row">
+                        <h3 onclick="toggleSection('watchlist-content', this)">
+                            <span class="icon">👀</span> Watchlist <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                        </h3>
+                    </div>
+                    <div id="watchlist-content" style="display: none;">
+                        <div class="input-group" style="margin-bottom: 12px; justify-content: center;">
+                            <input type="text" id="add-watchlist-ticker" placeholder="SYM" class="mini-input">
+                            <button id="add-to-watchlist-btn" class="add-btn">+</button>
+                        </div>
+                        <div id="watchlist-manager-container" class="watch-list-flex" style="margin-top: 0;">
+                            <!-- Tags injected by JS -->
                         </div>
                     </div>
-                    <div id="watch-list-container" style="max-height: 150px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 6px;">
-                        <!-- Watch list items injected here -->
+                </div>
+
+                <!-- Scout Intelligence Manager -->
+                <div class="sidebar-card glass-panel manager-card minimized">
+                    <div class="header-row">
+                        <h3 onclick="toggleSection('scout-content', this)">
+                            <span class="icon">🔭</span> Scout Intelligence <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                        </h3>
+                    </div>
+                    <div id="scout-content" style="display: none;">
+                        <p class="subtitle" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 12px;">Toggle target sectors for autonomous screening</p>
+                        <div id="scout-categories-container" class="scout-grid-container" style="margin-top: 0; min-height: 40px; border: 1px dashed var(--panel-border); padding: 8px; border-radius: 4px;">
+                            <!-- Grid injected by JS -->
+                        </div>
                     </div>
                 </div>
 
-                <div class="sidebar-card glass-panel controls-card">
-                    <div class="control-row">
-                        <button id="open-indices-modal-btn" class="glow-btn outline block-btn">📈 MANAGE INDICES</button>
+                <!-- Decision Log Management -->
+                <div class="sidebar-card glass-panel manager-card minimized desktop-only">
+                    <div class="header-row">
+                        <h3 onclick="toggleSection('decision-log-content', this)">
+                            <span class="icon">🗄️</span> Decision Log <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                        </h3>
+                    </div>
+                    <div id="decision-log-content" style="display: none;">
+                        <p class="subtitle" style="margin-bottom: 12px;">Forensic trade history management</p>
+                        <div class="btn-row">
+                            <button id="clear-log-btn" class="glow-btn outline danger">🗑️ Clear Decision Log</button>
+                            <div id="clear-log-status" class="status-message inline-feedback"></div>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </div>
+            </aside>
+        </main>
+
     </div>
 
-    <!-- Modern Chat Overlay (Keep outside grid) -->
-    <div class="modern-chat-overlay" id="chat-window">
-        <div class="modern-chat-panel">
-            <div class="modern-chat-header">
-                <div class="modern-header-left" style="display: flex; align-items: center; gap: 20px;">
-                    <div class="modern-logo-box">✦</div>
-                    <h2 style="margin: 0; font-size: 1.4rem; letter-spacing: 1px; white-space: nowrap;">GEMINI AI COUNCIL</h2>
-                </div>
-                <div class="modern-header-right" style="display: flex; align-items: center; gap: 12px;">
-                    <select id="model-selector" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 5px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; outline: none;">
-                        <option value="gemini-2.5-pro" selected style="background: #1a1a1a; color: white;">2.5 PRO (DEFAULT)</option>
-                        <option value="gemini-2.5-flash" style="background: #1a1a1a; color: white;">2.5 FLASH (COST-FREE)</option>
-                        <option value="gemma-4-31b-it" style="background: #1a1a1a; color: white;">GEMMA 4 31B (PRECISION)</option>
-                        <option value="gemini-1.5-pro" style="background: #1a1a1a; color: white;">1.5 PRO (STABLE)</option>
-                        <option value="gemini-1.5-flash" style="background: #1a1a1a; color: white;">1.5 FLASH (TURBO)</option>
-                    </select>
-                    <button id="new-chat-btn" title="New Conversation" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
-                        <span>+</span> NEW
-                    </button>
-                    <button id="history-chat-btn" title="History" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
-                        <span>📋</span> SESSIONS
-                    </button>
-                    <button class="modern-ctrl-btn" id="chat-close-btn">×</button>
-                </div>
-            </div>
-
-            <div class="modern-chat-messages" id="chat-messages">
-                <div class="modern-message ai">
-                    Welcome to the council. How can I help you analyze the markets today?
-                </div>
-            </div>
-
-            <div class="modern-input-area">
-                <textarea id="chat-input" placeholder="Ask Gemini..." rows="1"></textarea>
-                <div class="modern-input-footer">
-                    <div class="modern-input-tools">
-                        <span id="chat-status-indicator" style="color: #8b949e; font-size: 0.85rem; font-weight: 500; letter-spacing: 0.5px;">Status: Ready</span>
-                    </div>
-                    <button class="modern-send-btn" id="send-chat-btn" style="width: auto; border-radius: 12px; padding: 10px 24px; font-weight: 700; letter-spacing: 1px; font-size: 0.9rem; display: flex; align-items: center; gap: 10px;">
-                        <span>✦ CHAT WITH THE COUNCIL</span>
-                    </button>
-                    <button class="modern-stop-btn" id="stop-chat-btn" style="display: none; width: auto; border-radius: 12px; padding: 10px 24px; font-weight: 700; letter-spacing: 1px; font-size: 0.9rem; background: #da3633; border: none; color: white; cursor: pointer; align-items: center; gap: 10px;">
-                        <span>⏹ STOP</span>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modals -->
-    <div class="modal-overlay" id="ticker-modal-overlay">
-        <div class="modal glass-panel">
-            <div class="modal-header">
-                <h3>📊 Manage Tickers</h3>
-                <button class="modal-close" id="close-ticker-modal">&times;</button>
-            </div>
-            <textarea id="ticker-input" rows="4"></textarea>
-            <button id="update-tickers-btn" class="glow-btn">Update Universe</button>
-        </div>
-    </div>
-
+    <!-- ─── Indices Modal ─── -->
     <div class="modal-overlay" id="indices-modal-overlay">
         <div class="modal modal-wide glass-panel">
             <div class="modal-header">
                 <h3>📈 Manage Indices</h3>
                 <button class="modal-close" id="close-indices-modal">&times;</button>
             </div>
-            <textarea id="indices-input" rows="3"></textarea>
-            <button id="update-indices-btn" class="glow-btn">Update Indices</button>
-            <div class="indices-grid" id="indices-grid"></div>
+            <p class="subtitle">Edit tracked macro indices (comma or space separated)</p>
+            <textarea id="indices-input" rows="3" placeholder="SPY, ^VIX, IEF..."></textarea>
+            <button id="update-indices-btn" class="glow-btn" style="margin-bottom: 8px;">Update Indices</button>
+            <div id="indices-status" class="status-message"></div>
+            
+            <hr style="border: 0; border-top: 1px solid var(--panel-border); margin: 16px 0;">
+            <p class="subtitle" style="margin-bottom: 8px;">Real-time macro indicator data</p>
+            <div class="indices-grid" id="indices-grid">
+                <!-- Populated by JS -->
+            </div>
         </div>
     </div>
 
-    <script src="dashboard_core.js?v=40"></script>
-    <script src="modern_ui.js?v=40"></script>
-    <script src="modals.js?v=40"></script>
+    <script src="app.js"></script>
 </body>
 </html>
