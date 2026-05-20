@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.02-SSR-Nullification-Sync
+**Version:** v10.05-Reasoning-Surface-Buffer
 **Tone:** neutral, reflective, concise
 
 ---

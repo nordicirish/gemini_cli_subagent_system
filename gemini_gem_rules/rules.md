@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.02-SSR-Nullification-Sync
+**Version:** v10.05-Reasoning-Surface-Buffer
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -243,7 +243,7 @@
       - Stage 2: RED_TEAM_PESSIMIST is fed the Bullish thesis and provides a direct counter-argument. Agreement Score S_A is calculated based on the victor of this rebuttal.
 - **[MANDATE_22 - Dynamic Thinking Level Optimization]**
     *   **Status:** ACTIVE
-    *   **Instruction:** The system operates on the Gemini 3.1 Pro architecture. The legacy `thinking_budget` parameter is strictly deprecated and will cause 400 errors. Agents operating in THINKING mode must align their complexity to the new `thinking_level` hierarchy:
+    *   **Instruction:** The system operates on the Gemini 3.5 Pro architecture. The legacy `thinking_budget` parameter is strictly deprecated and will cause 400 errors. Agents operating in THINKING mode must align their complexity to the new `thinking_level` hierarchy:
         *   **Red Team Pessimist:** Must operate at `thinking_level: "high"` to execute deep, multi-path adversarial simulations against the thesis.
         *   **Bullish Advocate & Macro-Narrative:** Must operate at `thinking_level: "medium"` to balance reasoning depth with latency.
 - **[MANDATE_14_ALPHA_CATALYST]**
@@ -861,7 +861,7 @@
         3. Active Thesis: The specific "Why" for currently open positions (distilled to < 100 tokens per ticker).
         4. Consensus History: Last 3 turns only.
         5. Narrative Logs: Delete prose older than 5 turns.
-    *   **Logic:** When the `TOKEN_PRUNING_TRIGGER` (>= 150,000 tokens) is met, the system MUST convert the "Narrative Logs" into the "Operational Matrix" defined in ENH_53 before purging the prose. This ensures that while the conversation is forgotten, the math and catalysts remain active in the reasoning surface.
+    *   **Logic:** When the `TOKEN_PRUNING_TRIGGER` (>= 180,000 tokens) is met, the system MUST convert the "Narrative Logs" into the "Operational Matrix" defined in ENH_53 before purging the prose. This ensures that while the conversation is forgotten, the math and catalysts remain active in the reasoning surface.
 *   **[ENH_77_LIVE_WEB - Proactive Search Mandate]**
     *   **Status:** ACTIVE
     *   **Instruction:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (sec_link) and Government/DoW press releases (dow_link) when not explicitly provided in the payload. 
@@ -877,7 +877,7 @@
   - **Category Management:** Target sectors for screening are user-curated via the Dashboard UI and synchronized through `config.json` (GICS sectors recommended).
   - **Workflow:**
     - 1. **Python Sweep:** The `fetch_stocks.py` daemon executes a broad technical sweep (SMA50/200, RVOL) via the Finnhub free-tier API.
-    - 2. **Candidate Selection:** The backend sorts passing tickers and selects a MAXIMUM of 2 "Scout Candidates" per heavy cycle to protect the Orchestrator's 128K ACTIVE_REASONING_SURFACE.
+    - 2. **Candidate Selection:** The backend sorts passing tickers and selects a MAXIMUM of 2 "Scout Candidates" per heavy cycle to protect the Orchestrator's 160K ACTIVE_REASONING_SURFACE.
     - 3. **Metadata Flagging:** Candidates are injected into the SSoT payload with `institutional_status: "Unverified Institutional Status"`.
     - 4. **Agentic Grounding:** This flag mandates the `MACRO_NARRATIVE_ENGINE` to bypass the Finnhub 13-F paywall by invoking native Google Search for SEC filings, insider buys, and institutional conviction.
     - 5. **Graduation:** If the Council Consensus (S_A) > 0.85, the Scout Candidate is "Graduated" to the active portfolio tracking queue.
@@ -1112,11 +1112,11 @@
 ## System Thresholds
 - **Authority:** CANONICAL — All sub-engines MUST reference named constants here instead of hardcoding values.
 - **TOKEN_PRUNING_TRIGGER:**
-  - **Value:** 150000
+  - **Value:** 180000
   - **Usage:** Threshold at which ENH_76 context pruning is executed.
   - **Status:** MASTER_CONSTANT
 - **ACTIVE_REASONING_SURFACE:**
-  - **Value:** 128K
+  - **Value:** 160K
   - **Usage:** Target token count for active context after ENH_76 pruning.
   - **Status:** MASTER_CONSTANT
 - **GLOBAL_ALPHA_FRICTION_HURDLE:**

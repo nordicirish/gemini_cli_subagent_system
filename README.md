@@ -1,12 +1,30 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v10.02-SSR-Nullification-Sync
+**Version:** v10.05-Reasoning-Surface-Buffer
 
 **A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
 Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. **Starting with v9.21, the system has deployed the "Phantom Persona" framework—a psychological framing strategy that weaponizes every engine with absolute skepticism, forcing agents to treat all input narratives, corporate filings, and retail news as potentially manipulated or biased, thereby achieving unprecedented levels of adversarial rigor.**
 
-Starting with **v9.22-Phantom-Persona-Final-Sync**, the system has reached full architectural maturity. It consolidates its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search**, **Gemini 3.1 Pro Thinking Level Optimization**, and a **Professional Master Router** to ensure high-fidelity data integrity. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`).
+Starting with **v9.22-Phantom-Persona-Final-Sync**, the system has reached full architectural maturity. It consolidates its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search**, **Gemini 3.5 Pro Thinking Level Optimization**, and a **Professional Master Router** to ensure high-fidelity data integrity. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`).
+
+### 🔒 v10.05 Reasoning Surface Buffer (2026-05-20)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Reasoning Surface Buffer** | `ENH_76` | Increased `ACTIVE_REASONING_SURFACE` to 160,000 tokens while maintaining the `TOKEN_PRUNING_TRIGGER` at 180,000, establishing a mathematically optimal 20,000-token gap for deeper pre-pruning payloads. |
+
+### 🔒 v10.04 Token Economy Expansion (2026-05-20)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Token Economy Expansion** | `ENH_76` | Moderately increased `TOKEN_PRUNING_TRIGGER` to 180,000 and `ACTIVE_REASONING_SURFACE` to 150,000 to safely utilize Gemini 3.5 Pro's expanded context without risking silent web app truncation. |
+
+### 🔒 v10.03 Gemini 3.5 Architecture Sync (2026-05-20)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Gemini 3.5 Architecture Sync** | `ARCH_SYNC` | Updated engine model specifications across instructions and README to explicitly enforce the Gemini 3.5 Pro architecture, retiring legacy 3.1 references while preserving strict token limits and context pruning guardrails. |
 
 ### 🔒 v10.02 SSR Nullification Sync (2026-05-18)
 
@@ -328,7 +346,7 @@ The background daemon runs in a loop, fetching live data while a **FastAPI** `uv
 - **Copy/Paste Integrations**: Two-tier copy system — **Copy Turn Data** (lightweight per-turn payload with slim tickers + compact mutable state) and **Copy Session Init** (full SSOT + tickers + trade lessons for new sessions). A **Paste Execution Payload** button ingests Gemini outputs back to automatically mutate `local_ssot_shadow.json` and append historical logic to `decision_log.json`.
 
 ### 2. Paste Into a Gem Conversation
-Open the relevant Gemini Gem (e.g., the Terminal Orchestrator). **IMPORTANT: Ensure you have manually selected your preferred model mode (e.g., "Gemini 3.1 Pro" or "Thinking") in the chat interface. Thinking mode is recommended.** Paste the dashboard payload. The Gem parses the financial data and routes it through the appropriate engine pipeline.
+Open the relevant Gemini Gem (e.g., the Terminal Orchestrator). **IMPORTANT: Ensure you have manually selected your preferred model mode (e.g., "Gemini 3.5 Pro" or "Thinking") in the chat interface. Thinking mode is recommended.** Paste the dashboard payload. The Gem parses the financial data and routes it through the appropriate engine pipeline.
 
 ### 3. The Council Deliberates
 For trade decisions, the system triggers the **v9.0 Multi-Stage Consensus Pipeline**:
