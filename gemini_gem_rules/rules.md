@@ -1515,13 +1515,12 @@
 
     - **Logic:** For qualitative intelligence gathering (e.g., earnings webcasts, military testing footage, management interviews), the RESEARCH_ENGINE must proactively invoke the YouTube extension to perform primary source verification rather than relying on secondary text summaries.
 
-## Enh 86 Melt-Up RSI Decoupling
-- **Id:** ENH_86
-- **Title:** Melt-Up Regime & RSI Decoupling
+## Momentum & Regime Frameworks
+
+### [ENH_86] MELT-UP REGIME & RSI DECOUPLING
 - **Status:** ACTIVE
-- **Directive:** SPY RSI > 75 no longer blocks high-beta accumulation if VIX < 20 and Dealer Posture is LONG_GAMMA.
-- **Justification:** Promoted from G-01. Withstood multi-session verification as a reliable momentum filter.
-- **Instruction:** Do not short or prematurely exit high-beta accumulation based solely on extended RSI in this regime. Classify as "Institutional Graduation" melt-up rather than a technical exhaustion point.
+- **Content:** When systemic risk is suppressed (VIX < 20) and broad index dealer posture is LONG_GAMMA, standard overbought oscillators decouple. An RSI > 75 no longer acts as an automatic block for high-beta accumulation or a mandatory trim trigger, provided the asset maintains its VWAP floor.
+- **Justification:** Repeatedly validated through sustained momentum capture in RKLB and DFTX during May 2026 OPEX cycle.
 
 ## Enh 87 VWAP Stop & Liquidity Wash Protocol
 - **Id:** ENH_87
@@ -1564,6 +1563,18 @@
 - **Status:** ACTIVE
 - **Directive:** Fundamental analyst upgrades (e.g., PT raises) carry ZERO execution weight and cannot authorize capital deployment if the asset is currently classified as SHORT_GAMMA or is trading below its intraday VWAP.
 - **Justification:** Quarantined the "Needham PT $22" UMAC catalyst, preventing algorithmic confirmation bias during an active intraday distribution cycle.
+
+## Risk & Liquidity Parameters
+
+### [MANDATE_34] LONG GAMMA SHIELD OVERRIDE
+- **Status:** ACTIVE
+- **Content:** The LONG_GAMMA dealer posture provides a systemic shield against forced liquidations. However, if the asset suffers a catastrophic intraday structural failure (triggering the SEC Rule 201 Short Sale Restriction by dropping >10%), the LONG_GAMMA shield is instantly invalidated and trims must proceed.
+- **Justification:** Codifies the exact invalidation threshold for market-maker hedging defense.
+
+### [MANDATE_35] GEX-SSR CONFLICT PROTOCOL
+- **Status:** ACTIVE
+- **Content:** If an asset is shielded by LONG_GAMMA but drops past the -10% SSR threshold, the Council must prioritize the SSR structural failure. The Consensus Pipeline must forcefully override the Neutral Structuralist and execute a risk trim.
+- **Justification:** Resolves pipeline deadlocks between quantitative GEX readings and regulatory SEC circuit breakers.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.

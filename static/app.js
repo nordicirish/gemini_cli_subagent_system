@@ -307,6 +307,7 @@ async function copySessionBoot(triggerBtn, statusEl) {
             sessionPayload.local_storage_state.mutable_state && 
             sessionPayload.local_storage_state.mutable_state.state_context) {
             sessionPayload.local_storage_state.mutable_state.state_context.timestamp = localTS;
+            sessionPayload.local_storage_state.mutable_state.state_context.status = state.status;
         }
         
         const bootPrompt = [
