@@ -1,12 +1,22 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v10.07-Data-Integrity-Hardening
+**Version:** v10.08-Risk-Telemetry-Hardening
 
 **A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
 Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. **Starting with v9.21, the system has deployed the "Phantom Persona" framework—a psychological framing strategy that weaponizes every engine with absolute skepticism, forcing agents to treat all input narratives, corporate filings, and retail news as potentially manipulated or biased, thereby achieving unprecedented levels of adversarial rigor.**
 
 Starting with **v9.22-Phantom-Persona-Final-Sync**, the system has reached full architectural maturity. It consolidates its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search**, **Gemini 3.5 Pro Thinking Level Optimization**, and a **Professional Master Router** to ensure high-fidelity data integrity. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`).
+
+### 🔒 v10.08 Risk Telemetry Hardening (2026-05-20)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Persistent Stop-Loss Telemetry** | `ENH_104` | New telemetry protocol mandating a `trailing_stop_audit` block in the EXECUTION_PAYLOAD for any active holding with RSI > 65 or price > 2% above daily VWAP. Enforced across Execution Engine, State Validation Router, and Rule Enforcer Engine (PROC_08). |
+| **LONG_GAMMA Shield Override Augmentation** | `MANDATE_34` | Augmented MANDATE_34 with precision language clarifying the mathematical invalidation mechanism of LONG_GAMMA dealer posture upon SEC Rule 201 SSR trigger (>10% intraday drop). Cross-referenced with ENH_16_D and MANDATE_35. Rejected redundant MANDATE_46 proposal. |
+| **GEX SSR Early Warning** | `GEX_ENGINE` | GEX Engine now emits `ssr_invalidation_risk: TRUE` at -8% session change (early warning) and `long_gamma_shield_status: INVALIDATED` at -10% (SSR trigger). |
+| **Neutral Structuralist SSR Guard** | `NEUTRAL_GEM` | Neutral Structuralist is now strictly prohibited from citing LONG_GAMMA as a structural hold justification when SSR is triggered. Must reclassify to STRUCTURAL_FAILURE. |
+| **Payload Alias Hardening** | `FETCH_STOCKS` | Extended `fetch_stocks.py` alias mapping to recognize `projected_portfolio_snapshot` and `post_execution_state` payload containers, preventing silent data drops from variant Council emissions. |
 
 ### 🔒 v10.07 Data Integrity Hardening (2026-05-20)
 

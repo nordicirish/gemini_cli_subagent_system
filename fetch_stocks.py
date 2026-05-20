@@ -521,6 +521,8 @@ async def handle_paste(req: Request):
         # Map common payload aliases to canonical keys
         def map_aliases(data):
             if not isinstance(data, dict): return
+            if "projected_portfolio_snapshot" in data and "portfolio_snapshot" not in data:
+                data["portfolio_snapshot"] = data.pop("projected_portfolio_snapshot")
             if "portfolio" in data and "portfolio_snapshot" not in data:
                 data["portfolio_snapshot"] = data.pop("portfolio")
             if "instructions" in data and "portfolio_snapshot" not in data:
@@ -572,7 +574,7 @@ async def handle_paste(req: Request):
 
         # Apply mapping recursively to known payload containers
         map_aliases(payload)
-        for k in ("EXECUTION_PAYLOAD", "mutable_state", "payload"):
+        for k in ("EXECUTION_PAYLOAD", "mutable_state", "payload", "post_execution_state"):
             if isinstance(payload.get(k), dict):
                 map_aliases(payload[k])
 
@@ -581,7 +583,7 @@ async def handle_paste(req: Request):
             def find_key_recursive(data, target_key):
                 if not isinstance(data, dict): return None
                 if target_key in data: return data[target_key]
-                for k in ("EXECUTION_PAYLOAD", "mutable_state", "state_context", "payload"):
+                for k in ("EXECUTION_PAYLOAD", "mutable_state", "state_context", "payload", "post_execution_state"):
                     if k in data:
                         res = find_key_recursive(data[k], target_key)
                         if res is not None: return res

@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.07-Data-Integrity-Hardening
+**Version:** v10.08-Risk-Telemetry-Hardening
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -94,6 +94,7 @@
 - ENH_97: Power Hour Integrity
 - ENH_98: Analyst Upgrade Quarantine
 - ENH_99: Portfolio Curation Protocol
+- ENH_104: PERSISTENT STOP-LOSS TELEMETRY (trailing_stop_audit Emission Protocol)
 
 
 ## Mandate Registry
@@ -131,6 +132,7 @@
 - MANDATE_32: ZERO_LIQUIDITY_ROTATION (Pairwise Opportunity Cost Audit)
 - MANDATE_33: SHORT_GAMMA_DEGRADATION_TRIMS (VWAP Degradation Protocol)
 - MANDATE_34: INSTITUTIONAL PEG & AH GRAVITY
+- NOTE: MANDATE_46 (LONG GAMMA SHIELD OVERRIDE) was REJECTED — content is fully covered by ENH_16_D, MANDATE_34, and MANDATE_35. MANDATE_34 has been augmented with the precision language from the proposed patch.
 
 ## Tool Supremacy Hierarchy
 - **Google Search:** Primary Numeric Arbiter (Prices, Rates, Statutory text).
@@ -1568,13 +1570,32 @@
 
 ### [MANDATE_34] LONG GAMMA SHIELD OVERRIDE
 - **Status:** ACTIVE
-- **Content:** The LONG_GAMMA dealer posture provides a systemic shield against forced liquidations. However, if the asset suffers a catastrophic intraday structural failure (triggering the SEC Rule 201 Short Sale Restriction by dropping >10%), the LONG_GAMMA shield is instantly invalidated and trims must proceed.
-- **Justification:** Codifies the exact invalidation threshold for market-maker hedging defense.
+- **Content:** The LONG_GAMMA dealer posture provides a systemic shield against standard forced liquidations. However, if an asset suffers a catastrophic intraday structural failure (defined as dropping >10% and triggering the SEC Rule 201 Short Sale Restriction), the LONG_GAMMA shield is **instantly mathematically invalidated** due to the collapse of market-maker hedging bands. The Orchestrator MUST immediately permit risk-reduction trims to proceed despite the positive GEX profile.
+- **Rationale:** Confirmed structural hierarchy of market mechanics — regulatory halts destroy options-derived liquidity buffers. This is the canonical invalidation mechanism; ENH_16_D and MANDATE_35 are companion enforcement rules within the same authority chain.
+- **Cross-Reference:** ENH_16_D (mechanical trim trigger), MANDATE_35 (consensus pipeline override).
+- **Note:** Proposed MANDATE_46 was REJECTED as duplicate of this rule and ENH_16_D. This entry has been augmented with the precision language from that proposal.
 
 ### [MANDATE_35] GEX-SSR CONFLICT PROTOCOL
 - **Status:** ACTIVE
 - **Content:** If an asset is shielded by LONG_GAMMA but drops past the -10% SSR threshold, the Council must prioritize the SSR structural failure. The Consensus Pipeline must forcefully override the Neutral Structuralist and execute a risk trim.
 - **Justification:** Resolves pipeline deadlocks between quantitative GEX readings and regulatory SEC circuit breakers.
+
+## Telemetry Filters
+
+### [ENH_104] PERSISTENT STOP-LOSS TELEMETRY
+- **Id:** ENH_104
+- **Title:** Persistent Stop-Loss Telemetry
+- **Status:** ACTIVE
+- **Directive:** The Orchestrator's Execution Payload MUST persistently emit a `trailing_stop_audit` block for any active holding that satisfies EITHER of the following conditions:
+  - RSI > 65 (overbought momentum zone), OR
+  - Price > 2% above the daily VWAP (extended distribution risk)
+- **Required `trailing_stop_audit` Schema:**
+  - `anchor_price`: The precise trailing stop anchor (e.g., session VWAP, prior close, or swing low).
+  - `current_price`: The live evaluated price at the time of payload emission.
+  - `pct_distance_from_anchor`: Calculated as `(current_price - anchor_price) / anchor_price * 100`. Must include the math proof string per MANDATE_06.
+  - `trigger_condition`: The condition that activated this block (`RSI > 65` or `VWAP_DIST > 2%` or `BOTH`).
+- **Enforcement:** If a qualifying holding is present in `portfolio_snapshot` and the `trailing_stop_audit` block is absent from the `EXECUTION_PAYLOAD`, this constitutes a CRITICAL_SCHEMA_VIOLATION and must be flagged by the Rule Enforcer Engine.
+- **Justification:** Enforces rigorous mechanical risk management and prevents passive system drift during extended momentum runs on overextended holdings.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.
