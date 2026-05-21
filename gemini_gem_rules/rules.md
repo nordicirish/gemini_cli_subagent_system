@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.08-Risk-Telemetry-Hardening
+**Version:** v10.10-SSR-Override-Telemetry-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -20,6 +20,7 @@
 - ENH_16_B: Passive Hold Override
 - ENH_16_C: Pre-Market Deadlock Resolution
 - ENH_16_D: SSR Immunity Nullification
+- ENH_16_E: LONG GAMMA SSR OVERRIDE
 - ENH_17: Gamma Exposure (GEX) Protocol
 - ENH_18: Synthetic Vol Logic
 - ENH_19: Volatility Proxy
@@ -132,6 +133,7 @@
 - MANDATE_32: ZERO_LIQUIDITY_ROTATION (Pairwise Opportunity Cost Audit)
 - MANDATE_33: SHORT_GAMMA_DEGRADATION_TRIMS (VWAP Degradation Protocol)
 - MANDATE_34: INSTITUTIONAL PEG & AH GRAVITY
+- MANDATE_36: DYNAMIC TRAILING TELEMETRY
 - NOTE: MANDATE_46 (LONG GAMMA SHIELD OVERRIDE) was REJECTED — content is fully covered by ENH_16_D, MANDATE_34, and MANDATE_35. MANDATE_34 has been augmented with the precision language from the proposed patch.
 
 ## Tool Supremacy Hierarchy
@@ -436,6 +438,11 @@
     *   **Directive:** Assets pinning unnaturally to whole numbers into the close prior to binary events must be treated as institutional distribution ceilings. The Orchestrator is strictly prohibited from chasing After-Hours momentum on such assets without verified filings, and must rely on mechanical trailing stops.
     *   **Rationale:** Prevents the system from misinterpreting toxic AH distribution as bullish momentum breakouts.
 
+*   **[MANDATE_36_DYNAMIC_TRAILING_TELEMETRY]**
+    *   **Status:** ACTIVE
+    *   **Directive (DYNAMIC TRAILING TELEMETRY):** The Execution Payload MUST persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP.
+    *   **Rationale:** Demonstrated critical utility in the May 21 CMPS log, providing mechanical downside defense during sympathy-driven overextensions.
+
 
 ## Anti Hallucination Core
 - **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.
@@ -474,6 +481,11 @@
 - **[ENH_16_D - SSR Immunity Nullification]**
   - **Instruction:** If an asset suffers a catastrophic intraday structural failure (defined as triggering the SEC Rule 201 Short Sale Restriction by dropping >10%), any active LONG_GAMMA dealer shielding is INSTANTLY INVALIDATED. The Orchestrator must permit ENH_16_B mechanical trims to proceed regardless of positive GEX profiles.
   - **Rationale:** Resolves the paradox of passive holds during active -13% distribution washes by forcing risk reduction.
+
+- **[ENH_16_E - LONG GAMMA SSR OVERRIDE]**
+  - **Status:** ACTIVE
+  - **Instruction:** If an asset suffers a catastrophic intraday structural failure triggering the SEC Rule 201 Short Sale Restriction (>10% drop), any active LONG_GAMMA dealer shielding is INSTANTLY INVALIDATED. The system must permit mechanical risk trims.
+  - **Rationale:** Authorized by consistent decision log backtesting where GEX decay during SSR events rendered gamma shields ineffective.
 - **[ENH_17 - Gamma Exposure (GEX) Protocol]**
   - **Instruction:** GEX > 0 = Stabilizing; GEX < 0 = Accelerating. Scale sizing modifiers accordingly.
 - **[ENH_18 - Synthetic Vol Logic]**
@@ -1586,7 +1598,7 @@
 - **Id:** ENH_104
 - **Title:** Persistent Stop-Loss Telemetry
 - **Status:** ACTIVE
-- **Directive:** The Orchestrator's Execution Payload MUST persistently emit a `trailing_stop_audit` block for any active holding that satisfies EITHER of the following conditions:
+- **Directive (Technical Implementation Protocol for MANDATE_36):** The Orchestrator's Execution Payload MUST persistently emit a `trailing_stop_audit` block for any active holding that satisfies EITHER of the following conditions:
   - RSI > 65 (overbought momentum zone), OR
   - Price > 2% above the daily VWAP (extended distribution risk)
 - **Required `trailing_stop_audit` Schema:**

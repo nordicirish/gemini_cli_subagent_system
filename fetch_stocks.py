@@ -669,7 +669,8 @@ async def handle_paste(req: Request):
                               "remaining_cash_eur", "remaining_cash_usd", 
                               "unallocated_cash_eur", "unallocated_cash_usd",
                               "base_currency", "exchange_rate", 
-                              "portfolio_total_value_usd", "portfolio_total_value_eur"]
+                              "portfolio_total_value_usd", "portfolio_total_value_eur",
+                              "state_context", "forensic_intelligence"]
             
             # Source data can be at the root of ep_source or inside its mutable_state
             source_data = ep_source
@@ -682,13 +683,14 @@ async def handle_paste(req: Request):
                 target_container = payload["mutable_state"]
                 
             for k in promotion_keys:
-                if k in ep_source:
-                    # Always promote portfolio_snapshot as proposed_portfolio_snapshot
-                    # For others, promote if not already present or if it's a primary directive/metric
+                if k in source_data:
+                    # Directives Supremacy (ENH_31-P): Promote portfolio_snapshot as both active portfolio_snapshot and proposed_portfolio_snapshot
                     if k == "portfolio_snapshot":
-                        target_container["proposed_portfolio_snapshot"] = ep_source[k]
-                    elif k not in target_container or k in ["directive", "risk_metrics", "timestamp"]:
-                        target_container[k] = ep_source[k]
+                        target_container["portfolio_snapshot"] = source_data[k]
+                        target_container["proposed_portfolio_snapshot"] = source_data[k]
+                    # For all other promotion keys, promote/overwrite them to target_container
+                    else:
+                        target_container[k] = source_data[k]
             
         # Helper to extract and remove fields from payload regardless of nesting
         def get_and_prune(data, key):
@@ -780,7 +782,11 @@ async def handle_paste(req: Request):
             payload_portfolio = payload.get("mutable_state", {}).get("portfolio_snapshot", []) if has_layer_model else payload.get("portfolio_snapshot", [])
 
             if payload_portfolio and existing_portfolio:
-                merged_portfolio = _merge_portfolio(existing_portfolio, payload_portfolio)
+                if ep_source is not None:
+                    # Directives Supremacy (ENH_31-P): Overwrite active state fields with payload counterparts to maintain zero-drift
+                    merged_portfolio = payload_portfolio
+                else:
+                    merged_portfolio = _merge_portfolio(existing_portfolio, payload_portfolio)
                 
                 payload_without_portfolio = _deep_merge({}, payload)
                 if has_layer_model:
@@ -861,14 +867,19 @@ async def handle_paste(req: Request):
         with open('local_ssot_shadow.json', 'w') as f:
             json.dump(merged_ssot, f, indent=2)
 
-        # ENH_84: Immediate Memory Sync for Scouts
+        # Update global trackers for Portfolio and Scouts immediately to prevent out-of-sync states
+        global PORTFOLIO_TICKERS, SCOUT_TICKERS, ALL_TICKERS
+        active_portfolio = merged_ssot.get("mutable_state", {}).get("portfolio_snapshot", []) if has_layer_model else merged_ssot.get("portfolio_snapshot", [])
+        if isinstance(active_portfolio, list):
+            PORTFOLIO_TICKERS = [p.get("ticker").upper() for p in active_portfolio if isinstance(p, dict) and p.get("ticker")]
+
         new_scouts = merged_ssot.get("scouted_assets_tracked")
         if not new_scouts and "mutable_state" in merged_ssot:
             new_scouts = merged_ssot["mutable_state"].get("scouted_assets_tracked")
         if isinstance(new_scouts, list):
-            global SCOUT_TICKERS, ALL_TICKERS
             SCOUT_TICKERS = list(set(new_scouts))
-            ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS + ["EURUSD=X"]))
+            
+        ALL_TICKERS = list(dict.fromkeys(PORTFOLIO_TICKERS + WATCHLIST_TICKERS + MACRO_TICKERS + SCOUT_TICKERS + ["EURUSD=X"]))
             
         def _prune_lessons(deletions):
             if not deletions: return
