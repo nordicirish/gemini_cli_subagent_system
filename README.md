@@ -1,6 +1,6 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v10.13-WAC-Persistence-Sync
+**Version:** v10.14-Cross-Repo-Sync
 
 **A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
@@ -719,3 +719,10 @@ The system maintains a continuous, sliding-window time-series ledger of all Coun
 This project is provided as-is for personal and educational use.
 
 > **Disclaimer:** This system is a research and educational tool. It does not constitute financial advice. Always do your own due diligence before making investment decisions.
+
+## Changelog
+
+### [v10.14-Cross-Repo-Sync] - 2026-05-22
+- **Architectural Update:** Implemented the Cross-Repository Synchronization Protocol (ENH_100-SYNC) in `antigravity.md`.
+- **System Sync:** Antigravity will now autonomously verify file hashes/timestamps between `gemini_cli_subagent_system` and `gem_trading_agent_system` and initiate a unidirectional pull to ingest newer logic, rules, lessons, and state logs.
+- **SSoT Mapping:** `local_ssot_shadow.json` from the trading system is automatically mapped to `ssot.json` during the ingestion cycle.
