@@ -110,11 +110,11 @@ Maintain "Zero-Drift" across the Gemini Gem Stock Market Council ecosystem. Ensu
 
 ### 16. Cross-Repository Synchronization Protocol (ENH_100-SYNC)
 - **Constraint:** `gemini_cli_subagent_system` and `gem_trading_agent_system` MUST maintain perfect parity. System Drift across repositories is a fatal error.
-- **Trigger:** On initialization, or before applying any major logic patches, the Custodian MUST actively check for the presence of the sibling directory `../gem_trading_agent_system`.
+- **Trigger:** On initialization, or before applying any major logic patches, the Custodian MUST actively check for the presence of the sibling directory `../gem_trading_agent_system` (or `../gemini_cli_subagent_system` respectively).
 - **Action:**
-  - **Unidirectional Pull:** The Custodian must autonomously pull updates FROM `../gem_trading_agent_system` INTO the current workspace if the sibling repository contains newer versions.
+  - **Unidirectional Pull:** The Custodian must autonomously pull updates FROM `gem_trading_agent_system` INTO `gemini_cli_subagent_system` if the trading repository contains newer versions.
   - **Target Files:** Engine instructions (`*.md`), `trade_lessons.json`, `trade_lessons.md`, `decision_log.json`, and `rules.md` (if applicable).
-  - **SSoT Mapping Rule:** During sync, the file `local_ssot_shadow.json` from the sibling repository MUST map to and overwrite `ssot.json` in the current repository.
+  - **SSoT Mapping Rule:** During sync, the file `local_ssot_shadow.json` from the trading repository MUST map to and overwrite `ssot.json` in the cli subagent repository.
 
 ## 🔄 Refactoring Workflow
 When commanded to update or "Sync" the terminal:
