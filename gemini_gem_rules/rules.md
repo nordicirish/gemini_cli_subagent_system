@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.10-SSR-Override-Telemetry-Sync
+**Version:** v10.13-WAC-Persistence-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -96,6 +96,10 @@
 - ENH_98: Analyst Upgrade Quarantine
 - ENH_99: Portfolio Curation Protocol
 - ENH_104: PERSISTENT STOP-LOSS TELEMETRY (trailing_stop_audit Emission Protocol)
+- ENH_105: Melt-Up Regime & RSI Decoupling
+- ENH_106: Long Gamma Shield Override
+- ENH_107: GEX-SSR Conflict Protocol
+- ENH_108: Persistent Stop-Loss Telemetry
 
 
 ## Mandate Registry
@@ -1256,13 +1260,13 @@
   - **Value:** 5.0
   - **Usage:** Macro shock intensity for CAUTION mode
   - **Used By:**
-    - macro_arbiter
+    - macro_sentinel
     - ENH_45
 - **Shock Abort Threshold:**
   - **Value:** 8.0
   - **Usage:** Macro shock intensity for ABORT/NO_TRADE
   - **Used By:**
-    - macro_arbiter
+    - macro_sentinel
     - ENH_45
     - MANDATE_20
 - **Drift Control Threshold:**
@@ -1326,7 +1330,7 @@
   - **Usage:** Hours before macro event that activates shield posture (ENH_47)
   - **Used By:**
     - ENH_47
-    - macro_arbiter
+    - macro_sentinel
     - execution
 - **Narrative Resonance Threshold:**
   - **Value:** 0.75
@@ -1342,7 +1346,7 @@
   - **Value:** 0.2
   - **Usage:** CPI/PPI deviation % from consensus triggering Macro Flag
   - **Used By:**
-    - macro_arbiter
+    - macro_sentinel
 - **Vix Fear Threshold:**
   - **Value:** 20.0
   - **Usage:** VIX exact value above this (combined with VIX_FEAR_GAP_PCT) triggers FEAR ALERT in dashboard
@@ -1426,7 +1430,7 @@
     - neutral_gem
     - terminal
     - execution
-    - macro_arbiter
+    - macro_sentinel
 - **Council Full Nav Threshold:**
   - **Value:** 0.1
   - **Usage:** Position size (as fraction of NAV) above which full council review is mandatory
@@ -1608,6 +1612,32 @@
   - `trigger_condition`: The condition that activated this block (`RSI > 65` or `VWAP_DIST > 2%` or `BOTH`).
 - **Enforcement:** If a qualifying holding is present in `portfolio_snapshot` and the `trailing_stop_audit` block is absent from the `EXECUTION_PAYLOAD`, this constitutes a CRITICAL_SCHEMA_VIOLATION and must be flagged by the Rule Enforcer Engine.
 - **Justification:** Enforces rigorous mechanical risk management and prevents passive system drift during extended momentum runs on overextended holdings.
+
+## Fundamental Guardrails
+
+### [ENH_105] MELT-UP REGIME & RSI DECOUPLING
+- **Status:** ACTIVE
+- **Content:** SPY RSI > 75 does not trigger automatic liquidation if VIX < 20.
+- **Justification:** Validated by sustained performance in recent high-beta breakouts.
+
+## Risk Management
+
+### [ENH_106] LONG GAMMA SHIELD OVERRIDE
+- **Status:** ACTIVE
+- **Content:** If SSR is triggered (>10% drop), Long Gamma protection is mathematically invalidated.
+- **Justification:** Necessary to prevent passive holding during active distribution.
+
+### [ENH_107] GEX-SSR CONFLICT PROTOCOL
+- **Status:** ACTIVE
+- **Content:** Prioritize SSR circuit breakers over GEX stabilization.
+- **Justification:** Prevents pipeline deadlock in conflict scenarios.
+
+## Telemetry
+
+### [ENH_108] PERSISTENT STOP-LOSS TELEMETRY
+- **Status:** ACTIVE
+- **Content:** Emission of stop-loss audit blocks is mandatory for all holdings with RSI > 65 or VWAP extension > 2%.
+- **Justification:** Prevents passive holding of overextended assets by ensuring telemetry trails.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.

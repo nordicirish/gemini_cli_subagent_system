@@ -784,6 +784,24 @@ async def handle_paste(req: Request):
             if payload_portfolio and existing_portfolio:
                 if ep_source is not None:
                     # Directives Supremacy (ENH_31-P): Overwrite active state fields with payload counterparts to maintain zero-drift
+                    # However, we must preserve read-only local database properties (WAC and historical_context) from the existing state
+                    # to prevent "state amnesia" or silent data loss on ingestion.
+                    existing_by_ticker = {}
+                    for item in existing_portfolio:
+                        if isinstance(item, dict) and item.get("ticker"):
+                            existing_by_ticker[item["ticker"].upper()] = item
+                    
+                    for item in payload_portfolio:
+                        if isinstance(item, dict) and item.get("ticker"):
+                            ticker_upper = item["ticker"].upper()
+                            if ticker_upper in existing_by_ticker:
+                                existing_item = existing_by_ticker[ticker_upper]
+                                # If the payload item does not have 'wac' or it is 0/None, carry it forward from existing
+                                if ("wac" not in item or item.get("wac") in (0, 0.0, None)) and "wac" in existing_item:
+                                    item["wac"] = existing_item["wac"]
+                                # Carry forward 'historical_context' if not present in the payload
+                                if ("historical_context" not in item or not item.get("historical_context")) and "historical_context" in existing_item:
+                                    item["historical_context"] = existing_item["historical_context"]
                     merged_portfolio = payload_portfolio
                 else:
                     merged_portfolio = _merge_portfolio(existing_portfolio, payload_portfolio)
@@ -800,8 +818,12 @@ async def handle_paste(req: Request):
                 if has_layer_model:
                     if "mutable_state" not in merged_ssot: merged_ssot["mutable_state"] = {}
                     merged_ssot["mutable_state"]["portfolio_snapshot"] = merged_portfolio
+                    if "proposed_portfolio_snapshot" in merged_ssot["mutable_state"]:
+                        merged_ssot["mutable_state"]["proposed_portfolio_snapshot"] = merged_portfolio
                 else:
                     merged_ssot["portfolio_snapshot"] = merged_portfolio
+                    if "proposed_portfolio_snapshot" in merged_ssot:
+                        merged_ssot["proposed_portfolio_snapshot"] = merged_portfolio
             else:
                 merged_ssot = _deep_merge(existing_ssot, payload)
         else:
@@ -826,7 +848,7 @@ async def handle_paste(req: Request):
 
         # SSoT schema validation — prune non-canonical top-level keys to prevent drift
         CANONICAL_SSOT_KEYS = {
-            "state_context", "portfolio_snapshot", "forensic_intelligence",
+            "state_context", "portfolio_snapshot", "proposed_portfolio_snapshot", "forensic_intelligence",
             "runtime_flags", "macro_calendar_shield", "active_orders",
             "fin_account_gate", "registry_pointers", "overnight_posture",
             "strategy_timing", "lesson_integration", "immutable_background", "mutable_state",

@@ -1,12 +1,35 @@
 # 💎 Gemini Gem Stock Market Council
 ### *The poor person's Bloomberg ;)*
-**Version:** v10.10-SSR-Override-Telemetry-Sync
+**Version:** v10.13-WAC-Persistence-Sync
 
 **A multi-agent AI investment intelligence framework built on Google Gemini Gems, now powered by the "Phantom Persona" adversarial strategy.**
 
 Gemini Gem Stock Market Council is a multi‑agent, institutional‑grade analysis framework built on Google Gemini Gems. Each Gem operates as a specialised, rule‑bound agent governed by deterministic JSON system instructions. **Starting with v9.21, the system has deployed the "Phantom Persona" framework—a psychological framing strategy that weaponizes every engine with absolute skepticism, forcing agents to treat all input narratives, corporate filings, and retail news as potentially manipulated or biased, thereby achieving unprecedented levels of adversarial rigor.**
 
 Starting with **v9.22-Phantom-Persona-Final-Sync**, the system has reached full architectural maturity. It consolidates its core orchestration into **machine-executable Markdown instructions** with integrated **Live Web Search**, **Gemini 3.5 Pro Thinking Level Optimization**, and a **Professional Master Router** to ensure high-fidelity data integrity. While JSON remains the underlying data exchange format for state persistence (`local_ssot_shadow.json`), the system has migrated its institutional memory to a high-density Markdown registry (`trade_lessons.md`) with a synchronized, normalized JSON fallback (`trade_lessons.json`).
+
+### 🔒 v10.13 WAC Persistence Sync (2026-05-22)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **WAC State Persistence** | `DATA_INTEGRITY` | Hardens the ingestion bridge (`fetch_stocks.py`) to carry forward `wac` and `historical_context` during Council promotions, preventing state amnesia upon execution confirmation. |
+
+### 🔒 v10.12 Regime Guardrail & Telemetry Sync (2026-05-22)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Melt-Up Decoupling** | `ENH_105` | Codifies SPY RSI > 75 decoupling from automatic liquidations when VIX < 20. |
+| **Long Gamma Override** | `ENH_106` | Mathematically invalidates Long Gamma shield protection when an asset triggers SSR (>10% drop). |
+| **GEX-SSR Conflict** | `ENH_107` | Establishes a conflict protocol prioritizing SSR circuit breakers over GEX stabilization. |
+| **Stop-Loss Telemetry** | `ENH_108` | Mandates trailing stop-loss audit emissions for active holdings with RSI > 65 or VWAP extension > 2%. |
+
+### 🔒 v10.11 Review Engine & Audit Sync (2026-05-21)
+
+| Enhancement | ID | Summary |
+|---|---|---|
+| **Decision Log Integration** | `DATA_INTEGRITY` | Ingests structural council debates and per-ticker decisions into a continuous `decision_log.json` time-series for post-mortem auditing. |
+| **Review Engine Synthesis** | `post_trade_review` | Natively routes decision history through the Post-Trade Review subagent to extract corrective lessons. |
+| **Global Parity Sync** | `GLOBAL_SYNC` | Purged legacy macro_arbiter files and references, synchronized all systems to version `v10.11-Review-Engine-Audit-Sync`. |
 
 ### 🔒 v10.10 SSR Override & Telemetry Sync (2026-05-21)
 
@@ -350,7 +373,7 @@ The Gemini Council Dashboard provides a high-density, real-time visualization of
 | `neutral_gem.md` | **Neutral Structuralist** | PRO | Market architecture specialist — GEX, regime detection, liquidity |
 | `execution.md` | **Execution Engine** | PRO | ATR-adjusted position sizing, order generation, liquidity gates |
 | `gex_engine.md` | **GEX Engine** | PRO | Gamma exposure computation — net GEX, gamma flip, dealer posture |
-| `macro_arbiter.md` | **Macro Sentinel** | PRO | Binary risk-on/risk-off veto — CPI, FOMC, FX, geopolitical shocks |
+| `macro_sentinel.md` | **Macro Sentinel** | PRO | Binary risk-on/risk-off veto — CPI, FOMC, FX, geopolitical shocks |
 | `macro_narrative_engine.md` | **Macro-Narrative Engine** | THINKING | Macro narrative, sector rotation, forensic signal attribution |
 | `structural_engine.md` | **Structural Risk Engine** | FLASH | Forensic dilution detection — shelf offerings, warrant walls, PIPE |
 | `post_trade_review.md` | **Review Engine** | PRO | Post-trade reflection — thesis vs. outcome, misfire detection |
