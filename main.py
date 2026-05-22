@@ -3,7 +3,8 @@ import sys
 from agent_framework import AgentFramework
 import agent_framework
 import tools
-
+import threading
+import cloud_sync
 
 def main():
     print("Initializing GEM Trading CLI Subagent System...")
@@ -165,15 +166,32 @@ def main():
         print("ERROR: All fallback models failed to verify. Exiting.")
         sys.exit(1)
 
-    # ---------------------------------------------------------------------------
-    # Chat session
-    # ---------------------------------------------------------------------------
+    try:
+        import glob
+        sync_daemon = cloud_sync.CloudSyncDaemon(framework.client)
+        sync_files = glob.glob("*.md") + [
+            os.path.join("GEM_Trading_Rules", "rules.md"),
+            "decision_log.json",
+            "trade_lessons.json",
+            "ssot.json"
+        ]
+        sync_thread = threading.Thread(target=sync_daemon.start_background_sync, args=(sync_files,), daemon=True)
+        sync_thread.start()
+    except Exception as e:
+        print(f"Failed to start Cloud Sync Daemon: {e}")
+
+    cache_to_use = None
+    if getattr(framework, "cached_content_name", None):
+        cache_to_use = framework.cached_content_name
+        print(f"[System] Binding Context Cache to CLI chat session: {cache_to_use}")
+
     chat = framework.client.chats.create(
         model=valid_model,
         config=agent_framework.types.GenerateContentConfig(
             system_instruction=terminal_instruction,
             temperature=1.0,
             tools=terminal_tools,
+            cached_content=cache_to_use,
         ),
     )
 

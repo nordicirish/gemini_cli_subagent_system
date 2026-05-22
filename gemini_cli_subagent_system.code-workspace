@@ -1,9 +1,11 @@
 {
 	"folders": [
 		{
+			"name": "gemini_cli_subagent_system",
 			"path": "."
 		},
 		{
+			"name": "gem_trading_agent_system",
 			"path": "../gem_trading_agent_system"
 		}
 	],

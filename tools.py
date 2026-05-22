@@ -71,6 +71,12 @@ def update_ssot(payload_json: str) -> str:
         else:
             payload_data = payload_json
             
+        # Try intercepting decision log early
+        try:
+            intercept_and_log_decision(payload_data)
+        except Exception as ie:
+            print(f"[System Warning] Decision interception inside update_ssot failed: {ie}")
+            
         req = MockRequest({"payload": json.dumps(payload_data)})
         
         # Run the async handler synchronously
@@ -136,6 +142,150 @@ def update_trade_lessons(lessons_json: str) -> str:
         return "Trade lessons updated successfully."
     except Exception as e:
         return f"Error updating trade lessons: {str(e)}"
+
+def read_decision_log() -> str:
+    """Reads the continuous time-series ledger of all Council decisions (decision_log.json)."""
+    path = 'decision_log.json'
+    if not os.path.exists(path):
+        return "[]"
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        return f"Error reading decision log: {str(e)}"
+
+def intercept_and_log_decision(data_input) -> None:
+    """
+    Parses and intercepts decisions and council debates from incoming data 
+    (can be a raw dictionary or raw response text containing a JSON block)
+    and appends them to decision_log.json.
+    """
+    try:
+        import re
+        import datetime
+        
+        parsed_payloads = []
+        
+        if isinstance(data_input, dict):
+            parsed_payloads.append(data_input)
+        elif isinstance(data_input, str):
+            # Attempt to find JSON inside code blocks
+            json_blocks = re.findall(r"```json\s*(.*?)\s*```", data_input, re.DOTALL | re.IGNORECASE)
+            if not json_blocks:
+                json_blocks = re.findall(r"```\s*(.*?)\s*```", data_input, re.DOTALL | re.IGNORECASE)
+                
+            for block in json_blocks:
+                try:
+                    block_clean = block.strip()
+                    if block_clean.startswith("{") or block_clean.startswith("["):
+                        parsed_payloads.append(json.loads(block_clean))
+                except:
+                    pass
+            
+            # If no blocks parsed, check for raw braces/brackets
+            if not parsed_payloads:
+                try:
+                    start_idx = data_input.find('{')
+                    end_idx = data_input.rfind('}')
+                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                        parsed_payloads.append(json.loads(data_input[start_idx:end_idx+1]))
+                except:
+                    pass
+        else:
+            return
+            
+        if not parsed_payloads:
+            return
+            
+        def find_key_recursive(data, target_key):
+            if not isinstance(data, dict):
+                if isinstance(data, list):
+                    for item in data:
+                        res = find_key_recursive(item, target_key)
+                        if res is not None:
+                            return res
+                return None
+            if target_key in data:
+                return data[target_key]
+            for k in ("EXECUTION_PAYLOAD", "mutable_state", "state_context", "payload", "post_execution_state"):
+                if k in data:
+                    res = find_key_recursive(data[k], target_key)
+                    if res is not None:
+                        return res
+            for val in data.values():
+                if isinstance(val, (dict, list)):
+                    res = find_key_recursive(val, target_key)
+                    if res is not None:
+                        return res
+            return None
+
+        for payload in parsed_payloads:
+            incoming_portfolio = find_key_recursive(payload, "portfolio_snapshot")
+            if incoming_portfolio and isinstance(incoming_portfolio, list):
+                ts = find_key_recursive(payload, "timestamp") or datetime.datetime.now().isoformat()
+                trigger = find_key_recursive(payload, "trigger_context") or "ROUTINE_OUTPUT"
+                
+                market_context = {
+                    "regime": find_key_recursive(payload, "regime") or find_key_recursive(payload, "risk_regime"),
+                    "vix_guard": find_key_recursive(payload, "vix_guard"),
+                    "portfolio_value_eur": find_key_recursive(payload, "portfolio_total_value_eur") or find_key_recursive(payload, "total_liquidity_eur"),
+                    "unallocated_cash_eur": find_key_recursive(payload, "unallocated_cash_eur") or find_key_recursive(payload, "remaining_cash_eur")
+                }
+                
+                council_debate = find_key_recursive(payload, "council_debate")
+                
+                turn_log = {
+                    "timestamp": ts, 
+                    "trigger_context": trigger, 
+                    "market_context": market_context, 
+                    "council_debate": council_debate,
+                    "decisions": []
+                }
+                
+                for item in incoming_portfolio:
+                    if isinstance(item, dict):
+                        ticker = item.get("ticker")
+                        trade_state = item.get("trade_state", item.get("action"))
+                        scrutiny_audit = item.get("scrutiny_audit")
+                        price = item.get("price") or item.get("current_price") or item.get("price_at_eval")
+                        
+                        if ticker and (trade_state or scrutiny_audit):
+                            turn_log["decisions"].append({
+                                "ticker": ticker,
+                                "timestamp": ts,
+                                "trigger_context": trigger,
+                                "price_at_eval": price,
+                                "trade_state": trade_state,
+                                "scrutiny_audit": scrutiny_audit
+                            })
+                
+                if turn_log["decisions"]:
+                    decision_log_file = 'decision_log.json'
+                    log_data = []
+                    if os.path.exists(decision_log_file):
+                        try:
+                            with open(decision_log_file, 'r', encoding='utf-8') as f:
+                                log_data = json.load(f)
+                        except: pass
+                    if not isinstance(log_data, list):
+                        log_data = []
+                    
+                    duplicate = False
+                    if log_data:
+                        last_entry = log_data[-1]
+                        if last_entry.get("timestamp") == ts and last_entry.get("decisions") == turn_log["decisions"]:
+                            duplicate = True
+                            
+                    if not duplicate:
+                        log_data.append(turn_log)
+                        if len(log_data) > 300:
+                            log_data = log_data[-300:]
+                        with open(decision_log_file, 'w', encoding='utf-8') as f:
+                            json.dump(log_data, f, indent=2)
+                        print(f"[System] Decision Log Appended: {len(turn_log['decisions'])} decisions.")
+                    break
+    except Exception as e:
+        print(f"[System Error] Decision log interception failure: {e}")
 
 def update_rules(rules_md_content: str) -> str:
     """

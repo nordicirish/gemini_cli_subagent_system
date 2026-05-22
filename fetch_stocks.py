@@ -74,7 +74,10 @@ MACRO_LABELS = {
 REFRESH_RATE_SECONDS = 30
 HISTORY_REFRESH_CYCLES = 10
 
-GLOBAL_STATE = {}
+GLOBAL_STATE = {
+    "status": "INITIALIZING - LOADING GEX PROFILES (MAY TAKE 1-2 MIN)...",
+    "tickers": {}
+}
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
@@ -1290,6 +1293,7 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
     post_price = None
     reg_price = None
     reg_open = None
+    reg_low = None
     batch_prev_close = None
     pre_vol = 0
     post_vol = 0

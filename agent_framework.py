@@ -44,6 +44,13 @@ class AgentFramework:
         self.cached_content_name = None
         self.last_cache_hash = None
         self.cache_disabled = False  # Track Free Tier limitations
+        
+        # Telemetry
+        self.reset_turn_usage()
+
+    def reset_turn_usage(self):
+        """Clear token counters for a new chat session turn."""
+        self.turn_usage = {'prompt_tokens': 0, 'candidates_tokens': 0, 'cached_tokens': 0}
 
     def log(self, message: str):
         """Helper to print to console and send to callback if exists."""
@@ -208,11 +215,17 @@ class AgentFramework:
             def attempt_call():
                 if final_tools:
                     chat = self.client.chats.create(model=model_name, config=config)
-                    return chat.send_message(prompt)
+                    res = chat.send_message(prompt)
                 else:
-                    return self.client.models.generate_content(
+                    res = self.client.models.generate_content(
                         model=model_name, contents=prompt, config=config
                     )
+                
+                if hasattr(res, 'usage_metadata') and res.usage_metadata:
+                    self.turn_usage['prompt_tokens'] += (res.usage_metadata.prompt_token_count or 0)
+                    self.turn_usage['candidates_tokens'] += (res.usage_metadata.candidates_token_count or 0)
+                    self.turn_usage['cached_tokens'] += (res.usage_metadata.cached_content_token_count or 0)
+                return res
 
             try:
                 return attempt_call()

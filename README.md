@@ -1,4 +1,4 @@
-# 💎 GEM Trading Agent Framework — v10.03-ESA-Deadlock-Sync
+# 💎 GEM Trading Agent Framework — v10.14-Cross-Repo-Sync
 
 **An autonomous, multi-agent AI trading intelligence system powered by Google Gemini & Gemma.**
 
@@ -9,6 +9,29 @@ Each Markdown file (`.md`) is a **system instruction** for a dedicated AI sub-ag
 ---
 
 ## 📋 Changelog
+
+### v10.14-Cross-Repo-Sync *(2026-05-22)*
+- **Architectural Update:** Implemented the Cross-Repository Synchronization Protocol (ENH_100-SYNC) in `antigravity.md`.
+- **System Sync:** Antigravity will now autonomously verify file hashes/timestamps between `gemini_cli_subagent_system` and `gem_trading_agent_system` and initiate a unidirectional pull to ingest newer logic, rules, lessons, and state logs.
+- **SSoT Mapping:** `local_ssot_shadow.json` from the trading system is automatically mapped to `ssot.json` during the ingestion cycle.
+
+### v10.11-Review-Engine-Audit-Sync *(2026-05-21)*
+**High-Fidelity Decision Log & Review Engine Integration.**
+
+- **[NEW]** Added `read_decision_log` and `intercept_and_log_decision` helper functions to `tools.py` to capture and store debates and per-ticker decisions automatically in `decision_log.json`.
+- **[NEW]** Integrated and registered the `Post-Trade Review Engine` subagent tool inside `web_server.py` for comprehensive quantitative portfolio and decision auditing.
+- **[NEW]** Reprogrammed the dashboard quick-prompt toolbar chip `📝 Review Log` in `static/modern_ui.js` to fire the **Review Engine** over `decision_log.json` to extract corrective lessons.
+- **[SYNC]** Globally synchronized all council engines to version `v10.11-Review-Engine-Audit-Sync`.
+
+### v10.10-SSR-Override-Telemetry-Sync *(2026-05-21)*
+**Consensus & Dashboard Upgrade, Telemetry Audit, and GEX-SSR Invalidation Integration.**
+
+- **[NEW]** Added a dynamic **AI Council Chat Overlay** inside the browser dashboard, completely replacing legacy manual clipboard-based copy/paste context assembly.
+- **[NEW]** Modified the `/api/chat` route in `web_server.py` to auto-inject the active state `DATA_PACKET` (market snapshot, portfolio SSoT, trade lessons, and decision log) into every model turn.
+- **[NEW]** Created `/api/save_decision_log` and `/api/clear_decision_log` endpoints to write direct autonomous insights to `decision_log.json` and clear state, coupled with a front-end unbuffered real-time logs feed stream.
+- **[NEW]** Implemented the `qp-*` quick-prompt toolbar chips above the chat window to trigger immediate structured analyses (Session Boot, Market Analysis, Audit & Review, Risk Regime, Scout, and Review Log).
+- **[NEW]** Enforced **[ENH_16_E - LONG GAMMA SSR OVERRIDE]** and **[ENH_104 - PERSISTENT STOP-LOSS TELEMETRY]** (`trailing_stop_audit` emission) across core engine instructions to ensure mathematical hedging invalidation and stop auditing.
+- **[SYNC]** Globally synchronized all council engines to version `v10.10-SSR-Override-Telemetry-Sync`.
 
 ### v10.03-ESA-Deadlock-Sync *(2026-05-20)*
 **ESA Structural Optimizations & Deadlock Eradication.**
@@ -156,18 +179,18 @@ Each file below is loaded as a system instruction for a dedicated AI sub-agent. 
 | File | Agent Name | Mode | Role |
 |------|-----------|------|------|
 | `terminal.md` | **Terminal Orchestrator** | PRO | Routes user queries, delegates to sub-agents, synthesises final decisions |
-| `macro_arbiter.md` | **Macro Sentinel** | PRO | Macro regime detection, Calendar Shield monitoring (Search Enabled) |
-| `bullish_gem.md` | **Bullish Advocate** | FLASH | Constructs the strongest bull case + self-critique (Search Enabled) |
-| `red_team_gem.md` | **Red Team Pessimist** | FLASH | Constructs the strongest bear case + self-critique (Search Enabled) |
+| `macro_sentinel.md` | **Macro Sentinel** | PRO | Macro regime detection, Calendar Shield monitoring (Search Enabled) |
+| `bullish_gem.md` | **Bullish Advocate** | THINKING | Constructs the strongest bull case + self-critique (Search Enabled) |
+| `red_team_gem.md` | **Red Team Pessimist** | THINKING | Constructs the strongest bear case + self-critique (Search Enabled) |
 | `neutral_gem.md` | **Neutral Structuralist**| GEMMA | Unbiased structural analysis; breaks ties with quantitative evidence |
-| `execution.md` | **Execution Engine** | PRO | Generates `EXECUTION_PAYLOAD` JSON; manages sizing and order routing |
+| `execution.md` | **Execution Engine** | GEMMA | Generates `EXECUTION_PAYLOAD` JSON; manages sizing and order routing |
 | `structural_engine.md` | **Structural Engine** | GEMMA | GEX regime, dark pool posture, VWAP structure analysis |
 | `technical_validator.md` | **Technical Validator** | GEMMA | Final gate — validates thesis against quantitative restrictions |
-| `research.md` | **Research Engine** | FLASH | Live web search for macro narrative, filings, sector rotation signals |
-| `sentiment_engine.md` | **Sentiment Engine** | FLASH | Social sentiment, news velocity, dark pool order flow (Search Enabled) |
+| `research.md` | **Research Engine** | THINKING | Live web search for macro narrative, filings, sector rotation signals |
+| `sentiment_engine.md` | **Sentiment Engine** | GEMMA | Social sentiment, news velocity, dark pool order flow (Search Enabled) |
 | `context_engine.md` | **Context Engine** | GEMMA | SSoT state bridge — maintains session continuity and trade thesis integrity |
 | `gex_engine.md` | **GEX Engine** | GEMMA | Gamma Exposure modelling, dealer hedging flow, pin risk analysis |
-| `post_trade_review.md` | **Review Engine** | PRO | Post-trade reflection — thesis vs. outcome, misfire detection, lesson authoring |
+| `post_trade_review.md` | **Review Engine** | FAST | Post-trade reflection — thesis vs. outcome, misfire detection, lesson authoring |
 
 ### Model Hierarchy
 

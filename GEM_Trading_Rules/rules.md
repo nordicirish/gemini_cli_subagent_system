@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.02-SSR-Nullification-Sync
+**Version:** v10.13-WAC-Persistence-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -20,6 +20,7 @@
 - ENH_16_B: Passive Hold Override
 - ENH_16_C: Pre-Market Deadlock Resolution
 - ENH_16_D: SSR Immunity Nullification
+- ENH_16_E: LONG GAMMA SSR OVERRIDE
 - ENH_17: Gamma Exposure (GEX) Protocol
 - ENH_18: Synthetic Vol Logic
 - ENH_19: Volatility Proxy
@@ -94,6 +95,11 @@
 - ENH_97: Power Hour Integrity
 - ENH_98: Analyst Upgrade Quarantine
 - ENH_99: Portfolio Curation Protocol
+- ENH_104: PERSISTENT STOP-LOSS TELEMETRY (trailing_stop_audit Emission Protocol)
+- ENH_105: Melt-Up Regime & RSI Decoupling
+- ENH_106: Long Gamma Shield Override
+- ENH_107: GEX-SSR Conflict Protocol
+- ENH_108: Persistent Stop-Loss Telemetry
 
 
 ## Mandate Registry
@@ -131,6 +137,8 @@
 - MANDATE_32: ZERO_LIQUIDITY_ROTATION (Pairwise Opportunity Cost Audit)
 - MANDATE_33: SHORT_GAMMA_DEGRADATION_TRIMS (VWAP Degradation Protocol)
 - MANDATE_34: INSTITUTIONAL PEG & AH GRAVITY
+- MANDATE_36: DYNAMIC TRAILING TELEMETRY
+- NOTE: MANDATE_46 (LONG GAMMA SHIELD OVERRIDE) was REJECTED — content is fully covered by ENH_16_D, MANDATE_34, and MANDATE_35. MANDATE_34 has been augmented with the precision language from the proposed patch.
 
 ## Tool Supremacy Hierarchy
 - **Google Search:** Primary Numeric Arbiter (Prices, Rates, Statutory text).
@@ -243,7 +251,7 @@
       - Stage 2: RED_TEAM_PESSIMIST is fed the Bullish thesis and provides a direct counter-argument. Agreement Score S_A is calculated based on the victor of this rebuttal.
 - **[MANDATE_22 - Dynamic Thinking Level Optimization]**
     *   **Status:** ACTIVE
-    *   **Instruction:** The system operates on the Gemini 3.1 Pro architecture. The legacy `thinking_budget` parameter is strictly deprecated and will cause 400 errors. Agents operating in THINKING mode must align their complexity to the new `thinking_level` hierarchy:
+    *   **Instruction:** The system operates on the Gemini 3.5 Pro architecture. The legacy `thinking_budget` parameter is strictly deprecated and will cause 400 errors. Agents operating in THINKING mode must align their complexity to the new `thinking_level` hierarchy:
         *   **Red Team Pessimist:** Must operate at `thinking_level: "high"` to execute deep, multi-path adversarial simulations against the thesis.
         *   **Bullish Advocate & Macro-Narrative:** Must operate at `thinking_level: "medium"` to balance reasoning depth with latency.
 - **[MANDATE_14_ALPHA_CATALYST]**
@@ -434,6 +442,11 @@
     *   **Directive:** Assets pinning unnaturally to whole numbers into the close prior to binary events must be treated as institutional distribution ceilings. The Orchestrator is strictly prohibited from chasing After-Hours momentum on such assets without verified filings, and must rely on mechanical trailing stops.
     *   **Rationale:** Prevents the system from misinterpreting toxic AH distribution as bullish momentum breakouts.
 
+*   **[MANDATE_36_DYNAMIC_TRAILING_TELEMETRY]**
+    *   **Status:** ACTIVE
+    *   **Directive (DYNAMIC TRAILING TELEMETRY):** The Execution Payload MUST persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP.
+    *   **Rationale:** Demonstrated critical utility in the May 21 CMPS log, providing mechanical downside defense during sympathy-driven overextensions.
+
 
 ## Anti Hallucination Core
 - **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.
@@ -472,6 +485,11 @@
 - **[ENH_16_D - SSR Immunity Nullification]**
   - **Instruction:** If an asset suffers a catastrophic intraday structural failure (defined as triggering the SEC Rule 201 Short Sale Restriction by dropping >10%), any active LONG_GAMMA dealer shielding is INSTANTLY INVALIDATED. The Orchestrator must permit ENH_16_B mechanical trims to proceed regardless of positive GEX profiles.
   - **Rationale:** Resolves the paradox of passive holds during active -13% distribution washes by forcing risk reduction.
+
+- **[ENH_16_E - LONG GAMMA SSR OVERRIDE]**
+  - **Status:** ACTIVE
+  - **Instruction:** If an asset suffers a catastrophic intraday structural failure triggering the SEC Rule 201 Short Sale Restriction (>10% drop), any active LONG_GAMMA dealer shielding is INSTANTLY INVALIDATED. The system must permit mechanical risk trims.
+  - **Rationale:** Authorized by consistent decision log backtesting where GEX decay during SSR events rendered gamma shields ineffective.
 - **[ENH_17 - Gamma Exposure (GEX) Protocol]**
   - **Instruction:** GEX > 0 = Stabilizing; GEX < 0 = Accelerating. Scale sizing modifiers accordingly.
 - **[ENH_18 - Synthetic Vol Logic]**
@@ -861,7 +879,7 @@
         3. Active Thesis: The specific "Why" for currently open positions (distilled to < 100 tokens per ticker).
         4. Consensus History: Last 3 turns only.
         5. Narrative Logs: Delete prose older than 5 turns.
-    *   **Logic:** When the `TOKEN_PRUNING_TRIGGER` (>= 150,000 tokens) is met, the system MUST convert the "Narrative Logs" into the "Operational Matrix" defined in ENH_53 before purging the prose. This ensures that while the conversation is forgotten, the math and catalysts remain active in the reasoning surface.
+    *   **Logic:** When the `TOKEN_PRUNING_TRIGGER` (>= 180,000 tokens) is met, the system MUST convert the "Narrative Logs" into the "Operational Matrix" defined in ENH_53 before purging the prose. This ensures that while the conversation is forgotten, the math and catalysts remain active in the reasoning surface.
 *   **[ENH_77_LIVE_WEB - Proactive Search Mandate]**
     *   **Status:** ACTIVE
     *   **Instruction:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (sec_link) and Government/DoW press releases (dow_link) when not explicitly provided in the payload. 
@@ -877,7 +895,7 @@
   - **Category Management:** Target sectors for screening are user-curated via the Dashboard UI and synchronized through `config.json` (GICS sectors recommended).
   - **Workflow:**
     - 1. **Python Sweep:** The `fetch_stocks.py` daemon executes a broad technical sweep (SMA50/200, RVOL) via the Finnhub free-tier API.
-    - 2. **Candidate Selection:** The backend sorts passing tickers and selects a MAXIMUM of 2 "Scout Candidates" per heavy cycle to protect the Orchestrator's 128K ACTIVE_REASONING_SURFACE.
+    - 2. **Candidate Selection:** The backend sorts passing tickers and selects a MAXIMUM of 2 "Scout Candidates" per heavy cycle to protect the Orchestrator's 160K ACTIVE_REASONING_SURFACE.
     - 3. **Metadata Flagging:** Candidates are injected into the SSoT payload with `institutional_status: "Unverified Institutional Status"`.
     - 4. **Agentic Grounding:** This flag mandates the `MACRO_NARRATIVE_ENGINE` to bypass the Finnhub 13-F paywall by invoking native Google Search for SEC filings, insider buys, and institutional conviction.
     - 5. **Graduation:** If the Council Consensus (S_A) > 0.85, the Scout Candidate is "Graduated" to the active portfolio tracking queue.
@@ -1112,11 +1130,11 @@
 ## System Thresholds
 - **Authority:** CANONICAL — All sub-engines MUST reference named constants here instead of hardcoding values.
 - **TOKEN_PRUNING_TRIGGER:**
-  - **Value:** 150000
+  - **Value:** 180000
   - **Usage:** Threshold at which ENH_76 context pruning is executed.
   - **Status:** MASTER_CONSTANT
 - **ACTIVE_REASONING_SURFACE:**
-  - **Value:** 128K
+  - **Value:** 160K
   - **Usage:** Target token count for active context after ENH_76 pruning.
   - **Status:** MASTER_CONSTANT
 - **GLOBAL_ALPHA_FRICTION_HURDLE:**
@@ -1242,13 +1260,13 @@
   - **Value:** 5.0
   - **Usage:** Macro shock intensity for CAUTION mode
   - **Used By:**
-    - macro_arbiter
+    - macro_sentinel
     - ENH_45
 - **Shock Abort Threshold:**
   - **Value:** 8.0
   - **Usage:** Macro shock intensity for ABORT/NO_TRADE
   - **Used By:**
-    - macro_arbiter
+    - macro_sentinel
     - ENH_45
     - MANDATE_20
 - **Drift Control Threshold:**
@@ -1312,7 +1330,7 @@
   - **Usage:** Hours before macro event that activates shield posture (ENH_47)
   - **Used By:**
     - ENH_47
-    - macro_arbiter
+    - macro_sentinel
     - execution
 - **Narrative Resonance Threshold:**
   - **Value:** 0.75
@@ -1328,7 +1346,7 @@
   - **Value:** 0.2
   - **Usage:** CPI/PPI deviation % from consensus triggering Macro Flag
   - **Used By:**
-    - macro_arbiter
+    - macro_sentinel
 - **Vix Fear Threshold:**
   - **Value:** 20.0
   - **Usage:** VIX exact value above this (combined with VIX_FEAR_GAP_PCT) triggers FEAR ALERT in dashboard
@@ -1412,7 +1430,7 @@
     - neutral_gem
     - terminal
     - execution
-    - macro_arbiter
+    - macro_sentinel
 - **Council Full Nav Threshold:**
   - **Value:** 0.1
   - **Usage:** Position size (as fraction of NAV) above which full council review is mandatory
@@ -1568,13 +1586,58 @@
 
 ### [MANDATE_34] LONG GAMMA SHIELD OVERRIDE
 - **Status:** ACTIVE
-- **Content:** The LONG_GAMMA dealer posture provides a systemic shield against forced liquidations. However, if the asset suffers a catastrophic intraday structural failure (triggering the SEC Rule 201 Short Sale Restriction by dropping >10%), the LONG_GAMMA shield is instantly invalidated and trims must proceed.
-- **Justification:** Codifies the exact invalidation threshold for market-maker hedging defense.
+- **Content:** The LONG_GAMMA dealer posture provides a systemic shield against standard forced liquidations. However, if an asset suffers a catastrophic intraday structural failure (defined as dropping >10% and triggering the SEC Rule 201 Short Sale Restriction), the LONG_GAMMA shield is **instantly mathematically invalidated** due to the collapse of market-maker hedging bands. The Orchestrator MUST immediately permit risk-reduction trims to proceed despite the positive GEX profile.
+- **Rationale:** Confirmed structural hierarchy of market mechanics — regulatory halts destroy options-derived liquidity buffers. This is the canonical invalidation mechanism; ENH_16_D and MANDATE_35 are companion enforcement rules within the same authority chain.
+- **Cross-Reference:** ENH_16_D (mechanical trim trigger), MANDATE_35 (consensus pipeline override).
+- **Note:** Proposed MANDATE_46 was REJECTED as duplicate of this rule and ENH_16_D. This entry has been augmented with the precision language from that proposal.
 
 ### [MANDATE_35] GEX-SSR CONFLICT PROTOCOL
 - **Status:** ACTIVE
 - **Content:** If an asset is shielded by LONG_GAMMA but drops past the -10% SSR threshold, the Council must prioritize the SSR structural failure. The Consensus Pipeline must forcefully override the Neutral Structuralist and execute a risk trim.
 - **Justification:** Resolves pipeline deadlocks between quantitative GEX readings and regulatory SEC circuit breakers.
+
+## Telemetry Filters
+
+### [ENH_104] PERSISTENT STOP-LOSS TELEMETRY
+- **Id:** ENH_104
+- **Title:** Persistent Stop-Loss Telemetry
+- **Status:** ACTIVE
+- **Directive (Technical Implementation Protocol for MANDATE_36):** The Orchestrator's Execution Payload MUST persistently emit a `trailing_stop_audit` block for any active holding that satisfies EITHER of the following conditions:
+  - RSI > 65 (overbought momentum zone), OR
+  - Price > 2% above the daily VWAP (extended distribution risk)
+- **Required `trailing_stop_audit` Schema:**
+  - `anchor_price`: The precise trailing stop anchor (e.g., session VWAP, prior close, or swing low).
+  - `current_price`: The live evaluated price at the time of payload emission.
+  - `pct_distance_from_anchor`: Calculated as `(current_price - anchor_price) / anchor_price * 100`. Must include the math proof string per MANDATE_06.
+  - `trigger_condition`: The condition that activated this block (`RSI > 65` or `VWAP_DIST > 2%` or `BOTH`).
+- **Enforcement:** If a qualifying holding is present in `portfolio_snapshot` and the `trailing_stop_audit` block is absent from the `EXECUTION_PAYLOAD`, this constitutes a CRITICAL_SCHEMA_VIOLATION and must be flagged by the Rule Enforcer Engine.
+- **Justification:** Enforces rigorous mechanical risk management and prevents passive system drift during extended momentum runs on overextended holdings.
+
+## Fundamental Guardrails
+
+### [ENH_105] MELT-UP REGIME & RSI DECOUPLING
+- **Status:** ACTIVE
+- **Content:** SPY RSI > 75 does not trigger automatic liquidation if VIX < 20.
+- **Justification:** Validated by sustained performance in recent high-beta breakouts.
+
+## Risk Management
+
+### [ENH_106] LONG GAMMA SHIELD OVERRIDE
+- **Status:** ACTIVE
+- **Content:** If SSR is triggered (>10% drop), Long Gamma protection is mathematically invalidated.
+- **Justification:** Necessary to prevent passive holding during active distribution.
+
+### [ENH_107] GEX-SSR CONFLICT PROTOCOL
+- **Status:** ACTIVE
+- **Content:** Prioritize SSR circuit breakers over GEX stabilization.
+- **Justification:** Prevents pipeline deadlock in conflict scenarios.
+
+## Telemetry
+
+### [ENH_108] PERSISTENT STOP-LOSS TELEMETRY
+- **Status:** ACTIVE
+- **Content:** Emission of stop-loss audit blocks is mandatory for all holdings with RSI > 65 or VWAP extension > 2%.
+- **Justification:** Prevents passive holding of overextended assets by ensuring telemetry trails.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.

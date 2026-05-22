@@ -14,6 +14,7 @@ const dDynamicMacroCards = document.getElementById('dynamic-macro-cards');
 
 let currentMacroTickers = [];
 let MACRO_LABELS = {};
+let currentEurUsdRate = 1.08; // Store EURUSD rate globally for real-time conversion
 
 const dCopyBtn = document.getElementById('copy-json-btn');
 const dCopySessionBtn = document.getElementById('copy-session-btn');
@@ -408,7 +409,7 @@ function renderTable(tickers, state) {
 
     tickers.forEach(t => {
         const sym = t.ticker.toUpperCase();
-        if (MACRO_TICKERS.includes(sym)) return;
+        if (MACRO_TICKERS.includes(sym) || sym === 'EURUSD=X') return;
 
         if (heldTickers.has(sym)) {
             groups.held.push(t);
@@ -659,6 +660,7 @@ function renderPortfolio(data) {
     const portfolio = data.portfolio || [];
     const cash = data.unallocated_cash_eur || 0;
     const rate = data.eurusd_rate || 1.08;
+    currentEurUsdRate = rate; // Update global rate
     const usd = (cash * rate).toFixed(2);
     
     portfolio.forEach((item, index) => {
@@ -905,6 +907,25 @@ window.copySessionReviewPayload = copySessionReviewPayload;
 dAddToPortfolioBtn.addEventListener('click', addToPortfolio);
 dSavePortfolioBtn.addEventListener('click', () => savePortfolio());
 dAddToWatchlistBtn.addEventListener('click', addToWatchlist);
+
+// Real-time conversion feedback as user types cash value
+dPortfolioBody.addEventListener('input', (e) => {
+    if (e.target.id === 'cash-input-eur') {
+        const val = parseFloat(e.target.value) || 0;
+        const usdVal = (val * currentEurUsdRate).toFixed(2);
+        const usdDisplay = e.target.closest('tr').querySelector('td[colspan="2"]');
+        if (usdDisplay) {
+            usdDisplay.textContent = `$${usdVal}`;
+        }
+    }
+});
+
+// Auto-save on change/blur of portfolio inputs
+dPortfolioBody.addEventListener('change', async (e) => {
+    if (e.target.classList.contains('portfolio-input')) {
+        await savePortfolio();
+    }
+});
 
 async function copySessionReviewPayload(triggerBtn, statusEl) {
     const btn = triggerBtn || document.getElementById('btn-session-review');
