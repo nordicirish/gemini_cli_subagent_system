@@ -1632,12 +1632,27 @@
 - **Content:** Prioritize SSR circuit breakers over GEX stabilization.
 - **Justification:** Prevents pipeline deadlock in conflict scenarios.
 
+### [MANDATE_35] LONG GAMMA SHIELD OVERRIDE
+- **Status:** ACTIVE
+- **Content:** LONG_GAMMA SHIELD OVERRIDE: If an asset suffers a structural failure (>10% drop triggering SSR), the LONG_GAMMA shield is nullified. Immediate mechanical trim required.
+- **Justification:** Forensic evidence shows dealer hedging bands decay rapidly during SSR events; positive GEX becomes misleading.
+
+### [MANDATE_36] GEX-SSR CONFLICT PROTOCOL
+- **Status:** ACTIVE
+- **Content:** GEX-SSR CONFLICT PROTOCOL: SSR structural failure takes precedence over GEX stabilization. Consensus Pipeline must force trim.
+- **Justification:** Prevents pipeline paralysis when technical shields conflict with regulatory circuit breakers.
+
 ## Telemetry
 
 ### [ENH_108] PERSISTENT STOP-LOSS TELEMETRY
 - **Status:** ACTIVE
 - **Content:** Emission of stop-loss audit blocks is mandatory for all holdings with RSI > 65 or VWAP extension > 2%.
 - **Justification:** Prevents passive holding of overextended assets by ensuring telemetry trails.
+
+### [ENH_110] PERSISTENT STOP-LOSS TELEMETRY
+- **Status:** ACTIVE
+- **Content:** PERSISTENT STOP-LOSS TELEMETRY: All active holdings with RSI > 65 or > 2% VWAP extension must emit an audit block detailing anchor prices.
+- **Justification:** Eliminates manual latency in identifying overextended assets.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.
