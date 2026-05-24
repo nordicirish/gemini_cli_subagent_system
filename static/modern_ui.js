@@ -131,9 +131,8 @@ const ModernChat = {
             display: flex;
             flex-wrap: nowrap;
             overflow-x: auto;
-            justify-content: space-between;
-            gap: 6px;
-            padding: 10px 4px 12px;
+            gap: 16px;
+            padding: 10px 16px 12px;
             border-bottom: 1px solid rgba(255,255,255,0.07);
             margin-bottom: 10px;
             scrollbar-width: none;
@@ -146,11 +145,12 @@ const ModernChat = {
             if (qp.tooltip) btn.title = qp.tooltip;
             btn.innerHTML = `${qp.icon} <span style="white-space:nowrap">${qp.label}</span>`;
             btn.style.cssText = `
-                flex-shrink: 0;
+                flex: 1 0 auto;
                 display: flex;
                 align-items: center;
-                gap: 5px;
-                padding: 5px 13px;
+                justify-content: center;
+                gap: 6px;
+                padding: 6px 16px;
                 border-radius: 20px;
                 border: 1px solid rgba(255,255,255,0.18);
                 background: rgba(255,255,255,0.07);
@@ -597,6 +597,12 @@ const ModernChat = {
                 summary.textContent = '⚖️ System Compliance & Framing (Hidden)';
                 details.appendChild(summary);
 
+                details.addEventListener('toggle', () => {
+                    summary.textContent = details.open 
+                        ? '⚖️ System Compliance & Framing' 
+                        : '⚖️ System Compliance & Framing (Hidden)';
+                });
+
                 const contentDiv = document.createElement('div');
                 contentDiv.style.marginTop = '8px';
                 contentDiv.style.fontSize = '0.82rem';
@@ -633,6 +639,12 @@ const ModernChat = {
                     summary.style.letterSpacing = '0.5px';
                     summary.textContent = '🏛️ Gemini Gem Council Debate (Hidden)';
                     details.appendChild(summary);
+
+                    details.addEventListener('toggle', () => {
+                        summary.textContent = details.open 
+                            ? '🏛️ Gemini Gem Council Debate' 
+                            : '🏛️ Gemini Gem Council Debate (Hidden)';
+                    });
                     
                     const contentDiv = document.createElement('div');
                     contentDiv.style.marginTop = '12px';

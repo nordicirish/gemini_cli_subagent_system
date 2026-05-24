@@ -1,4 +1,4 @@
-# 💎 GEM Trading Agent Framework — v10.38-Interactions-API-Mitigation
+# 💎 GEM Trading Agent Framework — v10.40-Debate-Title-Expansion-Fix
 
 **An autonomous, multi-agent AI trading intelligence system powered by Google Gemini & Gemma.**
 
@@ -18,9 +18,17 @@ Each Markdown file (`.md`) is a **system instruction** for a dedicated AI sub-ag
 ---
 
 ## 📋 Changelog
-### v10.38-Interactions-API-Mitigation *(2026-05-24)*
+### v10.40-Debate-Title-Expansion-Fix *(2026-05-24)*
+- **Dynamic Debate & Compliance Title Updates:** Engineered dynamic toggle event listeners for both the "Gemini Gem Council Debate" and the "System Compliance & Framing" collapsible containers in [modern_ui.js](file:///c:/github/gemini_cli_subagent_system/static/modern_ui.js). The UI now dynamically strips the `(Hidden)` label when the containers are expanded by the user, and reappends it when collapsed, maintaining pristine interface feedback.
+- **Global Architectural Parity:** Synchronized version strings to `v10.40-Debate-Title-Expansion-Fix` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+
+### v10.40-Debate-Title-Expansion-Fix *(2026-05-24)*
+- **Quick-Prompt Button Bar Spacing & Full-Width Symmetry:** Surgically restructured the CSS layout of `quick-prompt-bar` in [modern_ui.js](file:///c:/github/gemini_cli_subagent_system/static/modern_ui.js). Stretched buttons to fill the bar width (`flex: 1 0 auto`) and centered text/icons (`justify-content: center`). Replaced the custom 12px gap with a wider, premium `16px` gap and mathematically matched the container's side margins (`padding: 10px 16px 12px`) for perfect visual horizontal alignment across wide displays.
+- **Global Architectural Parity:** Synchronized version strings to `v10.40-Debate-Title-Expansion-Fix` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+
+### v10.40-Debate-Title-Expansion-Fix *(2026-05-24)*
 - **Advanced Model Interaction API Fallback Gate:** Surgically upgraded the fallback validation gate in [agent_framework.py](file:///c:/github/gemini_cli_subagent_system/python/agent_framework.py)'s `generate_response_with_fallback` execution loop to intercept the 400 Bad Request error (`This model only supports Interactions API.`). When encountered, the client now dynamically failovers to the next robust, standard text-generation model (e.g. `gemini-2.5-pro` or `gemini-2.5-flash`), preventing API-level orchestrator crashes.
-- **Global Architectural Parity:** Synchronized version strings to `v10.38-Interactions-API-Mitigation` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+- **Global Architectural Parity:** Synchronized version strings to `v10.40-Debate-Title-Expansion-Fix` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
 
 ### v10.37-Loading-Aesthetics-and-Custodian-Shrink *(2026-05-24)*
 - **Pristine Startup HUD Alignment:** Surgically aligned the main data loading panel visually by setting its margin to `0 auto` and adding explicit start alignment `align-items: start;` to `.table-overlap-wrapper` in CSS grid cell layout to align the loading card exactly level with the top of the Portfolio sidebar card.
