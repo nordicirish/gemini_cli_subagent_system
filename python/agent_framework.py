@@ -8,7 +8,7 @@ from google import genai
 from google.genai import types
 
 # ---------------------------------------------------------------------------
-# Model definitions — v10.34-Scout-UX-and-Payload-Bypass
+# Model definitions — v10.38-Interactions-API-Mitigation
 # Per terminal.md > Mode Selection Matrix (Canonical)
 # ---------------------------------------------------------------------------
 DEFAULT_MODEL_PRO = "gemini-2.5-pro"
@@ -369,7 +369,7 @@ class AgentFramework:
                             pass
                         continue
 
-                    elif "not found" in error_msg.lower() or "404" in error_msg or "not supported" in error_msg.lower():
+                    elif "not found" in error_msg.lower() or "404" in error_msg or "not supported" in error_msg.lower() or "interactions api" in error_msg.lower():
                         continue
                     else:
                         self.log(f"[System] Warning: {model_name} failed with error: {e}")

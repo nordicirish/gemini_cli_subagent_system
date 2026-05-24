@@ -147,11 +147,11 @@
     "expires_at": 1779647901.219765
   },
   "gem_trading_rules\\rules.md": {
-    "local_hash": "32c5b20e99b934c27d23d782042c09d1",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/wut59au8n8p9",
-    "cloud_name": "files/wut59au8n8p9",
-    "uploaded_timestamp": 1779642615.287755,
-    "expires_at": 1779815415.2877553
+    "local_hash": "6e90c2bc6d10a5f2f3ce9774682331e1",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/6w1j3lj9yh30",
+    "cloud_name": "files/6w1j3lj9yh30",
+    "uploaded_timestamp": 1779644431.9810648,
+    "expires_at": 1779817231.981065
   },
   "trade_lessons.json": {
     "local_hash": "97ea86dedf828ed74708754ef6a39d89",
@@ -168,11 +168,11 @@
     "expires_at": 1779711632.2493558
   },
   "engine_instructions\\bullish_gem.md": {
-    "local_hash": "00e1d75988576da53b5916329501efb8",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/bpwpffxbvkk7",
-    "cloud_name": "files/bpwpffxbvkk7",
-    "uploaded_timestamp": 1779641174.3288076,
-    "expires_at": 1779813974.3288088
+    "local_hash": "659554e264f7b26fac393ea462827534",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/3kob040txbqy",
+    "cloud_name": "files/3kob040txbqy",
+    "uploaded_timestamp": 1779644384.5333903,
+    "expires_at": 1779817184.5333905
   },
   "engine_instructions\\context_engine.md": {
     "local_hash": "ebd78886bd01ae91e78cb4899f04659d",
@@ -182,60 +182,60 @@
     "expires_at": 1779713366.7735698
   },
   "engine_instructions\\data_analyst.md": {
-    "local_hash": "0cb71a5db3f47b6815a80fa7867e33c3",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/v3mt3hq4i0a6",
-    "cloud_name": "files/v3mt3hq4i0a6",
-    "uploaded_timestamp": 1779641177.5070922,
-    "expires_at": 1779813977.507093
+    "local_hash": "d1085f0fcf972c400bcd040b9595836d",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/4wqep4c1gj9l",
+    "cloud_name": "files/4wqep4c1gj9l",
+    "uploaded_timestamp": 1779644388.563779,
+    "expires_at": 1779817188.56378
   },
   "engine_instructions\\execution.md": {
-    "local_hash": "2b108c6d972498c5ab512a113bd2facf",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/3o04ba7s6zy2",
-    "cloud_name": "files/3o04ba7s6zy2",
-    "uploaded_timestamp": 1779641180.804695,
-    "expires_at": 1779813980.8046954
+    "local_hash": "4583bbd4bfda0a23aac628c1bd0d0a5d",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/y0kjsj7yis7r",
+    "cloud_name": "files/y0kjsj7yis7r",
+    "uploaded_timestamp": 1779644391.896238,
+    "expires_at": 1779817191.8962383
   },
   "engine_instructions\\gex_engine.md": {
-    "local_hash": "8127ac4d19caa65121af6cfa200f1b55",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/com38cpyc2d7",
-    "cloud_name": "files/com38cpyc2d7",
-    "uploaded_timestamp": 1779641184.4841082,
-    "expires_at": 1779813984.4841087
+    "local_hash": "fd5bd71588705a9d4faaee4fbf283ff6",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/njmt5mkaio2l",
+    "cloud_name": "files/njmt5mkaio2l",
+    "uploaded_timestamp": 1779644395.0047832,
+    "expires_at": 1779817195.004784
   },
   "engine_instructions\\macro_narrative_engine.md": {
-    "local_hash": "1ba7503a2e81967241fc4d9547e077de",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/odnm086mtjhf",
-    "cloud_name": "files/odnm086mtjhf",
-    "uploaded_timestamp": 1779641187.8247755,
-    "expires_at": 1779813987.8247757
+    "local_hash": "a027311129fc8873ae98ead663fac1e7",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/f35nutz0u8z7",
+    "cloud_name": "files/f35nutz0u8z7",
+    "uploaded_timestamp": 1779644398.1409013,
+    "expires_at": 1779817198.1409023
   },
   "engine_instructions\\macro_sentinel.md": {
-    "local_hash": "ab5ecd6b15307c9fb73d502a9783a7e9",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/5a2yrmo5b1xs",
-    "cloud_name": "files/5a2yrmo5b1xs",
-    "uploaded_timestamp": 1779641190.9228086,
-    "expires_at": 1779813990.9228091
+    "local_hash": "f41a77b9f09bb33d5e8afbd4393a768b",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/xed7560wtree",
+    "cloud_name": "files/xed7560wtree",
+    "uploaded_timestamp": 1779644401.476362,
+    "expires_at": 1779817201.476362
   },
   "engine_instructions\\neutral_gem.md": {
-    "local_hash": "0f8c8659cca703ed88f02afb4c16fa6d",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/pw2ozz0c1s2h",
-    "cloud_name": "files/pw2ozz0c1s2h",
-    "uploaded_timestamp": 1779641194.2329936,
-    "expires_at": 1779813994.2329948
+    "local_hash": "7787df78c5548b43ecd84a32a0174e43",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/62to7b19912w",
+    "cloud_name": "files/62to7b19912w",
+    "uploaded_timestamp": 1779644405.3090355,
+    "expires_at": 1779817205.3090358
   },
   "engine_instructions\\post_trade_review.md": {
-    "local_hash": "627959d618629ec64c2f28b4b887fbe9",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/g7dzfbyyslk8",
-    "cloud_name": "files/g7dzfbyyslk8",
-    "uploaded_timestamp": 1779641198.439008,
-    "expires_at": 1779813998.4390087
+    "local_hash": "b934e614d6b186daa9a2362cc22ee9e1",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/wllapyuzipal",
+    "cloud_name": "files/wllapyuzipal",
+    "uploaded_timestamp": 1779644409.0837712,
+    "expires_at": 1779817209.0837715
   },
   "engine_instructions\\red_team_gem.md": {
-    "local_hash": "809cdd9711dc37a2ec8a97bda82d9dc5",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/ob8yy2itx2x9",
-    "cloud_name": "files/ob8yy2itx2x9",
-    "uploaded_timestamp": 1779641201.6550715,
-    "expires_at": 1779814001.6550722
+    "local_hash": "bbc2a9070ba66baef26cdfa57e8877da",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/a1wbivf5kfqt",
+    "cloud_name": "files/a1wbivf5kfqt",
+    "uploaded_timestamp": 1779644412.4380984,
+    "expires_at": 1779817212.4380987
   },
   "engine_instructions\\research.md": {
     "local_hash": "9d954056f11c37031ff09724a2e9a9e3",
@@ -245,11 +245,11 @@
     "expires_at": 1779713385.6605093
   },
   "engine_instructions\\rule_enforcer_engine.md": {
-    "local_hash": "0ba1e1cd5dc65af37a7c92af7d9da33d",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/kpv5s7zjxvgp",
-    "cloud_name": "files/kpv5s7zjxvgp",
-    "uploaded_timestamp": 1779641205.1841564,
-    "expires_at": 1779814005.184157
+    "local_hash": "b0263c7cb1614ee085513ffe528515ab",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/ru2f3e8qk1oo",
+    "cloud_name": "files/ru2f3e8qk1oo",
+    "uploaded_timestamp": 1779644416.9744723,
+    "expires_at": 1779817216.9744725
   },
   "engine_instructions\\sentiment_engine.md": {
     "local_hash": "270f55bd75b53e8a08c9fbeef8eac9c2",
@@ -259,18 +259,18 @@
     "expires_at": 1779713389.3380907
   },
   "engine_instructions\\state_validation_router.md": {
-    "local_hash": "9fa1ab0ffaed0af2bbfc681bdd598d26",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/lb8v2znirnuq",
-    "cloud_name": "files/lb8v2znirnuq",
-    "uploaded_timestamp": 1779641208.6620135,
-    "expires_at": 1779814008.662014
+    "local_hash": "ad8e18944fd099a2c9ffba0956bcc0f7",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/cqsmojkrod9s",
+    "cloud_name": "files/cqsmojkrod9s",
+    "uploaded_timestamp": 1779644421.422233,
+    "expires_at": 1779817221.4222336
   },
   "engine_instructions\\structural_engine.md": {
-    "local_hash": "4334a7606e9cc490617ef4aa6df45721",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/2qqy3cytapvx",
-    "cloud_name": "files/2qqy3cytapvx",
-    "uploaded_timestamp": 1779641212.5325148,
-    "expires_at": 1779814012.532515
+    "local_hash": "60503398d73d296c5328968d4fa7074a",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/4b764euwd1ky",
+    "cloud_name": "files/4b764euwd1ky",
+    "uploaded_timestamp": 1779644424.5162265,
+    "expires_at": 1779817224.5162265
   },
   "engine_instructions\\technical_validator.md": {
     "local_hash": "88390a12ea1462132678dc9970282ce2",
@@ -280,18 +280,18 @@
     "expires_at": 1779713395.9323995
   },
   "engine_instructions\\terminal.md": {
-    "local_hash": "6908c26e5a03bd46016d9da470eaee1e",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/3ubjlcxwv4ns",
-    "cloud_name": "files/3ubjlcxwv4ns",
-    "uploaded_timestamp": 1779641216.4760778,
-    "expires_at": 1779814016.476078
+    "local_hash": "c9319dc5d66527384584998909520b6f",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/quhycmdi7glp",
+    "cloud_name": "files/quhycmdi7glp",
+    "uploaded_timestamp": 1779644428.3463159,
+    "expires_at": 1779817228.346316
   },
   "context/decision_log.json": {
-    "local_hash": "a5be2ccc1f51f1428a2ddc4994352d29",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/zurg520cecjl",
-    "cloud_name": "files/zurg520cecjl",
-    "uploaded_timestamp": 1779642618.5470796,
-    "expires_at": 1779815418.54708
+    "local_hash": "13895f01ef26a1e9d8b02e6851ea32dc",
+    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/z7xvyw3iygor",
+    "cloud_name": "files/z7xvyw3iygor",
+    "uploaded_timestamp": 1779643219.7324846,
+    "expires_at": 1779816019.7324853
   },
   "context/trade_lessons.json": {
     "local_hash": "97ea86dedf828ed74708754ef6a39d89",
