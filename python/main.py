@@ -6,8 +6,31 @@ import tools
 import threading
 import cloud_sync
 
+def initialize_context_files():
+    """Bootstraps missing context files for fresh repository clones."""
+    if not os.path.exists("context"):
+        os.makedirs("context")
+        
+    defaults = {
+        "context/ssot.json": "{}",
+        "context/trade_lessons.json": "[]",
+        "context/decision_log.json": "[]",
+        "context/user_config.json": "{}",
+        "context/config.json": '{\n  "GEMINI_API_KEY": "",\n  "GEMINI_FREE_TIER_API_KEY": "",\n  "FINNHUB_API_KEY": ""\n}'
+    }
+    
+    for filepath, default_content in defaults.items():
+        if not os.path.exists(filepath):
+            try:
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(default_content)
+                print(f"[System] Initialized missing file: {filepath}")
+            except Exception as e:
+                print(f"[Warning] Could not initialize {filepath}: {e}")
+
 def main():
     print("Initializing GEM Trading CLI Subagent System...")
+    initialize_context_files()
 
     # Initialize the Framework
     framework = AgentFramework()
@@ -120,9 +143,9 @@ def main():
         tools=all_tools
     )
 
+    rules_path = os.path.join("gem_trading_rules", "rules.md")
     if not getattr(framework, "cached_content_name", None):
         # Attach canonical rules knowledge base
-        rules_path = os.path.join("gem_trading_rules", "rules.md")
         if os.path.exists(rules_path):
             with open(rules_path, "r", encoding="utf-8") as f:
                 rules_content = f.read()

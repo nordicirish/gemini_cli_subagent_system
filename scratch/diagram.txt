@@ -1,0 +1,22 @@
+┌─────────────────────────────────────────────────────────────────────┐
+│                     web_server.py (Entry Point)                     │
+│                                                                     │
+│  ┌──────────────────────────┐   ┌──────────────────────────────┐    │
+│  │   FastAPI Web Server     │   │    Background Data Daemon    │    │
+│  │   (http://localhost:8000)│   │   (fetch_stocks.py thread)   │    │
+│  │                          │   │                              │    │
+│  │  GET  /api/data          │   │  Polls Yahoo Finance / SSoT  │    │
+│  │  POST /api/chat          │   │  Updates GLOBAL_STATE every  │    │
+│  │  POST /api/save_basket   │   │  30 seconds                  │    │
+│  │  POST /api/save_watch    │   │                              │    │
+│  └──────────┬───────────────┘   └──────────────┬───────────────┘    │
+│             │                                  │                    │
+│             ▼                                  ▼                    │
+│        Model Router                       GLOBAL_STATE              │
+│        (Logic Tier)                       (Shared Mem)              │
+└─────────────┬──────────────────────────────────┬────────────────────┘
+              │                                  │
+        ┌─────▼────────────────┐           ┌─────▼────────────────┐
+        │  GEMINI (THINKING)   │           │     GEMMA 4 31B      │
+        │  (Reasoning & Search)│           │  (Precision Logic)   │
+        └──────────────────────┘           └──────────────────────┘

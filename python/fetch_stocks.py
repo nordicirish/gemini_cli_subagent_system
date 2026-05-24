@@ -24,6 +24,30 @@ try:
 except ImportError:
     msvcrt = None
 
+def initialize_context_files():
+    """Bootstraps missing context files for fresh repository clones."""
+    if not os.path.exists("context"):
+        os.makedirs("context")
+        
+    defaults = {
+        "context/ssot.json": "{}",
+        "context/trade_lessons.json": "[]",
+        "context/decision_log.json": "[]",
+        "context/user_config.json": "{}",
+        "context/config.json": '{\n  "GEMINI_API_KEY": "",\n  "GEMINI_FREE_TIER_API_KEY": "",\n  "FINNHUB_API_KEY": ""\n}'
+    }
+    
+    for filepath, default_content in defaults.items():
+        if not os.path.exists(filepath):
+            try:
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(default_content)
+                print(f"[System] Initialized missing file: {filepath}")
+            except Exception as e:
+                print(f"[Warning] Could not initialize {filepath}: {e}")
+
+initialize_context_files()
+
 # Load configuration from JSON file
 with open('context/config.json', 'r') as f:
     config = json.load(f)
@@ -189,6 +213,10 @@ except Exception as e:
 TICKERS = _load_ssot_tickers()
 MACRO_TICKERS = _load_macro_tickers()
 ALL_TICKERS = TICKERS + MACRO_TICKERS
+if not ALL_TICKERS:
+    TICKERS = ["AAPL", "MSFT", "GOOGL", "NVDA"]
+    MACRO_TICKERS = ["SPY", "QQQ"]
+    ALL_TICKERS = TICKERS + MACRO_TICKERS
 INVERSE_MACRO = config.get("INVERSE_MACRO", [])
 
 MACRO_LABELS = config.get("MACRO_LABELS", {})
