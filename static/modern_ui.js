@@ -464,7 +464,7 @@ const ModernChat = {
                         <div style="font-weight: 500; margin-top: 4px;">${s.preview}</div>
                     </div>
                     <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent-blue); text-align: right; flex-shrink: 0; padding-left: 10px;">
-                        Est. Cost: $${displayCost.toFixed(5)}
+                        Est. Cost: $${displayCost.toFixed(2)}
                     </div>
                 </div>
             `;
@@ -540,7 +540,7 @@ const ModernChat = {
         });
         const costEl = document.getElementById('chat-session-cost');
         if (costEl) {
-            costEl.textContent = `Est. Session Cost: $${totalCost.toFixed(5)}`;
+            costEl.textContent = `Est. Session Cost: $${totalCost.toFixed(2)}`;
         }
     },
 
@@ -578,6 +578,40 @@ const ModernChat = {
         if (role === 'ai') {
             msgDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(text) : text;
             
+            // Collapsible Adversarial Framing Isolation (v10.36)
+            const paragraphs = msgDiv.querySelectorAll('p');
+            let adversarialParagraph = null;
+            for (const p of paragraphs) {
+                if (p.textContent.toLowerCase().includes('adversarial framing')) {
+                    adversarialParagraph = p;
+                    break;
+                }
+            }
+
+            if (adversarialParagraph) {
+                const details = document.createElement('details');
+                details.style.cssText = 'margin: 10px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent); padding-left: 15px; background: rgba(255,255,255,0.01); border-radius: 8px; padding-top: 6px; padding-bottom: 6px; border: 1px solid rgba(255,255,255,0.03); font-size: 0.85rem;';
+                const summary = document.createElement('summary');
+                summary.style.fontWeight = '600';
+                summary.style.color = 'var(--text-secondary)';
+                summary.textContent = '⚖️ System Compliance & Framing (Hidden)';
+                details.appendChild(summary);
+
+                const contentDiv = document.createElement('div');
+                contentDiv.style.marginTop = '8px';
+                contentDiv.style.fontSize = '0.82rem';
+                contentDiv.style.lineHeight = '1.4';
+                contentDiv.style.color = 'var(--text-muted)';
+                details.appendChild(contentDiv);
+
+                // Move the adversarial paragraph into the details tag
+                contentDiv.appendChild(adversarialParagraph.cloneNode(true));
+                adversarialParagraph.remove();
+
+                // Append the details block at the bottom of the message
+                msgDiv.appendChild(details);
+            }
+            
             const skipToggle = document.getElementById('skip-debate-toggle');
             if (skipToggle && skipToggle.checked) {
                 const headers = msgDiv.querySelectorAll('h1, h2, h3, h4, h5, h6, p, strong');
@@ -609,6 +643,18 @@ const ModernChat = {
                     while (next) {
                         if (next.nodeType === 1 && (next.tagName.startsWith('H') || next.tagName === 'HR')) {
                             const text = next.textContent.toLowerCase();
+                            if (next.tagName.startsWith('H')) {
+                                const isAgentOrDebate = text.includes('debate') || 
+                                                        text.includes('advocate') || 
+                                                        text.includes('pessimist') || 
+                                                        text.includes('structuralist') || 
+                                                        text.includes('sentinel') || 
+                                                        text.includes('engine') || 
+                                                        text.includes('validator');
+                                if (!isAgentOrDebate) {
+                                    break;
+                                }
+                            }
                             if (text.includes('decision') || text.includes('metrics') || text.includes('reconciliation') || text.includes('unallocated') || text.includes('proof')) {
                                 break;
                             }
@@ -630,7 +676,7 @@ const ModernChat = {
                 if (usage) {
                     tokenInfo = ` <span style="font-size:0.65rem;opacity:0.7">(${usage.prompt_tokens + usage.cached_tokens} in / ${usage.candidates_tokens} out)</span>`;
                 }
-                badge.innerHTML = `🪙 Est. Cost: $${cost.toFixed(5)}${tokenInfo}`;
+                badge.innerHTML = `🪙 Est. Cost: $${cost.toFixed(2)}${tokenInfo}`;
                 msgDiv.appendChild(badge);
             }
         } else {

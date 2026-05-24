@@ -1227,7 +1227,7 @@ textarea:focus {
 /* ─── Initial Fetch Progress Container ─── */
 .progress-panel {
     max-width: 800px;
-    margin: 40px auto;
+    margin: 8px auto 40px;
     padding: 32px;
     display: flex;
     flex-direction: column;

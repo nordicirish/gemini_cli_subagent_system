@@ -49,8 +49,15 @@ def log_to_queue(message: str):
         except:
             pass
 
+import threading
+cancel_event = threading.Event()
+
+def check_cancelled():
+    return cancel_event.is_set()
+
 # Initialize the AgentFramework with cloud-fallback
 framework = AgentFramework(log_callback=log_to_queue)
+framework.cancel_check = check_cancelled
 
 # ---------------------------------------------------------------------------
 # Subagent & Council Tool Definitions
@@ -267,9 +274,6 @@ class ChatRequest(BaseModel):
     message: str
     history: list = []
     skip_debate: bool = False # New: Support for browser session memory
-
-import threading
-cancel_event = threading.Event()
 
 @app.post("/api/cancel_chat")
 def cancel_chat():
@@ -707,6 +711,8 @@ def chat_endpoint(req: ChatRequest):
         }
     except Exception as e:
         error_msg = str(e)
+        if cancel_event.is_set() or "cancelled" in error_msg.lower():
+            return {"status": "success", "response": "[OFFLINE] Session terminated by user interrupt."}
         framework.log(f"[Error] Chat endpoint exception: {error_msg}")
         if "429" in error_msg or "quota" in error_msg.lower() or "resource_exhausted" in error_msg.lower():
             return {

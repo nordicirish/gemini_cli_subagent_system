@@ -17,14 +17,14 @@ DEFAULT_MODEL_GEMMA = "gemma-4-31b-it"
 DEFAULT_MODEL_THINKING = "gemini-2.0-flash-thinking-exp"
 
 MODEL_MAPPING = {
-    "PRO":      [DEFAULT_MODEL_PRO, "gemini-3.1-pro-preview", "gemini-2.0-pro-exp", "gemini-1.5-pro"],
+    "PRO":      [DEFAULT_MODEL_PRO, "gemini-3.1-pro-preview", "gemini-2.0-pro-exp", "gemini-1.5-pro", DEFAULT_MODEL_FLASH],
     "FLASH":    [DEFAULT_MODEL_FLASH, "gemini-3-flash-preview", DEFAULT_MODEL_GEMMA, "gemini-1.5-flash"],
     "GEMMA":    [DEFAULT_MODEL_GEMMA, DEFAULT_MODEL_FLASH, DEFAULT_MODEL_PRO],
-    "THINKING": [DEFAULT_MODEL_THINKING, DEFAULT_MODEL_PRO, "gemini-3.1-pro-preview", "gemini-2.0-pro-exp", "gemini-1.5-pro"],
+    "THINKING": [DEFAULT_MODEL_THINKING, DEFAULT_MODEL_PRO, "gemini-3.1-pro-preview", "gemini-2.0-pro-exp", "gemini-1.5-pro", DEFAULT_MODEL_FLASH],
     "FAST":     [DEFAULT_MODEL_FLASH, "gemini-3-flash-preview", DEFAULT_MODEL_GEMMA, "gemini-1.5-flash"],
 }
 
-CACHE_VERSION = "GEM_CACHE_v10.19"
+CACHE_VERSION = "GEM_CACHE_v10.35"
 
 
 
@@ -243,11 +243,18 @@ class AgentFramework:
     # -----------------------------------------------------------------------
     def generate_response_with_fallback(self, prompt, instruction, mode, tools=None):
         """Generate a response, routing to Gemini (cloud modes) with Caching support."""
+        if getattr(self, "cancel_check", None) and self.cancel_check():
+            self.log("[Framework] Cancel signal active before starting call.")
+            raise RuntimeError("Operation cancelled by user.")
 
         models = self._get_cloud_models(mode)
         last_error = None
 
         for model_name in models:
+            if getattr(self, "cancel_check", None) and self.cancel_check():
+                self.log("[Framework] Cancel signal active. Aborting fallback loop.")
+                raise RuntimeError("Operation cancelled by user.")
+
             self.log(f"[Cloud Execution] Attempting with model: {model_name}...")
 
             final_tools = []
@@ -304,6 +311,9 @@ class AgentFramework:
                     self.log(f"[Cloud Execution] Trying client with {client_label} for model {model_name}...")
 
                 def attempt_call(client_instance):
+                    if getattr(self, "cancel_check", None) and self.cancel_check():
+                        self.log("[Framework] Cancel signal active before starting API call.")
+                        raise RuntimeError("Operation cancelled by user.")
                     if final_tools:
                         chat = client_instance.chats.create(model=model_name, config=config)
                         res = chat.send_message(prompt)
@@ -359,7 +369,7 @@ class AgentFramework:
                             pass
                         continue
 
-                    elif "not found" in error_msg.lower():
+                    elif "not found" in error_msg.lower() or "404" in error_msg or "not supported" in error_msg.lower():
                         continue
                     else:
                         self.log(f"[System] Warning: {model_name} failed with error: {e}")

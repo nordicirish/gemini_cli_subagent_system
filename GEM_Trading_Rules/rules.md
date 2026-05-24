@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.34-Scout-UX-and-Payload-Bypass
+**Version:** v10.36-Adversarial-Framing-Isolation
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -100,6 +100,8 @@
 - ENH_106: Long Gamma Shield Override
 - ENH_107: GEX-SSR Conflict Protocol
 - ENH_108: Persistent Stop-Loss Telemetry
+- ENH_110: Council Debate & Decision Log Permanence
+- ENH_111: Technical Compliance Isolation
 
 
 ## Mandate Registry
@@ -1649,10 +1651,15 @@
 - **Content:** Emission of stop-loss audit blocks is mandatory for all holdings with RSI > 65 or VWAP extension > 2%.
 - **Justification:** Prevents passive holding of overextended assets by ensuring telemetry trails.
 
-### [ENH_110] PERSISTENT STOP-LOSS TELEMETRY
+### [ENH_110] COUNCIL DEBATE & DECISION LOG PERMANENCE
 - **Status:** ACTIVE
-- **Content:** PERSISTENT STOP-LOSS TELEMETRY: All active holdings with RSI > 65 or > 2% VWAP extension must emit an audit block detailing anchor prices.
-- **Justification:** Eliminates manual latency in identifying overextended assets.
+- **Content:** Any turn resulting in SSoT mutations, portfolio rebalancing, or systemic rule changes MUST permanently record the full Council Debate in decision_log.json. The log entry must serve as a complete forensic audit trail of how the consensus was reached before the state was mutated.
+- **Justification:** Prevents logical gaps, cognitive drift, or truncating debate transcripts in the decision log ledger.
+
+### [ENH_111] TECHNICAL COMPLIANCE ISOLATION
+- **Status:** ACTIVE
+- **Content:** Technical and programmatic "Adversarial Framing" or legislative compliance messages (e.g. references to MANDATE_09, MANDATE_30, EXECUTION_PAYLOAD suppression) must not clutter the primary analytical response. The UI must automatically isolate any paragraph matching "Adversarial Framing" and encapsulate it inside a collapsible details panel at the bottom of the message container.
+- **Justification:** Preserves the absolute logical audit trail for compliance checking while presenting a clean, natural conversational interface to the user by default.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.
