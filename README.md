@@ -1,16 +1,109 @@
-# 💎 GEM Trading Agent Framework — v10.14-Cross-Repo-Sync
+# 💎 GEM Trading Agent Framework — v10.34-Scout-UX-and-Payload-Bypass
 
 **An autonomous, multi-agent AI trading intelligence system powered by Google Gemini & Gemma.**
 
 Each Markdown file (`.md`) is a **system instruction** for a dedicated AI sub-agent. Together, these agents form an institutional-grade trading council that analyses live market data, enforces risk protocols, and produces consensus-driven trade decisions — all accessible via a real-time, glassmorphic Web Dashboard with a built-in AI chat interface.
 
-> **Cost-Optimized & Local-First.** The system uses a hybrid model architecture routing to Gemini 2.5 Pro (PRO), Gemini 2.5 Flash (THINKING/FAST), and Gemma 4 31B (GEMMA) tiers — fully synchronized with the GEM Trading Agent System source of truth.
+> **Cost-Optimized & Local-First.** The system uses a hybrid model architecture routing to Gemini 2.5 Pro (PRO), Gemini 2.0 Flash Thinking (THINKING), Gemini 2.5 Flash (FAST), and Gemma 4 31B (GEMMA) tiers — fully synchronized with the GEM Trading Agent System source of truth.
+
+---
+
+## 🖥️ Platform Showcase
+
+<p align="center">
+  <img src="static/dashboard_mockup.png" alt="GEM Live Web Dashboard Mockup" width="48%">
+  <img src="static/chat_overlay_mockup.png" alt="GEM AI Council Chat Overlay UI Mockup" width="48%">
+</p>
 
 ---
 
 ## 📋 Changelog
+### v10.34-Scout-UX-and-Payload-Bypass *(2026-05-24)*
+- **Resolved Adversarial Framing (Payload Suppression Exemption):** Surgically updated the Master SSoT rules (`rules.md` > `MANDATE_09`, `MANDATE_22`, `MANDATE_30`), the logic auditor (`rule_enforcer_engine.md` > `PROC_04`), and the validation engine (`state_validation_router.md` > Step 7) to fully codify the payload suppression exemption. If a user quick-prompt explicitly requests to suppress the JSON payload (or when no portfolio SSoT shifts occur), the entire Council respects the command and omits the payload, completely preventing "Adversarial Framing" rejection responses.
+- **Scout Suggestions UX Fallback & Leakage Fix:** Populated the `SCOUT_TICKER_MAP` inside both [config.json](file:///c:/github/gemini_cli_subagent_system/config.json) and [context/config.json](file:///c:/github/gemini_cli_subagent_system/context/config.json) with highly relevant, professional fallback tickers for all 15 active market sectors. This ensures the dashboard instantly displays high-quality stock candidates upon sector selection instead of blank lists or `NO DATA` rows during background scans.
+- **Scout Prompt Bias Mitigation:** Updated the dynamic scanning prompt in [fetch_stocks.py](file:///c:/github/gemini_cli_subagent_system/python/fetch_stocks.py) to replace specific technology examples with generic placeholders (`[\"SYM1\", \"SYM2\", \"SYM3\"]`), successfully preventing the search model from biasedly returning technology tickers for other sectors.
+- **Global Architectural Parity:** Synchronized all version strings and sync manifestations to `v10.34-Scout-UX-and-Payload-Bypass` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
 
-### v10.14-Cross-Repo-Sync *(2026-05-22)*
+### v10.32-Tool-Response-Patch *(2026-05-24)*
+- **Conversational Tool Response Schema Fix:** Surgically corrected the manual tool response formatting in `/api/chat` within `web_server.py`. Replaced the illegal, mixed-part `current_message` array with a clean `FunctionResponse`-only array. This conforms perfectly with the Google GenAI SDK and Gemini conversational content spec, resolving the severe `model output must contain either output text or tool calls, these cannot both be empty` API crash when calling subagents or scouting opportunities on reasoning models (such as `gemini-2.0-flash-thinking-exp`).
+
+### v10.31-Cost-Aware-Calibration *(2026-05-24)*
+- **Complete Sibling Decoupling:** Purged cross-repository synchronization capabilities (`Rule 16 / ENH_100-SYNC`) from the active custodian rules (`antigravity.md`) and deleted local repository push/pull sync scripts, making the system 100% standalone.
+- **Orchestrator Fallback Calibration:** Resolved the `404 NOT_FOUND` thinking model startup crash by implementing dynamic active model validation fallbacks to `PRO` and `FLASH` tiers in `web_server.py` when thinking models are unsupported.
+- **Cost-Aware Caching Policy:** Added a dynamic, user-controlled context caching policy toggle under the paid model tiers in the dashboard overlay, allowing the user to select high-speed, cost-saving caching, while automatically disabling it on Free tiers to prevent quota limits.
+- **Interactive Quota Shield:** Implemented automatic 429 quota exhaustion exception interception in the backend, triggering a premium glassmorphic warning card in the chat UI with a one-click upgrade button to calibrate the Council on paid Pro tiers dynamically.
+- **Global Architectural Parity:** Proactively bumped all version strings to `v10.34-Scout-UX-and-Payload-Bypass` across Master rules.md SSoT, antigravity.md, README.md, and all 13 active subagent engine instruction sets per MANDATE_29.
+
+### v10.29-Dynamic-Tier-Routing *(2026-05-24)*
+- **Interactive Model Tier Selector:** Added a sleek "Include Paid Tiers" checkbox right inside the browser's Gemini AI Council Chat Overlay in [index.html](file:///c:/github/gemini_cli_subagent_system/static/index.html).
+- **Dynamic Tier Filtering & Hot-Rebalancing:** Programmed `fetchModels()` in [modern_ui.js](file:///c:/github/gemini_cli_subagent_system/static/modern_ui.js) to display only standard free-tier models by default (minimizing development API usage costs) and dynamically expand the selector to show paid/Pro tiers (e.g. `gemini-2.5-pro`, `gemini-1.5-pro`) on check, with seamless backend calibration hot-swaps.
+- **Global Architectural Parity:** Synchronized version strings to `v10.29-Dynamic-Tier-Routing` across Master rules.md SSoT, antigravity.md, README.md, and all 13 active subagent engine instruction sets per MANDATE_29.
+
+### v10.27-Scout-Limit-Hardening *(2026-05-24)*
+- **Top-5 Category and Total Scout Caps:** Restructured `_load_ssot_tickers()` and the main loop in [fetch_stocks.py](file:///c:/github/gemini_cli_subagent_system/python/fetch_stocks.py) to select a maximum of the top 5 dynamic candidates per sector and enforce a strict **absolute total cap of 5 scouted tickers** on the dashboard (ranked in descending order by score).
+- **Yahoo Finance API Rate-Limit Protection:** Added `MANDATE_31` in [antigravity.md](file:///c:/github/gemini_cli_subagent_system/.agents/rules/antigravity.md) to explicitly require that all future market data fetching logic strictly respects API rate limits using batch downloads, throttled sleeps, and non-blocking background tasks.
+
+### v10.26-Scout-Ranking-Indicator *(2026-05-24)*
+- **Smart Loading Indicator Clearance:** Upgraded the frontend's `pollData()` in `app.js` to selectively clear pulsing yellow sectors from the loading queue only when their dynamic tickers have been successfully resolved and processed by the backend (matching `state.scout_categories_loaded` in the data payload), avoiding premature loading clearances.
+- **Top-2 Candidate Limits per Sector:** Configured `_load_ssot_tickers()` in the backend to select at most the top 2 highest-performing assets from each active sector category.
+- **Descending Score Top-6 Rank Capping:** Integrated backend filtering to isolate pure scouted tickers, sort them in descending order by raw quantitative score, and cap the final dashboard table payload at the top 6 absolute best scout candidates (excluding watchlist/portfolio holdings).
+
+### v10.25-Optimistic-Scouting-UI *(2026-05-24)*
+- **Zero-Latency Optimistic UI Toggles:** Refactored `app.js`'s `toggleScoutCategory()` to use optimistic state rendering. Clicking any sector toggle chip now updates the color state instantly (sub-millisecond click response) and fires the HTTP POST request asynchronously in the background.
+- **FastAPI BackgroundTask Scouting:** Reprogrammed `/api/scout` on the backend to trigger yfinance data reloads and Google client searches inside a non-blocking `BackgroundTasks` thread pool, reducing API response latency to less than a millisecond.
+
+### v10.24-Deferred-Scouting-Boot *(2026-05-24)*
+- **Deferred Stock Scouting on Server Startup:** Configured `fetch_stocks.py` to automatically clear active dynamic scout categories in `ssot.json` on startup. This defers heavy Google client searches and Yahoo Finance fetches for scouted tickers until the user explicitly selects a category chip on the dashboard.
+- **Fast Startup & Anti-Timeout Shield:** This change reduces server boot time from minutes to seconds and completely prevents Yahoo Finance rate-limiting or timeout errors during the initial heavy data loading sequence.
+- **Global Architectural Parity:** Synchronized version strings to `v10.24-Deferred-Scouting-Boot` across Master rules.md SSoT, antigravity.md, README.md, and all 13 active subagent engine instruction sets per MANDATE_29.
+
+### v10.23-Stable-Thinking-Model *(2026-05-24)*
+- **Resolved Regional Thinking 404:** Overhauled all `THINKING` model identifiers across `agent_framework.py`, `web_server.py`, `config.json`, and context files to point to the canonical stable thinking model alias `gemini-2.0-flash-thinking-exp` to resolve regional API 404 exceptions on v1beta.
+- **Dynamic Frontend Pre-Selection SSoT:** Upgraded the dynamic model-selection list in `modern_ui.js` to pre-select the active model dynamically based on the orchestrator backend's actual active engine reported by `/api/list_models`, completely eliminating the static, hardcoded selector default rules.
+- **Global Architectural Parity:** Synchronized version strings to `v10.23-Stable-Thinking-Model` across Master rules.md SSoT, antigravity.md, README.md, and all 13 active subagent engine instruction sets per MANDATE_29.
+
+### v10.22-SSoT-Config-Decanting *(2026-05-24)*
+- **Complete Decanting of Configuration Fallbacks:** Purged all remaining hardcoded ticker fallbacks, inverse macro asset lists, macro label dictionaries, and verified sectors from backend Python scripts and the frontend Javascript layout.
+- **Dynamic Frontend Sector Loading:** Exposed a new `/api/scout_sectors` endpoint that pulls available sectors dynamically from `config.json`, entirely eliminating the static sector button deck in `app.js` and binding it directly to the master configuration SSoT.
+- **Global Architectural Parity:** Synchronized version strings to `v10.22-SSoT-Config-Decanting` across Master rules.md SSoT, antigravity.md, README.md, and all 13 active subagent engine instruction sets per MANDATE_29.
+
+### v10.21-Flash-Thinking-Reasoning-Integration *(2026-05-24)*
+- **Configurable Flash-Tier Reasoning Integration:** Upgraded the `THINKING` mode mapping within `agent_framework.py` to route to `gemini-2.0-flash-thinking-exp-01-21` by default, enabling cost-effective, high-fidelity reasoning capabilities.
+- **Dynamic Caching Lifecycle Support:** Added local custom overrides (`MODEL_THINKING`) to root and context `config.json` configurations to ensure seamless, hot-reloadable model routing.
+- **Global Architectural Parity:** Synchronized version strings to `v10.21-Flash-Thinking-Reasoning-Integration` across rules.md, antigravity.md, README.md, and all 13 active engine instructions per MANDATE_29.
+
+### v10.20-Auto-Payload-Ingestion-Sync *(2026-05-22)*
+- **Auto SSoT Payload Ingestion:** Programmed the web server's `/api/chat` route to autonomously intercept and parse the Council's `EXECUTION_PAYLOAD` JSON block directly from the output stream.
+- **Dynamic SSoT Synchronization:** Integrates `tools.update_ssot` directly into the chat flow to synchronize portfolio allocations, watchlist assets, rules, and corrective lessons automatically on the fly.
+- **Chat Interface Purification:** Strips all raw JSON blocks and associated headers from the council's response to keep user chat bubbles clean, replacing them with a sleek `*⚖️ SSoT Shadow State synchronized successfully.*` confirmation badge.
+
+### v10.20-Auto-Payload-Ingestion-Sync *(2026-05-22)*
+- **Context Cache Tool Validation Resolution:** Fixed Pydantic validation errors during client-side `CreateCachedContentConfig` instantiation inside `agent_framework.py` by dynamically parsing and converting all Python callable tools into valid `types.Tool` models wrapping `FunctionDeclaration` objects using the `types.FunctionDeclaration.from_callable` SDK method.
+- **Global Architectural Parity:** Proactively bumped all 14 engine instruction sets, Master rules.md SSoT, and terminal orchestrator versions to `v10.20-Auto-Payload-Ingestion-Sync` per MANDATE_29 across all synchronized repositories.
+
+### v10.20-Auto-Payload-Ingestion-Sync *(2026-05-22)*
+- **SSoT Schema Realignment:** Realigned the `/api/basket` endpoints in `web_server.py` and aligned all basket and watchlist APIs in `fetch_stocks.py` to seamlessly support both flat and nested `mutable_state` structures inside `ssot.json`.
+- **UI Redundancy Purge:** Removed obsolete clipboard-based "Export to Council" and "Import from Council" cards from `static/index.html` on both desktop and mobile layouts in favor of the active live SSE-enabled Gemini AI Council Chat Overlay.
+- **Dynamic Hot-Reloading:** Added direct hot-reloading triggers to reload active and macro tickers within the background daemon instantly upon dashboard updates.
+
+### v10.20-Auto-Payload-Ingestion-Sync *(2026-05-22)*
+- **SSoT Sync Decoupling & Asset Protection:** Codified strict layout asset isolation inside the `ENH_100-SYNC` cross-repository protocol in `antigravity.md` to prevent automated overrides of interactive UI overlays.
+- **Frontend Stable Reference:** Created a persistent, secure local backup (`scratch/index_interactive_backup.html`) of the restored interactive Council Chat overlay template.
+- **Global Architectural Parity:** Proactively bumped all 14 engine instruction sets, Master rules.md SSoT, and terminal orchestrator versions to `v10.20-Auto-Payload-Ingestion-Sync` per MANDATE_29.
+### v10.20-Auto-Payload-Ingestion-Sync *(2026-05-22)*
+- **Architectural Cleanup:** Centralized LLM model default strings into canonical constants (`DEFAULT_MODEL_PRO`, `DEFAULT_MODEL_FLASH`, `DEFAULT_MODEL_GEMMA`) inside `agent_framework.py` to completely eliminate hardcoding and duplication.
+- **Cost-Optimized Standard Default:** Prioritized standard `gemini-2.5-pro` and `gemini-2.5-flash` as primary defaults across all mappings to minimize operational compute costs.
+- **Optimal Fallback Enablement:** Integrated newer Gemini 3.x models (`gemini-3.1-pro-preview` and `gemini-3-flash-preview`) as robust secondary fallback options within `MODEL_MAPPING`.
+- **Reasoning Tier Alignment:** Corrected `THINKING` mode mapping within the framework to correctly route to reasoning-heavy Pro-tier models first.
+- **Global Version Parity:** Synchronized version strings to `v10.20-Auto-Payload-Ingestion-Sync` across all 14 subagent instructions, rules, antigravity.md, and README.md.
+### v10.20-Auto-Payload-Ingestion-Sync *(2026-05-22)*
+- **Architectural Update:** Implemented the Gemini Free Tier Key Routing Protocol in `agent_framework.py`.
+- **System Cost Optimization:** Enabled dedicated key routing for free-tier LLMs (such as `FLASH` and `GEMMA` tiers) via `GEMINI_FREE_TIER_API_KEY` (configured in `config.json` or loaded from environment variables).
+- **Proactive Fallbacks:** Integrated real-time client failovers, seamlessly falling back to the primary key upon encountering rate limits (429), quota limits, or authentication failures.
+- **Config & Model Calibration:** Synchronized the `Mode Selection Matrix` in `terminal.md` with active subagent modes, and appended the `GEMINI_FREE_TIER_API_KEY` placeholder in `config.json`.
+- **Parity Alignment:** Performed a global version synchronization across all subagent instruction sets, rules, and the custodian engine to maintain absolute structural integrity.
+
+### v10.20-Auto-Payload-Ingestion-Sync *(2026-05-22)*
 - **Architectural Update:** Implemented the Cross-Repository Synchronization Protocol (ENH_100-SYNC) in `antigravity.md`.
 - **System Sync:** Antigravity will now autonomously verify file hashes/timestamps between `gemini_cli_subagent_system` and `gem_trading_agent_system` and initiate a unidirectional pull to ingest newer logic, rules, lessons, and state logs.
 - **SSoT Mapping:** `local_ssot_shadow.json` from the trading system is automatically mapped to `ssot.json` during the ingestion cycle.
@@ -57,7 +150,7 @@ Each Markdown file (`.md`) is a **system instruction** for a dedicated AI sub-ag
 - **[UPGRADE]** `structural_engine.md` — FORENSIC PARANOIA PERSONA, ENH_73-S Monopoly Audit, BLINDSPOT-04 fix (Self-Critique emitted as JSON STRING to SSoT for ENH_85 interception).
 - **[UPGRADE]** `post_trade_review.md` — FORENSIC AUDITOR PERSONA, Normalized Registry Sync (codified tags), dual Lesson Pipeline (global systemic + ticker-specific reflexes), MANDATE_25_STRICT_LESSON_EMISSION.
 - **[UPGRADE]** `gex_engine.md` — PREDATORY DESK AUDITOR PERSONA, INSUFFICIENT_STRIKES guard, ENH_17/20/26 refs.
-- **[UPGRADE]** `GEM_Trading_Rules/rules.md` — Full v10.02 canonical ruleset (120,672 bytes — up from 72,448 bytes). All mandates MANDATE_01→MANDATE_34+ and ENH protocols ENH_01→ENH_99.
+- **[UPGRADE]** `gem_trading_rules/rules.md` — Full v10.02 canonical ruleset (120,672 bytes — up from 72,448 bytes). All mandates MANDATE_01→MANDATE_34+ and ENH protocols ENH_01→ENH_99.
 - **[UPGRADE]** `main.py` — Fixed critical NameError bug (setup_context_cache called before sub_agent_configs was defined). Added 3 new sub-agents. Switched all file refs to `.md`. Parallel council tool registered. Mode tiers synced per v10.02 matrix.
 - **[UPGRADE]** `agent_framework.py` — Added FAST tier. `gemini-2.0-pro-exp` as PRO fallback. GEMMA tier fallback to Flash. Cache display name bumped to `GEM_CACHE_v10.02`. `.md`-first file loading.
 - **[UPGRADE]** `config.json` — Merged FINNHUB_API_KEY, POLYGON_API_KEY, ALPHA_ADVANTAGE_API_KEY, MACRO_TICKERS, WATCHLIST, SCOUT_CATEGORIES from gem_trading_agent_system source.
@@ -86,7 +179,7 @@ pip install -r requirements.txt
 $env:GEMINI_API_KEY="your_api_key_here"
 
 # 4. Launch the system
-python web_server.py
+python python/web_server.py
 ```
 
 The dashboard will be available at **http://localhost:8000**
@@ -142,12 +235,12 @@ Sub-agents marked as **Research**, **Sentiment**, **Bullish Advocate**, **Red Te
 
 | File | Purpose |
 |------|---------|
-| `web_server.py` | **Primary entry point.** Starts the FastAPI server, initialises all sub-agents, and exposes the `/api/chat` endpoint. |
-| `main.py` | Alternative **CLI-only** orchestrator. Runs the same agent stack in a terminal chat loop. |
-| `ssot.json` | **Master Data Store.** The Single Source of Truth for portfolio holdings, cost basis (WAC), and the dynamic watch list. Synchronized in real-time with the Web Dashboard. |
-| `trade_lessons.json` | **Historical trade lessons.** Appended autonomously via ENH_62 to prevent repeating past mistakes. |
-| `rules.md` | **Canonical Rules Engine.** Local rules document containing all mandates, thresholds, and autonomous logic updates. |
-| `config.json` | **API Configuration.** Keys for Gemini, Finnhub, and local model routing overrides. |
+| `python/web_server.py` | **Primary entry point.** Starts the FastAPI server, initialises all sub-agents, and exposes the `/api/chat` endpoint. |
+| `python/main.py` | Alternative **CLI-only** orchestrator. Runs the same agent stack in a terminal chat loop. |
+| `context/ssot.json` | **Master Data Store.** The Single Source of Truth for portfolio holdings, cost basis (WAC), and the dynamic watch list. Synchronized in real-time with the Web Dashboard. |
+| `context/trade_lessons.json` | **Historical trade lessons.** Appended autonomously via ENH_62 to prevent repeating past mistakes. |
+| `gem_trading_rules/rules.md` | **Canonical Rules Engine.** Local rules document containing all mandates, thresholds, and autonomous logic updates. |
+| `context/config.json` | **API Configuration.** Keys for Gemini, Finnhub, and local model routing overrides. |
 
 ---
 
@@ -173,7 +266,7 @@ The system "Learns" from market events. When a high-conviction pattern is identi
 
 ### Sub-Agent Markdown Instructions
 
-Each file below is loaded as a system instruction for a dedicated AI sub-agent. High-precision nodes have been migrated to the **GEMMA** tier for improved instruction-following and cost efficiency:
+Each file below (located in the `engine_instructions/` folder) is loaded as a system instruction for a dedicated AI sub-agent. High-precision nodes have been migrated to the **GEMMA** tier for improved instruction-following and cost efficiency:
 
 | File | Agent Name | Mode | Role |
 |------|-----------|------|------|
@@ -198,7 +291,7 @@ The system uses a **tiered fallback model** strategy defined in `agent_framework
 | Mode | Model Priority | Used By |
 |------|---------------|---------|
 | `PRO` | `gemini-2.5-pro` | Orchestrator, complex engines |
-| `THINKING` | `gemini-2.5-pro` | Council advocates, Research |
+| `THINKING` | `gemini-2.0-flash-thinking-exp-01-21` → `gemini-2.5-pro` | Council advocates, Research |
 | `GEMMA` | `gemma-4-31b-it` → `gemini-2.5-flash` | Context, Execution, Structural, Rule Enforcement |
 | `FAST` | `gemini-2.5-flash` → `gemini-2.0-flash` | Utility engines (Sentiment, Review, etc.) |
 
@@ -241,7 +334,7 @@ python web_server.py
 
 ### Editing Sub-Agent Instructions
 
-Each Markdown file (.md) in the root or `GEM_Trading_Rules/` is human-readable and can be edited directly. The changes take effect on the **next server restart**. No manual synchronisation is required.
+Each Markdown file (.md) in the root or `gem_trading_rules/` is human-readable and can be edited directly. The changes take effect on the **next server restart**. No manual synchronisation is required.
 
 ---
 

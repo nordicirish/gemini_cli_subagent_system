@@ -13,36 +13,42 @@ const ModernChat = {
             icon: '⚡',
             label: 'Session Boot',
             id: 'qp-boot',
+            tooltip: 'Initialize system, sync baseline prices, reconcile cash, and perform health audit.',
             prompt: 'SYSTEM BOOT: Execute the full Stage 0 Council Boot Sequence. Using the live DATA_PACKET just injected: (1) Baseline sync — ground all portfolio prices. (2) Cash reconciliation. (3) Regime classification. (4) Portfolio health audit. (5) Market posture assessment. Output a clear, human-readable summary of your findings. DO NOT output a JSON EXECUTION_PAYLOAD.'
         },
         {
             icon: '📊',
             label: 'Market Analysis',
             id: 'qp-analysis',
+            tooltip: 'Evaluate risk regime, dealer posture, and macro signals to determine top priorities.',
             prompt: 'SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION. Using the live DATA_PACKET just injected, evaluate risk regime, dealer posture shifts, VIX/VIXY/IEF signals, and score movements. Provide a clear, readable summary of your analysis and top-3 priority actions. DO NOT output a JSON EXECUTION_PAYLOAD.'
         },
         {
             icon: '🔍',
-            label: 'Audit & Review',
+            label: 'Audit Portfolio',
             id: 'qp-audit-portfolio',
+            tooltip: 'Deep audit of all active positions against trading rules, limits, and cash allocation.',
             prompt: 'SYSTEM DIRECTIVE: AUDIT & PORTFOLIO REVIEW. Using the live DATA_PACKET just injected, perform a full portfolio audit: (1) Check all positions against GEM_Trading_Rules, concentration limits, and cash allocation. (2) Conduct a deep portfolio analysis and provide Trim/Hold/Add recommendations for each held ticker with supporting evidence. Output a structured, human-readable compliance and review report. DO NOT output a JSON EXECUTION_PAYLOAD.'
         },
         {
             icon: '⚖️',
             label: 'Risk Regime',
             id: 'qp-risk',
+            tooltip: 'Assess macro risk indicators to declare the current regime and risk posture.',
             prompt: 'SYSTEM DIRECTIVE: RISK REGIME ASSESSMENT. Using the live DATA_PACKET just injected, run a full macro risk assessment based on VIX, VIXY, IEF, and SPY. Declare the current regime and risk posture with entry/exit implications. Output a clear, human-readable summary. DO NOT output a JSON EXECUTION_PAYLOAD.'
         },
         {
             icon: '🎯',
             label: 'Scout Opportunities',
             id: 'qp-scout',
+            tooltip: 'Scan non-portfolio watchlist tickers for top entry candidates based on regime.',
             prompt: 'SYSTEM DIRECTIVE: SCOUT INTELLIGENCE SCAN. Using the live DATA_PACKET just injected, evaluate the non-portfolio tickers to identify top entry candidates. Assess risk/reward vs current regime. Output a clear, human-readable summary. DO NOT output a JSON EXECUTION_PAYLOAD.'
         },
         {
             icon: '📝',
             label: 'Review Log',
             id: 'qp-review-log',
+            tooltip: 'Forensically audit past decisions to generate corrective trade lessons.',
             prompt: 'SYSTEM DIRECTIVE: EXECUTE [MANDATE_26_POST_TRADE_REVIEW]. Invoke the Post-Trade Review Engine to forensically audit the complete decision_log.json. Perform a decision log backtest and trade lessons permanency audit: (1) Grade historical agreement scores and trade state assumptions against realized price action. (2) Identify technical drift, liquidity errors, and rebalancing misfires. (3) Generate corrective trade lessons and save them using update_trade_lessons. Output a clear, human-readable forensic summary of your review. DO NOT output a JSON EXECUTION_PAYLOAD.'
         },
     ],
@@ -70,6 +76,16 @@ const ModernChat = {
         this.modelSelector = document.getElementById('model-selector');
         if (this.modelSelector) {
             this.modelSelector.onchange = () => this.changeModel();
+        }
+        this.paidTiersToggle = document.getElementById('paid-tiers-toggle');
+        if (this.paidTiersToggle) {
+            this.paidTiersToggle.onchange = () => this.fetchModels();
+        }
+        this.cachingToggle = document.getElementById('context-caching-toggle');
+        this.cachingContainer = document.getElementById('context-caching-toggle-container');
+        if (this.cachingToggle) {
+            this.cachingToggle.onchange = () => this.toggleCaching();
+            this.cachingToggle.checked = true; // Default to checked (recommended for paid)
         }
 
         if (this.input) {
@@ -127,6 +143,7 @@ const ModernChat = {
         this.QUICK_PROMPTS.forEach(qp => {
             const btn = document.createElement('button');
             btn.id = qp.id;
+            if (qp.tooltip) btn.title = qp.tooltip;
             btn.innerHTML = `${qp.icon} <span style="white-space:nowrap">${qp.label}</span>`;
             btn.style.cssText = `
                 flex-shrink: 0;
@@ -164,6 +181,24 @@ const ModernChat = {
     },
 
     async fireQuickPrompt(qp) {
+        if (qp.id === 'qp-scout') {
+            try {
+                const res = await fetch('/api/data');
+                const state = await res.json();
+                const ssot = state.local_storage_state || {};
+                const ms = ssot.mutable_state || {};
+                const watched = ms.watched_tickers || [];
+                const scouts = ms.scout_categories || [];
+                
+                if (watched.length === 0 && scouts.length === 0) {
+                    alert("Validation Error: Please add at least one Watchlist ticker or enable a Scout Sector before running a Scout Scan.");
+                    return;
+                }
+            } catch (e) {
+                console.error("Scout validation failed", e);
+            }
+        }
+
         // Store the friendly display label so the chat bubble shows icon+name, not the raw system prompt
         this._pendingDisplayLabel = `${qp.icon} ${qp.label}`;
         this.input.value = qp.prompt;
@@ -177,19 +212,38 @@ const ModernChat = {
             const data = await res.json();
             if (data.status === 'success') {
                 const currentModel = this.modelSelector.value;
+                const activeModel = currentModel || data.current_model || 'gemini-2.0-flash-thinking-exp';
                 this.modelSelector.innerHTML = '';
+                
+                const includePaid = this.paidTiersToggle ? this.paidTiersToggle.checked : false;
+                
                 data.models.forEach(m => {
+                    const nameLower = m.name.toLowerCase();
+                    // Classify model as paid if it is a Pro tier or Preview/Pro preview
+                    const isPaid = nameLower.includes('pro') || (nameLower.includes('preview') && !nameLower.includes('flash') && !nameLower.includes('thinking'));
+                    
+                    if (!includePaid && isPaid) {
+                        return; // Skip paid models if includePaid toggle is unchecked
+                    }
+                    
                     const opt = document.createElement('option');
                     opt.value = m.name;
                     opt.textContent = m.label;
                     opt.style.background = '#1a1a1a';
                     opt.style.color = 'white';
-                    const isDefault = (m.name === 'gemini-2.5-pro' || m.name.includes('2.5-pro'));
-                    if (m.name === currentModel || (isDefault && !currentModel)) {
+                    if (m.name === activeModel) {
                         opt.selected = true;
                     }
                     this.modelSelector.appendChild(opt);
                 });
+
+                // Auto-fallback if the previously active model was a paid model and is now hidden
+                if (!this.modelSelector.value && this.modelSelector.options.length > 0) {
+                    this.modelSelector.selectedIndex = 0;
+                    this.changeModel();
+                } else {
+                    this.updateCachingToggleVisibility();
+                }
             }
         } catch (e) {
             console.error('Failed to fetch models', e);
@@ -202,19 +256,157 @@ const ModernChat = {
         statusIndicator.textContent = `Status: Re-Calibrating Council (${model})...`;
         statusIndicator.style.color = 'var(--accent-blue)';
         try {
+            const includePaid = this.paidTiersToggle ? this.paidTiersToggle.checked : false;
             const res = await fetch('/api/set_model', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model })
+                body: JSON.stringify({ model, include_paid: includePaid })
             });
             if (res.ok) {
                 statusIndicator.textContent = 'Status: Ready';
                 statusIndicator.style.color = '#8b949e';
                 this.appendMessage('ai', `Council re-calibrated. Now utilizing **${model}** for higher reasoning.`, false);
+                this.updateCachingToggleVisibility();
             }
         } catch (e) {
             console.error('Model switch failed', e);
             statusIndicator.textContent = 'Status: Calibration Error';
+        }
+    },
+
+    async toggleCaching() {
+        if (!this.cachingToggle) return;
+        const disableCache = !this.cachingToggle.checked;
+        try {
+            const res = await fetch('/api/set_cache_policy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ disable_cache: disableCache })
+            });
+            if (res.ok) {
+                const action = disableCache ? "disabled" : "enabled";
+                console.log(`Context caching manually ${action}`);
+            }
+        } catch (e) {
+            console.error('Failed to set cache policy', e);
+        }
+    },
+
+    async updateCachingToggleVisibility() {
+        if (!this.modelSelector || !this.cachingContainer || !this.cachingToggle) return;
+        const model = this.modelSelector.value || '';
+        const nameLower = model.toLowerCase();
+        const isPaid = nameLower.includes('pro') || (nameLower.includes('preview') && !nameLower.includes('flash') && !nameLower.includes('thinking'));
+        
+        if (isPaid) {
+            this.cachingContainer.style.display = 'flex';
+        } else {
+            this.cachingContainer.style.display = 'none';
+            // If it was checked, uncheck it and call backend to deactivate caching
+            if (this.cachingToggle.checked) {
+                this.cachingToggle.checked = false;
+                await this.toggleCaching();
+            }
+        }
+    },
+
+    renderQuotaExhaustedCard(thinkingId) {
+        // Remove thinking message first
+        const tMsg = document.getElementById(thinkingId);
+        if (tMsg) tMsg.remove();
+        
+        // Create card element
+        const cardDiv = document.createElement('div');
+        cardDiv.className = 'quota-exhausted-card';
+        cardDiv.style.cssText = `
+            margin: 20px 0;
+            padding: 24px;
+            background: rgba(255, 75, 75, 0.08);
+            border: 1px solid rgba(255, 75, 75, 0.3);
+            border-radius: 16px;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            color: #ffcccc;
+            box-shadow: 0 8px 32px rgba(255, 75, 75, 0.15);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        `;
+        
+        cardDiv.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 2rem;">⚠️</span>
+                <div>
+                    <h3 style="margin: 0; font-size: 1.1rem; color: #ff6b6b; font-weight: 700; letter-spacing: 0.5px;">API Quota Exhausted</h3>
+                    <p style="margin: 4px 0 0; font-size: 0.85rem; color: rgba(255, 200, 200, 0.8);">Your Gemini Free Tier usage limit has been temporarily reached.</p>
+                </div>
+            </div>
+            <p style="margin: 0; font-size: 0.85rem; line-height: 1.5; color: rgba(255, 255, 255, 0.85);">
+                Paid Tier keys support much higher throughput and enable ultra-fast <strong>Context Caching</strong>, saving up to 75% on token costs and increasing response speed by 3x to 5x.
+            </p>
+            <button id="upgrade-tier-btn" style="
+                background: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%);
+                border: none;
+                color: white;
+                padding: 12px 20px;
+                border-radius: 10px;
+                cursor: pointer;
+                font-weight: bold;
+                font-size: 0.9rem;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                transition: all 0.2s ease;
+                box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4);
+            ">
+                🚀 Move to Paid Tier & Use Pro
+            </button>
+        `;
+        
+        const btn = cardDiv.querySelector('#upgrade-tier-btn');
+        btn.onmouseenter = () => {
+            btn.style.transform = 'translateY(-2px)';
+            btn.style.boxShadow = '0 6px 20px rgba(139, 92, 246, 0.6)';
+        };
+        btn.onmouseleave = () => {
+            btn.style.transform = 'none';
+            btn.style.boxShadow = '0 4px 15px rgba(139, 92, 246, 0.4)';
+        };
+        btn.onclick = () => this.enablePaidTiersAndSwitch();
+        
+        this.messages.appendChild(cardDiv);
+        this.messages.scrollTop = this.messages.scrollHeight;
+    },
+
+    async enablePaidTiersAndSwitch() {
+        this.appendMessage('ai', 'Initiating Paid Tier calibration sequence...', false);
+        
+        // 1. Check Include Paid Tiers checkbox
+        if (this.paidTiersToggle) {
+            this.paidTiersToggle.checked = true;
+        }
+        
+        // 2. Fetch paid models
+        await this.fetchModels();
+        
+        // 3. Find and select PRO model
+        if (this.modelSelector) {
+            const options = Array.from(this.modelSelector.options);
+            const proOption = options.find(opt => opt.value.includes('pro')) || options[0];
+            if (proOption) {
+                this.modelSelector.value = proOption.value;
+                
+                // 4. Trigger model change
+                await this.changeModel();
+                
+                // 5. Automatically enable Context Caching
+                if (this.cachingToggle) {
+                    this.cachingToggle.checked = true;
+                    await this.toggleCaching();
+                    this.appendMessage('ai', '🚀 Paid Tier active and **Context Caching** enabled for maximum speed & cost savings!', false);
+                }
+            }
         }
     },
 
@@ -239,11 +431,18 @@ const ModernChat = {
         const sessions = JSON.parse(localStorage.getItem('gemini_chat_sessions') || '[]');
         const firstUserMsg = history.find(m => m.role === 'user')?.text || 'Empty Session';
         const sessionPreview = firstUserMsg.substring(0, 40) + (firstUserMsg.length > 40 ? '...' : '');
+        
+        let totalCost = 0.0;
+        history.forEach(m => {
+            if (m.cost) totalCost += m.cost;
+        });
+
         sessions.unshift({
             id: Date.now(),
             date: new Date().toLocaleString(),
             preview: sessionPreview,
-            messages: history
+            messages: history,
+            totalCost: totalCost
         });
         if (sessions.length > 10) sessions.pop();
         localStorage.setItem('gemini_chat_sessions', JSON.stringify(sessions));
@@ -257,17 +456,24 @@ const ModernChat = {
         }
         let historyHtml = '<div style="padding: 10px;"><h3>Archived Sessions</h3>';
         sessions.forEach(s => {
+            const displayCost = s.totalCost !== undefined ? s.totalCost : 0.0;
             historyHtml += `
-                <div onclick="window.chatUI.loadSession(${s.id})" style="padding: 10px; margin-bottom: 8px; background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1);">
-                    <div style="font-size: 0.75rem; color: #8b949e;">${s.date}</div>
-                    <div style="font-weight: 500; margin-top: 4px;">${s.preview}</div>
+                <div onclick="window.chatUI.loadSession(${s.id})" style="padding: 10px; margin-bottom: 8px; background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="font-size: 0.75rem; color: #8b949e;">${s.date}</div>
+                        <div style="font-weight: 500; margin-top: 4px;">${s.preview}</div>
+                    </div>
+                    <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent-blue); text-align: right; flex-shrink: 0; padding-left: 10px;">
+                        Est. Cost: $${displayCost.toFixed(5)}
+                    </div>
                 </div>
             `;
         });
         historyHtml += '</div>';
-        const originalHtml = this.messages.innerHTML;
-        this.messages.innerHTML = historyHtml + `<button onclick="window.chatUI.restoreCurrentView()" style="margin: 10px; padding: 8px 16px; background: #238636; border: none; color: white; border-radius: 6px; cursor: pointer;">← Back to Chat</button>`;
-        this.restoreHtml = originalHtml;
+        if (!this.restoreHtml) {
+            this.restoreHtml = this.messages.innerHTML;
+        }
+        this.messages.innerHTML = historyHtml + `<div style="display: flex; justify-content: center;"><button onclick="window.chatUI.restoreCurrentView()" style="margin: 10px; padding: 8px 16px; background: #238636; border: none; color: white; border-radius: 6px; cursor: pointer; width: fit-content;">← Back to Chat</button></div>`;
     },
 
     loadSession(id) {
@@ -295,10 +501,15 @@ const ModernChat = {
             try {
                 const messages = JSON.parse(history);
                 this.messages.innerHTML = '';
-                messages.forEach(msg => this.appendMessage(msg.role, msg.text, false));
+                messages.forEach(msg => {
+                    this.appendMessage(msg.role, msg.text, false, msg.cost || 0.0, msg.usage || null, msg.model || null);
+                });
+                this.updateTotalSessionCost();
             } catch (e) {
                 console.error('Failed to load chat history', e);
             }
+        } else {
+            this.updateTotalSessionCost();
         }
     },
 
@@ -309,9 +520,28 @@ const ModernChat = {
             if (el.classList.contains('thinking-msg')) return;
             const role = el.classList.contains('ai') ? 'ai' : 'user';
             const text = el.getAttribute('data-raw-text') || el.innerText;
-            history.push({ role, text });
+            const cost = parseFloat(el.getAttribute('data-cost') || '0.0');
+            const usageStr = el.getAttribute('data-usage');
+            const usage = usageStr ? JSON.parse(usageStr) : null;
+            const model = el.getAttribute('data-model') || null;
+            history.push({ role, text, cost, usage, model });
         });
         localStorage.setItem('gem_chat_history', JSON.stringify(history));
+        this.updateTotalSessionCost();
+    },
+
+    updateTotalSessionCost() {
+        const messageElements = this.messages.querySelectorAll('.modern-message');
+        let totalCost = 0.0;
+        messageElements.forEach(el => {
+            if (el.classList.contains('thinking-msg')) return;
+            const cost = parseFloat(el.getAttribute('data-cost') || '0.0');
+            totalCost += cost;
+        });
+        const costEl = document.getElementById('chat-session-cost');
+        if (costEl) {
+            costEl.textContent = `Est. Session Cost: $${totalCost.toFixed(5)}`;
+        }
     },
 
     toggle() {
@@ -331,12 +561,78 @@ const ModernChat = {
         this.overlay.classList.remove('active');
     },
 
-    appendMessage(role, text, save = true) {
+    appendMessage(role, text, save = true, cost = 0.0, usage = null, model = null) {
         const msgDiv = document.createElement('div');
         msgDiv.className = `modern-message ${role}`;
         msgDiv.setAttribute('data-raw-text', text);
+        if (cost > 0) {
+            msgDiv.setAttribute('data-cost', cost.toString());
+        }
+        if (usage) {
+            msgDiv.setAttribute('data-usage', JSON.stringify(usage));
+        }
+        if (model) {
+            msgDiv.setAttribute('data-model', model);
+        }
+
         if (role === 'ai') {
             msgDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(text) : text;
+            
+            const skipToggle = document.getElementById('skip-debate-toggle');
+            if (skipToggle && skipToggle.checked) {
+                const headers = msgDiv.querySelectorAll('h1, h2, h3, h4, h5, h6, p, strong');
+                let debateHeader = null;
+                for (const h of headers) {
+                    const text = h.textContent.toLowerCase();
+                    if (text.includes('debate') || text.includes('advocate') || text.includes('pessimist')) {
+                        debateHeader = h;
+                        break;
+                    }
+                }
+                
+                if (debateHeader) {
+                    const details = document.createElement('details');
+                    details.style.cssText = 'margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);';
+                    const summary = document.createElement('summary');
+                    summary.style.fontWeight = '700';
+                    summary.style.color = 'var(--text-secondary)';
+                    summary.style.letterSpacing = '0.5px';
+                    summary.textContent = '🏛️ Gemini Gem Council Debate (Hidden)';
+                    details.appendChild(summary);
+                    
+                    const contentDiv = document.createElement('div');
+                    contentDiv.style.marginTop = '12px';
+                    details.appendChild(contentDiv);
+                    
+                    let siblingsToMove = [debateHeader];
+                    let next = debateHeader.nextSibling;
+                    while (next) {
+                        if (next.nodeType === 1 && (next.tagName.startsWith('H') || next.tagName === 'HR')) {
+                            const text = next.textContent.toLowerCase();
+                            if (text.includes('decision') || text.includes('metrics') || text.includes('reconciliation') || text.includes('unallocated') || text.includes('proof')) {
+                                break;
+                            }
+                        }
+                        siblingsToMove.push(next);
+                        next = next.nextSibling;
+                    }
+                    
+                    msgDiv.insertBefore(details, debateHeader);
+                    siblingsToMove.forEach(node => {
+                        contentDiv.appendChild(node);
+                    });
+                }
+            }
+            if (cost > 0 || (usage && Object.keys(usage).length > 0)) {
+                const badge = document.createElement('div');
+                badge.className = 'cost-estimator';
+                let tokenInfo = '';
+                if (usage) {
+                    tokenInfo = ` <span style="font-size:0.65rem;opacity:0.7">(${usage.prompt_tokens + usage.cached_tokens} in / ${usage.candidates_tokens} out)</span>`;
+                }
+                badge.innerHTML = `🪙 Est. Cost: $${cost.toFixed(5)}${tokenInfo}`;
+                msgDiv.appendChild(badge);
+            }
         } else {
             // Truncate display for long quick-prompts (show only first line)
             const displayText = text.length > 120 ? text.substring(0, 120) + '…' : text;
@@ -344,7 +640,11 @@ const ModernChat = {
             msgDiv.setAttribute('data-raw-text', text); // preserve full text for history
         }
         this.messages.appendChild(msgDiv);
-        this.messages.scrollTop = this.messages.scrollHeight;
+        if (role === 'ai') {
+            this.messages.scrollTop = msgDiv.offsetTop - 20;
+        } else {
+            this.messages.scrollTop = this.messages.scrollHeight;
+        }
         if (save) this.saveHistory();
     },
 
@@ -452,24 +752,16 @@ const ModernChat = {
             this.currentLogElement = null;
 
             if (data.status === 'success') {
-                this.appendMessage('ai', data.response);
-                
-                // Add Cost Estimator Badge
+                let cost = 0.0;
                 if (data.usage && data.model) {
-                    const cost = this.calculateCost(data.usage, data.model);
-                    if (cost > 0 || Object.keys(data.usage).length > 0) {
-                        const lastMsg = this.messages.lastElementChild;
-                        if (lastMsg && lastMsg.classList.contains('ai')) {
-                            const badge = document.createElement('div');
-                            badge.className = 'cost-estimator';
-                            badge.innerHTML = `🪙 Est. Cost: $${cost.toFixed(5)} <span style="font-size:0.65rem;opacity:0.7">(${data.usage.prompt_tokens + data.usage.cached_tokens} in / ${data.usage.candidates_tokens} out)</span>`;
-                            lastMsg.appendChild(badge);
-                        }
-                    }
+                    cost = this.calculateCost(data.usage, data.model);
                 }
+                this.appendMessage('ai', data.response, true, cost, data.usage, data.model);
                 
                 // Auto-save every Council response silently to the decision log
                 this.autoSaveDecisionLog(data.response);
+            } else if (data.code === 'quota_exhausted') {
+                this.renderQuotaExhaustedCard(thinkingId);
             } else {
                 this.appendMessage('ai', '⚠️ Error: ' + data.message);
             }

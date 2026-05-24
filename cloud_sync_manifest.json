@@ -1,9 +1,0 @@
-{
-  "decision_log.json": {
-    "local_hash": "6fea748a18de84b63635af2c8ab89d41",
-    "cloud_uri": "https://generativelanguage.googleapis.com/v1beta/files/ysa1ujo0s25e",
-    "cloud_name": "files/ysa1ujo0s25e",
-    "uploaded_timestamp": 1779465379.7376294,
-    "expires_at": 1779638179.7376297
-  }
-}

@@ -6,6 +6,15 @@ const dStatus = document.getElementById('market-status');
 const dUpdated = document.getElementById('last-updated');
 const dIndicator = document.getElementById('live-indicator');
 
+// Progress Bar DOM Elements
+const dProgressContainer = document.getElementById('initial-fetch-progress-container');
+const dProgressPhase = document.getElementById('progress-phase-title');
+const dProgressStatus = document.getElementById('progress-status-text');
+const dProgressBar = document.getElementById('initial-fetch-progress-bar');
+const dProgressPercent = document.getElementById('progress-bar-percent');
+const dProgressDetails = document.getElementById('progress-ticker-details');
+const dTableContainer = document.getElementById('main-data-table-container');
+
 
 const dIndicesInput = document.getElementById('indices-input');
 const dUpdateIndicesBtn = document.getElementById('update-indices-btn');
@@ -145,7 +154,7 @@ async function init() {
     await fetchWatchlist();
     await fetchScoutCategories();
     pollData();
-    setInterval(pollData, 3000); // 3 sec polling
+    window._pollInterval = setInterval(pollData, 3000); // 3 sec polling
 }
 
 // Fetch current ticker list
@@ -378,6 +387,8 @@ if (dPasteBtn) dPasteBtn.addEventListener('click', () => ingestExecutionPayload(
 
 // Format large numbers (Volume)
 function formatVol(vol) {
+    if (vol === null || vol === undefined) return '—';
+    if (typeof vol === 'string') return vol;
     if (vol >= 1000000) return (vol / 1000000).toFixed(2) + 'M';
     if (vol >= 1000) return (vol / 1000).toFixed(1) + 'K';
     return vol.toString();
@@ -405,7 +416,7 @@ function renderTable(tickers, state) {
         scouts: []
     };
 
-    const userWatchlist = new Set((state.watchlist || []).map(s => s.toUpperCase()));
+    const userWatchlist = new Set(((ms.watched_tickers || state.watchlist) || []).map(s => s.toUpperCase()));
 
     tickers.forEach(t => {
         const sym = t.ticker.toUpperCase();
@@ -415,7 +426,7 @@ function renderTable(tickers, state) {
             groups.held.push(t);
         } else if (userWatchlist.has(sym)) {
             groups.watchlist.push(t);
-        } else {
+        } else if (t._isScout) {
             groups.scouts.push(t);
         }
     });
@@ -424,7 +435,31 @@ function renderTable(tickers, state) {
 
     const renderRow = (row) => {
         const sym = row.ticker;
-        const p = row.price.toFixed(2);
+        
+        if (row.status === 'NO_DATA') {
+            const noteHtml = row.note ? `<span class="note-tag danger">${row.note}</span>` : '<span class="note-tag danger">NO DATA</span>';
+            return `
+                <tr class="no-data-row">
+                    <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}">
+                        <span class="ticker-symbol text-muted">${sym}</span>
+                    </td>
+                    <td class="text-muted">—</td>
+                    <td class="text-muted">—</td>
+                    <td class="text-muted">—</td>
+                    <td class="text-muted">—</td>
+                    <td class="text-muted">—</td>
+                    <td class="text-muted">—</td>
+                    <td class="text-muted">—</td>
+                    <td><span class="trend-tag flat">— Flat</span></td>
+                    <td><span class="dealer-badge dealer-neutral">NEUTRAL</span></td>
+                    <td class="score-col">
+                        <span class="score-badge neutral">0</span>${noteHtml}
+                    </td>
+                </tr>
+            `;
+        }
+
+        const p = (row.price || 0).toFixed(2);
         
         let pClass = '';
         if(prevPrices[sym]) {
@@ -469,11 +504,11 @@ function renderTable(tickers, state) {
                     ${scoutIndicator}
                 </td>
                 <td class="${pClass}">${p}</td>
-                <td class="${dayColor}">${row.session_change_pct > 0 ? '+' : ''}${row.session_change_pct.toFixed(2)}%</td>
-                <td class="${gapColor}">${row.gap_percent > 0 ? '+' : ''}${row.gap_percent.toFixed(2)}%</td>
+                <td class="${dayColor}">${row.session_change_pct > 0 ? '+' : ''}${(row.session_change_pct || 0).toFixed(2)}%</td>
+                <td class="${gapColor}">${row.gap_percent > 0 ? '+' : ''}${(row.gap_percent || 0).toFixed(2)}%</td>
                 <td>${formatVol(row.volume)}</td>
-                <td>${row.atr_percent.toFixed(2)}%</td>
-                <td class="${rsiColor}">${row.rsi.toFixed(1)}</td>
+                <td>${(row.atr_percent || 0).toFixed(2)}%</td>
+                <td class="${rsiColor}">${(row.rsi || 0).toFixed(1)}</td>
                 <td>${row.vwap > 0 ? row.vwap.toFixed(2) : '—'}</td>
                 <td>${trendHtml}</td>
                 <td>${(() => {
@@ -527,7 +562,11 @@ function renderTable(tickers, state) {
     dTableBody.innerHTML = html;
 }
 
+let currentFetchId = 0;
+let lastProcessedFetchId = 0;
+
 async function pollData() {
+    const fetchId = ++currentFetchId;
     try {
         // Refresh managers if not focused
         const active = document.activeElement;
@@ -538,6 +577,81 @@ async function pollData() {
 
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
+        
+        // Ignore out-of-order stale responses
+        if (fetchId < lastProcessedFetchId) {
+            return;
+        }
+        lastProcessedFetchId = fetchId;
+
+        // Handle initial boot/fetch progress bar
+        if (state && state.boot_phase) {
+            dIndicator.classList.add('active');
+            let displayStatus = state.status || 'INITIALIZING...';
+            dStatus.textContent = displayStatus;
+            dStatus.style.color = 'var(--yellow)';
+
+            // Show container & blur table
+            if (dProgressContainer) dProgressContainer.style.display = 'block';
+            if (dTableContainer) dTableContainer.classList.add('blurred-view');
+
+            const phase = state.boot_phase;
+            const progress = state.boot_progress || 0;
+            const total = state.boot_total || 100;
+            const ticker = state.boot_ticker || '';
+
+            let overallPercent = 0;
+            let phaseTitle = 'Initializing System';
+            let phaseDesc = 'Setting up real-time stock scanners...';
+
+            if (phase === 'STARTING_UP') {
+                overallPercent = 5;
+                phaseTitle = 'Starting Daemon...';
+                phaseDesc = 'Preparing historical data structures';
+            } else if (phase === 'TECHNICAL_ANALYSIS') {
+                // Phase 1 maps to 5% to 50%
+                overallPercent = Math.round(5 + (progress / total) * 45);
+                phaseTitle = 'Phase 1: Loading Technical History';
+                phaseDesc = `Downloading 200-day daily charts to calculate SMAs and ATR%`;
+            } else if (phase === 'GEX_PROFILES') {
+                // Phase 2 maps to 50% to 95%
+                overallPercent = Math.round(50 + (progress / total) * 45);
+                phaseTitle = 'Phase 2: Compiling Option GEX Profiles';
+                phaseDesc = `Fetching option chains & computing synthetic Gamma curves`;
+            }
+
+            // Ensure constraints
+            overallPercent = Math.max(0, Math.min(100, overallPercent));
+            
+            // Prevent backward jumps due to async race conditions (persists across refreshes)
+            let maxBoot = parseInt(sessionStorage.getItem('max_boot_percent') || '0');
+            if (overallPercent > maxBoot) {
+                sessionStorage.setItem('max_boot_percent', overallPercent);
+            } else {
+                overallPercent = maxBoot;
+            }
+
+            if (dProgressPhase) dProgressPhase.textContent = phaseTitle;
+            if (dProgressStatus) dProgressStatus.textContent = phaseDesc;
+            if (dProgressBar) dProgressBar.style.width = `${overallPercent}%`;
+            if (dProgressPercent) dProgressPercent.textContent = `${overallPercent}%`;
+            
+            if (dProgressDetails) {
+                if (ticker && ticker !== 'SYSTEM') {
+                    dProgressDetails.innerHTML = `Loading ticker data: <span class="loading-ticker">${ticker}</span> [${progress}/${total}]`;
+                } else {
+                    dProgressDetails.innerHTML = `Synchronizing state with SSoT database...`;
+                }
+            }
+
+            // Do not render table data yet
+            return;
+        } else {
+            // Initialization is complete, hide container & remove blur
+            if (dProgressContainer) dProgressContainer.style.display = 'none';
+            if (dTableContainer) dTableContainer.classList.remove('blurred-view');
+            sessionStorage.removeItem('max_boot_percent');
+        }
 
         if (state && Object.keys(state).length > 0) {
             dIndicator.classList.add('active');
@@ -563,10 +677,24 @@ async function pollData() {
             }
 
             // Render table with bifurcated sections
-            renderTable(state.tickers, state);
+            if (state.tickers && Array.isArray(state.tickers)) {
+                renderTable(state.tickers, state);
+                
+                if (typeof loadingScoutSectors !== 'undefined' && loadingScoutSectors.size > 0) {
+                    const loadedCats = state.scout_categories_loaded || [];
+                    loadingScoutSectors.forEach(sector => {
+                        // Clear sector from loading list only if backend has successfully loaded it,
+                        // or if the user has deselected it (not in activeScoutCategories)
+                        if (loadedCats.includes(sector) || !activeScoutCategories.includes(sector)) {
+                            loadingScoutSectors.delete(sector);
+                        }
+                    });
+                    renderScoutCategories(activeScoutCategories);
+                }
+            }
             
             // Render Macro HUD dynamic cards
-            if (state.tickers) {
+            if (state.tickers && Array.isArray(state.tickers)) {
                 let hudHtml = '';
                 
                 currentMacroTickers.forEach(tickerStr => {
@@ -576,13 +704,13 @@ async function pollData() {
                     
                     if (row) {
                         latestMacroData[tickerStr] = row;
-                        const gapStr = (row.gap_percent > 0 ? '+' : '') + row.gap_percent.toFixed(2) + '%';
+                        const gapStr = (row.gap_percent > 0 ? '+' : '') + (row.gap_percent || 0).toFixed(2) + '%';
                         const gapColor = row.gap_percent > 0 ? 'text-green' : 'text-red';
                         
                         hudHtml += `
                             <div class="macro-card glass-panel" id="macro-card-${tickerStr.replace(/[^a-zA-Z0-9]/g, '')}">
                                 <h3>${title}</h3>
-                                <div class="macro-val">${row.price.toFixed(2)}</div>
+                                <div class="macro-val">${(row.price || 0).toFixed(2)}</div>
                                 <div class="macro-gap ${gapColor}">${gapStr}</div>
                             </div>
                         `;
@@ -636,8 +764,13 @@ async function pollData() {
     } catch (e) {
         console.error("Polling error", e);
         dIndicator.classList.remove('active');
-        dStatus.textContent = 'DISCONNECTED';
+        dStatus.textContent = 'ERR: ' + (e.message ? e.message.substring(0, 150) : 'DISCONNECTED');
         dStatus.style.color = 'var(--red)';
+        
+        // Stop polling so the error message stays visible
+        if (window._pollInterval) {
+            clearInterval(window._pollInterval);
+        }
     }
 }
 
@@ -831,18 +964,28 @@ function toggleSection(id, header) {
 }
 
 // Scout Logic
-const VERIFIED_SCOUT_SECTORS = [
-    "Technology", "Healthcare", "Financials", "Energy", "Industrials", 
-    "Consumer Discretionary", "Consumer Staples", "Utilities", 
-    "Real Estate", "Materials", "Communication Services",
-    "AI & Data", "Aerospace & Defense", "Biotech", "Semiconductors"
-];
+let verifiedScoutSectors = [];
+let activeScoutCategories = [];
+let loadingScoutSectors = new Set();
 
 async function fetchScoutCategories() {
     try {
-        const res = await fetch(`${API_BASE}/scout_categories`);
-        const activeCategories = await res.json();
-        renderScoutCategories(activeCategories);
+        const sectorsRes = await fetch(`${API_BASE}/scout_sectors`);
+        const sectorsData = await sectorsRes.json();
+        if (sectorsData && sectorsData.length > 0) {
+            verifiedScoutSectors = sectorsData;
+        } else {
+            verifiedScoutSectors = [
+                "Technology", "Healthcare", "Financials", "Energy", "Industrials", 
+                "Consumer Discretionary", "Consumer Staples", "Utilities", 
+                "Real Estate", "Materials", "Communication Services",
+                "AI & Data", "Aerospace & Defense", "Biotech", "Semiconductors"
+            ];
+        }
+        
+        const res = await fetch(`${API_BASE}/scout`);
+        activeScoutCategories = await res.json();
+        renderScoutCategories(activeScoutCategories);
     } catch (e) { console.error("Scout categories fetch failed", e); }
 }
 
@@ -851,17 +994,27 @@ function renderScoutCategories(activeList) {
     const activeSet = new Set(activeList);
     
     let html = '';
-    VERIFIED_SCOUT_SECTORS.forEach(sector => {
+    verifiedScoutSectors.forEach(sector => {
         const isActive = activeSet.has(sector);
-        const style = isActive 
-            ? 'background: rgba(0, 255, 148, 0.2); border-color: var(--green); color: var(--green);' 
-            : 'background: rgba(255, 255, 255, 0.03); border-color: var(--panel-border); color: var(--text-dim);';
+        const isLoading = loadingScoutSectors.has(sector);
+        
+        let style = '';
+        let label = sector;
+        
+        if (isLoading) {
+            style = 'background: rgba(255, 193, 7, 0.2); border-color: var(--yellow); color: var(--yellow); animation: pulse 1.5s infinite;';
+            label = sector + ' 📡';
+        } else if (isActive) {
+            style = 'background: rgba(0, 255, 148, 0.2); border-color: var(--green); color: var(--green);';
+        } else {
+            style = 'background: rgba(255, 255, 255, 0.03); border-color: var(--panel-border); color: var(--text-dim);';
+        }
         
         html += `
             <button class="scout-toggle-btn" 
                     onclick="toggleScoutCategory('${sector}')" 
                     style="padding: 4px 8px; border-radius: 4px; border: 1px solid; font-size: 0.65rem; font-weight: 600; cursor: pointer; transition: all 0.2s; ${style}">
-                ${sector}
+                ${label}
             </button>
         `;
     });
@@ -870,31 +1023,33 @@ function renderScoutCategories(activeList) {
 
 async function toggleScoutCategory(sector) {
     try {
-        const res = await fetch(`${API_BASE}/scout_categories`);
-        let list = await res.json();
-        
-        if (list.includes(sector)) {
-            list = list.filter(c => c !== sector);
+        if (activeScoutCategories.includes(sector)) {
+            activeScoutCategories = activeScoutCategories.filter(c => c !== sector);
+            loadingScoutSectors.delete(sector);
         } else {
-            list.push(sector);
+            activeScoutCategories.push(sector);
+            loadingScoutSectors.add(sector);
         }
         
-        await saveScoutCategories(list);
-    } catch (e) { console.error("Toggle failed", e); }
-}
-
-async function saveScoutCategories(list) {
-    try {
-        const res = await fetch(`${API_BASE}/scout_categories`, {
+        // Optimistically render instantly with zero lag!
+        renderScoutCategories(activeScoutCategories);
+        
+        // POST to the backend asynchronously in the background
+        fetch(`${API_BASE}/scout`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(list)
+            body: JSON.stringify(activeScoutCategories)
+        }).catch(err => {
+            console.error("Scout categories POST failed, rolling back to SSoT", err);
+            loadingScoutSectors.delete(sector);
+            fetchScoutCategories(); // rollback on connection/server failure
         });
-        if (res.ok) {
-            const updated = await res.json();
-            renderScoutCategories(updated.categories);
-        }
-    } catch (e) { console.error("Scout categories update failed", e); }
+        
+    } catch (e) { 
+        console.error("Toggle failed", e); 
+        loadingScoutSectors.delete(sector);
+        fetchScoutCategories();
+    }
 }
 
 // Global Exports

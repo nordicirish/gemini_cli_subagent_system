@@ -1,0 +1,18 @@
+{
+  "tickers": [
+    "ONDS",
+    "UMAC",
+    "RCAT",
+    "DFTX",
+    "AVEX"
+  ],
+  "macro": [
+    "^VIX",
+    "VIXY",
+    "^VVIX",
+    "IEF",
+    "UUP",
+    "SPY",
+    "GDX"
+  ]
+}

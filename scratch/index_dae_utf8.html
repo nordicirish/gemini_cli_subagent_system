@@ -1,0 +1,192 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GEM Trading Dashboard</title>
+    <link rel="stylesheet" href="styles.css?v=40">
+    <link rel="stylesheet" href="modern_ui.css?v=40">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body class="dark-theme">
+    <div class="app-container">
+        <!-- Header -->
+        <header class="glass-panel" style="z-index: 10000; position: relative;">
+            <div class="header-content">
+                <div class="brand">
+                    <div class="pulse-indicator" id="live-indicator"></div>
+                    <h1>GEM Dashboard <span class="version">v17.2</span></h1>
+                </div>
+                <div class="system-status">
+                    <div class="status-item">
+                        <span class="label">MARKET</span>
+                        <span id="market-status" class="value">CONNECTING...</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">UPDATED</span>
+                        <span id="last-updated" class="value">ÔÇö</span>
+                    </div>
+                    <button id="launch-chat-btn" class="glow-btn chat-launcher">
+                        <span>Ô£ª Consult The AI Council</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- System Warnings -->
+        <div id="system-warning-banner" class="warning-banner" style="display:none;">
+            <span class="warning-icon">ÔÜá´©Å</span>
+            <span id="system-warning-text" class="warning-text"></span>
+        </div>
+
+        <!-- Main Dashboard Layout -->
+        <div class="dashboard-grid">
+            <!-- Left Column: Macro & Table -->
+            <div class="dashboard-left">
+                <!-- Macro Cards Section -->
+                <div id="dynamic-macro-cards" class="macro-grid">
+                    <!-- Cards injected by JS -->
+                </div>
+
+                <!-- Table Section -->
+                <div class="table-container glass-panel">
+                    <table class="modern-table">
+                        <thead>
+                            <tr>
+                                <th>TICKER</th>
+                                <th>PRICE</th>
+                                <th>GAP %</th>
+                                <th>VOLUME</th>
+                                <th>ATR %</th>
+                                <th>RSI</th>
+                                <th>VWAP</th>
+                                <th>TREND</th>
+                                <th>DEALER POSTURE</th>
+                                <th>SCORE</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-body">
+                            <!-- Data rows injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Right Column: Alerts & Controls -->
+            <div class="dashboard-right">
+                <div id="alerts-panel" class="sidebar-card alerts-card glass-panel">
+                    <h3>ÔÜí ALERTS</h3>
+                    <div class="alerts-content">
+                        <div class="alert-item info">BOND ALERT: Yields rising rapidly. High Risk Environment.</div>
+                    </div>
+                </div>
+
+                <div class="sidebar-card glass-panel basket-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <h3 style="margin: 0;">­ƒÆ╝ BASKET</h3>
+                        <button id="save-basket-btn" style="background: var(--accent-blue); color: white; border: none; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; cursor: pointer;">SYNC SSOT</button>
+                    </div>
+                    <div id="basket-container" style="max-height: 200px; overflow-y: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                            <thead>
+                                <tr style="text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                    <th style="padding: 4px;">SYM</th>
+                                    <th style="padding: 4px;">AMT</th>
+                                    <th style="padding: 4px;">UAC</th>
+                                </tr>
+                            </thead>
+                            <tbody id="basket-body">
+                                <!-- Basket rows injected here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="sidebar-card glass-panel controls-card">
+                    <div class="control-row">
+                        <button id="open-ticker-modal-btn" class="glow-btn outline block-btn">­ƒôè MANAGE TICKERS</button>
+                        <button id="open-indices-modal-btn" class="glow-btn outline block-btn">­ƒôê INDICES</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modern Chat Overlay (Keep outside grid) -->
+    <div class="modern-chat-overlay" id="chat-window">
+        <div class="modern-chat-panel">
+            <div class="modern-chat-header">
+                <div class="modern-header-left" style="display: flex; align-items: center; gap: 20px;">
+                    <div class="modern-logo-box">Ô£ª</div>
+                    <h2 style="margin: 0; font-size: 1.4rem; letter-spacing: 1px; white-space: nowrap;">GEMINI AI COUNCIL</h2>
+                </div>
+                <div class="modern-header-right" style="display: flex; align-items: center; gap: 12px;">
+                    <select id="model-selector" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 5px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; outline: none;">
+                        <option value="gemini-3.1-pro-preview" style="background: #1a1a1a; color: white;">3.1 PRO (MAX)</option>
+                        <option value="gemini-2.5-pro" selected style="background: #1a1a1a; color: white;">2.5 PRO (DEFAULT)</option>
+                        <option value="gemini-1.5-pro" style="background: #1a1a1a; color: white;">1.5 PRO (STABLE)</option>
+                        <option value="gemini-1.5-flash" style="background: #1a1a1a; color: white;">1.5 FLASH (TURBO)</option>
+                    </select>
+                    <button id="new-chat-btn" title="New Conversation" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
+                        <span>+</span> NEW
+                    </button>
+                    <button id="history-chat-btn" title="History" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
+                        <span>­ƒôï</span> SESSIONS
+                    </button>
+                    <button class="modern-ctrl-btn" id="chat-close-btn">├ù</button>
+                </div>
+            </div>
+
+            <div class="modern-chat-messages" id="chat-messages">
+                <div class="modern-message ai">
+                    Welcome to the council. How can I help you analyze the markets today?
+                </div>
+            </div>
+
+            <div class="modern-input-area">
+                <textarea id="chat-input" placeholder="Ask Gemini..." rows="1"></textarea>
+                <div class="modern-input-footer">
+                    <div class="modern-input-tools">
+                        <span id="chat-status-indicator" style="color: #8b949e; font-size: 0.85rem; font-weight: 500; letter-spacing: 0.5px;">Status: Ready</span>
+                    </div>
+                    <button class="modern-send-btn" id="send-chat-btn" style="width: auto; border-radius: 12px; padding: 10px 24px; font-weight: 700; letter-spacing: 1px; font-size: 0.9rem; display: flex; align-items: center; gap: 10px;">
+                        <span>Ô£ª CHAT WITH THE COUNCIL</span>
+                    </button>
+                    <button class="modern-stop-btn" id="stop-chat-btn" style="display: none; width: auto; border-radius: 12px; padding: 10px 24px; font-weight: 700; letter-spacing: 1px; font-size: 0.9rem; background: #da3633; border: none; color: white; cursor: pointer; align-items: center; gap: 10px;">
+                        <span>ÔÅ╣ STOP</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal-overlay" id="ticker-modal-overlay">
+        <div class="modal glass-panel">
+            <div class="modal-header">
+                <h3>­ƒôè Manage Tickers</h3>
+                <button class="modal-close" id="close-ticker-modal">&times;</button>
+            </div>
+            <textarea id="ticker-input" rows="4"></textarea>
+            <button id="update-tickers-btn" class="glow-btn">Update Universe</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="indices-modal-overlay">
+        <div class="modal modal-wide glass-panel">
+            <div class="modal-header">
+                <h3>­ƒôê Manage Indices</h3>
+                <button class="modal-close" id="close-indices-modal">&times;</button>
+            </div>
+            <textarea id="indices-input" rows="3"></textarea>
+            <button id="update-indices-btn" class="glow-btn">Update Indices</button>
+            <div class="indices-grid" id="indices-grid"></div>
+        </div>
+    </div>
+
+    <script src="dashboard_core.js?v=40"></script>
+    <script src="modern_ui.js?v=40"></script>
+    <script src="modals.js?v=40"></script>
+</body>
+</html>
