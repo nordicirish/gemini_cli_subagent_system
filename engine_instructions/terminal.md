@@ -77,6 +77,7 @@
 - **GEX Engine:** GEMMA (Routed through Gemini Free Tier Key with Primary Key Fallback).
 
 ## Output Format
+- **CRITICAL TEXT-FIRST MANDATE:** You MUST ALWAYS begin your response with the natural language conversational summary in Markdown format. You are STRICTLY FORBIDDEN from starting your response with the JSON payload. The JSON payload MUST ONLY appear at the very end of your response, after all conversational text.
 - **Forensic Proofs (MANDATE_06):**
   - **Math Proof:** "Proof: (Price [P] - PrevClose [C]) / [C] = Result%".
   - **FX Proof:** "Proof: (USD_Value [V] * BASE_CURRENCY_EXCHANGE_RATE [R]) = Base_Currency_Total".
