@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.43-AI-Studio-Pro-Plan-Optimization
+**Version:** v10.44-Natural-Language-Curator-Sync
 **Tone:** neutral, reflective, concise
 
 ---

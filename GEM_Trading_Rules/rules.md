@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.43-AI-Studio-Pro-Plan-Optimization
+**Version:** v10.44-Natural-Language-Curator-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -1660,6 +1660,15 @@
 - **Status:** ACTIVE
 - **Content:** Technical and programmatic "Adversarial Framing" or legislative compliance messages (e.g. references to MANDATE_09, MANDATE_30, EXECUTION_PAYLOAD suppression) must not clutter the primary analytical response. The UI must automatically isolate any paragraph matching "Adversarial Framing" and encapsulate it inside a collapsible details panel at the bottom of the message container.
 - **Justification:** Preserves the absolute logical audit trail for compliance checking while presenting a clean, natural conversational interface to the user by default.
+
+### [ENH_112] NATURAL LANGUAGE CURATOR & USER-FRIENDLY DISCLOSURES
+- **Status:** ACTIVE
+- **Content:** The visible markdown output MUST be presented in highly clear, natural conversational language. Raw technical jargon, structural engine codes (e.g. `ENH_xx` or `MANDATE_xx`), and system variables must be strictly forbidden in the user-visible primary text, and instead restricted to the background context payloads and `Self-Critique` fields. Any trade advice, especially SELL or TRIM directives, MUST be formulated in a highly user-friendly format containing:
+  1. The specific **Ticker** and explicit **Action**.
+  2. The exact **Target Trigger Price**.
+  3. The **Share Percentage** and exact **Share Count** to sell (derived dynamically from the active portfolio snapshot).
+  4. Any active **Trailing Stop Values** detailed in clean, natural percentage and price metrics rather than dry mathematical formulas.
+- **Justification:** Translates complex system metrics into actionable, high-fidelity human instructions for maximum operational clarity.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.

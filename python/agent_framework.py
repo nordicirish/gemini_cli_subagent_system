@@ -8,7 +8,7 @@ from google import genai
 from google.genai import types
 
 # ---------------------------------------------------------------------------
-# Model definitions — v10.43-AI-Studio-Pro-Plan-Optimization
+# Model definitions — v10.44-Natural-Language-Curator-Sync
 # Per terminal.md > Mode Selection Matrix (Canonical)
 # ---------------------------------------------------------------------------
 DEFAULT_MODEL_PRO = "gemini-2.5-pro"

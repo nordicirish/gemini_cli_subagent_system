@@ -280,6 +280,10 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 ---
 
 ## 📋 Changelog
+### v10.44-Natural-Language-Curator-Sync *(2026-05-25)*
+- **Natural Language & User-Friendly Presentation (ENH_112):** Codified rule `ENH_112` inside `rules.md` and `terminal.md` to restrict raw technical jargon/codes (e.g. `ENH_xx` or `MANDATE_xx`) from appearing in user-visible primary summaries. Any exit, trim, or sell recommendations must explicitly state the specific Ticker, Action, exact Target Trigger Price, Share Percentage, and dynamically calculated Share Count. Trailing stop telemetry is now presented in clean, natural percentage and price metrics rather than math formulas.
+- **Global Architectural Parity:** Synchronized version strings to `v10.44-Natural-Language-Curator-Sync` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+
 ### v10.43-AI-Studio-Pro-Plan-Optimization *(2026-05-25)*
 - **AI Studio Architecture Optimization:** Removed hardcoded references to the deprecated "Gemini 3.5 Pro" model architecture in `rules.md` (MANDATE_22) and `terminal.md` (thought signature bypass mandate) to optimize the system for standard, premium Google AI Studio Gemini API models (Pro/Flash).
 - **Global Architectural Parity:** Synchronized version strings to `v10.43-AI-Studio-Pro-Plan-Optimization` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
