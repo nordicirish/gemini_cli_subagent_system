@@ -285,9 +285,9 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 - **Natural Language Compliance Guard (PROC_09):** Added a procedural validation step inside the Rule Enforcer Engine to automatically intercept and veto any response violating natural language standards.
 - **Global Architectural Parity:** Synchronized version strings to `v10.46-Natural-Language-JSON-Enforcement` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
 
-### v10.45-JSON-Payload-Enforcement *(2026-05-25)*
+### v10.46-Natural-Language-JSON-Enforcement *(2026-05-25)*
 - **Mandatory JSON Payload Emission:** Removed all JSON payload suppression exemptions from `rules.md` (MANDATE_09/22) and `terminal.md` (unsuppressed final emission). Stripped the `DO NOT output a JSON` directives from all 6 quick-prompts in `static/modern_ui.js` to ensure the Master Orchestrator always outputs the JSON `EXECUTION_PAYLOAD` block on every single response, securing automatic updates of `ssot.json` and `decision_log.json`.
-- **Global Architectural Parity:** Synchronized version strings to `v10.45-JSON-Payload-Enforcement` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+- **Global Architectural Parity:** Synchronized version strings to `v10.46-Natural-Language-JSON-Enforcement` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
 
 ### v10.44-Natural-Language-Curator-Sync *(2026-05-25)*
 - **Natural Language & User-Friendly Presentation (ENH_112):** Codified rule `ENH_112` inside `rules.md` and `terminal.md` to restrict raw technical jargon/codes (e.g. `ENH_xx` or `MANDATE_xx`) from appearing in user-visible primary summaries. Any exit, trim, or sell recommendations must explicitly state the specific Ticker, Action, exact Target Trigger Price, Share Percentage, and dynamically calculated Share Count. Trailing stop telemetry is now presented in clean, natural percentage and price metrics rather than math formulas.

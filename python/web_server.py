@@ -713,6 +713,7 @@ def chat_endpoint(req: ChatRequest):
         full_response = "\n\n---\n\n".join(all_text)
         
         # Intercept and process EXECUTION_PAYLOAD dynamically (purging it from user display)
+        full_response_original = full_response
         cleaned_response = full_response
         payload_processed = False
         
@@ -773,6 +774,11 @@ def chat_endpoint(req: ChatRequest):
             # Clean trailing dividers if any
             if cleaned_response.endswith("---"):
                 cleaned_response = cleaned_response[:-3].strip()
+            
+            # Robust fallback if the AI generated NO conversational text
+            if not cleaned_response:
+                cleaned_response = "*(The AI Council executed its routine and synchronized the SSoT, but did not output a conversational summary for this turn.)*"
+                
             # Append success badge
             cleaned_response += "\n\n---\n\n*⚖️ SSoT Shadow State synchronized successfully.*"
             full_response = cleaned_response
@@ -783,6 +789,15 @@ def chat_endpoint(req: ChatRequest):
             except Exception as ie:
                 framework.log(f"[System Warning] Decision interception inside chat_endpoint failed: {ie}")
             
+        try:
+            with open("scratch/debug_output.txt", "w", encoding="utf-8") as df:
+                df.write("=== RAW FULL RESPONSE ===\n")
+                df.write(full_response_original + "\n\n")
+                df.write("=== CLEANED RESPONSE ===\n")
+                df.write(full_response + "\n")
+        except Exception as e:
+            framework.log(f"Debug write failed: {e}")
+
         return {
             "status": "success", 
             "response": full_response.strip(),
