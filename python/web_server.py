@@ -413,10 +413,21 @@ def list_models_endpoint():
     """Dynamically pull authorized models from Google GenAI with defensive canonical fallbacks."""
     try:
         models = []
+        
+        # Exclude legacy, specialized (image/audio/tts), and niche non-text models
+        BLACKLIST_KEYWORDS = [
+            "image", "audio", "tts", "live", "embedding", "aqa", 
+            "robotics", "veo", "imagen", "lyria", "computer-use", 
+            "banana", "clip", "customtools", "1.5", "-001", "lite-001"
+        ]
+        
         try:
             for m in framework.client.models.list():
                 supported = getattr(m, 'supported_methods', getattr(m, 'supported_generation_methods', getattr(m, 'supported_actions', [])))
                 name = getattr(m, "name", "").replace("models/", "")
+                
+                if any(kw in name.lower() for kw in BLACKLIST_KEYWORDS):
+                    continue
                 
                 if not supported or "generateContent" in supported or "generate_content" in supported or "gemini" in name.lower():
                     label = name.upper()
@@ -427,15 +438,14 @@ def list_models_endpoint():
         except Exception as le:
             framework.log(f"[Warning] Failed to dynamically list models from API: {le}. Proceeding with canonical injection.")
 
-        # Ensure key canonical models (including experimental thinking models) are ALWAYS present
+        # Ensure key canonical modern models are ALWAYS present
         guaranteed_models = [
             {"name": "gemini-2.0-flash-thinking-exp", "label": "GEMINI-2.0-FLASH-THINKING-EXP (THINKING)"},
             {"name": "gemini-2.0-flash", "label": "GEMINI-2.0-FLASH (FLASH)"},
             {"name": "gemini-2.5-pro", "label": "GEMINI-2.5-PRO (PRO)"},
             {"name": "gemini-2.5-flash", "label": "GEMINI-2.5-FLASH (FLASH)"},
             {"name": "gemini-3.1-pro-preview", "label": "GEMINI-3.1-PRO-PREVIEW (PRO)"},
-            {"name": "gemini-1.5-pro", "label": "GEMINI-1.5-PRO (PRO)"},
-            {"name": "gemini-1.5-flash", "label": "GEMINI-1.5-FLASH (FLASH)"}
+            {"name": "gemini-3.5-flash", "label": "GEMINI-3.5-FLASH (FLASH)"}
         ]
         
         existing_names = {m["name"] for m in models}
