@@ -33,3 +33,7 @@ context/decision_log.json
 context/trade_lessons.md
 context/user_config.json
 
+# Temporary Scratchpad Scripts
+scratch/
+
+
