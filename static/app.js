@@ -591,10 +591,19 @@ async function pollData() {
             dStatus.textContent = displayStatus;
             dStatus.style.color = 'var(--yellow)';
 
+            // Disable Consult AI Council button
+            const launcher = document.getElementById('launch-chat-btn');
+            if (launcher) {
+                launcher.disabled = true;
+                launcher.style.opacity = '0.4';
+                launcher.style.pointerEvents = 'none';
+                launcher.title = 'Consulting the AI Council is locked until all ticker data has loaded.';
+            }
+
             // Show container & blur table
             if (dProgressContainer) dProgressContainer.style.display = 'block';
             if (dTableContainer) dTableContainer.classList.add('blurred-view');
-
+            
             const phase = state.boot_phase;
             const progress = state.boot_progress || 0;
             const total = state.boot_total || 100;
@@ -647,6 +656,15 @@ async function pollData() {
             // Do not render table data yet
             return;
         } else {
+            // Enable Consult AI Council button
+            const launcher = document.getElementById('launch-chat-btn');
+            if (launcher) {
+                launcher.disabled = false;
+                launcher.style.opacity = '1';
+                launcher.style.pointerEvents = 'auto';
+                launcher.title = 'Consult AI Council';
+            }
+
             // Initialization is complete, hide container & remove blur
             if (dProgressContainer) dProgressContainer.style.display = 'none';
             if (dTableContainer) dTableContainer.classList.remove('blurred-view');
@@ -792,9 +810,9 @@ function renderPortfolio(data) {
     let html = '';
     const portfolio = data.portfolio || [];
     const cash = data.unallocated_cash_eur || 0;
+    const cashUsd = data.unallocated_cash_usd || 0;
     const rate = data.eurusd_rate || 1.08;
     currentEurUsdRate = rate; // Update global rate
-    const usd = (cash * rate).toFixed(2);
     
     portfolio.forEach((item, index) => {
         html += `
@@ -808,10 +826,13 @@ function renderPortfolio(data) {
     });
 
     html += `
-        <tr class="cash-row" style="background: rgba(0, 255, 148, 0.05);">
-            <td style="color: var(--green); font-weight: 700; font-size: 0.75rem;">CASH (€)</td>
-            <td><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cash}" style="color: var(--green);"></td>
-            <td colspan="2" style="font-size: 0.75rem; color: var(--text-dim); text-align: left; padding-left: 8px;">$${usd}</td>
+        <tr class="cash-row" style="background: rgba(0, 255, 148, 0.03);">
+            <td style="color: var(--green); font-weight: 700; font-size: 0.7rem;">CASH (€)</td>
+            <td colspan="3"><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cash}" style="color: var(--green); width: 100%;"></td>
+        </tr>
+        <tr class="cash-row" style="background: rgba(0, 180, 255, 0.03);">
+            <td style="color: var(--accent); font-weight: 700; font-size: 0.7rem;">CASH ($)</td>
+            <td colspan="3"><input type="number" step="0.01" class="portfolio-input" id="cash-input-usd" value="${cashUsd}" style="color: var(--accent); width: 100%;"></td>
         </tr>
     `;
 
@@ -842,8 +863,12 @@ function getCurrentPortfolio() {
 }
 
 function getCurrentCash() {
-    const cashInput = document.getElementById('cash-input-eur');
-    return cashInput ? parseFloat(cashInput.value) || 0 : 0;
+    const cashInputEur = document.getElementById('cash-input-eur');
+    const cashInputUsd = document.getElementById('cash-input-usd');
+    return {
+        unallocated_cash_eur: cashInputEur ? parseFloat(cashInputEur.value) || 0 : 0,
+        unallocated_cash_usd: cashInputUsd ? parseFloat(cashInputUsd.value) || 0 : 0
+    };
 }
 async function savePortfolio(portfolioArr) {
     const btn = dSavePortfolioBtn;
@@ -852,10 +877,11 @@ async function savePortfolio(portfolioArr) {
     btn.disabled = true;
     try {
         const pArray = portfolioArr || getCurrentPortfolio();
-        const cVal = getCurrentCash();
+        const cashObj = getCurrentCash();
         const payload = {
             portfolio: pArray,
-            unallocated_cash_eur: cVal
+            unallocated_cash_eur: cashObj.unallocated_cash_eur,
+            unallocated_cash_usd: cashObj.unallocated_cash_usd
         };
         const res = await fetch(`${API_BASE}/basket`, {
             method: 'POST',

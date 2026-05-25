@@ -29,6 +29,7 @@ class BasketRequest(BaseModel):
 class BasketSaveRequest(BaseModel):
     portfolio: List[BasketItem]
     unallocated_cash_eur: float
+    unallocated_cash_usd: float
 
 # --- LOGGING SYSTEM ---
 _system_logs_queue = None
@@ -604,6 +605,7 @@ def chat_endpoint(req: ChatRequest):
                     "watched_tickers": watched,
                     "scout_categories": scouts,
                     "unallocated_cash_eur": ms.get("unallocated_cash_eur", state_ctx.get("unallocated_cash_eur", 0)),
+                    "unallocated_cash_usd": ms.get("unallocated_cash_usd", state_ctx.get("unallocated_cash_usd", 0)),
                     "total_liquidity_eur": ms.get("total_liquidity_eur", state_ctx.get("total_liquidity_eur", 0)),
                     "risk_regime": state_ctx.get("risk_regime", ""),
                 },
@@ -934,16 +936,18 @@ def get_basket():
                 raw_basket = ms.get("portfolio_snapshot", [])
                 portfolio = [{"ticker": i["ticker"], "shares": i.get("shares", 0), "wac": i.get("wac", 0)} for i in raw_basket]
                 cash = ms.get("unallocated_cash_eur", 0.0)
+                cash_usd = ms.get("unallocated_cash_usd", 0.0)
                 state_ctx = ms.get("state_context", {})
                 rate = ms.get("eurusd_rate", state_ctx.get("eurusd_rate", 1.08))
                 return {
                     "portfolio": portfolio,
                     "unallocated_cash_eur": cash,
+                    "unallocated_cash_usd": cash_usd,
                     "eurusd_rate": rate
                 }
     except Exception as e:
         framework.log(f"[Error] get_basket failed: {e}")
-    return {"portfolio": [], "unallocated_cash_eur": 0.0, "eurusd_rate": 1.08}
+    return {"portfolio": [], "unallocated_cash_eur": 0.0, "unallocated_cash_usd": 0.0, "eurusd_rate": 1.08}
 
 @app.post("/api/basket")
 def save_basket(req: BasketSaveRequest):
@@ -967,13 +971,15 @@ def save_basket(req: BasketSaveRequest):
             if "mutable_state" in data:
                 data["mutable_state"]["portfolio_snapshot"] = new_snapshot
                 data["mutable_state"]["unallocated_cash_eur"] = req.unallocated_cash_eur
+                data["mutable_state"]["unallocated_cash_usd"] = req.unallocated_cash_usd
             else:
                 data["portfolio_snapshot"] = new_snapshot
                 data["unallocated_cash_eur"] = req.unallocated_cash_eur
+                data["unallocated_cash_usd"] = req.unallocated_cash_usd
                 
             with open("context/ssot.json", "w") as f:
                 json.dump(data, f, indent=2)
-            framework.log(f"[System] SSoT Basket & Cash updated. Cash: {req.unallocated_cash_eur} EUR")
+            framework.log(f"[System] SSoT Basket & Cash updated. Cash: {req.unallocated_cash_eur} EUR | {req.unallocated_cash_usd} USD")
             
             # Hot-reload TICKERS in fetch_stocks so the scanning daemon immediately registers changes
             try:

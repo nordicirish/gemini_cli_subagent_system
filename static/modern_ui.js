@@ -463,8 +463,11 @@ const ModernChat = {
                         <div style="font-size: 0.75rem; color: #8b949e;">${s.date}</div>
                         <div style="font-weight: 500; margin-top: 4px;">${s.preview}</div>
                     </div>
-                    <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent-blue); text-align: right; flex-shrink: 0; padding-left: 10px;">
-                        Est. Cost: $${displayCost.toFixed(2)}
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent-blue); text-align: right; flex-shrink: 0; padding-left: 10px;">
+                            Est. Cost: $${displayCost.toFixed(2)}
+                        </div>
+                        <button onclick="event.stopPropagation(); window.chatUI.deleteSession(${s.id})" style="background: rgba(255, 68, 68, 0.15); border: 1px solid rgba(255, 68, 68, 0.3); color: #ff6b6b; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.75rem;" title="Delete Session">&times;</button>
                     </div>
                 </div>
             `;
@@ -474,6 +477,15 @@ const ModernChat = {
             this.restoreHtml = this.messages.innerHTML;
         }
         this.messages.innerHTML = historyHtml + `<div style="display: flex; justify-content: center;"><button onclick="window.chatUI.restoreCurrentView()" style="margin: 10px; padding: 8px 16px; background: #238636; border: none; color: white; border-radius: 6px; cursor: pointer; width: fit-content;">← Back to Chat</button></div>`;
+    },
+
+    deleteSession(id) {
+        if (confirm('Delete this archived session permanently?')) {
+            let sessions = JSON.parse(localStorage.getItem('gemini_chat_sessions') || '[]');
+            sessions = sessions.filter(s => s.id !== id);
+            localStorage.setItem('gemini_chat_sessions', JSON.stringify(sessions));
+            this.showHistory();
+        }
     },
 
     loadSession(id) {
