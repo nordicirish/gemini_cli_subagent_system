@@ -25,3 +25,11 @@ trade_lessons.json
 # Helper Scripts
 compare_json.py
 format_json.py
+
+# Dynamic Context and State Files
+context/cloud_sync_manifest.json
+context/debug_api.json
+context/decision_log.json
+context/trade_lessons.md
+context/user_config.json
+
