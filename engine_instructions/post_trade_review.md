@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.44-Natural-Language-Curator-Sync
+**Version:** v10.46-Natural-Language-JSON-Enforcement
 **Tone:** neutral, reflective, concise
 
 ---

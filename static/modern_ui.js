@@ -14,42 +14,42 @@ const ModernChat = {
             label: 'Session Boot',
             id: 'qp-boot',
             tooltip: 'Initialize system, sync baseline prices, reconcile cash, and perform health audit.',
-            prompt: 'SYSTEM BOOT: Execute the full Stage 0 Council Boot Sequence. Using the live DATA_PACKET just injected: (1) Baseline sync — ground all portfolio prices. (2) Cash reconciliation. (3) Regime classification. (4) Portfolio health audit. (5) Market posture assessment. Output a clear, human-readable summary of your findings. DO NOT output a JSON EXECUTION_PAYLOAD.'
+            prompt: 'SYSTEM BOOT: Execute the full Stage 0 Council Boot Sequence. Using the live DATA_PACKET just injected: (1) Baseline sync — ground all portfolio prices. (2) Cash reconciliation. (3) Regime classification. (4) Portfolio health audit. (5) Market posture assessment. Output a clear, human-readable summary of your findings.'
         },
         {
             icon: '📊',
             label: 'Market Analysis',
             id: 'qp-analysis',
             tooltip: 'Evaluate risk regime, dealer posture, and macro signals to determine top priorities.',
-            prompt: 'SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION. Using the live DATA_PACKET just injected, evaluate risk regime, dealer posture shifts, VIX/VIXY/IEF signals, and score movements. Provide a clear, readable summary of your analysis and top-3 priority actions. DO NOT output a JSON EXECUTION_PAYLOAD.'
+            prompt: 'SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION. Using the live DATA_PACKET just injected, evaluate risk regime, dealer posture shifts, VIX/VIXY/IEF signals, and score movements. Provide a clear, readable summary of your analysis and top-3 priority actions.'
         },
         {
             icon: '🔍',
             label: 'Audit Portfolio',
             id: 'qp-audit-portfolio',
             tooltip: 'Deep audit of all active positions against trading rules, limits, and cash allocation.',
-            prompt: 'SYSTEM DIRECTIVE: AUDIT & PORTFOLIO REVIEW. Using the live DATA_PACKET just injected, perform a full portfolio audit: (1) Check all positions against GEM_Trading_Rules, concentration limits, and cash allocation. (2) Conduct a deep portfolio analysis and provide Trim/Hold/Add recommendations for each held ticker with supporting evidence. Output a structured, human-readable compliance and review report. DO NOT output a JSON EXECUTION_PAYLOAD.'
+            prompt: 'SYSTEM DIRECTIVE: AUDIT & PORTFOLIO REVIEW. Using the live DATA_PACKET just injected, perform a full portfolio audit: (1) Check all positions against GEM_Trading_Rules, concentration limits, and cash allocation. (2) Conduct a deep portfolio analysis and provide Trim/Hold/Add recommendations for each held ticker with supporting evidence. Output a structured, human-readable compliance and review report.'
         },
         {
             icon: '⚖️',
             label: 'Risk Regime',
             id: 'qp-risk',
             tooltip: 'Assess macro risk indicators to declare the current regime and risk posture.',
-            prompt: 'SYSTEM DIRECTIVE: RISK REGIME ASSESSMENT. Using the live DATA_PACKET just injected, run a full macro risk assessment based on VIX, VIXY, IEF, and SPY. Declare the current regime and risk posture with entry/exit implications. Output a clear, human-readable summary. DO NOT output a JSON EXECUTION_PAYLOAD.'
+            prompt: 'SYSTEM DIRECTIVE: RISK REGIME ASSESSMENT. Using the live DATA_PACKET just injected, run a full macro risk assessment based on VIX, VIXY, IEF, and SPY. Declare the current regime and risk posture with entry/exit implications. Output a clear, human-readable summary.'
         },
         {
             icon: '🎯',
             label: 'Scout Opportunities',
             id: 'qp-scout',
             tooltip: 'Scan non-portfolio watchlist tickers for top entry candidates based on regime.',
-            prompt: 'SYSTEM DIRECTIVE: SCOUT INTELLIGENCE SCAN. Using the live DATA_PACKET just injected, evaluate the non-portfolio tickers to identify top entry candidates. Assess risk/reward vs current regime. Output a clear, human-readable summary. DO NOT output a JSON EXECUTION_PAYLOAD.'
+            prompt: 'SYSTEM DIRECTIVE: SCOUT INTELLIGENCE SCAN. Using the live DATA_PACKET just injected, evaluate the non-portfolio tickers to identify top entry candidates. Assess risk/reward vs current regime. Output a clear, human-readable summary.'
         },
         {
             icon: '📝',
             label: 'Review Log',
             id: 'qp-review-log',
             tooltip: 'Forensically audit past decisions to generate corrective trade lessons.',
-            prompt: 'SYSTEM DIRECTIVE: EXECUTE [MANDATE_26_POST_TRADE_REVIEW]. Invoke the Post-Trade Review Engine to forensically audit the complete decision_log.json. Perform a decision log backtest and trade lessons permanency audit: (1) Grade historical agreement scores and trade state assumptions against realized price action. (2) Identify technical drift, liquidity errors, and rebalancing misfires. (3) Generate corrective trade lessons and save them using update_trade_lessons. Output a clear, human-readable forensic summary of your review. DO NOT output a JSON EXECUTION_PAYLOAD.'
+            prompt: 'SYSTEM DIRECTIVE: EXECUTE [MANDATE_26_POST_TRADE_REVIEW]. Invoke the Post-Trade Review Engine to forensically audit the complete decision_log.json. Perform a decision log backtest and trade lessons permanency audit: (1) Grade historical agreement scores and trade state assumptions against realized price action. (2) Identify technical drift, liquidity errors, and rebalancing misfires. (3) Generate corrective trade lessons and save them using update_trade_lessons. Output a clear, human-readable forensic summary of your review.'
         },
     ],
 
