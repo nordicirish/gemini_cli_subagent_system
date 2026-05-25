@@ -725,7 +725,7 @@ def chat_endpoint(req: ChatRequest):
             close_idx = full_response.find("```", idx + 3)
             if close_idx != -1:
                 block_content = full_response[idx:close_idx + 3]
-                if "EXECUTION_PAYLOAD" in block_content:
+                if "EXECUTION_PAYLOAD" in block_content or "thoughtSignature" in block_content or "portfolio_snapshot" in block_content:
                     inner_json = block_content
                     if inner_json.startswith("```json"):
                         inner_json = inner_json[7:-3].strip()
@@ -741,13 +741,13 @@ def chat_endpoint(req: ChatRequest):
                     except Exception as pe:
                         framework.log(f"[System Error] Failed to update SSoT with sliced payload: {pe}")
                         
-        if not payload_processed and "EXECUTION_PAYLOAD" in full_response:
+        if not payload_processed:
             # Fallback to direct curly brace extraction
             start_idx = full_response.find('{')
             end_idx = full_response.rfind('}')
             if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
                 candidate = full_response[start_idx:end_idx+1]
-                if "EXECUTION_PAYLOAD" in candidate:
+                if "EXECUTION_PAYLOAD" in candidate or "thoughtSignature" in candidate or "portfolio_snapshot" in candidate:
                     try:
                         json.loads(candidate)
                         framework.log("[System] Auto-processing brace-extracted EXECUTION_PAYLOAD...")
