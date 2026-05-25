@@ -93,7 +93,9 @@ subagent_instructions = [
     "engine_instructions/macro_sentinel.md", "engine_instructions/research.md", "engine_instructions/sentiment_engine.md",
     "engine_instructions/structural_engine.md", "engine_instructions/context_engine.md", "engine_instructions/technical_validator.md",
     "engine_instructions/bullish_gem.md", "engine_instructions/red_team_gem.md", "engine_instructions/neutral_gem.md", "engine_instructions/terminal.md",
-    "engine_instructions/post_trade_review.md"
+    "engine_instructions/post_trade_review.md", "engine_instructions/macro_narrative_engine.md",
+    "engine_instructions/data_analyst.md", "engine_instructions/state_validation_router.md", "engine_instructions/rule_enforcer_engine.md",
+    "engine_instructions/execution.md", "engine_instructions/gex_engine.md"
 ]
 
 # 1. Define the Sub-Agents with their instructions and specific tools
@@ -109,6 +111,48 @@ research_engine = framework.create_agent_tool(
     file_path="engine_instructions/research.md", 
     mode="THINKING", 
     agent_tools=[tools.perform_web_forensic_search]
+)
+
+macro_narrative_engine = framework.create_agent_tool(
+    name="Macro Narrative Engine",
+    file_path="engine_instructions/macro_narrative_engine.md",
+    mode="THINKING",
+    agent_tools=[tools.perform_web_forensic_search, tools.read_ssot, tools.get_market_data]
+)
+
+data_analyst = framework.create_agent_tool(
+    name="Data Analyst",
+    file_path="engine_instructions/data_analyst.md",
+    mode="PRO",
+    agent_tools=[tools.perform_web_forensic_search, tools.get_market_data]
+)
+
+state_validation_router = framework.create_agent_tool(
+    name="State Validation Router",
+    file_path="engine_instructions/state_validation_router.md",
+    mode="PRO",
+    agent_tools=[tools.read_ssot, tools.update_ssot, tools.get_market_data]
+)
+
+rule_enforcer_engine = framework.create_agent_tool(
+    name="Rule Enforcer Engine",
+    file_path="engine_instructions/rule_enforcer_engine.md",
+    mode="GEMMA",
+    agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
+)
+
+execution = framework.create_agent_tool(
+    name="Execution Engine",
+    file_path="engine_instructions/execution.md",
+    mode="GEMMA",
+    agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
+)
+
+gex_engine = framework.create_agent_tool(
+    name="GEX Engine",
+    file_path="engine_instructions/gex_engine.md",
+    mode="GEMMA",
+    agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
 )
 
 sentiment_engine = framework.create_agent_tool(
@@ -173,6 +217,12 @@ neutral_structuralist = framework.create_agent_tool(
 council_members = {
     "ask_macro_sentinel": macro_sentinel,
     "ask_research_engine": research_engine,
+    "ask_macro_narrative_engine": macro_narrative_engine,
+    "ask_data_analyst": data_analyst,
+    "ask_state_validation_router": state_validation_router,
+    "ask_rule_enforcer_engine": rule_enforcer_engine,
+    "ask_execution_engine": execution,
+    "ask_gex_engine": gex_engine,
     "ask_sentiment_engine": sentiment_engine,
     "ask_structural_engine": structural_engine,
     "ask_context_engine": context_engine,
@@ -193,6 +243,12 @@ terminal_tools = [
     tools.read_decision_log,
     macro_sentinel,
     research_engine,
+    macro_narrative_engine,
+    data_analyst,
+    state_validation_router,
+    rule_enforcer_engine,
+    execution,
+    gex_engine,
     sentiment_engine,
     structural_engine,
     context_engine,
@@ -329,6 +385,7 @@ def list_models_endpoint():
         # Ensure key canonical models (including experimental thinking models) are ALWAYS present
         guaranteed_models = [
             {"name": "gemini-2.0-flash-thinking-exp", "label": "GEMINI-2.0-FLASH-THINKING-EXP (THINKING)"},
+            {"name": "gemini-2.0-flash", "label": "GEMINI-2.0-FLASH (FLASH)"},
             {"name": "gemini-2.5-pro", "label": "GEMINI-2.5-PRO (PRO)"},
             {"name": "gemini-2.5-flash", "label": "GEMINI-2.5-FLASH (FLASH)"},
             {"name": "gemini-3.1-pro-preview", "label": "GEMINI-3.1-PRO-PREVIEW (PRO)"},
@@ -402,12 +459,7 @@ def set_cache_policy(data: dict):
         framework.log("[System] Context Caching manually enabled by user. Re-building cache...")
         framework.setup_context_cache(
             model=ORCHESTRATOR_MODEL,
-            subagent_files=[
-                "engine_instructions/macro_sentinel.md", "engine_instructions/research.md", "engine_instructions/sentiment_engine.md",
-                "engine_instructions/structural_engine.md", "engine_instructions/context_engine.md", "engine_instructions/technical_validator.md",
-                "engine_instructions/bullish_gem.md", "engine_instructions/red_team_gem.md", "engine_instructions/neutral_gem.md", "engine_instructions/terminal.md",
-                "engine_instructions/post_trade_review.md"
-            ],
+            subagent_files=subagent_instructions,
             system_instruction=terminal_instruction,
             tools=all_tools
         )
@@ -441,12 +493,7 @@ def set_model(data: dict):
         # Explicitly trigger cache setup for the new model
         framework.setup_context_cache(
             model=ORCHESTRATOR_MODEL, 
-            subagent_files=[
-                "engine_instructions/macro_sentinel.md", "engine_instructions/research.md", "engine_instructions/sentiment_engine.md",
-                "engine_instructions/structural_engine.md", "engine_instructions/context_engine.md", "engine_instructions/technical_validator.md",
-                "engine_instructions/bullish_gem.md", "engine_instructions/red_team_gem.md", "engine_instructions/neutral_gem.md", "engine_instructions/terminal.md",
-                "engine_instructions/post_trade_review.md"
-            ],
+            subagent_files=subagent_instructions,
             system_instruction=terminal_instruction,
             tools=all_tools
         )

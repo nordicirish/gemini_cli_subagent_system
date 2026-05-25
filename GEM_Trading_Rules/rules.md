@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.42-Ticker-Validation-UI-Alert-Sync
+**Version:** v10.43-AI-Studio-Pro-Plan-Optimization
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -253,7 +253,7 @@
       - Stage 2: RED_TEAM_PESSIMIST is fed the Bullish thesis and provides a direct counter-argument. Agreement Score S_A is calculated based on the victor of this rebuttal.
 - **[MANDATE_22 - Dynamic Thinking Level Optimization]**
     *   **Status:** ACTIVE
-    *   **Instruction:** The system operates on the Gemini 3.5 Pro architecture. The legacy `thinking_budget` parameter is strictly deprecated and will cause 400 errors. Agents operating in THINKING mode must align their complexity to the new `thinking_level` hierarchy:
+    *   **Instruction:** The system operates on the Google AI Studio Gemini API (Gemini Pro/Flash architecture). The legacy `thinking_budget` parameter is strictly deprecated and will cause 400 errors. Agents operating in THINKING mode must align their complexity to the new `thinking_level` hierarchy:
         *   **Red Team Pessimist:** Must operate at `thinking_level: "high"` to execute deep, multi-path adversarial simulations against the thesis.
         *   **Bullish Advocate & Macro-Narrative:** Must operate at `thinking_level: "medium"` to balance reasoning depth with latency.
 - **[MANDATE_14_ALPHA_CATALYST]**

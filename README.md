@@ -280,9 +280,14 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 ---
 
 ## 📋 Changelog
+### v10.43-AI-Studio-Pro-Plan-Optimization *(2026-05-25)*
+- **AI Studio Architecture Optimization:** Removed hardcoded references to the deprecated "Gemini 3.5 Pro" model architecture in `rules.md` (MANDATE_22) and `terminal.md` (thought signature bypass mandate) to optimize the system for standard, premium Google AI Studio Gemini API models (Pro/Flash).
+- **Global Architectural Parity:** Synchronized version strings to `v10.43-AI-Studio-Pro-Plan-Optimization` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+
 ### v10.42-Ticker-Validation-UI-Alert-Sync *(2026-05-25)*
 - **Real-Time Ticker Validation & UI Alerts:** Integrated automated ticker validation inside `web_server.py`'s basket (portfolio) and watchlist endpoints. The backend now queries Yahoo Finance quotes to dynamically verify new assets. If an invalid symbol is detected, the server returns a `400 Bad Request` that triggers a browser alert dialog and automatically rolls back UI inputs, preventing data pollution.
 - **Global Architectural Parity:** Synchronized version strings to `v10.42-Ticker-Validation-UI-Alert-Sync` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+
 
 ### v10.41-Volume-NoneType-TypeError-Fix *(2026-05-25)*
 - **Hardened Volume Tick Sanitization:** Patched a critical volume fetch type mismatch inside `fetch_stocks.py`. Added robust `NoneType` checks and standard integer conversion fallbacks when polling Yahoo Finance's `fast_info` or Polygon interfaces, preventing server and background daemon thread crashes due to invalid tickers or incomplete API responses.
