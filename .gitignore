@@ -36,4 +36,7 @@ context/user_config.json
 # Temporary Scratchpad Scripts
 scratch/
 
+# LLM Handshakes and System Logs
+logs/
+
 

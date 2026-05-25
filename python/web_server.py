@@ -255,6 +255,9 @@ terminal_tools = [
     context_engine,
     technical_validator,
     post_trade_review,
+    bullish_advocate,
+    red_team_pessimist,
+    neutral_structuralist,
     ask_council
 ]
 

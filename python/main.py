@@ -10,13 +10,16 @@ def initialize_context_files():
     """Bootstraps missing context files for fresh repository clones."""
     if not os.path.exists("context"):
         os.makedirs("context")
+    if not os.path.exists("logs"):
+        os.makedirs("logs")
         
     defaults = {
         "context/ssot.json": "{}",
         "context/trade_lessons.json": "[]",
         "context/decision_log.json": "[]",
         "context/user_config.json": "{}",
-        "context/config.json": '{\n  "GEMINI_API_KEY": "",\n  "GEMINI_FREE_TIER_API_KEY": "",\n  "FINNHUB_API_KEY": ""\n}'
+        "context/config.json": '{\n  "GEMINI_API_KEY": "",\n  "GEMINI_FREE_TIER_API_KEY": "",\n  "FINNHUB_API_KEY": ""\n}',
+        "logs/gem_handshakes.log": ""
     }
     
     for filepath, default_content in defaults.items():
