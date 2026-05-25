@@ -4,17 +4,46 @@ import time
 import hashlib
 import requests
 import concurrent.futures
+import logging
+from logging.handlers import TimedRotatingFileHandler
 from google import genai
 from google.genai import types
 
 # ---------------------------------------------------------------------------
-# Model definitions — v10.46-Natural-Language-JSON-Enforcement
+# Rolling LLM Handshake Logger (5 Days Rolling)
+# ---------------------------------------------------------------------------
+os.makedirs("logs", exist_ok=True)
+handshake_log_file = os.path.join("logs", "gem_handshakes.log")
+
+# Configure a file handler rotating daily, keeping 5 backups
+handshake_handler = TimedRotatingFileHandler(
+    handshake_log_file,
+    when="D",
+    interval=1,
+    backupCount=5,
+    encoding="utf-8"
+)
+handshake_handler.setLevel(logging.INFO)
+handshake_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+handshake_handler.setFormatter(handshake_formatter)
+
+llm_logger = logging.getLogger("gem_handshakes")
+llm_logger.setLevel(logging.INFO)
+# Clear existing handlers to prevent duplicate logs on reload
+if llm_logger.hasHandlers():
+    llm_logger.handlers.clear()
+llm_logger.addHandler(handshake_handler)
+# Prevent propagation to parent loggers to avoid flooding console
+llm_logger.propagate = False
+
+# ---------------------------------------------------------------------------
+# Model definitions — v10.47-Portfolio-Merge-Protection-Enforced
 # Per terminal.md > Mode Selection Matrix (Canonical)
 # ---------------------------------------------------------------------------
 DEFAULT_MODEL_PRO = "gemini-2.5-pro"
 DEFAULT_MODEL_FLASH = "gemini-2.5-flash"
 DEFAULT_MODEL_GEMMA = "gemma-4-31b-it"
-DEFAULT_MODEL_THINKING = "gemini-2.0-flash-thinking-exp"
+DEFAULT_MODEL_THINKING = "gemini-2.5-flash"
 
 MODEL_MAPPING = {
     "PRO":      [DEFAULT_MODEL_PRO, "gemini-3.1-pro-preview", "gemini-2.0-pro-exp", "gemini-1.5-pro", DEFAULT_MODEL_FLASH],
@@ -57,7 +86,19 @@ class AgentFramework:
         else:
             self.free_client = self.client
 
+        # Probe best flash thinking model dynamically and set default thinking model
+        best_thinking = self.probe_best_flash_thinking_model()
+        global DEFAULT_MODEL_THINKING, MODEL_MAPPING
+        DEFAULT_MODEL_THINKING = best_thinking
+        # Update mapping
+        if "gemini-2.5-flash" in MODEL_MAPPING["THINKING"]:
+            idx = MODEL_MAPPING["THINKING"].index("gemini-2.5-flash")
+            MODEL_MAPPING["THINKING"][idx] = best_thinking
+        else:
+            MODEL_MAPPING["THINKING"].insert(0, best_thinking)
+
         self.agents = {}
+
 
         # Caching state (ENH_CACHE_01)
         self.cached_content_name = None
@@ -71,6 +112,112 @@ class AgentFramework:
         """Check if a model is considered a free-tier model."""
         name_lower = model_name.lower()
         return "flash" in name_lower or "gemma" in name_lower
+
+    def probe_best_flash_thinking_model(self) -> str:
+        """
+        Dynamically query Google GenAI for available models under the active key,
+        finding the best reasoning/thinking model (e.g. gemini-2.0-flash-thinking)
+        and fall back to gemini-2.5-flash if none are found.
+        """
+        try:
+            available_models = []
+            # List available models from API
+            try:
+                for m in self.client.models.list():
+                    name = getattr(m, "name", "").replace("models/", "")
+                    available_models.append(name)
+            except Exception as e_list:
+                # Try free_client list if primary client list fails
+                if getattr(self, "free_client", None) and self.free_client is not self.client:
+                    for m in self.free_client.models.list():
+                        name = getattr(m, "name", "").replace("models/", "")
+                        available_models.append(name)
+                else:
+                    raise e_list
+
+            # Find all flash thinking models (containing both "thinking" and "flash")
+            thinking_flash_models = [name for name in available_models if "thinking" in name.lower() and "flash" in name.lower()]
+            
+            # Find any other thinking models (containing "thinking")
+            all_thinking_models = [name for name in available_models if "thinking" in name.lower()]
+            
+            if thinking_flash_models:
+                # Rank models: prefer gemini-2.5 thinking, prefer non-experimental
+                thinking_flash_models.sort(key=lambda x: (
+                    0 if "2.5" in x else (1 if "2.0" in x else 2),
+                    0 if "-exp" not in x else 1,
+                    x
+                ))
+                best_model = thinking_flash_models[0]
+                self.log(f"[Dynamic Model Discovery] Found best reasoning flash-thinking model: {best_model}")
+                return best_model
+            elif all_thinking_models:
+                all_thinking_models.sort(key=lambda x: (
+                    0 if "-exp" not in x else 1,
+                    x
+                ))
+                best_model = all_thinking_models[0]
+                self.log(f"[Dynamic Model Discovery] Found best general thinking model: {best_model}")
+                return best_model
+            
+            self.log("[Dynamic Model Discovery] No specific thinking models returned by key. Defaulting to gemini-2.5-flash.")
+            return "gemini-2.5-flash"
+        except Exception as e:
+            self.log(f"[Dynamic Model Discovery Warning] Failed to dynamically probe models from API: {e}. Defaulting to gemini-2.5-flash.")
+            return "gemini-2.5-flash"
+
+    def _log_handshake(self, direction, model_name, client_label, prompt, config, response=None, error=None, latency=None):
+        """Record structured LLM interactions to gem_handshakes.log"""
+        try:
+            p_len = len(str(prompt))
+            instruct_len = 0
+            has_cache = False
+            if config:
+                if getattr(config, "system_instruction", None):
+                    instruct_len = len(str(config.system_instruction))
+                if getattr(config, "cached_content", None):
+                    has_cache = True
+
+            latency_str = f", Latency: {latency:.2f}s" if latency is not None else ""
+            
+            if direction == "REQUEST":
+                msg = (
+                    f"[{direction}] Model: {model_name} ({client_label}) | "
+                    f"Prompt Len: {p_len}, Instruct Len: {instruct_len}, Caching: {has_cache}"
+                )
+                llm_logger.info(msg)
+            elif direction == "RESPONSE" and response:
+                t_p, t_c, t_ca = 0, 0, 0
+                if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                    t_p = response.usage_metadata.prompt_token_count or 0
+                    t_c = response.usage_metadata.candidates_token_count or 0
+                    t_ca = response.usage_metadata.cached_content_token_count or 0
+
+                text_preview = "No text output"
+                try:
+                    if hasattr(response, "text") and response.text:
+                        text_preview = response.text[:300].replace("\n", " ") + "..."
+                    elif response.candidates and response.candidates[0].content.parts:
+                        parts_text = "".join(part.text for part in response.candidates[0].content.parts if part.text)
+                        if parts_text:
+                            text_preview = parts_text[:300].replace("\n", " ") + "..."
+                except Exception:
+                    pass
+
+                msg = (
+                    f"[{direction}] Model: {model_name} ({client_label}) | Status: SUCCESS{latency_str} | "
+                    f"Tokens: [Prompt: {t_p}, Candidate: {t_c}, Cached: {t_ca}] | "
+                    f"Preview: {text_preview}"
+                )
+                llm_logger.info(msg)
+            elif direction == "WARNING":
+                msg = f"[{direction}] Model: {model_name} ({client_label}) | Msg: {error}"
+                llm_logger.warning(msg)
+            elif direction == "ERROR":
+                msg = f"[{direction}] Model: {model_name} ({client_label}) | Status: FAILED{latency_str} | Error: {error}"
+                llm_logger.error(msg)
+        except Exception as e:
+            self.log(f"[Logging Error] Failed to write to handshake log: {e}")
 
     def reset_turn_usage(self):
         """Clear token counters for a new chat session turn."""
@@ -335,19 +482,28 @@ class AgentFramework:
                     return res
 
                 try:
-                    return attempt_call(active_client, config, client_prompt)
+                    self._log_handshake("REQUEST", model_name, client_label, prompt, config)
+                    start_time = time.time()
+                    res = attempt_call(active_client, config, client_prompt)
+                    elapsed = time.time() - start_time
+                    self._log_handshake("RESPONSE", model_name, client_label, prompt, config, response=res, latency=elapsed)
+                    return res
                 except Exception as e:
                     error_msg = str(e)
                     last_error = e
+                    elapsed = time.time() - start_time
+                    self._log_handshake("ERROR", model_name, client_label, prompt, config, error=error_msg, latency=elapsed)
                     self.log(f"[Warning] Call failed using {client_label} for model {model_name}: {error_msg}")
 
                     # If this is the free tier client and we have a primary client fallback, proceed immediately to primary key
                     if client_label == "Free-Tier Key" and len(clients_to_try) > 1:
+                        self._log_handshake("WARNING", model_name, client_label, prompt, config, error=f"Free-Tier Key failed, falling back to Primary Key: {error_msg}")
                         self.log(f"[System] Falling back from Free-Tier to Primary Key for {model_name}...")
                         continue
 
                     # Cache expired/invalid — retry immediately without cache
                     if "cache" in error_msg.lower() and client_cache:
+                        self._log_handshake("WARNING", model_name, client_label, prompt, config, error="Cache expired/invalid. Retrying call without cache.")
                         self.log("[System] Cache expired or invalid. Retrying without cache...")
                         self.cached_content_name = None
                         return self.generate_response_with_fallback(prompt, instruction, mode, tools)
@@ -356,6 +512,7 @@ class AgentFramework:
 
                     if "429" in error_msg or "quota" in error_msg.lower():
                         if is_daily_limit:
+                            self._log_handshake("WARNING", model_name, client_label, prompt, config, error=f"Daily limit reached. Instantly skipping: {error_msg}")
                             self.log(f"[System] Daily quota/limit hit for {model_name}. Skipping retry wait, instantly falling back to next available model...")
                             continue
 
@@ -364,24 +521,42 @@ class AgentFramework:
                         match = re.search(r"retry in (\d+(?:\.\d+)?)s", error_msg, re.IGNORECASE)
                         if match:
                             wait_time = int(float(match.group(1))) + 1
+                        self._log_handshake("WARNING", model_name, client_label, prompt, config, error=f"Rate limit hit. Waiting {wait_time}s to retry...")
                         self.log(f"[System] Rate limit hit for {model_name}. Waiting {wait_time}s...")
                         time.sleep(wait_time)
                         try:
-                            return attempt_call(active_client, config, client_prompt)
+                            self._log_handshake("REQUEST", model_name, client_label, prompt, config)
+                            start_time = time.time()
+                            res = attempt_call(active_client, config, client_prompt)
+                            elapsed = time.time() - start_time
+                            self._log_handshake("RESPONSE", model_name, client_label, prompt, config, response=res, latency=elapsed)
+                            return res
                         except Exception as retry_e:
                             last_error = retry_e
+                            elapsed = time.time() - start_time
+                            self._log_handshake("ERROR", model_name, client_label, prompt, config, error=f"Retry attempt failed: {retry_e}", latency=elapsed)
                             continue
 
                     elif "503" in error_msg or "unavailable" in error_msg.lower():
+                        self._log_handshake("WARNING", model_name, client_label, prompt, config, error="503 Unavailable. Retrying in 5s...")
                         self.log(f"[System] 503 UNAVAILABLE for {model_name}. Retrying in 5s...")
                         time.sleep(5)
                         try:
-                            return attempt_call(active_client, config, client_prompt)
-                        except Exception:
+                            self._log_handshake("REQUEST", model_name, client_label, prompt, config)
+                            start_time = time.time()
+                            res = attempt_call(active_client, config, client_prompt)
+                            elapsed = time.time() - start_time
+                            self._log_handshake("RESPONSE", model_name, client_label, prompt, config, response=res, latency=elapsed)
+                            return res
+                        except Exception as retry_e:
+                            last_error = retry_e
+                            elapsed = time.time() - start_time
+                            self._log_handshake("ERROR", model_name, client_label, prompt, config, error=f"Retry after 503 failed: {retry_e}", latency=elapsed)
                             pass
                         continue
 
                     elif "not found" in error_msg.lower() or "404" in error_msg or "not supported" in error_msg.lower() or "interactions api" in error_msg.lower():
+                        self._log_handshake("WARNING", model_name, client_label, prompt, config, error=f"Model not supported / returned 404: {error_msg}")
                         continue
                     else:
                         self.log(f"[System] Warning: {model_name} failed with error: {e}")
@@ -435,8 +610,16 @@ class AgentFramework:
         return call_subagent
 
     def create_parallel_council_tool(self, agents_dict):
-        def ask_council(queries: dict) -> str:
-            """Dispatch multiple council agents in parallel for 3x speed increase."""
+        def ask_council(queries_json: str) -> str:
+            """Dispatch multiple council agents in parallel for 3x speed increase.
+            queries_json: A JSON string mapping agent names (e.g. 'bullish_advocate', 'red_team_pessimist') to their respective sub-query.
+            """
+            try:
+                queries = json.loads(queries_json)
+            except Exception as e:
+                self.log(f"[Parallel Dispatcher Error] Failed to parse queries_json: {e}")
+                return json.dumps({"error": f"Failed to parse queries_json: {e}"})
+
             self.log(f"\n[Parallel Dispatcher] Initializing parallel session for {list(queries.keys())}...")
             results = {}
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(queries)) as executor:

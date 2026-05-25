@@ -328,6 +328,44 @@ if not valid_model:
 # Use the verified valid model from the THINKING tier, fallback to framework default
 ORCHESTRATOR_MODEL = valid_model or agent_framework.DEFAULT_MODEL_THINKING
 
+active_model_warning = None
+
+def check_model_validity(model_name: str) -> str:
+    """
+    Checks if the model is supported by the active API key.
+    Returns a descriptive warning string if invalid/deprecated, or None.
+    """
+    try:
+        available_names = []
+        try:
+            # Dynamically fetch models from active client
+            for m in framework.client.models.list():
+                available_names.append(getattr(m, "name", "").replace("models/", ""))
+        except Exception:
+            # If primary listing fails, try free tier client list
+            try:
+                if getattr(framework, "free_client", None) and framework.free_client is not framework.client:
+                    for m in framework.free_client.models.list():
+                        available_names.append(getattr(m, "name", "").replace("models/", ""))
+            except Exception:
+                pass
+
+        # Check for officially deprecated model
+        if "gemini-2.0-flash-thinking-exp" in model_name:
+            return "⚠️ Warning: Selected model 'gemini-2.0-flash-thinking-exp' is officially deprecated. We recommend migrating to a modern stable Flash model."
+
+        if available_names and model_name not in available_names:
+            return f"⚠️ Warning: Selected model '{model_name}' is not in the list of models supported by your API key. Gemini may throw 404/400 errors. We recommend switching to a supported Flash or Pro model."
+            
+        return None
+    except Exception as e:
+        return f"⚠️ Warning: Model validation exception: {e}"
+
+active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
+if active_model_warning:
+    framework.log(f"[System Warning] {active_model_warning}")
+
+
 # Initialize the global Chat object
 def create_new_session():
     global ORCHESTRATOR_MODEL
@@ -416,7 +454,9 @@ def list_models_endpoint():
                 return (2, name)
 
         models.sort(key=sort_key)
-        return {"status": "success", "models": models, "current_model": ORCHESTRATOR_MODEL}
+        global active_model_warning
+        active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
+        return {"status": "success", "models": models, "current_model": ORCHESTRATOR_MODEL, "warning": active_model_warning}
     except Exception as e:
         framework.log(f"[Error] Failed to compile models: {e}")
         return {"status": "error", "message": str(e)}
@@ -508,7 +548,9 @@ def set_model(data: dict):
         # Re-create session
         global_chat_session = create_new_session()
         framework.log(f"[System] Council re-calibrated on {new_model}.")
-    return {"status": "success", "current_model": ORCHESTRATOR_MODEL}
+    global active_model_warning
+    active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
+    return {"status": "success", "current_model": ORCHESTRATOR_MODEL, "warning": active_model_warning}
 
 @app.post("/api/chat")
 def chat_endpoint(req: ChatRequest):
@@ -673,6 +715,14 @@ def chat_endpoint(req: ChatRequest):
                             found_text_in_turn = True
             except Exception as e:
                 framework.log(f"[Orchestrator] Text capture warning: {e}")
+                try:
+                    if response.candidates:
+                        cand = response.candidates[0]
+                        framework.log(f"[Orchestrator Debug] Candidate finish reason: {cand.finish_reason}")
+                        framework.log(f"[Orchestrator Debug] Safety ratings: {getattr(cand, 'safety_ratings', None)}")
+                        framework.log(f"[Orchestrator Debug] Content present: {cand.content is not None}")
+                except Exception as de:
+                    framework.log(f"[Orchestrator Debug] Failed to log candidate details: {de}")
                 if hasattr(response, 'text') and response.text:
                     all_text.append(response.text)
                     found_text_in_turn = True
@@ -808,11 +858,14 @@ def chat_endpoint(req: ChatRequest):
         except Exception as e:
             framework.log(f"Debug write failed: {e}")
 
+        global active_model_warning
+        active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
         return {
             "status": "success", 
             "response": full_response.strip(),
             "usage": framework.turn_usage,
-            "model": ORCHESTRATOR_MODEL
+            "model": ORCHESTRATOR_MODEL,
+            "warning": active_model_warning
         }
     except Exception as e:
         error_msg = str(e)

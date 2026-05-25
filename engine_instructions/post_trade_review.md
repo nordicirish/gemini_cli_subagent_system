@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.46-Natural-Language-JSON-Enforcement
+**Version:** v10.47-Portfolio-Merge-Protection-Enforced
 **Tone:** neutral, reflective, concise
 
 ---

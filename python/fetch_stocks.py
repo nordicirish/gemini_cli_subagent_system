@@ -531,10 +531,29 @@ async def handle_paste(req: Request):
 
         if existing_ssot:
             existing_portfolio = existing_ssot.get("mutable_state", {}).get("portfolio_snapshot", []) if has_layer_model else existing_ssot.get("portfolio_snapshot", [])
-            payload_portfolio = payload.get("mutable_state", {}).get("portfolio_snapshot", []) if has_layer_model else payload.get("portfolio_snapshot", [])
+            
+            # Check if portfolio_snapshot is explicitly specified in the payload (to handle empty arrays properly)
+            # Default to None to distinguish between 'missing in payload' and 'explicitly empty'
+            has_payload_portfolio = False
+            payload_portfolio = None
+            if has_layer_model:
+                if "mutable_state" in payload and isinstance(payload["mutable_state"], dict) and "portfolio_snapshot" in payload["mutable_state"]:
+                    payload_portfolio = payload["mutable_state"]["portfolio_snapshot"]
+                    has_payload_portfolio = True
+            else:
+                if "portfolio_snapshot" in payload:
+                    payload_portfolio = payload["portfolio_snapshot"]
+                    has_payload_portfolio = True
 
-            if payload_portfolio and existing_portfolio:
-                merged_portfolio = _merge_portfolio(existing_portfolio, payload_portfolio)
+            # If payload contains a portfolio_snapshot (even if empty) or if both exist
+            if has_payload_portfolio:
+                if not payload_portfolio and existing_portfolio:
+                    # Incoming payload has an empty portfolio snapshot, but we have existing holdings.
+                    # Per MERGE_BY_TICKER_PRESERVE_UNTOUCHED_TICKERS, do NOT wipe the existing portfolio!
+                    # Preserve existing holdings unless explicitly deleted via DELETE_FIELD.
+                    merged_portfolio = existing_portfolio
+                else:
+                    merged_portfolio = _merge_portfolio(existing_portfolio, payload_portfolio)
                 
                 payload_without_portfolio = _deep_merge({}, payload)
                 if has_layer_model:
@@ -551,6 +570,7 @@ async def handle_paste(req: Request):
                 else:
                     merged_ssot["portfolio_snapshot"] = merged_portfolio
             else:
+                # portfolio_snapshot is missing entirely from incoming payload, so preserve existing portfolio
                 merged_ssot = _deep_merge(existing_ssot, payload)
         else:
             merged_ssot = payload

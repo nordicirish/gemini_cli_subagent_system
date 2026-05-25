@@ -6,16 +6,11 @@ const ModernChat = {
     input: null,
     messages: null,
     sendBtn: null,
+    
+    BOOT_PROMPT: 'SYSTEM BOOT: Execute the full Stage 0 Council Boot Sequence. Using the live DATA_PACKET just injected: (1) Baseline sync — ground all portfolio prices. (2) Cash reconciliation. (3) Regime classification. (4) Portfolio health audit. (5) Market posture assessment. Output a clear, human-readable summary of your findings.',
 
-    // Quick-prompt definitions (6 core actions — log/execute handled automatically)
+    // Quick-prompt definitions (5 core actions — log/execute handled automatically)
     QUICK_PROMPTS: [
-        {
-            icon: '⚡',
-            label: 'Session Boot',
-            id: 'qp-boot',
-            tooltip: 'Initialize system, sync baseline prices, reconcile cash, and perform health audit.',
-            prompt: 'SYSTEM BOOT: Execute the full Stage 0 Council Boot Sequence. Using the live DATA_PACKET just injected: (1) Baseline sync — ground all portfolio prices. (2) Cash reconciliation. (3) Regime classification. (4) Portfolio health audit. (5) Market posture assessment. Output a clear, human-readable summary of your findings.'
-        },
         {
             icon: '📊',
             label: 'Market Analysis',
@@ -205,12 +200,45 @@ const ModernChat = {
         await this.sendMessage();
     },
 
+    showModelWarning(warningText) {
+        let warningEl = document.getElementById('chat-model-warning-banner');
+        if (warningText) {
+            if (!warningEl) {
+                warningEl = document.createElement('div');
+                warningEl.id = 'chat-model-warning-banner';
+                warningEl.style.cssText = `
+                    background: rgba(255, 171, 0, 0.15);
+                    border: 1px solid rgba(255, 171, 0, 0.3);
+                    border-radius: 12px;
+                    padding: 10px 16px;
+                    margin-bottom: 16px;
+                    color: #ffab00;
+                    font-size: 0.85rem;
+                    font-weight: 500;
+                    backdrop-filter: blur(10px);
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                `;
+                // Insert it at the very top of the chat-messages container
+                this.messages.insertBefore(warningEl, this.messages.firstChild);
+            }
+            warningEl.innerHTML = `⚠️ <span>${warningText}</span>`;
+            warningEl.style.display = 'flex';
+        } else {
+            if (warningEl) {
+                warningEl.style.display = 'none';
+            }
+        }
+    },
+
     async fetchModels() {
         if (!this.modelSelector) return;
         try {
             const res = await fetch('/api/list_models');
             const data = await res.json();
             if (data.status === 'success') {
+                this.showModelWarning(data.warning);
                 const currentModel = this.modelSelector.value;
                 const activeModel = currentModel || data.current_model || 'gemini-2.0-flash-thinking-exp';
                 this.modelSelector.innerHTML = '';
@@ -219,7 +247,6 @@ const ModernChat = {
                 
                 data.models.forEach(m => {
                     const nameLower = m.name.toLowerCase();
-                    // Classify model as paid if it is a Pro tier or Preview/Pro preview
                     const isPaid = nameLower.includes('pro') || (nameLower.includes('preview') && !nameLower.includes('flash') && !nameLower.includes('thinking'));
                     
                     if (!includePaid && isPaid) {
@@ -237,7 +264,6 @@ const ModernChat = {
                     this.modelSelector.appendChild(opt);
                 });
 
-                // Auto-fallback if the previously active model was a paid model and is now hidden
                 if (!this.modelSelector.value && this.modelSelector.options.length > 0) {
                     this.modelSelector.selectedIndex = 0;
                     this.changeModel();
@@ -263,6 +289,8 @@ const ModernChat = {
                 body: JSON.stringify({ model, include_paid: includePaid })
             });
             if (res.ok) {
+                const data = await res.json();
+                this.showModelWarning(data.warning);
                 statusIndicator.textContent = 'Status: Ready';
                 statusIndicator.style.color = '#8b949e';
                 this.appendMessage('ai', `Council re-calibrated. Now utilizing **${model}** for higher reasoning.`, false);
@@ -413,15 +441,14 @@ const ModernChat = {
     async startNewChat() {
         if (confirm('Archive current session and start a new conversation?')) {
             this.archiveCurrentSession();
-            this.messages.innerHTML = `
-                <div class="modern-message ai">
-                    Council session reset. Live data will be auto-injected with your next message. How can I help you?
-                </div>
-            `;
+            this.messages.innerHTML = '';
+            localStorage.removeItem('gem_chat_history');
             this.saveHistory();
             try {
                 await fetch('/api/reset_chat', { method: 'POST' });
             } catch (e) {}
+            // Automatically trigger boot
+            await this.triggerAutoBoot();
         }
     },
 
@@ -509,20 +536,34 @@ const ModernChat = {
 
     loadHistory() {
         const history = localStorage.getItem('gem_chat_history');
+        let parsed = [];
         if (history) {
             try {
-                const messages = JSON.parse(history);
-                this.messages.innerHTML = '';
-                messages.forEach(msg => {
-                    this.appendMessage(msg.role, msg.text, false, msg.cost || 0.0, msg.usage || null, msg.model || null);
-                });
-                this.updateTotalSessionCost();
+                parsed = JSON.parse(history);
             } catch (e) {
-                console.error('Failed to load chat history', e);
+                console.error('Failed to parse chat history', e);
             }
+        }
+
+        if (parsed.length > 0) {
+            this.messages.innerHTML = '';
+            parsed.forEach(msg => {
+                this.appendMessage(msg.role, msg.text, false, msg.cost || 0.0, msg.usage || null, msg.model || null);
+            });
+            this.updateTotalSessionCost();
         } else {
             this.updateTotalSessionCost();
+            this.triggerAutoBoot();
         }
+    },
+
+    async triggerAutoBoot() {
+        this.messages.innerHTML = '';
+        this.appendMessage('ai', '⚡ **System Booting...** Running Stage 0 Council Sequence...', false);
+        
+        this._pendingDisplayLabel = '⚡ Session Auto-Boot';
+        this.input.value = this.BOOT_PROMPT;
+        await this.sendMessage();
     },
 
     saveHistory() {
@@ -836,6 +877,7 @@ const ModernChat = {
             this.currentLogElement = null;
 
             if (data.status === 'success') {
+                this.showModelWarning(data.warning);
                 let cost = 0.0;
                 if (data.usage && data.model) {
                     cost = this.calculateCost(data.usage, data.model);
