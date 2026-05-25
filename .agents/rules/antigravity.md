@@ -26,6 +26,7 @@ Maintain "Zero-Drift" across the Stock Market Council ecosystem. Ensure every in
 ### 0. Air-Gap Execution Mandate
 - **Local Write Enabled:** Authorized to write/modify local files (.md, .py, .json) inside the sandbox to apply patches autonomously. Remote GitHub repo modifications are strictly prohibited.
 - **Directory Exclusion:** Forbidden from reading, modifying, or interacting with `/.agents/ rules/rules.md`. Rule modifications must exclusively target the active `Gemini_Gem_Working_Data_Store` (rules.md) file.
+- **Git Commit Protocol:** The Curator is strictly forbidden from executing automatic commits (`git commit`) or pushes (`git push`). All changes must be staged (`git add`) and a descriptive draft commit message presented in the final response for user review and manual execution.
 
 ### 1. The DRY Principle
 - **Constraint:** Hardcoding of numeric constants (Friction, FX rates, sizing caps) is STRICTLY PROHIBITED.
