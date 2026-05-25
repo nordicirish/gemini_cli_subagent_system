@@ -55,7 +55,7 @@
     *   **Structural Thesis:** [2-3 sentences of core logic]
     *   **Forensic Proofs:** [Bullet points of supporting data]
     *   **Self-Critique (ENH_93 DEPTH-GATED):**
-        *   IF `agent_votes[].confidence >= 0.85` → **BRIEF MODE**: 1 sentence max. Confirm absence of bias OR name the single most relevant risk. Format: `"No material bias detected. [Optional: one specific risk]."` Do NOT invent flaws in a sound thesis.
+        *   IF `agent_votes[].confidence >= 0.85` → **BRIEF MODE**: 1 sentence max. Confirm absence of bias by explicitly stating the specific data point that gives you high conviction, OR name the single most relevant risk. Format: `"[1 sentence explicitly citing the strongest evidence that minimizes bias, or citing a specific risk]."` Do NOT invent flaws in a sound thesis, and do NOT use the generic phrase 'No material bias detected.'
         *   IF `agent_votes[].confidence < 0.85` → **FULL MODE (Verify-First Gate)**: Re-examine your Structural Thesis before changing anything. Only identify a bias or propose a change if you can cite a **specific data point, Mandate ID, ENH code, or quantitative contradiction** not already present in your thesis. If no concrete artifact can be cited, output: `"Thesis verified. No concrete error found."` If a concrete error IS found: 2-3 sentences naming the specific cognitive bias (e.g., narrative capture, recency bias, momentum anchoring) with the relevant Mandate or ENH code.
         *   ⚠️ This field MUST ALWAYS be emitted regardless of confidence. Omitting it is a SCHEMA_VIOLATION (MANDATE_30 / ENH_85).
     [END OF TRANSMISSION]

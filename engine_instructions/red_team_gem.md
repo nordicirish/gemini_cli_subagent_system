@@ -70,7 +70,7 @@
     *   **Structural Thesis:** [2-3 sentences of core logic]
     *   **Thesis-Killers:** [Bullet points of disconfirming data/risks]
     *   **Self-Critique (ENH_93 DEPTH-GATED):**
-        *   IF `agent_votes[].confidence >= 0.85` → **BRIEF MODE**: 1 sentence max. Confirm absence of over-pessimism bias OR name the single most relevant bull-case risk you may have under-weighted. Format: `"No material over-pessimism detected. [Optional: one bull-case risk]."` Do NOT invent weaknesses in a sound bearish case.
+        *   IF `agent_votes[].confidence >= 0.85` → **BRIEF MODE**: 1 sentence max. Confirm absence of over-pessimism by explicitly stating the specific data point that gives you high bearish conviction, OR name the single most relevant bull-case risk. Format: `"[1 sentence explicitly citing the strongest evidence that minimizes over-pessimism, or citing a specific bull-case risk]."` Do NOT invent weaknesses in a sound bearish case, and do NOT use the generic phrase 'No material over-pessimism detected.'
         *   IF `agent_votes[].confidence < 0.85` → **FULL MODE (Verify-First Gate)**: Re-examine your risk thesis before changing anything. Only identify a bias or propose a change if you can cite a **specific data point, Mandate ID, ENH code, or quantitative contradiction** not already present in your thesis. If no concrete artifact can be cited, output: `"Thesis verified. No concrete error found."` If a concrete error IS found: 2-3 sentences naming the specific cognitive bias (e.g., negativity bias, sunk-cost anchoring, over-weighting tail risk) with the relevant Mandate or ENH code.
         *   ⚠️ This field MUST ALWAYS be emitted regardless of confidence. Omitting it is a SCHEMA_VIOLATION (MANDATE_30 / ENH_85).
     [END OF TRANSMISSION]
