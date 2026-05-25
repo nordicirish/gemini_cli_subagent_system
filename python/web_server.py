@@ -737,7 +737,12 @@ def chat_endpoint(req: ChatRequest):
                     try:
                         res = tools.update_ssot(inner_json)
                         framework.log(f"[System] SSoT update result: {res}")
-                        cleaned_response = full_response[:idx] + full_response[close_idx + 3:]
+                        payload_html = (
+                            f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
+                            f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; list-style: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden) <span style="font-size: 0.75rem; color: var(--accent-blue); cursor: pointer; margin-left: 10px;">[Show/Hide]</span></summary>'
+                            f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
+                        )
+                        cleaned_response = full_response[:idx] + payload_html + full_response[close_idx + 3:]
                         payload_processed = True
                     except Exception as pe:
                         framework.log(f"[System Error] Failed to update SSoT with sliced payload: {pe}")
@@ -754,7 +759,12 @@ def chat_endpoint(req: ChatRequest):
                         framework.log("[System] Auto-processing brace-extracted EXECUTION_PAYLOAD...")
                         res = tools.update_ssot(candidate)
                         framework.log(f"[System] SSoT update result: {res}")
-                        cleaned_response = full_response[:start_idx] + full_response[end_idx+1:]
+                        payload_html = (
+                            f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
+                            f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; list-style: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden) <span style="font-size: 0.75rem; color: var(--accent-blue); cursor: pointer; margin-left: 10px;">[Show/Hide]</span></summary>'
+                            f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
+                        )
+                        cleaned_response = full_response[:start_idx] + payload_html + full_response[end_idx+1:]
                         payload_processed = True
                     except Exception as pe:
                         framework.log(f"[System Error] Failed to update SSoT with brace payload: {pe}")

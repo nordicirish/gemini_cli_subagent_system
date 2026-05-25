@@ -589,6 +589,20 @@ const ModernChat = {
 
         if (role === 'ai') {
             msgDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(text) : text;
+
+            // Collapsible SSoT Payload dynamic text toggling (v10.46)
+            const payloadDetails = msgDiv.querySelectorAll('.execution-payload-details');
+            payloadDetails.forEach(details => {
+                const summaryText = details.querySelector('summary');
+                if (summaryText) {
+                    details.addEventListener('toggle', () => {
+                        const isOpened = details.open;
+                        summaryText.childNodes[0].textContent = isOpened 
+                            ? '⚖️ SSoT Execution Payload (Visible) ' 
+                            : '⚖️ SSoT Execution Payload (Hidden) ';
+                    });
+                }
+            });
             
             // Collapsible Adversarial Framing Isolation (v10.36)
             const paragraphs = msgDiv.querySelectorAll('p');

@@ -310,3 +310,41 @@
     display: inline-block;
     border: 1px solid rgba(255, 255, 255, 0.05);
 }
+
+
+/* SSoT Execution Payload Collapsible Panel Styling (v10.46) */
+.execution-payload-details {
+    transition: background 0.3s, border-color 0.3s;
+}
+
+.execution-payload-details:hover {
+    background: rgba(255, 255, 255, 0.04) !important;
+    border-color: rgba(88, 166, 255, 0.15) !important;
+}
+
+.execution-payload-details summary {
+    user-select: none;
+    outline: none;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.execution-payload-details summary:hover {
+    color: var(--text-primary);
+}
+
+.execution-payload-details pre {
+    background: rgba(0, 0, 0, 0.4) !important;
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+    border-radius: 8px;
+    padding: 12px !important;
+    margin: 8px 0 0 0 !important;
+    overflow-x: auto;
+}
+
+.execution-payload-details code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+    font-size: 0.8rem !important;
+    background: transparent !important;
+    padding: 0 !important;
+}

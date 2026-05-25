@@ -155,7 +155,7 @@ class AgentFramework:
         CachedContent object to reduce latency and token usage.
         Must be called AFTER sub_agent_configs is defined.
         """
-        if getattr(self, "cache_disabled", False):
+        if getattr(self, "free_tier_only", True) or getattr(self, "cache_disabled", False):
             if self.cached_content_name:
                 try:
                     self.log(f"[System] Cleaning up cached content: {self.cached_content_name}")
@@ -265,34 +265,6 @@ class AgentFramework:
                     else:
                         final_tools.append(t)
 
-            # Cache association — PRO and THINKING modes only
-            cache_to_use = None
-            instruction_to_pass = instruction
-            tools_to_pass = final_tools if final_tools else None
-
-            if self.cached_content_name and mode in ["PRO", "THINKING"]:
-                cache_to_use = self.cached_content_name
-                if instruction:
-                    # Append instruction to prompt since it can't be in GenerateContentConfig with cache
-                    prompt = f"[SYSTEM INSTRUCTION OVERRIDE]\n{instruction}\n\n[USER PROMPT]\n{prompt}"
-                    instruction_to_pass = None
-                # Tools are assumed to be in the cache. Passing them in GenerateContentConfig raises an error.
-                tools_to_pass = None
-
-            config = types.GenerateContentConfig(
-                system_instruction=instruction_to_pass,
-                temperature=1.0,
-                max_output_tokens=8192,
-                tools=tools_to_pass,
-                cached_content=cache_to_use,
-                safety_settings=[
-                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT",  threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT",  threshold="BLOCK_NONE"),
-                ],
-            )
-
             # Determine clients to try for this model
             is_free_tier = self._is_free_tier_model(model_name)
             clients_to_try = []
@@ -310,16 +282,50 @@ class AgentFramework:
                 if len(clients_to_try) > 1:
                     self.log(f"[Cloud Execution] Trying client with {client_label} for model {model_name}...")
 
-                def attempt_call(client_instance):
+                # Dynamically construct client-specific prompt, instruction, tools, and config.
+                # Caching must be completely stripped when using the Free-Tier Key (since Free Tier has no caching support).
+                use_cache_for_this_client = (
+                    self.cached_content_name 
+                    and mode in ["PRO", "THINKING"] 
+                    and client_label != "Free-Tier Key"
+                )
+
+                client_prompt = prompt
+                client_instruction = instruction
+                client_tools = final_tools if final_tools else None
+                client_cache = None
+
+                if use_cache_for_this_client:
+                    client_cache = self.cached_content_name
+                    if instruction:
+                        client_prompt = f"[SYSTEM INSTRUCTION OVERRIDE]\n{instruction}\n\n[USER PROMPT]\n{prompt}"
+                        client_instruction = None
+                    client_tools = None
+
+                config = types.GenerateContentConfig(
+                    system_instruction=client_instruction,
+                    temperature=1.0,
+                    max_output_tokens=8192,
+                    tools=client_tools,
+                    cached_content=client_cache,
+                    safety_settings=[
+                        types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
+                        types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),
+                        types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT",  threshold="BLOCK_NONE"),
+                        types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT",  threshold="BLOCK_NONE"),
+                    ],
+                )
+
+                def attempt_call(client_instance, client_config, p_content):
                     if getattr(self, "cancel_check", None) and self.cancel_check():
                         self.log("[Framework] Cancel signal active before starting API call.")
                         raise RuntimeError("Operation cancelled by user.")
                     if final_tools:
-                        chat = client_instance.chats.create(model=model_name, config=config)
-                        res = chat.send_message(prompt)
+                        chat = client_instance.chats.create(model=model_name, config=client_config)
+                        res = chat.send_message(p_content)
                     else:
                         res = client_instance.models.generate_content(
-                            model=model_name, contents=prompt, config=config
+                            model=model_name, contents=p_content, config=client_config
                         )
                     
                     if hasattr(res, 'usage_metadata') and res.usage_metadata:
@@ -329,7 +335,7 @@ class AgentFramework:
                     return res
 
                 try:
-                    return attempt_call(active_client)
+                    return attempt_call(active_client, config, client_prompt)
                 except Exception as e:
                     error_msg = str(e)
                     last_error = e
@@ -341,12 +347,18 @@ class AgentFramework:
                         continue
 
                     # Cache expired/invalid — retry immediately without cache
-                    if "cache" in error_msg.lower() and cache_to_use:
+                    if "cache" in error_msg.lower() and client_cache:
                         self.log("[System] Cache expired or invalid. Retrying without cache...")
                         self.cached_content_name = None
                         return self.generate_response_with_fallback(prompt, instruction, mode, tools)
 
+                    is_daily_limit = any(term in error_msg.lower() for term in ["daily", "limit exceeded", "exhausted", "free tier", "quota"])
+
                     if "429" in error_msg or "quota" in error_msg.lower():
+                        if is_daily_limit:
+                            self.log(f"[System] Daily quota/limit hit for {model_name}. Skipping retry wait, instantly falling back to next available model...")
+                            continue
+
                         import re
                         wait_time = 32
                         match = re.search(r"retry in (\d+(?:\.\d+)?)s", error_msg, re.IGNORECASE)
@@ -355,7 +367,7 @@ class AgentFramework:
                         self.log(f"[System] Rate limit hit for {model_name}. Waiting {wait_time}s...")
                         time.sleep(wait_time)
                         try:
-                            return attempt_call(active_client)
+                            return attempt_call(active_client, config, client_prompt)
                         except Exception as retry_e:
                             last_error = retry_e
                             continue
@@ -364,7 +376,7 @@ class AgentFramework:
                         self.log(f"[System] 503 UNAVAILABLE for {model_name}. Retrying in 5s...")
                         time.sleep(5)
                         try:
-                            return attempt_call(active_client)
+                            return attempt_call(active_client, config, client_prompt)
                         except Exception:
                             pass
                         continue
