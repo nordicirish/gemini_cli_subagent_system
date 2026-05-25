@@ -1580,12 +1580,14 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
     # --- Final fallback to fast_info ---
     try:
         fi = t_obj.fast_info
-        if vol == 0:
-            vol = fi.last_volume or fi.three_month_average_volume
+        if vol == 0 or vol is None:
+            v_last = getattr(fi, 'last_volume', 0)
+            v_avg = getattr(fi, 'three_month_average_volume', 0)
+            vol = (v_last if v_last is not None else 0) or (v_avg if v_avg is not None else 0) or 0
         if price == 0:
             if status == "PRE-MARKET" and getattr(fi, 'pre_market_price', None):
                 price = float(fi.pre_market_price)
-            elif status in ("AFTER-HOURS", "CLOSED") and getattr(fi, 'post_market_price', None):
+            elif status in ("AFTER-HOURS", "CLOSED" ) and getattr(fi, 'post_market_price', None):
                 price = float(fi.post_market_price)
             elif getattr(fi, 'last_price', None):
                 price = float(fi.last_price)
@@ -1593,10 +1595,19 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         pass
 
     # --- Volume fallback ---
-    if vol == 0:
+    if vol == 0 or vol is None:
         alt_vol = polygon_volume(symbol)
         if alt_vol:
             vol = alt_vol
+
+    # Ensure vol is safe and not None
+    if vol is None:
+        vol = 0
+    else:
+        try:
+            vol = int(vol)
+        except:
+            vol = 0
 
     # --- Cache updates ---
     if vol > 0:

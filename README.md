@@ -1,8 +1,8 @@
-# 💎 GEM Investment Portfolio Agent Framework — v10.40-Debate-Title-Expansion-Fix
+# 💎 GEM Investment Portfolio Agent Framework 
 
 **An autonomous, multi-agent AI investment portfolio intelligence system powered by Google Gemini & Gemma.**
 
-Each Markdown file (`.md`) is a **system instruction** for a dedicated AI sub-agent. Together, these agents form an institutional-grade investment portfolio council that analyses live market data, enforces risk protocols, and produces consensus-driven investment decisions — all accessible via a real-time, glassmorphic Web Dashboard with a built-in AI chat interface.
+Each Markdown file (`.md`) is a **system instruction** for a dedicated AI sub-agent. Together, these agents form an institutional-grade investment portfolio council that analyses live market data, enforces risk protocols, and produces consensus-driven investment decisions — all accessible via a real-time, Web Dashboard with a built-in AI chat interface.
 
 > **Cost-Optimized & Local-First.** The system uses a hybrid model architecture routing to Gemini 2.0 Flash Thinking (THINKING), Gemini 2.5 Pro (PRO), Gemini 2.5 Flash (FAST), and Gemma 4 31B (GEMMA) tiers — fully synchronized with the GEM Investment Portfolio Agent System source of truth.
 
@@ -280,6 +280,14 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 ---
 
 ## 📋 Changelog
+### v10.42-Ticker-Validation-UI-Alert-Sync *(2026-05-25)*
+- **Real-Time Ticker Validation & UI Alerts:** Integrated automated ticker validation inside `web_server.py`'s basket (portfolio) and watchlist endpoints. The backend now queries Yahoo Finance quotes to dynamically verify new assets. If an invalid symbol is detected, the server returns a `400 Bad Request` that triggers a browser alert dialog and automatically rolls back UI inputs, preventing data pollution.
+- **Global Architectural Parity:** Synchronized version strings to `v10.42-Ticker-Validation-UI-Alert-Sync` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+
+### v10.41-Volume-NoneType-TypeError-Fix *(2026-05-25)*
+- **Hardened Volume Tick Sanitization:** Patched a critical volume fetch type mismatch inside `fetch_stocks.py`. Added robust `NoneType` checks and standard integer conversion fallbacks when polling Yahoo Finance's `fast_info` or Polygon interfaces, preventing server and background daemon thread crashes due to invalid tickers or incomplete API responses.
+- **Global Architectural Parity:** Synchronized version strings to `v10.41-Volume-NoneType-TypeError-Fix` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+
 ### v10.40-Debate-Title-Expansion-Fix *(2026-05-24)*
 - **Dynamic Debate & Compliance Title Updates:** Engineered dynamic toggle event listeners for both the "Gemini Gem Council Debate" and the "System Compliance & Framing" collapsible containers in [modern_ui.js](file:///c:/github/gemini_cli_subagent_system/static/modern_ui.js). The UI now dynamically strips the `(Hidden)` label when the containers are expanded by the user, and reappends it when collapsed, maintaining pristine interface feedback.
 - **Global Architectural Parity:** Synchronized version strings to `v10.40-Debate-Title-Expansion-Fix` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.

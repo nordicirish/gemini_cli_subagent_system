@@ -8,7 +8,7 @@ from google import genai
 from google.genai import types
 
 # ---------------------------------------------------------------------------
-# Model definitions — v10.40-Debate-Title-Expansion-Fix
+# Model definitions — v10.42-Ticker-Validation-UI-Alert-Sync
 # Per terminal.md > Mode Selection Matrix (Canonical)
 # ---------------------------------------------------------------------------
 DEFAULT_MODEL_PRO = "gemini-2.5-pro"

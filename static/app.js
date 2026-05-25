@@ -867,6 +867,14 @@ async function savePortfolio(portfolioArr) {
             showFeedback(btn, "✅ Synced!", "Portfolio successfully updated! (Table refreshing...)");
             await fetchPortfolio();
             pollData(); // Force immediate refresh
+        } else {
+            let errMsg = 'Failed to update portfolio.';
+            try {
+                const data = await res.json();
+                errMsg = data.detail || data.message || errMsg;
+            } catch (err) {}
+            alert(`Validation Error: ${errMsg}`);
+            await fetchPortfolio(); // rollback inputs in UI
         }
     } catch (e) { console.error("Portfolio update failed", e); }
     finally {
@@ -942,6 +950,14 @@ async function saveWatchlist(list) {
             dDataStatus.className = "status-message text-green";
             setTimeout(() => { dDataStatus.textContent = ""; }, 3000);
             pollData(); // Force immediate refresh
+        } else {
+            let errMsg = 'Failed to update watchlist.';
+            try {
+                const data = await res.json();
+                errMsg = data.detail || data.message || errMsg;
+            } catch (err) {}
+            alert(`Validation Error: ${errMsg}`);
+            await fetchWatchlist(); // rollback in UI
         }
     } catch (e) { console.error("Watchlist update failed", e); }
 }

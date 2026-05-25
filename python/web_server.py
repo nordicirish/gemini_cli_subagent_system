@@ -1,5 +1,5 @@
 import os
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 import sys
 import uvicorn
 import asyncio
@@ -58,6 +58,31 @@ def check_cancelled():
 # Initialize the AgentFramework with cloud-fallback
 framework = AgentFramework(log_callback=log_to_queue)
 framework.cancel_check = check_cancelled
+
+def check_invalid_tickers(symbols: List[str]) -> List[str]:
+    # Normalize symbols to uppercase and strip whitespace
+    symbols = [s.strip().upper() for s in symbols if s.strip()]
+    if not symbols:
+        return []
+    
+    try:
+        from fetch_stocks import safe_yf_get
+        syms = ",".join(symbols)
+        url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={syms}"
+        r = safe_yf_get(url, timeout=3)
+        if r.status_code != 200:
+            # API failure, do not block the user to avoid false positives
+            return []
+        data = r.json()
+        results = data.get('quoteResponse', {}).get('result', [])
+        valid_symbols = {q['symbol'].upper() for q in results}
+        # A ticker is invalid if it was queried but is not in the valid_symbols returned
+        invalid = [s for s in symbols if s not in valid_symbols]
+        return invalid
+    except Exception as e:
+        print(f"[Validation Error] Exception in check_invalid_tickers: {e}")
+        # Network/Parsing failure, do not block the user
+        return []
 
 # ---------------------------------------------------------------------------
 # Subagent & Council Tool Definitions
@@ -870,6 +895,15 @@ def get_basket():
 @app.post("/api/basket")
 def save_basket(req: BasketSaveRequest):
     try:
+        # Validate portfolio symbols before saving
+        symbols = [item.ticker for item in req.portfolio]
+        invalid = check_invalid_tickers(symbols)
+        if invalid:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid ticker symbol(s): {', '.join(invalid)}"
+            )
+
         if os.path.exists("context/ssot.json"):
             with open("context/ssot.json", "r") as f:
                 data = json.load(f)
@@ -898,9 +932,11 @@ def save_basket(req: BasketSaveRequest):
                 framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
                 
             return {"status": "success"}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         framework.log(f"[Error] Basket Save Failed: {e}")
-        return {"status": "error", "message": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/watchlist")
 def get_watch_list():
@@ -948,6 +984,14 @@ async def save_watch_list(req: Request):
         # Clean and uppercase
         watch_list = [w.strip().upper() for w in watch_list if isinstance(w, str) and w.strip()]
         
+        # Validate watchlist symbols before saving
+        invalid = check_invalid_tickers(watch_list)
+        if invalid:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid ticker symbol(s): {', '.join(invalid)}"
+            )
+
         # 1. Update config.json (ENH_83 SSoT active asset tracking)
         if os.path.exists("context/config.json"):
             with open("context/config.json", "r") as f:
@@ -980,9 +1024,11 @@ async def save_watch_list(req: Request):
             framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
             
         return {"status": "success"}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         framework.log(f"[Error] Watch List Save Failed: {e}")
-    return {"status": "success"}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/scout")
 def get_scout_categories():
