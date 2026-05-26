@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v5.2-FIFO-WAC-Aware
+- **version**: v10.51-Trade-Lessons-Consolidated
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v5.2-FIFO-WAC-Aware
+- **version**: v10.51-Trade-Lessons-Consolidated
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

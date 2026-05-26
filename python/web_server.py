@@ -1043,8 +1043,8 @@ def get_basket():
 @app.post("/api/basket")
 def save_basket(req: BasketSaveRequest):
     try:
-        # Validate portfolio symbols before saving
-        symbols = [item.ticker for item in req.portfolio]
+        # Validate portfolio symbols before saving (only active holdings with shares > 0)
+        symbols = [item.ticker for item in req.portfolio if item.shares > 0]
         invalid = check_invalid_tickers(symbols)
         if invalid:
             raise HTTPException(
@@ -1057,7 +1057,8 @@ def save_basket(req: BasketSaveRequest):
                 data = json.load(f)
             new_snapshot = []
             for item in req.portfolio:
-                new_snapshot.append({"ticker": item.ticker, "shares": item.shares, "wac": item.wac})
+                if item.shares > 0:
+                    new_snapshot.append({"ticker": item.ticker, "shares": item.shares, "wac": item.wac})
             
             if "mutable_state" in data:
                 data["mutable_state"]["portfolio_snapshot"] = new_snapshot

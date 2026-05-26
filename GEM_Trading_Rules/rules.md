@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.47-Portfolio-Merge-Protection-Enforced
+**Version:** v10.51-Trade-Lessons-Consolidated
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -96,8 +96,8 @@
 - ENH_98: Analyst Upgrade Quarantine
 - ENH_99: Portfolio Curation Protocol
 - ENH_104: PERSISTENT STOP-LOSS TELEMETRY (trailing_stop_audit Emission Protocol)
-- ENH_105: Melt-Up Regime & RSI Decoupling
-- ENH_106: Long Gamma Shield Override
+- ENH_105: SPY RSI > 75 no longer blocks high-beta accumulation if VIX < 20 (Melt-Up Regime Decoupling)
+- ENH_106: LONG GAMMA SSR OVERRIDE - If an asset suffers a catastrophic intraday structural failure (triggering SEC Rule 201 SSR by dropping >10%), any active LONG_GAMMA shield is instantly invalidated. The Orchestrator must prioritize SSR structural failure over GEX stabilization and permit mechanical risk trims.
 - ENH_107: GEX-SSR Conflict Protocol
 - ENH_108: Persistent Stop-Loss Telemetry
 - ENH_110: Council Debate & Decision Log Permanence
@@ -139,7 +139,7 @@
 - MANDATE_32: ZERO_LIQUIDITY_ROTATION (Pairwise Opportunity Cost Audit)
 - MANDATE_33: SHORT_GAMMA_DEGRADATION_TRIMS (VWAP Degradation Protocol)
 - MANDATE_34: INSTITUTIONAL PEG & AH GRAVITY
-- MANDATE_36: DYNAMIC TRAILING TELEMETRY
+- MANDATE_36_ENH_104: PERSISTENT STOP-LOSS TELEMETRY - The Execution Payload must persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP.
 - NOTE: MANDATE_46 (LONG GAMMA SHIELD OVERRIDE) was REJECTED — content is fully covered by ENH_16_D, MANDATE_34, and MANDATE_35. MANDATE_34 has been augmented with the precision language from the proposed patch.
 
 ## Tool Supremacy Hierarchy
@@ -444,10 +444,10 @@
     *   **Directive:** Assets pinning unnaturally to whole numbers into the close prior to binary events must be treated as institutional distribution ceilings. The Orchestrator is strictly prohibited from chasing After-Hours momentum on such assets without verified filings, and must rely on mechanical trailing stops.
     *   **Rationale:** Prevents the system from misinterpreting toxic AH distribution as bullish momentum breakouts.
 
-*   **[MANDATE_36_DYNAMIC_TRAILING_TELEMETRY]**
+*   **[MANDATE_36_ENH_104 - PERSISTENT STOP-LOSS TELEMETRY]**
     *   **Status:** ACTIVE
-    *   **Directive (DYNAMIC TRAILING TELEMETRY):** The Execution Payload MUST persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP.
-    *   **Rationale:** Demonstrated critical utility in the May 21 CMPS log, providing mechanical downside defense during sympathy-driven overextensions.
+    *   **Directive:** PERSISTENT STOP-LOSS TELEMETRY - The Execution Payload must persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP.
+    *   **Rationale:** Flawlessly protected capital during the 2026-05-26 09:32 CMPS/DELL gamma flush by anchoring defense parameters directly to intraday liquidity metrics.
 
 
 ## Anti Hallucination Core
@@ -1617,17 +1617,17 @@
 
 ## Fundamental Guardrails
 
-### [ENH_105] MELT-UP REGIME & RSI DECOUPLING
+### [ENH_105] SPY RSI > 75 no longer blocks high-beta accumulation if VIX < 20 (Melt-Up Regime Decoupling)
 - **Status:** ACTIVE
-- **Content:** SPY RSI > 75 does not trigger automatic liquidation if VIX < 20.
-- **Justification:** Validated by sustained performance in recent high-beta breakouts.
+- **Content:** SPY RSI > 75 no longer blocks high-beta accumulation if VIX < 20 (Melt-Up Regime Decoupling).
+- **Justification:** Proven durable constraint across multiple structural melt-up cycles; algorithmic limits on SPY should not gate idiosyncratic beta when macro vol is dead.
 
 ## Risk Management
 
-### [ENH_106] LONG GAMMA SHIELD OVERRIDE
+### [ENH_106] LONG GAMMA SSR OVERRIDE
 - **Status:** ACTIVE
-- **Content:** If SSR is triggered (>10% drop), Long Gamma protection is mathematically invalidated.
-- **Justification:** Necessary to prevent passive holding during active distribution.
+- **Content:** LONG GAMMA SSR OVERRIDE - If an asset suffers a catastrophic intraday structural failure (triggering the SEC Rule 201 Short Sale Restriction by dropping >10%), any active LONG_GAMMA shield is instantly invalidated. The Orchestrator must prioritize the SSR structural failure over GEX stabilization and permit mechanical risk trims.
+- **Justification:** Prevents the system from passively holding a toxic asset whose market-maker hedging bands have catastrophically decayed.
 
 ### [ENH_107] GEX-SSR CONFLICT PROTOCOL
 - **Status:** ACTIVE
@@ -1663,11 +1663,16 @@
 
 ### [ENH_112] NATURAL LANGUAGE CURATOR & USER-FRIENDLY DISCLOSURES
 - **Status:** ACTIVE
-- **Content:** The visible markdown output MUST be presented in highly clear, natural conversational language. Raw technical jargon, structural engine codes (e.g. `ENH_xx` or `MANDATE_xx`), and system variables must be strictly forbidden in the user-visible primary text, and instead restricted to the background context payloads and `Self-Critique` fields. Any trade advice, especially SELL or TRIM directives, MUST be formulated in a highly user-friendly format containing:
-  1. The specific **Ticker** and explicit **Action**.
-  2. The exact **Target Trigger Price**.
-  3. The **Share Percentage** and exact **Share Count** to sell (derived dynamically from the active portfolio snapshot).
-  4. Any active **Trailing Stop Values** detailed in clean, natural percentage and price metrics rather than dry mathematical formulas.
+- **Content:** The visible markdown output MUST be presented in highly clear, natural conversational language. Raw technical jargon, structural engine codes (e.g. `ENH_xx` or `MANDATE_xx`), and system variables must be strictly forbidden in the user-visible primary text, and instead restricted to the background context payloads and `Self-Critique` fields. Any trade advice, especially SELL or TRIM directives, MUST be formulated in a highly user-friendly format. Specifically, the Orchestrator MUST persistently emit all buy, sell, and trailing stop recommendations in the visible Markdown output inside a structured section titled `### Active Telemetry & Suggested Sell Quantities:` conforming to the following strict format:
+  
+  Format Structure:
+  - For active trailing stops (triggered by RSI > 65 or Price > 2% above daily VWAP per `ENH_104`):
+    `[TICKER] (Holding: [shares] shares): * Anchor (VWAP Stop Price): $[anchor_price]`
+    `Current Price: $[current_price] ([+result]% above Anchor)`
+    `Status: ACTIVE (Trigger: RSI [rsi] > 65 or VWAP_DIST > 2%)`
+    `Trim Recommendation: If price breaches $[anchor_price], execute a [trim_pct]% mechanical risk trim ([trim_shares] shares) [rationale_narrative].`
+  - For inactive holdings:
+    `[TICKER] (Holding: [shares] shares): Current Price: $[current_price] | VWAP: $[vwap] | Status: INACTIVE (RSI [rsi] < 65)`
 - **Justification:** Translates complex system metrics into actionable, high-fidelity human instructions for maximum operational clarity.
 
 ## Infrastructure

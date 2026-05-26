@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v5.2-FIFO-WAC-Aware
+- **version**: v10.51-Trade-Lessons-Consolidated
 
 ## Tone
 institutional, narrative, concise

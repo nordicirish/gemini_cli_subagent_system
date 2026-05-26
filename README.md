@@ -280,14 +280,27 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 ---
 
 ## 📋 Changelog
-### v10.47-Portfolio-Merge-Protection-Enforced *(2026-05-25)*
+### v10.51-Trade-Lessons-Consolidated *(2026-05-26)*
+- **Trade Lessons SSoT Consolidation:** Eliminated duplicate structural states by purging the surplus `trade_lessons.json` file from the root directory. Enforced `context/trade_lessons.json` as the unified Single Source of Truth for dynamic trade lessons, aligning with Git patterns and air-gap context paradigms.
+- **Global Architectural Parity:** Synchronized version strings to `v10.51-Trade-Lessons-Consolidated` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+
+### v10.50-Portfolio-Pruning-Hardened *(2026-05-26)*
+- **SSoT Portfolio Curation & Pruning (ENH_99):** Resolved critical dashboard bugs where sold or deleted holdings were retained in `ssot.json` and UI tables. Enforced absolute programmatic filtering of assets with `shares <= 0` across the frontend DOM extraction (`getCurrentPortfolio()`), backend REST API (`/api/basket`), background merge processor (`_merge_portfolio()`), and Yahoo Finance validation flows.
+- **DOM Race Condition Elimination:** Hardened frontend deletion handler (`deleteFromPortfolio()`) to synchronously remove target elements from the DOM *before* triggering async save operations, preventing concurrent input focus-loss events from resurrecting deleted rows.
+- **Global Architectural Parity:** Synchronized version strings to `v10.50-Portfolio-Pruning-Hardened` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+
+### v10.49-Active-Telemetry-Format-Enforced *(2026-05-26)*
+- **Telemetry Formatting & Standardization (ENH_112):** Codified strict visual output format under a new section titled `### Active Telemetry & Suggested Sell Quantities:`. Defines explicit display structures for active trailing stops (including anchor price, current price, triggers, and mechanical trim percentages/shares) and inactive holdings.
+- **Global Architectural Parity:** Synchronized version strings to `v10.49-Active-Telemetry-Format-Enforced` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+
+### v10.48-Regime-Decoupling-Telemetry-Enforced *(2026-05-25)*
 - **Natural Language & User-Friendly Presentation (ENH_112):** Hardened the `ENH_112` curation protocols to explicitly forbid rule codes (e.g. `L-222`, `RULE_01`) and system variables (e.g. `net_gex_total`, `VIX_FEAR_THRESHOLD`) from appearing in conversational Markdown summaries, forcing the system to translate them into clean, elegant, user-friendly language.
 - **Natural Language Compliance Guard (PROC_09):** Added a procedural validation step inside the Rule Enforcer Engine to automatically intercept and veto any response violating natural language standards.
-- **Global Architectural Parity:** Synchronized version strings to `v10.47-Portfolio-Merge-Protection-Enforced` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+- **Global Architectural Parity:** Synchronized version strings to `v10.48-Regime-Decoupling-Telemetry-Enforced` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
 
-### v10.47-Portfolio-Merge-Protection-Enforced *(2026-05-25)*
+### v10.48-Regime-Decoupling-Telemetry-Enforced *(2026-05-25)*
 - **Mandatory JSON Payload Emission:** Removed all JSON payload suppression exemptions from `rules.md` (MANDATE_09/22) and `terminal.md` (unsuppressed final emission). Stripped the `DO NOT output a JSON` directives from all 6 quick-prompts in `static/modern_ui.js` to ensure the Master Orchestrator always outputs the JSON `EXECUTION_PAYLOAD` block on every single response, securing automatic updates of `ssot.json` and `decision_log.json`.
-- **Global Architectural Parity:** Synchronized version strings to `v10.47-Portfolio-Merge-Protection-Enforced` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
+- **Global Architectural Parity:** Synchronized version strings to `v10.48-Regime-Decoupling-Telemetry-Enforced` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
 
 ### v10.44-Natural-Language-Curator-Sync *(2026-05-25)*
 - **Natural Language & User-Friendly Presentation (ENH_112):** Codified rule `ENH_112` inside `rules.md` and `terminal.md` to restrict raw technical jargon/codes (e.g. `ENH_xx` or `MANDATE_xx`) from appearing in user-visible primary summaries. Any exit, trim, or sell recommendations must explicitly state the specific Ticker, Action, exact Target Trigger Price, Share Percentage, and dynamically calculated Share Count. Trailing stop telemetry is now presented in clean, natural percentage and price metrics rather than math formulas.

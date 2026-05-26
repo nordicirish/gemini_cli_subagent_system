@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v5.2-FIFO-WAC-Aware
+- **version**: v10.51-Trade-Lessons-Consolidated
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

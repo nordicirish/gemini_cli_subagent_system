@@ -262,11 +262,12 @@ async def save_basket(req: Request):
             
             new_snapshot = []
             for item in basket:
-                new_snapshot.append({
-                    "ticker": item["ticker"],
-                    "shares": item["shares"],
-                    "wac": item["wac"]
-                })
+                if item.get("shares", 0) > 0:
+                    new_snapshot.append({
+                        "ticker": item["ticker"],
+                        "shares": item["shares"],
+                        "wac": item["wac"]
+                    })
             
             if "mutable_state" in data:
                 data["mutable_state"]["portfolio_snapshot"] = new_snapshot
@@ -373,8 +374,8 @@ def _deep_merge(base, delta):
     return merged
 
 def _merge_portfolio(existing_list, delta_list):
-    if not isinstance(existing_list, list): return delta_list
-    if not isinstance(delta_list, list): return existing_list
+    if not isinstance(existing_list, list): existing_list = []
+    if not isinstance(delta_list, list): delta_list = []
     by_ticker = {}
     for item in existing_list:
         t = item.get('ticker')
@@ -386,7 +387,18 @@ def _merge_portfolio(existing_list, delta_list):
                 by_ticker[t] = _deep_merge(by_ticker[t], item)
             else:
                 by_ticker[t] = item
-    return list(by_ticker.values())
+                
+    # Prune any items where shares <= 0 to satisfy ENH_99 SSoT Curation Protocol
+    pruned_list = []
+    for item in by_ticker.values():
+        try:
+            shares = float(item.get("shares", 0))
+        except (ValueError, TypeError):
+            shares = 0.0
+        if shares > 0:
+            pruned_list.append(item)
+            
+    return pruned_list
 
 def _process_deletions(state, delete_list):
     """Parses SSoT DELETE_FIELD strings (e.g., 'portfolio_snapshot[RCAT]') and prunes keys from the state tree."""

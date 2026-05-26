@@ -853,11 +853,14 @@ function getCurrentPortfolio() {
     const rows = dPortfolioBody.querySelectorAll('tr.portfolio-item-row');
     const portfolio = [];
     rows.forEach(row => {
-        portfolio.push({
-            ticker: row.cells[0].textContent,
-            shares: parseFloat(row.querySelector('[data-key="shares"]').value) || 0,
-            wac: parseFloat(row.querySelector('[data-key="wac"]').value) || 0
-        });
+        const shares = parseFloat(row.querySelector('[data-key="shares"]').value) || 0;
+        if (shares > 0) {
+            portfolio.push({
+                ticker: row.cells[0].textContent,
+                shares: shares,
+                wac: parseFloat(row.querySelector('[data-key="wac"]').value) || 0
+            });
+        }
     });
     return portfolio;
 }
@@ -912,8 +915,11 @@ async function savePortfolio(portfolioArr) {
 }
 
 async function deleteFromPortfolio(index) {
+    const rows = dPortfolioBody.querySelectorAll('tr.portfolio-item-row');
+    if (rows[index]) {
+        rows[index].remove();
+    }
     const portfolio = getCurrentPortfolio();
-    portfolio.splice(index, 1);
     await savePortfolio(portfolio);
 }
 
