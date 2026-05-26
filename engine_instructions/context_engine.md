@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.51-Trade-Lessons-Consolidated
+- **version**: v10.30-Risk-Mitigation-Sync
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

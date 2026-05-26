@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.51-Trade-Lessons-Consolidated
+- **version**: v10.30-Risk-Mitigation-Sync
 
 ## Tone
 institutional, narrative, concise

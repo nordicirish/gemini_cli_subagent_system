@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.51-Trade-Lessons-Consolidated
+- **version**: v10.30-Risk-Mitigation-Sync
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

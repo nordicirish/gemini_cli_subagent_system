@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.51-Trade-Lessons-Consolidated
+- **version**: v10.30-Risk-Mitigation-Sync
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

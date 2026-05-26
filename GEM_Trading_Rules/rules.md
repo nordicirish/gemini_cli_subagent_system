@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.51-Trade-Lessons-Consolidated
+**Version:** v10.30-Risk-Mitigation-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -21,7 +21,9 @@
 - ENH_16_C: Pre-Market Deadlock Resolution
 - ENH_16_D: SSR Immunity Nullification
 - ENH_16_E: LONG GAMMA SSR OVERRIDE
+- ENH_16_F: Pre-Market Gap-Down Conviction Threshold
 - ENH_17: Gamma Exposure (GEX) Protocol
+- ENH_17_B: GAMMA_WHIPLASH_LOCK
 - ENH_18: Synthetic Vol Logic
 - ENH_19: Volatility Proxy
 - ENH_20: Synthetic GEX Logic
@@ -140,6 +142,7 @@
 - MANDATE_33: SHORT_GAMMA_DEGRADATION_TRIMS (VWAP Degradation Protocol)
 - MANDATE_34: INSTITUTIONAL PEG & AH GRAVITY
 - MANDATE_36_ENH_104: PERSISTENT STOP-LOSS TELEMETRY - The Execution Payload must persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP.
+- MANDATE_37: Sympathy Momentum Shield Bypass (Bypasses active shields to execute a 25% profit-taking trim on sympathy-driven momentum runners when price is >3% above VWAP and RSI >65).
 - NOTE: MANDATE_46 (LONG GAMMA SHIELD OVERRIDE) was REJECTED — content is fully covered by ENH_16_D, MANDATE_34, and MANDATE_35. MANDATE_34 has been augmented with the precision language from the proposed patch.
 
 ## Tool Supremacy Hierarchy
@@ -449,6 +452,11 @@
     *   **Directive:** PERSISTENT STOP-LOSS TELEMETRY - The Execution Payload must persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP.
     *   **Rationale:** Flawlessly protected capital during the 2026-05-26 09:32 CMPS/DELL gamma flush by anchoring defense parameters directly to intraday liquidity metrics.
 
+*   **[MANDATE_37_SYMPATHY_MOMENTUM_SHIELD_BYPASS]**
+    *   **Status:** ACTIVE
+    *   **Directive:** Execute a mandatory 25% profit-taking trim on sympathy-driven momentum runners when price >3% above daily VWAP and RSI >65. This bypasses typical long gamma or active shields to lock in short-term momentum extension gains.
+    *   **Rationale:** Prevents retaining extended positions on secondary runners riding the coattails of primary catalysts once momentum reaches overbought levels, locking in transient alpha before algorithmic mean-reversion occurs.
+
 
 ## Anti Hallucination Core
 - **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.
@@ -492,8 +500,16 @@
   - **Status:** ACTIVE
   - **Instruction:** If an asset suffers a catastrophic intraday structural failure triggering the SEC Rule 201 Short Sale Restriction (>10% drop), any active LONG_GAMMA dealer shielding is INSTANTLY INVALIDATED. The system must permit mechanical risk trims.
   - **Rationale:** Authorized by consistent decision log backtesting where GEX decay during SSR events rendered gamma shields ineffective.
+- **[ENH_16_F - Pre-Market Gap-Down Conviction Threshold]**
+  - **Status:** ACTIVE
+  - **Instruction:** Enforce a mandatory 50% mechanical risk trim on assets gapping down >3% pre-market if overall consensus/agreement score is < 0.
+  - **Rationale:** Ensures immediate capital protection in severe gap-down scenarios when overall consensus is negative, avoiding passive exposure to opening bell cascades.
 - **[ENH_17 - Gamma Exposure (GEX) Protocol]**
   - **Instruction:** GEX > 0 = Stabilizing; GEX < 0 = Accelerating. Scale sizing modifiers accordingly.
+- **[ENH_17_B - GAMMA_WHIPLASH_LOCK]**
+  - **Status:** ACTIVE
+  - **Instruction:** Enforce a mandatory 15-minute cool-down lock on posture flip chop zones (when Net GEX flips between positive and negative intraday). No new positions or posture-dependent adds may be executed during this lock.
+  - **Rationale:** Prevents high-frequency whipsaw trading in highly unstable posture flip zones.
 - **[ENH_18 - Synthetic Vol Logic]**
   - **Instruction:** Identify Synthetic Skew using: Bullish (Price > VWAP & rVol > 1.5), Bearish (Price < VWAP & rVol > 1.5).
 - **[ENH_19 - Volatility Proxy]**

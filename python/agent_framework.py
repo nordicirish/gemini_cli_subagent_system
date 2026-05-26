@@ -37,7 +37,7 @@ llm_logger.addHandler(handshake_handler)
 llm_logger.propagate = False
 
 # ---------------------------------------------------------------------------
-# Model definitions — v10.51-Trade-Lessons-Consolidated
+# Model definitions — v10.30-Risk-Mitigation-Sync
 # Per terminal.md > Mode Selection Matrix (Canonical)
 # ---------------------------------------------------------------------------
 DEFAULT_MODEL_PRO = "gemini-2.5-pro"
