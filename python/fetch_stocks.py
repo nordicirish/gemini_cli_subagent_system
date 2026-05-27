@@ -852,6 +852,14 @@ class MarketDataCache:
         self.ssr_active: dict[str, bool] = {} # New: SSR Trigger Tracker
         self.cycles: int = 0
         self.vwap_pointer: int = 0
+        
+        # Cache structures per v10.52 specifications
+        self.last_chart_fetch: dict[str, float] = {}
+        self.chart_cache: dict[str, tuple] = {}
+        self.last_premarket_vol_fetch: dict[str, float] = {}
+        self.premarket_vol_cache: dict[str, int] = {}
+        self.last_gex_fetch: dict[str, float] = {}
+        self.gex_cache: dict[str, dict] = {}
 
     def clear(self):
         self.__init__()
@@ -1589,7 +1597,15 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
     needs_post_vol = (status in ("AFTER-HOURS", "CLOSED") and post_vol == 0)
 
     if price == 0 or needs_post_vol:
-        api_price, api_vol, api_pre_vol, api_post_vol = get_live_chart_data(symbol, status)
+        now_ts = t_time.time()
+        if symbol in cache.last_chart_fetch and (now_ts - cache.last_chart_fetch[symbol]) < 60:
+            api_price, api_vol, api_pre_vol, api_post_vol = cache.chart_cache[symbol]
+        else:
+            api_price, api_vol, api_pre_vol, api_post_vol = get_live_chart_data(symbol, status)
+            if api_price > 0 or api_vol > 0 or api_pre_vol > 0 or api_post_vol > 0:
+                cache.last_chart_fetch[symbol] = now_ts
+                cache.chart_cache[symbol] = (api_price, api_vol, api_pre_vol, api_post_vol)
+
         if price == 0 and api_price > 0:
             price = api_price
         if vol == 0 and api_vol > 0:
@@ -1603,7 +1619,14 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
 
     # Dedicated pre-market volume fetch (more reliable than batch quote during regular hours)
     if needs_pre_vol:
-        chart_pre_vol = get_premarket_volume_chart(symbol)
+        now_ts = t_time.time()
+        if symbol in cache.last_premarket_vol_fetch and (now_ts - cache.last_premarket_vol_fetch[symbol]) < 90:
+            chart_pre_vol = cache.premarket_vol_cache.get(symbol, 0)
+        else:
+            chart_pre_vol = get_premarket_volume_chart(symbol)
+            cache.last_premarket_vol_fetch[symbol] = now_ts
+            cache.premarket_vol_cache[symbol] = chart_pre_vol
+
         if chart_pre_vol > 0:
             pre_vol = chart_pre_vol
 
@@ -1957,7 +1980,16 @@ def run_daemon():
             spot = float(spot)
             cache.prices[sym] = spot
             print(f"  GEX [{idx+1}/{total_gex}] {sym}...", end="\r")
-            cache.gex[sym] = get_gex_profile(obj, spot)
+            
+            now_ts = t_time.time()
+            if sym in cache.last_gex_fetch and (now_ts - cache.last_gex_fetch[sym]) < 1800:
+                cache.gex[sym] = cache.gex_cache[sym]
+            else:
+                gex_profile = get_gex_profile(obj, spot)
+                cache.gex[sym] = gex_profile
+                cache.last_gex_fetch[sym] = now_ts
+                cache.gex_cache[sym] = gex_profile
+
             # GEX loop sleep (lines 914)
             t_time.sleep(0.2)  # OPTIMIZED: Reduced from 2s
         else:
@@ -1997,7 +2029,7 @@ def run_daemon():
                 GLOBAL_STATE["is_heavy_refresh"] = True
                 GLOBAL_STATE["is_heavy_refresh"] = True
 
-            BATCH_SIZE = 10
+            BATCH_SIZE = 2
 
             # Dynamic Table Width Calculation
             try:
@@ -2102,7 +2134,13 @@ def run_daemon():
                 if is_heavy:
                     spot_price = cache.prices.get(sym)
                     if spot_price and spot_price > 0:
-                        gex_profile = get_gex_profile(obj, spot_price)
+                        now_ts = t_time.time()
+                        if sym in cache.last_gex_fetch and (now_ts - cache.last_gex_fetch[sym]) < 1800:
+                            gex_profile = cache.gex_cache[sym]
+                        else:
+                            gex_profile = get_gex_profile(obj, spot_price)
+                            cache.last_gex_fetch[sym] = now_ts
+                            cache.gex_cache[sym] = gex_profile
                         cache.gex[sym] = gex_profile
                     else:
                         cache.gex[sym] = {

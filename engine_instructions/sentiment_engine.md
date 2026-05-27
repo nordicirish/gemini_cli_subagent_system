@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.30-Risk-Mitigation-Sync
+- **version**: v10.52-Cache-Hardening-and-Portfolio-Defaults
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

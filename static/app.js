@@ -844,7 +844,7 @@ async function addToPortfolio() {
     if (!ticker) return;
     const portfolio = getCurrentPortfolio();
     if (portfolio.find(i => i.ticker === ticker)) return;
-    portfolio.push({ ticker, shares: 0, wac: 0 });
+    portfolio.push({ ticker, shares: 1, wac: 0 });
     dAddPortfolioTicker.value = '';
     await savePortfolio(portfolio);
 }

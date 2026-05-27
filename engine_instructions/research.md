@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.30-Risk-Mitigation-Sync
+- **version**: v10.52-Cache-Hardening-and-Portfolio-Defaults
 
 ## Tone
 institutional, narrative, concise

@@ -280,11 +280,17 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 ---
 
 ## 📋 Changelog
-### v10.30-Risk-Mitigation-Sync *(2026-05-26)*
+### v10.52-Cache-Hardening-and-Portfolio-Defaults *(2026-05-27)*
+- **Frontend Defaults Hardening:** Modified the frontend `addToPortfolio()` handler in `static/app.js` to default new entries to `shares: 1` and `wac: 0` (preventing display filtering/reconciliation race conditions).
+- **Backend Cache Hardening:** Engineered structured TTL caching architectures for the background stock daemon (`python/fetch_stocks.py`). Placed intraday chart requests under a 60s TTL check, pre-market volume requests under a 90s TTL check, and options GEX profile calculations under a 30m daily-alignment TTL check.
+- **VWAP Calculation Optimization:** Reduced the background daemon's VWAP calculation batch size from 10 to 2, successfully spreading heavy chart request loads across monitor ticks.
+- **Global Architectural Parity:** Synchronized all core files, master rules SSoT, and 17 subagent instruction markdown files to the unified version string `v10.52-Cache-Hardening-and-Portfolio-Defaults` per `MANDATE_29`.
+
+### v10.52-Cache-Hardening-and-Portfolio-Defaults *(2026-05-26)*
 - **Risk Mitigation Codification:** Codified `ENH_16_F` (Pre-Market Gap-Down Conviction Threshold), `MANDATE_37` (Sympathy Momentum Shield Bypass), and `ENH_17_B` (GAMMA_WHIPLASH_LOCK) inside the master legislative [rules.md](file:///c:/github/gemini_cli_subagent_system/gem_trading_rules/rules.md) SSoT.
 - **Proactive Logic Mirroring:** Bonded the new risk-mitigation rules and GEX Posture Whiplash cool-down limits across [terminal.md](file:///c:/github/gemini_cli_subagent_system/engine_instructions/terminal.md), [bullish_gem.md](file:///c:/github/gemini_cli_subagent_system/engine_instructions/bullish_gem.md), [neutral_gem.md](file:///c:/github/gemini_cli_subagent_system/engine_instructions/neutral_gem.md), [red_team_gem.md](file:///c:/github/gemini_cli_subagent_system/engine_instructions/red_team_gem.md), and [gex_engine.md](file:///c:/github/gemini_cli_subagent_system/engine_instructions/gex_engine.md) to eliminate cognitive/behavioral drift.
 - **Trade Lesson Garbage Collection:** Atomic cleanup of dynamic trade lessons by purging the newly-codified `L-219` and `L-222` rules from [trade_lessons.json](file:///c:/github/gemini_cli_subagent_system/context/trade_lessons.json) and [trade_lessons.md](file:///c:/github/gemini_cli_subagent_system/context/trade_lessons.md) per `ENH_53-GC`.
-- **Global Architectural Parity:** Proactively synchronized all version strings to `v10.30-Risk-Mitigation-Sync` across the master rules SSoT, root [antigravity.md](file:///c:/github/gemini_cli_subagent_system/antigravity.md), the system [README.md](file:///c:/github/gemini_cli_subagent_system/README.md), [agent_framework.py](file:///c:/github/gemini_cli_subagent_system/python/agent_framework.py), and all 17 subagent instruction sets per `MANDATE_29`.
+- **Global Architectural Parity:** Proactively synchronized all version strings to `v10.52-Cache-Hardening-and-Portfolio-Defaults` across the master rules SSoT, root [antigravity.md](file:///c:/github/gemini_cli_subagent_system/antigravity.md), the system [README.md](file:///c:/github/gemini_cli_subagent_system/README.md), [agent_framework.py](file:///c:/github/gemini_cli_subagent_system/python/agent_framework.py), and all 17 subagent instruction sets per `MANDATE_29`.
 
 ### v10.51-Trade-Lessons-Consolidated *(2026-05-26)*
 - **Trade Lessons SSoT Consolidation:** Eliminated duplicate structural states by purging the surplus `trade_lessons.json` file from the root directory. Enforced `context/trade_lessons.json` as the unified Single Source of Truth for dynamic trade lessons, aligning with Git patterns and air-gap context paradigms.
