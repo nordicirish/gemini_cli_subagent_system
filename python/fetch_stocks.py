@@ -853,7 +853,7 @@ class MarketDataCache:
         self.cycles: int = 0
         self.vwap_pointer: int = 0
         
-        # Cache structures per v10.52 specifications
+        # Cache structures per v10.53-Sympathy-Momentum-and-RSI-Trims specifications
         self.last_chart_fetch: dict[str, float] = {}
         self.chart_cache: dict[str, tuple] = {}
         self.last_premarket_vol_fetch: dict[str, float] = {}

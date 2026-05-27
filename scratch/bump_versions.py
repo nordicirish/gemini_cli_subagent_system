@@ -1,6 +1,6 @@
 import os
 
-old_ver_suffix = "v10.33-UX-Consistency-Patch"
+old_ver_suffix = "v10.53-Sympathy-Momentum-and-RSI-Trims-UX-Consistency-Patch"
 new_ver_suffix = "v10.34-Scout-UX-and-Payload-Bypass"
 
 # 1. Update engine_instructions

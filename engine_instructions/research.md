@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.52-Cache-Hardening-and-Portfolio-Defaults
+- **version**: v10.53-Sympathy-Momentum-and-RSI-Trims
 
 ## Tone
 institutional, narrative, concise

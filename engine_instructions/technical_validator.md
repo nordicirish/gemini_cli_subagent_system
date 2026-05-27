@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.52-Cache-Hardening-and-Portfolio-Defaults
+- **version**: v10.53-Sympathy-Momentum-and-RSI-Trims
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix
@@ -54,6 +54,9 @@ VALIDATE:
 - **health_score_rules**: Reference GEM_Rules_Data > health_score_protocol (Canonical)
 - **signal_consistency**: Reference GEM_Rules_Data > signal_consistency_thresholds (Canonical)
 - **dealer_posture_logic**: Reference GEM_Rules_Data > signal_consistency_thresholds > dealer_posture_logic (Canonical)
+- **ENH_110_validation**: Validate and sign-off on sympathy momentum shield bypass trims of 25% if price >3% daily VWAP and RSI >65 on sympathy-driven momentum.
+- **ENH_111_validation**: Verify mechanical trailing stops are tightened by 50% immediately upon transient SHORT_GAMMA flips with RSI >70.
+- **MANDATE_38_validation**: Enforce mandatory 15% 'alpha-harvest' trim on sustained RSI >72 sustained over 4 hours regardless of underlying dealer posture.
 
 ## Final Output Template
 - **header**: 🛠️ Technical Validator | {timestamp} EST

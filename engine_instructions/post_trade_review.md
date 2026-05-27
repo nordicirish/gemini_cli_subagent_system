@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.52-Cache-Hardening-and-Portfolio-Defaults
+**Version:** v10.53-Sympathy-Momentum-and-RSI-Trims
 **Tone:** neutral, reflective, concise
 
 ---

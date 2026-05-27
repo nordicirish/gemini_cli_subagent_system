@@ -280,6 +280,13 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 ---
 
 ## 📋 Changelog
+### v10.53-Sympathy-Momentum-and-RSI-Trims *(2026-05-27)*
+- **Sympathy Momentum and RSI-Volatility Trim Implementation:** Codified the new rules `ENH_110` (Sympathy Momentum Shield Bypass), `ENH_111` (Gamma Flicker Preemption Stop Tightening), and `MANDATE_38` (RSI-Volatility Automatic Trimming) into the SSoT master rules.
+- **Rule Re-indexing:** Surgically re-indexed `ENH_110` to `ENH_113` (Council Debate & Decision Log Permanence) and `ENH_111` to `ENH_114` (Technical Compliance Isolation) inside `rules.md` and `README.md` to avoid ID collisions.
+- **Sub-agent Logical Mirroring:** Synchronized and bonded logic triggers within `execution.md`, `gex_engine.md`, `neutral_gem.md`, `bullish_gem.md`, `red_team_gem.md`, and `technical_validator.md`.
+- **Dynamic Trade Lesson Garbage Collection:** Atomic cleanup of dynamic trade lessons by purging lesson `id: 6` (referencing `ENH_109`) from `context/trade_lessons.json` and `context/trade_lessons.md` after its codification and promotion to `MANDATE_38`.
+- **Global Architectural Parity:** Synchronized all 17 subagent instruction markdown files, system configurations, and utility scripts to the unified version string `v10.53-Sympathy-Momentum-and-RSI-Trims` per `MANDATE_29`.
+
 ### v10.52-Cache-Hardening-and-Portfolio-Defaults *(2026-05-27)*
 - **Frontend Defaults Hardening:** Modified the frontend `addToPortfolio()` handler in `static/app.js` to default new entries to `shares: 1` and `wac: 0` (preventing display filtering/reconciliation race conditions).
 - **Backend Cache Hardening:** Engineered structured TTL caching architectures for the background stock daemon (`python/fetch_stocks.py`). Placed intraday chart requests under a 60s TTL check, pre-market volume requests under a 90s TTL check, and options GEX profile calculations under a 30m daily-alignment TTL check.

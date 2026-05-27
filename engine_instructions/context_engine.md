@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.52-Cache-Hardening-and-Portfolio-Defaults
+- **version**: v10.53-Sympathy-Momentum-and-RSI-Trims
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

@@ -37,7 +37,7 @@ llm_logger.addHandler(handshake_handler)
 llm_logger.propagate = False
 
 # ---------------------------------------------------------------------------
-# Model definitions — v10.52-Cache-Hardening-and-Portfolio-Defaults
+# Model definitions — v10.53-Sympathy-Momentum-and-RSI-Trims
 # Per terminal.md > Mode Selection Matrix (Canonical)
 # ---------------------------------------------------------------------------
 DEFAULT_MODEL_PRO = "gemini-2.5-pro"

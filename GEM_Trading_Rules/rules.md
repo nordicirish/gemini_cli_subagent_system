@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.52-Cache-Hardening-and-Portfolio-Defaults
+**Version:** v10.53-Sympathy-Momentum-and-RSI-Trims
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -102,8 +102,10 @@
 - ENH_106: LONG GAMMA SSR OVERRIDE - If an asset suffers a catastrophic intraday structural failure (triggering SEC Rule 201 SSR by dropping >10%), any active LONG_GAMMA shield is instantly invalidated. The Orchestrator must prioritize SSR structural failure over GEX stabilization and permit mechanical risk trims.
 - ENH_107: GEX-SSR Conflict Protocol
 - ENH_108: Persistent Stop-Loss Telemetry
-- ENH_110: Council Debate & Decision Log Permanence
-- ENH_111: Technical Compliance Isolation
+- ENH_110: SYMPATHY MOMENTUM SHIELD BYPASS
+- ENH_111: GAMMA FLICKER PREEMPTION
+- ENH_113: Council Debate & Decision Log Permanence
+- ENH_114: Technical Compliance Isolation
 
 
 ## Mandate Registry
@@ -143,6 +145,7 @@
 - MANDATE_34: INSTITUTIONAL PEG & AH GRAVITY
 - MANDATE_36_ENH_104: PERSISTENT STOP-LOSS TELEMETRY - The Execution Payload must persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP.
 - MANDATE_37: Sympathy Momentum Shield Bypass (Bypasses active shields to execute a 25% profit-taking trim on sympathy-driven momentum runners when price is >3% above VWAP and RSI >65).
+- MANDATE_38: RSI-VOLATILITY AUTOMATIC TRIMMING - Positions maintaining an RSI > 72 sustained over 4 hours MUST trigger a mandatory 15% 'alpha-harvest' trim regardless of underlying GEX/Dealer posture to preempt programmatic distribution.
 - NOTE: MANDATE_46 (LONG GAMMA SHIELD OVERRIDE) was REJECTED — content is fully covered by ENH_16_D, MANDATE_34, and MANDATE_35. MANDATE_34 has been augmented with the precision language from the proposed patch.
 
 ## Tool Supremacy Hierarchy
@@ -456,6 +459,11 @@
     *   **Status:** ACTIVE
     *   **Directive:** Execute a mandatory 25% profit-taking trim on sympathy-driven momentum runners when price >3% above daily VWAP and RSI >65. This bypasses typical long gamma or active shields to lock in short-term momentum extension gains.
     *   **Rationale:** Prevents retaining extended positions on secondary runners riding the coattails of primary catalysts once momentum reaches overbought levels, locking in transient alpha before algorithmic mean-reversion occurs.
+
+*   **[MANDATE_38_RSI_VOLATILITY_AUTOMATIC_TRIMMING]**
+    *   **Status:** ACTIVE
+    *   **Directive:** Positions maintaining an RSI > 72 sustained over 4 hours MUST trigger a mandatory 15% 'alpha-harvest' trim regardless of underlying GEX/Dealer posture to preempt programmatic distribution.
+    *   **Rationale:** Consistently proven durable across multiple post-trade audits. Effectively limits drawdown leakage on over-crowded institutional assets (e.g., RKLB, MRVL).
 
 
 ## Anti Hallucination Core
@@ -1667,12 +1675,22 @@
 - **Content:** Emission of stop-loss audit blocks is mandatory for all holdings with RSI > 65 or VWAP extension > 2%.
 - **Justification:** Prevents passive holding of overextended assets by ensuring telemetry trails.
 
-### [ENH_110] COUNCIL DEBATE & DECISION LOG PERMANENCE
+### [ENH_110] SYMPATHY MOMENTUM SHIELD BYPASS
+- **Status:** ACTIVE
+- **Content:** If an asset's upward momentum is flagged as 'sympathy-driven' lacking an idiosyncratic catalyst, AND trades > 3% above intraday VWAP with RSI > 65, the LONG_GAMMA hold shield is structurally bypassed to allow mechanical 25% profit-taking trims.
+- **Justification:** Forensic logs confirm dealer positioning (GEX) lags narrative-driven retail momentum, creating false-positive LONG_GAMMA hold signals at structural tops.
+
+### [ENH_111] GAMMA FLICKER PREEMPTION
+- **Status:** ACTIVE
+- **Content:** If an asset with an RSI > 70 experiences a transient SHORT_GAMMA flip (even if LONG_GAMMA is subsequently restored intraday), mechanical trailing stops MUST be tightened by 50% immediately.
+- **Justification:** Protects capital against spoofed options liquidity and front-runs the institutional distribution waves observed during intraday dealer hedging flips.
+
+### [ENH_113] COUNCIL DEBATE & DECISION LOG PERMANENCE
 - **Status:** ACTIVE
 - **Content:** Any turn resulting in SSoT mutations, portfolio rebalancing, or systemic rule changes MUST permanently record the full Council Debate in decision_log.json. The log entry must serve as a complete forensic audit trail of how the consensus was reached before the state was mutated.
 - **Justification:** Prevents logical gaps, cognitive drift, or truncating debate transcripts in the decision log ledger.
 
-### [ENH_111] TECHNICAL COMPLIANCE ISOLATION
+### [ENH_114] TECHNICAL COMPLIANCE ISOLATION
 - **Status:** ACTIVE
 - **Content:** Technical and programmatic "Adversarial Framing" or legislative compliance messages (e.g. references to MANDATE_09, MANDATE_30, EXECUTION_PAYLOAD suppression) must not clutter the primary analytical response. The UI must automatically isolate any paragraph matching "Adversarial Framing" and encapsulate it inside a collapsible details panel at the bottom of the message container.
 - **Justification:** Preserves the absolute logical audit trail for compliance checking while presenting a clean, natural conversational interface to the user by default.
