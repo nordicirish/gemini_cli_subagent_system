@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.53-Sympathy-Momentum-and-RSI-Trims
+- **version**: v10.54-Tactical-Sweep-and-Gamma-Locks
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

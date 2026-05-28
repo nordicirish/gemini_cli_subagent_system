@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.53-Sympathy-Momentum-and-RSI-Trims
+- **version**: v10.54-Tactical-Sweep-and-Gamma-Locks
 
 ## Tone
 institutional, narrative, concise

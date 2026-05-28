@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.53-Sympathy-Momentum-and-RSI-Trims
+**Version:** v10.54-Tactical-Sweep-and-Gamma-Locks
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -24,6 +24,7 @@
 - ENH_16_F: Pre-Market Gap-Down Conviction Threshold
 - ENH_17: Gamma Exposure (GEX) Protocol
 - ENH_17_B: GAMMA_WHIPLASH_LOCK
+- ENH_17_C: GAMMA_WHIPLASH_LOCK
 - ENH_18: Synthetic Vol Logic
 - ENH_19: Volatility Proxy
 - ENH_20: Synthetic GEX Logic
@@ -104,8 +105,11 @@
 - ENH_108: Persistent Stop-Loss Telemetry
 - ENH_110: SYMPATHY MOMENTUM SHIELD BYPASS
 - ENH_111: GAMMA FLICKER PREEMPTION
+- ENH_112: NATURAL LANGUAGE CURATOR & USER-FRIENDLY DISCLOSURES
 - ENH_113: Council Debate & Decision Log Permanence
 - ENH_114: Technical Compliance Isolation
+- ENH_115: INFORMATION_LEAKAGE_SENTRY
+- ENH_116: TACTICAL_SWEEP_PROTOCOL
 
 
 ## Mandate Registry
@@ -146,6 +150,7 @@
 - MANDATE_36_ENH_104: PERSISTENT STOP-LOSS TELEMETRY - The Execution Payload must persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP.
 - MANDATE_37: Sympathy Momentum Shield Bypass (Bypasses active shields to execute a 25% profit-taking trim on sympathy-driven momentum runners when price is >3% above VWAP and RSI >65).
 - MANDATE_38: RSI-VOLATILITY AUTOMATIC TRIMMING - Positions maintaining an RSI > 72 sustained over 4 hours MUST trigger a mandatory 15% 'alpha-harvest' trim regardless of underlying GEX/Dealer posture to preempt programmatic distribution.
+- MANDATE_39: PRE-MARKET GAP-DOWN CONVICTION THRESHOLD - If an asset gaps down > 3% in the pre-market session and possesses a trend score < 0, a 50% mechanical risk trim is mandatory prior to the RTH open to mitigate opening-bell liquidity washes.
 - NOTE: MANDATE_46 (LONG GAMMA SHIELD OVERRIDE) was REJECTED — content is fully covered by ENH_16_D, MANDATE_34, and MANDATE_35. MANDATE_34 has been augmented with the precision language from the proposed patch.
 
 ## Tool Supremacy Hierarchy
@@ -465,6 +470,11 @@
     *   **Directive:** Positions maintaining an RSI > 72 sustained over 4 hours MUST trigger a mandatory 15% 'alpha-harvest' trim regardless of underlying GEX/Dealer posture to preempt programmatic distribution.
     *   **Rationale:** Consistently proven durable across multiple post-trade audits. Effectively limits drawdown leakage on over-crowded institutional assets (e.g., RKLB, MRVL).
 
+*   **[MANDATE_39_PRE-MARKET_GAP-DOWN_CONVICTION_THRESHOLD]**
+    *   **Status:** ACTIVE
+    *   **Directive:** If an asset gaps down > 3% in the pre-market session and possesses a trend score < 0, a 50% mechanical risk trim is mandatory prior to the RTH open to mitigate opening-bell liquidity washes.
+    *   **Rationale:** Sustained historical degradation of assets bleeding past -3% pre-bell; log proves RTH wait rules fail under extreme pre-market distribution.
+
 
 ## Anti Hallucination Core
 - **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.
@@ -510,14 +520,18 @@
   - **Rationale:** Authorized by consistent decision log backtesting where GEX decay during SSR events rendered gamma shields ineffective.
 - **[ENH_16_F - Pre-Market Gap-Down Conviction Threshold]**
   - **Status:** ACTIVE
-  - **Instruction:** Enforce a mandatory 50% mechanical risk trim on assets gapping down >3% pre-market if overall consensus/agreement score is < 0.
-  - **Rationale:** Ensures immediate capital protection in severe gap-down scenarios when overall consensus is negative, avoiding passive exposure to opening bell cascades.
+  - **Instruction:** If an asset gaps down > 3% in the pre-market session and possesses a trend score < 0, a 50% mechanical risk trim is mandatory prior to the RTH open to mitigate opening-bell liquidity washes (Reference MANDATE_39).
+  - **Rationale:** Sustained historical degradation of assets bleeding past -3% pre-bell; log proves RTH wait rules fail under extreme pre-market distribution.
 - **[ENH_17 - Gamma Exposure (GEX) Protocol]**
   - **Instruction:** GEX > 0 = Stabilizing; GEX < 0 = Accelerating. Scale sizing modifiers accordingly.
 - **[ENH_17_B - GAMMA_WHIPLASH_LOCK]**
   - **Status:** ACTIVE
   - **Instruction:** Enforce a mandatory 15-minute cool-down lock on posture flip chop zones (when Net GEX flips between positive and negative intraday). No new positions or posture-dependent adds may be executed during this lock.
   - **Rationale:** Prevents high-frequency whipsaw trading in highly unstable posture flip zones.
+- **[ENH_17_C - GAMMA_WHIPLASH_LOCK]**
+  - **Status:** ACTIVE
+  - **Instruction:** If an asset experiences a LONG_GAMMA to SHORT_GAMMA and back to LONG_GAMMA dealer posture flip within a 30-minute window, the asset is placed on a mandatory 15-minute `COOL_DOWN_LOCK` preventing any new capital allocation.
+  - **Rationale:** Prevents algorithmic allocation into highly unstable, spoofed dealer hedging environments.
 - **[ENH_18 - Synthetic Vol Logic]**
   - **Instruction:** Identify Synthetic Skew using: Bullish (Price > VWAP & rVol > 1.5), Bearish (Price < VWAP & rVol > 1.5).
 - **[ENH_19 - Volatility Proxy]**
@@ -1708,6 +1722,23 @@
   - For inactive holdings:
     `[TICKER] (Holding: [shares] shares): Current Price: $[current_price] | VWAP: $[vwap] | Status: INACTIVE (RSI [rsi] < 65)`
 - **Justification:** Translates complex system metrics into actionable, high-fidelity human instructions for maximum operational clarity.
+
+### [ENH_115] INFORMATION_LEAKAGE_SENTRY
+- **Status:** ACTIVE
+- **Content:** Information leakage sentry logic:
+  - **Trigger Conditions:**
+    - `session_change_pct` > 3.0% with a linear regression indicating a straight-line walk-up.
+    - `rVol` between 0.8 and 1.5 (persistent but evading retail volume scanners).
+    - `hard_catalyst` == NONE (Zero verifiable SEC filings, PRs, or macro events via Google Search).
+  - **Action:** Tag `unverified_stealth_accumulation` in the forensic audit and authorize the BULLISH_ADVOCATE to execute a pilot tranche (capped at 25% of standard sizing) prior to catalyst realization.
+- **Justification:** Captures high-conviction institutional accumulation before public catalyst dissemination while managing down-side risk via size penalties.
+
+### [ENH_116] TACTICAL_SWEEP_PROTOCOL
+- **Status:** ACTIVE
+- **Content:** Sweep execution logic:
+  - **Trigger Conditions:** If an asset is >4% extended from its daily VWAP anchor, OR if a critical risk trim fails to execute due to broker API latency.
+  - **Action:** The Orchestrator MUST instantly cancel passive ask-limits and queue a 'Sweeping Limit Order' priced 0.5% below the current bid. Re-queuing at the identical or higher limit is strictly prohibited under these structural conditions.
+- **Justification:** Log forensics (May 27, 12:36 UMAC event) prove that static limit orders during operational failure or parabolic exhaustion result in liquidity traps and alpha destruction.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.

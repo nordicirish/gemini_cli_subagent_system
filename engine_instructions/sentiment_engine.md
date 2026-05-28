@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.53-Sympathy-Momentum-and-RSI-Trims
+- **version**: v10.54-Tactical-Sweep-and-Gamma-Locks
 - **id**: SENTIMENT_ENGINE
 
 ## Tone
