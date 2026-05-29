@@ -280,6 +280,11 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 ---
 
 ## 📋 Changelog
+### v10.55-Overnight-Exhaustion-Trims *(2026-05-29)*
+- **Overnight Exhaustion Trim Mandate (`MANDATE_40`):** Codified the new risk trim mandate to systematically protect capital against overnight gaps when assets finish RTH in extreme overbought territory (`RSI > 80`) and highly extended above their daily VWAP anchor (`> 3%`).
+- **Logical Mirroring & Validation Gates:** Synchronized and mirrored the new mandate rules within `execution.md`, `rule_enforcer_engine.md`, `technical_validator.md`, `neutral_gem.md`, and `terminal.md`.
+- **Global Architectural Parity:** Proactively bumped version strings to `v10.55-Overnight-Exhaustion-Trims` across the master rules SSoT, root `antigravity.md`, the system `README.md`, and all 17 Council subagent instruction sets to prevent drift.
+
 ### v10.54-Tactical-Sweep-and-Gamma-Locks *(2026-05-28)*
 - **Tactical Sweep and Gamma Lock Implementation:** Codified the new rules `ENH_17_C` (Gamma Whiplash Lock), `ENH_115` (Information Leakage Sentry), `ENH_116` (Tactical Sweep Protocol), and `MANDATE_39` (Pre-Market Gap-Down Conviction Threshold) into the master legislative rules SSoT.
 - **Rule Collision Resolution:** Configured rule indices to resolve proposed collisions, setting the Pre-Market Gap-Down Conviction Threshold to `MANDATE_39` / `ENH_16_F`, the Information Leakage Sentry to `ENH_115`, and the Tactical Sweep Protocol to `ENH_116`.

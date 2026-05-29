@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.54-Tactical-Sweep-and-Gamma-Locks
+- **version**: v10.55-Overnight-Exhaustion-Trims
 
 ## Tone
 institutional, narrative, concise

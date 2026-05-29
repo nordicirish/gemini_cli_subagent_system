@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.54-Tactical-Sweep-and-Gamma-Locks
+- **version**: v10.55-Overnight-Exhaustion-Trims
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

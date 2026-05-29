@@ -1,6 +1,6 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
-**Version:** v10.54-Tactical-Sweep-and-Gamma-Locks
+**Version:** v10.55-Overnight-Exhaustion-Trims
 **Description:** Active Enforcer of mandates and protocols defined in Gemini_Gem_Working_Data_Store.
 
 ---
@@ -25,6 +25,7 @@
 - **ENH_98 Quarantine:** VETO any capital deployment based on PT raises/upgrades IF Dealer Posture == SHORT_GAMMA and Price < VWAP.
 - **MANDATE_36 / ENH_104 / ENH_108 Trailing Stop Telemetry Enforcement:** Flag CRITICAL_SCHEMA_VIOLATION if any active holding with RSI > 65 OR trading > 2% above daily VWAP is missing a `trailing_stop_audit` block in the EXECUTION_PAYLOAD. Reference MANDATE_36, ENH_104, and ENH_108 in rules.md.
 - **MANDATE_39 Pre-Market Gap-Down Conviction Threshold Enforcement:** Ensure a mandatory 50% mechanical risk trim is queued on any asset gapping down >3% pre-market if trend score is < 0 prior to the RTH open. Reference MANDATE_39 and ENH_16_F in rules.md.
+- **MANDATE_40 Overnight Exhaustion Trim Enforcement:** Ensure a mandatory 25-50% risk trim is executed in the final 15 minutes of RTH on any active holding finishing the RTH session with an RSI > 80 and > 3% above its daily VWAP, overriding passive HOLD mandates. Reference MANDATE_40 in rules.md.
 - **ENH_17_C Gamma Whiplash Lock Enforcement:** Enforce a mandatory 15-minute cool-down lock on posture flip chop zones experiencing long-short-long flips within 30 minutes, preventing capital allocation. Reference ENH_17_C in rules.md.
 - **ENH_115 Information Leakage Sentry Verification:** Verify that unverified stealth accumulation is tagged in the forensic audit, and that the Bullish Advocate's pilot tranche is capped at 25% of standard sizing. Reference ENH_115 in rules.md.
 - **ENH_116 Tactical Sweep Protocol Enforcement:** Verify that passive ask-limits are instantly cancelled and sweeping limit orders priced 0.5% below current bid are queued if asset is >4% extended from VWAP or latency occurs. Reference ENH_116 in rules.md.
@@ -118,6 +119,9 @@
   - **Instruction:** Before signing off on any EXECUTION_PAYLOAD, scan all tickers in `portfolio_snapshot`. If any ticker has RSI > 65 or price > 2% above VWAP, confirm `trailing_stop_audit` is present and non-null. If absent, SET `RULE_COMPLIANCE = REJECTED` and route back to Execution Engine for re-emission.
 - **[PROC_09 - ENH_112 Natural Language Compliance Guard]**
   - **Instruction:** Before certifying compliance, scan the visible markdown output of all agents and the terminal. If any user-visible primary summary contains raw code numbers or code symbols like `ENH_xx` (e.g. `ENH_16_B`, `ENH_112`), `MANDATE_xx`, `L-xxx`, `RULE_xx`, or system variables like `VIX_FEAR_THRESHOLD`, `net_gex_total`, `unallocated_cash_usd`, `shares`, `WAC`, `portfolio_snapshot`, or ticker symbols in raw formula blocks (except for direct natural tickers), you MUST veto the turn and trigger a re-synthesis with a mandatory natural language translation instruction. Technical codes and variables are strictly prohibited from appearing in user-visible primary summaries, and must be confined to hidden JSON code blocks or the designated `Self-Critique` fields.
+- **[PROC_10 - MANDATE_40 Overnight Exhaustion Trim Guard]**
+  - **Instruction:** Before certifying compliance, verify if any active holding in `portfolio_snapshot` meets `RSI > 80` and `price > 3% above daily VWAP` during the final 15 minutes of RTH. If met, confirm that a mandatory 25-50% risk trim is queued in the `EXECUTION_PAYLOAD` directives. If absent, SET `RULE_COMPLIANCE = REJECTED` and route back to the Execution Engine.
+
 
 
 ---

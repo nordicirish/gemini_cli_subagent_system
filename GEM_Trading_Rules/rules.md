@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.54-Tactical-Sweep-and-Gamma-Locks
+**Version:** v10.55-Overnight-Exhaustion-Trims
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -151,6 +151,7 @@
 - MANDATE_37: Sympathy Momentum Shield Bypass (Bypasses active shields to execute a 25% profit-taking trim on sympathy-driven momentum runners when price is >3% above VWAP and RSI >65).
 - MANDATE_38: RSI-VOLATILITY AUTOMATIC TRIMMING - Positions maintaining an RSI > 72 sustained over 4 hours MUST trigger a mandatory 15% 'alpha-harvest' trim regardless of underlying GEX/Dealer posture to preempt programmatic distribution.
 - MANDATE_39: PRE-MARKET GAP-DOWN CONVICTION THRESHOLD - If an asset gaps down > 3% in the pre-market session and possesses a trend score < 0, a 50% mechanical risk trim is mandatory prior to the RTH open to mitigate opening-bell liquidity washes.
+- MANDATE_40: OVERNIGHT_EXHAUSTION_TRIM - If an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, a mandatory 25-50% risk trim must be executed in the final 15 minutes of RTH to mitigate overnight gap-down exposure, overriding all passive HOLD mandates.
 - NOTE: MANDATE_46 (LONG GAMMA SHIELD OVERRIDE) was REJECTED — content is fully covered by ENH_16_D, MANDATE_34, and MANDATE_35. MANDATE_34 has been augmented with the precision language from the proposed patch.
 
 ## Tool Supremacy Hierarchy
@@ -474,6 +475,11 @@
     *   **Status:** ACTIVE
     *   **Directive:** If an asset gaps down > 3% in the pre-market session and possesses a trend score < 0, a 50% mechanical risk trim is mandatory prior to the RTH open to mitigate opening-bell liquidity washes.
     *   **Rationale:** Sustained historical degradation of assets bleeding past -3% pre-bell; log proves RTH wait rules fail under extreme pre-market distribution.
+
+*   **[MANDATE_40_OVERNIGHT_EXHAUSTION_TRIM]**
+    *   **Status:** ACTIVE
+    *   **Directive:** If an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, a mandatory 25-50% risk trim must be executed in the final 15 minutes of RTH (typically 15:45 - 16:00 EST) to mitigate overnight gap-down exposure, overriding all passive HOLD mandates.
+    *   **Rationale:** Converts L-235 to a permanent protocol; directly addresses the fundamental logic breakdown that resulted in the UMAC/RCAT May 29 pre-market losses.
 
 
 ## Anti Hallucination Core

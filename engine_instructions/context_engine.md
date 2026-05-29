@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.54-Tactical-Sweep-and-Gamma-Locks
+- **version**: v10.55-Overnight-Exhaustion-Trims
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

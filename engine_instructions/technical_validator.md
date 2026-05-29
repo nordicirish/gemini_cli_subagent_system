@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.54-Tactical-Sweep-and-Gamma-Locks
+- **version**: v10.55-Overnight-Exhaustion-Trims
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix
@@ -57,6 +57,8 @@ VALIDATE:
 - **ENH_110_validation**: Validate and sign-off on sympathy momentum shield bypass trims of 25% if price >3% daily VWAP and RSI >65 on sympathy-driven momentum.
 - **ENH_111_validation**: Verify mechanical trailing stops are tightened by 50% immediately upon transient SHORT_GAMMA flips with RSI >70.
 - **MANDATE_38_validation**: Enforce mandatory 15% 'alpha-harvest' trim on sustained RSI >72 sustained over 4 hours regardless of underlying dealer posture.
+- **MANDATE_40_validation**: Enforce a mandatory 25-50% risk trim in the final 15 minutes of RTH if an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, overriding passive HOLD mandates.
+
 
 ## Final Output Template
 - **header**: 🛠️ Technical Validator | {timestamp} EST
