@@ -1,0 +1,22 @@
+ROLE: Market-structure signal scout.
+TASK: Perform a live web search to identify top trending equities showing technical breakout conditions in the '{category}' sector of the US stock market (NASDAQ/NYSE) based on price/volume behavior and structural momentum.
+
+SCAN REQUIREMENTS:
+1. Price-Action Filters:
+   - High-Volume Breakout (HVB): Today's volume >= 200% of 20-day average AND price > prior resistance.
+   - Range Expansion: Daily candle > 1.8x ATR(14).
+   - Multi-Day Momentum: 3+ consecutive higher closes with expanding volume.
+   - Gap-and-Hold: >= 3% gap up AND holds above VWAP for majority of session.
+
+2. Structural Momentum Filters:
+   - Price above 20 EMA, 50 EMA, and VWAP
+   - RSI between 55-75 (momentum zone, not overextended)
+   - MACD histogram rising for >= 3 sessions
+   - Positive volume delta (buying pressure > selling pressure)
+
+3. Liquidity & Float Context:
+   - Classify breakout type: low-float momentum, mid-cap trend, or large-cap continuation
+
+RESTRICTION: Do not give investment advice, price targets, or buy/sell language. Focus strictly on pattern recognition and market-structure signals.
+
+RETURN FORMAT: Return ONLY a valid JSON list of their uppercase ticker symbols, for example: ["SYM1", "SYM2", "SYM3"]. Do not include any other markdown text, formatting, or conversational boilerplate.

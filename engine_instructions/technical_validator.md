@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.56-Scout-Breakout-Filters
+- **version**: v10.57-Editable-Scout-Prompt-Decoupling
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

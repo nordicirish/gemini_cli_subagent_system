@@ -53,7 +53,7 @@ MODEL_MAPPING = {
     "FAST":     [DEFAULT_MODEL_FLASH, "gemini-3-flash-preview", DEFAULT_MODEL_GEMMA, "gemini-1.5-flash"],
 }
 
-CACHE_VERSION = "GEM_CACHE_v10.56-Scout-Breakout-Filters"
+CACHE_VERSION = "GEM_CACHE_v10.57-Editable-Scout-Prompt-Decoupling"
 
 
 

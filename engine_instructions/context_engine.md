@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.56-Scout-Breakout-Filters
+- **version**: v10.57-Editable-Scout-Prompt-Decoupling
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

@@ -24,6 +24,26 @@ try:
 except ImportError:
     msvcrt = None
 
+DEFAULT_SCOUT_PROMPT = (
+    "ROLE: Market-structure signal scout.\n"
+    "TASK: Perform a live web search to identify top trending equities showing technical breakout conditions in the '{category}' sector of the US stock market (NASDAQ/NYSE) based on price/volume behavior and structural momentum.\n\n"
+    "SCAN REQUIREMENTS:\n"
+    "1. Price-Action Filters:\n"
+    "   - High-Volume Breakout (HVB): Today's volume >= 200% of 20-day average AND price > prior resistance.\n"
+    "   - Range Expansion: Daily candle > 1.8x ATR(14).\n"
+    "   - Multi-Day Momentum: 3+ consecutive higher closes with expanding volume.\n"
+    "   - Gap-and-Hold: >= 3% gap up AND holds above VWAP for majority of session.\n\n"
+    "2. Structural Momentum Filters:\n"
+    "   - Price above 20 EMA, 50 EMA, and VWAP\n"
+    "   - RSI between 55-75 (momentum zone, not overextended)\n"
+    "   - MACD histogram rising for >= 3 sessions\n"
+    "   - Positive volume delta (buying pressure > selling pressure)\n\n"
+    "3. Liquidity & Float Context:\n"
+    "   - Classify breakout type: low-float momentum, mid-cap trend, or large-cap continuation\n\n"
+    "RESTRICTION: Do not give investment advice, price targets, or buy/sell language. Focus strictly on pattern recognition and market-structure signals.\n\n"
+    "RETURN FORMAT: Return ONLY a valid JSON list of their uppercase ticker symbols, for example: [\"SYM1\", \"SYM2\", \"SYM3\"]. Do not include any other markdown text, formatting, or conversational boilerplate."
+)
+
 def initialize_context_files():
     """Bootstraps missing context files for fresh repository clones."""
     if not os.path.exists("context"):
@@ -37,7 +57,8 @@ def initialize_context_files():
         "context/decision_log.json": "[]",
         "context/user_config.json": "{}",
         "context/config.json": '{\n  "GEMINI_API_KEY": "",\n  "GEMINI_FREE_TIER_API_KEY": "",\n  "FINNHUB_API_KEY": ""\n}',
-        "logs/gem_handshakes.log": ""
+        "logs/gem_handshakes.log": "",
+        "context/scout_prompt.txt": DEFAULT_SCOUT_PROMPT
     }
     
     for filepath, default_content in defaults.items():
@@ -99,25 +120,18 @@ def _get_dynamic_scout_tickers(category: str) -> list:
         
         client = genai.Client(api_key=api_key) if api_key else genai.Client()
         
-        prompt = (
-            f"ROLE: Market-structure signal scout.\n"
-            f"TASK: Perform a live web search to identify top trending equities showing technical breakout conditions in the '{category}' sector of the US stock market (NASDAQ/NYSE) based on price/volume behavior and structural momentum.\n\n"
-            f"SCAN REQUIREMENTS:\n"
-            f"1. Price-Action Filters:\n"
-            f"   - High-Volume Breakout (HVB): Today's volume >= 200% of 20-day average AND price > prior resistance.\n"
-            f"   - Range Expansion: Daily candle > 1.8x ATR(14).\n"
-            f"   - Multi-Day Momentum: 3+ consecutive higher closes with expanding volume.\n"
-            f"   - Gap-and-Hold: >= 3% gap up AND holds above VWAP for majority of session.\n\n"
-            f"2. Structural Momentum Filters:\n"
-            f"   - Price above 20 EMA, 50 EMA, and VWAP\n"
-            f"   - RSI between 55-75 (momentum zone, not overextended)\n"
-            f"   - MACD histogram rising for >= 3 sessions\n"
-            f"   - Positive volume delta (buying pressure > selling pressure)\n\n"
-            f"3. Liquidity & Float Context:\n"
-            f"   - Classify breakout type: low-float momentum, mid-cap trend, or large-cap continuation\n\n"
-            f"RESTRICTION: Do not give investment advice, price targets, or buy/sell language. Focus strictly on pattern recognition and market-structure signals.\n\n"
-            f"RETURN FORMAT: Return ONLY a valid JSON list of their uppercase ticker symbols, for example: [\"SYM1\", \"SYM2\", \"SYM3\"]. Do not include any other markdown text, formatting, or conversational boilerplate."
-        )
+        prompt_path = "context/scout_prompt.txt"
+        scout_prompt = DEFAULT_SCOUT_PROMPT
+        if os.path.exists(prompt_path):
+            try:
+                with open(prompt_path, "r", encoding="utf-8") as f:
+                    file_content = f.read()
+                if file_content.strip() and file_content != DEFAULT_SCOUT_PROMPT:
+                    scout_prompt = file_content
+            except Exception as e:
+                print(f"[Scout Scanner] Error reading {prompt_path}: {e}")
+                
+        prompt = scout_prompt.replace("{category}", category)
         
         response = client.models.generate_content(
             model=flash_model,

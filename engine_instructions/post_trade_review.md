@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.56-Scout-Breakout-Filters
+**Version:** v10.57-Editable-Scout-Prompt-Decoupling
 **Tone:** neutral, reflective, concise
 
 ---

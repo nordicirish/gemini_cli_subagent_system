@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.56-Scout-Breakout-Filters
+- **version**: v10.57-Editable-Scout-Prompt-Decoupling
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

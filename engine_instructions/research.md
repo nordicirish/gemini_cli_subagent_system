@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.56-Scout-Breakout-Filters
+- **version**: v10.57-Editable-Scout-Prompt-Decoupling
 
 ## Tone
 institutional, narrative, concise
