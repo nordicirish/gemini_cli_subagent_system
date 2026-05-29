@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.55-Overnight-Exhaustion-Trims
+- **version**: v10.56-Scout-Breakout-Filters
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

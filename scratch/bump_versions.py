@@ -2,7 +2,7 @@ import os
 
 directory = r"c:\github\gemini_cli_subagent_system\engine_instructions"
 old_ver = "v10.54-Tactical-Sweep-and-Gamma-Locks"
-new_ver = "v10.55-Overnight-Exhaustion-Trims"
+new_ver = "v10.56-Scout-Breakout-Filters"
 
 files = [
     "bullish_gem.md",

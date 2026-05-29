@@ -100,10 +100,23 @@ def _get_dynamic_scout_tickers(category: str) -> list:
         client = genai.Client(api_key=api_key) if api_key else genai.Client()
         
         prompt = (
-            f"Perform a live web search for the current top 5 trending, high-beta, or high-performing stock tickers "
-            f"in the '{category}' sector in the US stock market (NASDAQ/NYSE). "
-            f"Return ONLY a valid JSON list of their uppercase ticker symbols, for example: [\"SYM1\", \"SYM2\", \"SYM3\"]. "
-            f"Do not include any other markdown text, formatting, or conversational boilerplate."
+            f"ROLE: Market-structure signal scout.\n"
+            f"TASK: Perform a live web search to identify top trending equities showing technical breakout conditions in the '{category}' sector of the US stock market (NASDAQ/NYSE) based on price/volume behavior and structural momentum.\n\n"
+            f"SCAN REQUIREMENTS:\n"
+            f"1. Price-Action Filters:\n"
+            f"   - High-Volume Breakout (HVB): Today's volume >= 200% of 20-day average AND price > prior resistance.\n"
+            f"   - Range Expansion: Daily candle > 1.8x ATR(14).\n"
+            f"   - Multi-Day Momentum: 3+ consecutive higher closes with expanding volume.\n"
+            f"   - Gap-and-Hold: >= 3% gap up AND holds above VWAP for majority of session.\n\n"
+            f"2. Structural Momentum Filters:\n"
+            f"   - Price above 20 EMA, 50 EMA, and VWAP\n"
+            f"   - RSI between 55-75 (momentum zone, not overextended)\n"
+            f"   - MACD histogram rising for >= 3 sessions\n"
+            f"   - Positive volume delta (buying pressure > selling pressure)\n\n"
+            f"3. Liquidity & Float Context:\n"
+            f"   - Classify breakout type: low-float momentum, mid-cap trend, or large-cap continuation\n\n"
+            f"RESTRICTION: Do not give investment advice, price targets, or buy/sell language. Focus strictly on pattern recognition and market-structure signals.\n\n"
+            f"RETURN FORMAT: Return ONLY a valid JSON list of their uppercase ticker symbols, for example: [\"SYM1\", \"SYM2\", \"SYM3\"]. Do not include any other markdown text, formatting, or conversational boilerplate."
         )
         
         response = client.models.generate_content(

@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.55-Overnight-Exhaustion-Trims
+- **version**: v10.56-Scout-Breakout-Filters
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

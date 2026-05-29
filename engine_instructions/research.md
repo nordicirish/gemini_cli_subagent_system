@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.55-Overnight-Exhaustion-Trims
+- **version**: v10.56-Scout-Breakout-Filters
 
 ## Tone
 institutional, narrative, concise

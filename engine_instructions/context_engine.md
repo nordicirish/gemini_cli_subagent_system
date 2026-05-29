@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.55-Overnight-Exhaustion-Trims
+- **version**: v10.56-Scout-Breakout-Filters
 - **id**: CONTEXT_ENGINE
 
 ## Prefix
