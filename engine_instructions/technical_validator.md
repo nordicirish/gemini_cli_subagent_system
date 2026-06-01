@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.57-Editable-Scout-Prompt-Decoupling
+- **version**: v10.58-Parabolic-Gravity-and-VWAP-Sweeps
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix
@@ -56,8 +56,9 @@ VALIDATE:
 - **dealer_posture_logic**: Reference GEM_Rules_Data > signal_consistency_thresholds > dealer_posture_logic (Canonical)
 - **ENH_110_validation**: Validate and sign-off on sympathy momentum shield bypass trims of 25% if price >3% daily VWAP and RSI >65 on sympathy-driven momentum.
 - **ENH_111_validation**: Verify mechanical trailing stops are tightened by 50% immediately upon transient SHORT_GAMMA flips with RSI >70.
-- **MANDATE_38_validation**: Enforce mandatory 15% 'alpha-harvest' trim on sustained RSI >72 sustained over 4 hours regardless of underlying dealer posture.
+- **MANDATE_38_validation**: Enforce a mandatory 15% 'alpha-harvest' trim on sustained RSI >72 sustained over 4 hours measured by an explicit 'Time in Overbought Zone' timer, regardless of underlying dealer posture.
 - **MANDATE_40_validation**: Enforce a mandatory 25-50% risk trim in the final 15 minutes of RTH if an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, overriding passive HOLD mandates.
+- **MANDATE_41_validation**: Enforce a mandatory minimum 15% tactical sweep trim if an asset exceeds a +12.0% extension from its daily VWAP anchor alongside an RSI > 80, regardless of SSR, LONG_GAMMA, or user manual overrides.
 
 
 ## Final Output Template

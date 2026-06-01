@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.57-Editable-Scout-Prompt-Decoupling
+**Version:** v10.58-Parabolic-Gravity-and-VWAP-Sweeps
 **Tone:** neutral, reflective, concise
 
 ---

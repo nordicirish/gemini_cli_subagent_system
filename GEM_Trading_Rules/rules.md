@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.57-Editable-Scout-Prompt-Decoupling
+**Version:** v10.58-Parabolic-Gravity-and-VWAP-Sweeps
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -109,7 +109,7 @@
 - ENH_113: Council Debate & Decision Log Permanence
 - ENH_114: Technical Compliance Isolation
 - ENH_115: INFORMATION_LEAKAGE_SENTRY
-- ENH_116: TACTICAL_SWEEP_PROTOCOL
+- ENH_116: EXTENDED_VWAP_BID_SWEEP - If an asset is >4% extended from its VWAP anchor and a passive ask-limit order fails to fill within 15 seconds, the Orchestrator MUST immediately cancel and replace with a marketable limit order sweeping the bid to guarantee extraction before parabolic mean reversion.
 
 
 ## Mandate Registry
@@ -149,9 +149,10 @@
 - MANDATE_34: INSTITUTIONAL PEG & AH GRAVITY
 - MANDATE_36_ENH_104: PERSISTENT STOP-LOSS TELEMETRY - The Execution Payload must persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP.
 - MANDATE_37: Sympathy Momentum Shield Bypass (Bypasses active shields to execute a 25% profit-taking trim on sympathy-driven momentum runners when price is >3% above VWAP and RSI >65).
-- MANDATE_38: RSI-VOLATILITY AUTOMATIC TRIMMING - Positions maintaining an RSI > 72 sustained over 4 hours MUST trigger a mandatory 15% 'alpha-harvest' trim regardless of underlying GEX/Dealer posture to preempt programmatic distribution.
+- MANDATE_38: STRICT_ENFORCEMENT_TIMER - The Orchestrator MUST instantiate an explicit 'Time in Overbought Zone' timer for any asset crossing 72 RSI. Trailing VWAP anchors DO NOT supersede time-based overbought exhaustion mandates. A 15% alpha-harvest trim is absolute after 4 consecutive hours.
 - MANDATE_39: PRE-MARKET GAP-DOWN CONVICTION THRESHOLD - If an asset gaps down > 3% in the pre-market session and possesses a trend score < 0, a 50% mechanical risk trim is mandatory prior to the RTH open to mitigate opening-bell liquidity washes.
 - MANDATE_40: OVERNIGHT_EXHAUSTION_TRIM - If an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, a mandatory 25-50% risk trim must be executed in the final 15 minutes of RTH to mitigate overnight gap-down exposure, overriding all passive HOLD mandates.
+- MANDATE_41: ABSOLUTE_PARABOLIC_GRAVITY - Regardless of active SSR status, LONG_GAMMA shielding, or user manual overrides, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST forcefully execute a minimum 15% tactical sweep trim. This is an un-bypassable terminal gravity layer.
 - NOTE: MANDATE_46 (LONG GAMMA SHIELD OVERRIDE) was REJECTED — content is fully covered by ENH_16_D, MANDATE_34, and MANDATE_35. MANDATE_34 has been augmented with the precision language from the proposed patch.
 
 ## Tool Supremacy Hierarchy
@@ -466,10 +467,10 @@
     *   **Directive:** Execute a mandatory 25% profit-taking trim on sympathy-driven momentum runners when price >3% above daily VWAP and RSI >65. This bypasses typical long gamma or active shields to lock in short-term momentum extension gains.
     *   **Rationale:** Prevents retaining extended positions on secondary runners riding the coattails of primary catalysts once momentum reaches overbought levels, locking in transient alpha before algorithmic mean-reversion occurs.
 
-*   **[MANDATE_38_RSI_VOLATILITY_AUTOMATIC_TRIMMING]**
+*   **[MANDATE_38_STRICT_ENFORCEMENT_TIMER]**
     *   **Status:** ACTIVE
-    *   **Directive:** Positions maintaining an RSI > 72 sustained over 4 hours MUST trigger a mandatory 15% 'alpha-harvest' trim regardless of underlying GEX/Dealer posture to preempt programmatic distribution.
-    *   **Rationale:** Consistently proven durable across multiple post-trade audits. Effectively limits drawdown leakage on over-crowded institutional assets (e.g., RKLB, MRVL).
+    *   **Directive:** STRICT_ENFORCEMENT_TIMER — The Orchestrator MUST instantiate an explicit 'Time in Overbought Zone' timer for any asset crossing 72 RSI. Trailing VWAP anchors DO NOT supersede time-based overbought exhaustion mandates. A 15% alpha-harvest trim is absolute after 4 consecutive hours.
+    *   **Rationale:** Validated successfully on 06-01; assets fading predictably after prolonged >72 RSI exposure. Promoted from L-234.
 
 *   **[MANDATE_39_PRE-MARKET_GAP-DOWN_CONVICTION_THRESHOLD]**
     *   **Status:** ACTIVE
@@ -481,6 +482,10 @@
     *   **Directive:** If an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, a mandatory 25-50% risk trim must be executed in the final 15 minutes of RTH (typically 15:45 - 16:00 EST) to mitigate overnight gap-down exposure, overriding all passive HOLD mandates.
     *   **Rationale:** Converts L-235 to a permanent protocol; directly addresses the fundamental logic breakdown that resulted in the UMAC/RCAT May 29 pre-market losses.
 
+*   **[MANDATE_41_ABSOLUTE_PARABOLIC_GRAVITY]**
+    *   **Status:** ACTIVE
+    *   **Directive:** ABSOLUTE_PARABOLIC_GRAVITY — Regardless of active SSR status, LONG_GAMMA shielding, or user manual overrides, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST forcefully execute a minimum 15% tactical sweep trim. This is an un-bypassable terminal gravity layer.
+    *   **Rationale:** Proven highly effective at stopping narrative capture during May 29th's extreme verticality. Promoted from L-236.
 
 ## Anti Hallucination Core
 - **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.
@@ -1739,12 +1744,18 @@
   - **Action:** Tag `unverified_stealth_accumulation` in the forensic audit and authorize the BULLISH_ADVOCATE to execute a pilot tranche (capped at 25% of standard sizing) prior to catalyst realization.
 - **Justification:** Captures high-conviction institutional accumulation before public catalyst dissemination while managing down-side risk via size penalties.
 
-### [ENH_116] TACTICAL_SWEEP_PROTOCOL
+### [ENH_116] EXTENDED_VWAP_BID_SWEEP
 - **Status:** ACTIVE
-- **Content:** Sweep execution logic:
-  - **Trigger Conditions:** If an asset is >4% extended from its daily VWAP anchor, OR if a critical risk trim fails to execute due to broker API latency.
-  - **Action:** The Orchestrator MUST instantly cancel passive ask-limits and queue a 'Sweeping Limit Order' priced 0.5% below the current bid. Re-queuing at the identical or higher limit is strictly prohibited under these structural conditions.
-- **Justification:** Log forensics (May 27, 12:36 UMAC event) prove that static limit orders during operational failure or parabolic exhaustion result in liquidity traps and alpha destruction.
+- **Content:** EXTENDED_VWAP_BID_SWEEP — If an asset is >4% extended from its VWAP anchor and a passive ask-limit order fails to fill within 15 seconds, the Orchestrator MUST immediately cancel and replace with a marketable limit order sweeping the bid to guarantee extraction before parabolic mean reversion.
+- **Trigger Conditions (BOTH must be satisfied):**
+  - `distance_from_vwap_pct > 4.0%` (Parabolic extension — asset structurally overextended from its intraday liquidity anchor)
+  - Passive ask-limit order fails to fill within 15 seconds.
+- **Action:**
+  1. Immediately cancel the outstanding passive ask-limit order.
+  2. Instantiate and execute a marketable limit order sweeping the bid to guarantee immediate execution.
+- **Constraints:**
+  - This protocol possesses absolute execution supremacy over standard passive limit strategies to prevent capital entrapment.
+- **Justification:** Forensic review shows multiple instances of passive limit trims failing during extreme overextensions, trapping capital. Promoted from L-233.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.

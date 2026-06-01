@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.57-Editable-Scout-Prompt-Decoupling
+- **version**: v10.58-Parabolic-Gravity-and-VWAP-Sweeps
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.57-Editable-Scout-Prompt-Decoupling
+- **version**: v10.58-Parabolic-Gravity-and-VWAP-Sweeps
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

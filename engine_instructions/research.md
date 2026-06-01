@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.57-Editable-Scout-Prompt-Decoupling
+- **version**: v10.58-Parabolic-Gravity-and-VWAP-Sweeps
 
 ## Tone
 institutional, narrative, concise

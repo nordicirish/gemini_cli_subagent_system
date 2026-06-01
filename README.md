@@ -285,6 +285,13 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v10.58-Parabolic-Gravity-and-VWAP-Sweeps *(2026-06-01)*
+- **Rule Codification (SSoT Integration):** Codified three critical defensive and execution rule patches:
+  - **ENH_116 (EXTENDED_VWAP_BID_SWEEP):** Bypasses passive limit strategies to execute an immediate marketable limit order sweeping the bid if an asset is >4% extended from VWAP and a passive ask-limit order fails to fill within 15 seconds, preventing capital traps during overextensions.
+  - **MANDATE_38 (STRICT_ENFORCEMENT_TIMER):** Mandates instantiation of an explicit 'Time in Overbought Zone' timer for assets crossing 72 RSI, triggering a mandatory 15% alpha trim after 4 consecutive hours.
+  - **MANDATE_41 (ABSOLUTE_PARABOLIC_GRAVITY):** Establishes an un-bypassable terminal gravity trim of 15% if an asset exceeds a +12.0% extension from VWAP and RSI > 80, overriding all shields and manual controls.
+- **Global Architectural Parity (MANDATE_29):** Synchronized and bumped the framework version to `v10.58-Parabolic-Gravity-and-VWAP-Sweeps` across all 17 Council subagent instruction sets, rules.md master SSoT, and antigravity.md files.
+
 ### v10.57-Editable-Scout-Prompt-Decoupling *(2026-05-30)*
 - **Editable Search Prompt File:** Extracted the technical breakout search prompt to `context/scout_prompt.txt`. The system dynamically reads this file at runtime, enabling users to customize the scanner criteria.
 - **Robust Fallback Engine:** Hardcoded the default breakout prompt inside `fetch_stocks.py` as a fallback. The system automatically falls back to it if the file is missing or empty, and overwrites the active prompt only if the file contents differ.
