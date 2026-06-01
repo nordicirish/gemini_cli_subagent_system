@@ -33,6 +33,10 @@ git clone https://github.com/your-org/gemini_cli_subagent_system
 cd gemini_cli_subagent_system
 
 # 2. Install dependencies
+# Option A: Run the automated installer script
+powershell -ExecutionPolicy Bypass -File install.ps1
+
+# Option B: Install manually
 pip install -r requirements.txt
 
 # 3. Set your Gemini API key
