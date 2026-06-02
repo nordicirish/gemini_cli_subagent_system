@@ -324,6 +324,19 @@ def get_market_data() -> str:
     }
     return json.dumps(data_to_return)
 
+def load_forensic_search_prompt(query: str) -> str:
+    """Loads the forensic search prompt from prompts/forensic_search_prompt.txt and replaces the query placeholder."""
+    prompt_path = "prompts/forensic_search_prompt.txt"
+    template = ""
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                template = f.read().strip()
+        except Exception: pass
+    if not template:
+        template = "Search and summarize the following for financial forensic audit: {query}"
+    return template.format(query=query)
+
 def perform_web_forensic_search(query: str) -> str:
     """
     Performs a live web search to fetch current market filings (424B, S-3), 
@@ -345,10 +358,11 @@ def perform_web_forensic_search(query: str) -> str:
         
         client = genai.Client(api_key=api_key) if api_key else genai.Client()
         
+        prompt = load_forensic_search_prompt(query)
         # Use a stable flash model for the search-only retrieval
         response = client.models.generate_content(
             model=flash_model, 
-            contents=f"Search and summarize the following for financial forensic audit: {query}",
+            contents=prompt,
             config=types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())],
                 safety_settings=[

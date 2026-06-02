@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.59-Ingestion-Merge-Protection
+- **version**: v10.60-Prompt-Externalization-and-Refactoring
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

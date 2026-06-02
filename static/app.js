@@ -256,15 +256,25 @@ async function copyMarketSnapshot(triggerBtn, statusEl) {
             }
         };
         
-        const snapshotPrompt = [
-            "SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION",
-            "",
-            "You are receiving the latest Market Snapshot and Portfolio State.",
-            "1. Parse the JSON payload and synchronize your local context.",
-            "2. Evaluate current 'risk_regime' and 'dealer_posture' shifts.",
-            "3. Route the data through the Consensus Pipeline (Data Analyst -> Council Debate -> Synthesis) for any required rebalancing, entries, or defensive trims.",
-            "4. Conclude your turn by outputting the final EXECUTION_PAYLOAD."
-        ].join("\n");
+        let snapshotPrompt = "";
+        try {
+            const promptRes = await fetch(`${API_BASE}/prompts/snapshot`);
+            const promptData = await promptRes.json();
+            snapshotPrompt = promptData.prompt || "";
+        } catch (pe) {
+            console.warn("Failed to fetch dynamic snapshot prompt, using fallback:", pe);
+        }
+        if (!snapshotPrompt) {
+            snapshotPrompt = [
+                "SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION",
+                "",
+                "You are receiving the latest Market Snapshot and Portfolio State.",
+                "1. Parse the JSON payload and synchronize your local context.",
+                "2. Evaluate current 'risk_regime' and 'dealer_posture' shifts.",
+                "3. Route the data through the Consensus Pipeline (Data Analyst -> Council Debate -> Synthesis) for any required rebalancing, entries, or defensive trims.",
+                "4. Conclude your turn by outputting the final EXECUTION_PAYLOAD."
+            ].join("\n");
+        }
         const jsonString = snapshotPrompt + "\n\n```json\n" + JSON.stringify(turnPayload, null, 2) + "\n```";
         await navigator.clipboard.writeText(jsonString);
         showFeedback(triggerBtn, "✅ Copied!", "Market snapshot ready!", false, statusEl);
@@ -320,25 +330,35 @@ async function copySessionBoot(triggerBtn, statusEl) {
             sessionPayload.local_storage_state.mutable_state.state_context.status = state.status;
         }
         
-        const bootPrompt = [
-            "SYSTEM BOOT: COUNCIL SESSION INITIALIZATION",
-            "",
-            "You are receiving the full SSoT state and live market data for a new session.",
-            "Execute the following Stage 0 Boot Sequence:",
-            "",
-            "1. BASELINE SYNC (ENH_31): Ground all portfolio prices via Google Search.",
-            "   Verify each ticker's current price against the provided snapshot.",
-            "2. CASH RECONCILIATION (MANDATE_31): Confirm unallocated_cash_eur matches",
-            "   the SSoT. Output: math_proof_liquidity.",
-            "3. REGIME CLASSIFICATION: Assess current risk regime (TRENDING/MEAN_REVERTING/",
-            "   VOLATILE) based on VIX, VIXY velocity, and SPY structure.",
-            "4. PORTFOLIO HEALTH AUDIT: Flag any positions with health_score < 50 or",
-            "   status = IN_DISTRESS for immediate Council review.",
-            "5. MARKET POSTURE: Provide a top-level posture assessment (RISK_ON/RISK_OFF/",
-            "   NEUTRAL) with supporting forensic evidence.",
-            "",
-            "Emit the full EXECUTION_PAYLOAD with updated state_context upon completion."
-        ].join("\n");
+        let bootPrompt = "";
+        try {
+            const promptRes = await fetch(`${API_BASE}/prompts/boot`);
+            const promptData = await promptRes.json();
+            bootPrompt = promptData.prompt || "";
+        } catch (pe) {
+            console.warn("Failed to fetch dynamic boot prompt, using fallback:", pe);
+        }
+        if (!bootPrompt) {
+            bootPrompt = [
+                "SYSTEM BOOT: COUNCIL SESSION INITIALIZATION",
+                "",
+                "You are receiving the full SSoT state and live market data for a new session.",
+                "Execute the following Stage 0 Boot Sequence:",
+                "",
+                "1. BASELINE SYNC (ENH_31): Ground all portfolio prices via Google Search.",
+                "   Verify each ticker's current price against the provided snapshot.",
+                "2. CASH RECONCILIATION (MANDATE_31): Confirm unallocated_cash_eur matches",
+                "   the SSoT. Output: math_proof_liquidity.",
+                "3. REGIME CLASSIFICATION: Assess current risk regime (TRENDING/MEAN_REVERTING/",
+                "   VOLATILE) based on VIX, VIXY velocity, and SPY structure.",
+                "4. PORTFOLIO HEALTH AUDIT: Flag any positions with health_score < 50 or",
+                "   status = IN_DISTRESS for immediate Council review.",
+                "5. MARKET POSTURE: Provide a top-level posture assessment (RISK_ON/RISK_OFF/",
+                "   NEUTRAL) with supporting forensic evidence.",
+                "",
+                "Emit the full EXECUTION_PAYLOAD with updated state_context upon completion."
+            ].join("\n");
+        }
         const jsonString = bootPrompt + "\n\n```json\n" + JSON.stringify(sessionPayload, null, 2) + "\n```";
         
         await navigator.clipboard.writeText(jsonString);
