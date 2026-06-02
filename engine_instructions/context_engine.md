@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.60-Prompt-Externalization-and-Refactoring
+- **version**: v10.61-Scout-Ticker-Validation
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

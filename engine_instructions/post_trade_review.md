@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.60-Prompt-Externalization-and-Refactoring
+**Version:** v10.61-Scout-Ticker-Validation
 **Tone:** neutral, reflective, concise
 
 ---

@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.60-Prompt-Externalization-and-Refactoring
+- **version**: v10.61-Scout-Ticker-Validation
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

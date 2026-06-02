@@ -37,7 +37,7 @@ llm_logger.addHandler(handshake_handler)
 llm_logger.propagate = False
 
 # ---------------------------------------------------------------------------
-# Model definitions — v10.53-Sympathy-Momentum-and-RSI-Trims
+# Model definitions — v10.61-Scout-Ticker-Validation
 # Per terminal.md > Mode Selection Matrix (Canonical)
 # ---------------------------------------------------------------------------
 DEFAULT_MODEL_PRO = "gemini-2.5-pro"

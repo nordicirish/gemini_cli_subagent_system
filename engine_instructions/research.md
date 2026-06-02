@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.60-Prompt-Externalization-and-Refactoring
+- **version**: v10.61-Scout-Ticker-Validation
 
 ## Tone
 institutional, narrative, concise

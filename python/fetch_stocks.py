@@ -150,6 +150,27 @@ SCOUT_TICKER_MAP = config.get("SCOUT_TICKER_MAP", {})
 DYNAMIC_SCOUT_CACHE = {}
 DYNAMIC_SCOUT_CACHE_LOCK = threading.Lock()
 
+VALID_SINGLE_LETTER_TICKERS = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'O', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Z'}
+STOP_WORDS = {"AND", "THE", "FOR", "JSON", "USA", "ETF", "SEC", "CEO", "IPO", "NYSE", "NASDAQ", "US", "PRICING", "INDEX"}
+
+def is_valid_ticker(symbol: str) -> bool:
+    if not isinstance(symbol, str):
+        return False
+    symbol = symbol.strip().upper()
+    if not symbol:
+        return False
+    if symbol in STOP_WORDS:
+        return False
+    if len(symbol) == 1:
+        return symbol in VALID_SINGLE_LETTER_TICKERS
+    # Enforce starting and ending with alphanumeric, allowing internal hyphens, slashes, equals, length 2 to 10.
+    # Must contain at least one letter to prevent purely numeric codes.
+    if not re.match(r"^[A-Z0-9][A-Z0-9^=/-]{0,8}[A-Z0-9]$", symbol):
+        return False
+    if not any(c.isalpha() for c in symbol):
+        return False
+    return True
+
 def _get_dynamic_scout_tickers(category: str) -> list:
     """
     Dynamically performs a live Google Search via Gemini Flash to retrieve the top 5
@@ -194,16 +215,17 @@ def _get_dynamic_scout_tickers(category: str) -> list:
         )
         
         text = response.text.strip()
-        match = re.search(r"\[\s*\"[A-Z]{1,5}\"(?:\s*,\s*\"[A-Z]{1,5}\")*\s*\]", text)
+        match = re.search(r"\[\s*\"[A-Z0-9^=-]{1,10}\"(?:\s*,\s*\"[A-Z0-9^=-]{1,10}\")*\s*\]", text, re.IGNORECASE)
         if match:
             tickers = json.loads(match.group(0))
         else:
-            words = re.findall(r"\"([A-Z]{1,5})\"", text)
+            words = re.findall(r"\"([A-Z0-9^=-]{1,10})\"", text)
             if not words:
-                words = re.findall(r"\b([A-Z]{1,5})\b", text)
+                words = re.findall(r"\b([A-Z0-9^=-]{1,10})\b", text)
             filter_words = {"AND", "THE", "FOR", "JSON", "USA", "ETF", "SEC", "CEO", "IPO", "NYSE", "NASDAQ", "US"}
-            tickers = [w for w in words if w not in filter_words][:5]
+            tickers = [w.upper() for w in words if w.upper() not in filter_words]
             
+        tickers = [t.strip().upper() for t in tickers if is_valid_ticker(t)][:5]
         if tickers:
             with DYNAMIC_SCOUT_CACHE_LOCK:
                 DYNAMIC_SCOUT_CACHE[category] = {"tickers": tickers, "timestamp": now}
@@ -213,7 +235,7 @@ def _get_dynamic_scout_tickers(category: str) -> list:
     except Exception as e:
         print(f"[Scout Scanner] Dynamic search failed for {category}: {e}. Using fallback tickers.")
         
-    return fallback
+    return [t.strip().upper() for t in fallback if is_valid_ticker(t)]
 
 ACTIVE_SCOUT_TICKERS = set()
 PROCESSED_SCOUT_CATEGORIES = []
@@ -239,14 +261,15 @@ def _load_ssot_tickers():
                     SCOUTED_TICKER_TO_CATEGORY_MAP[t.upper()] = cat
                 scout_tickers.extend(cat_tickers)
             
-            ACTIVE_SCOUT_TICKERS = set(scout_tickers)
+            ACTIVE_SCOUT_TICKERS = {t.upper() for t in scout_tickers if is_valid_ticker(t)}
             PROCESSED_SCOUT_CATEGORIES = list(scouts)
                     
             # Combine unique tickers, maintaining order where possible
             combined = []
-            for t in portfolio + watched + scout_tickers:
-                if t not in combined:
-                    combined.append(t)
+            for t in portfolio + watched + list(ACTIVE_SCOUT_TICKERS):
+                t_upper = t.upper()
+                if t_upper not in combined and is_valid_ticker(t_upper):
+                    combined.append(t_upper)
             return combined
     except Exception as e:
         print(f"[SSOT] Load failed: {e}")
@@ -988,7 +1011,7 @@ class MarketDataCache:
         self.cycles: int = 0
         self.vwap_pointer: int = 0
         
-        # Cache structures per v10.53-Sympathy-Momentum-and-RSI-Trims specifications
+        # Cache structures per v10.61-Scout-Ticker-Validation specifications
         self.last_chart_fetch: dict[str, float] = {}
         self.chart_cache: dict[str, tuple] = {}
         self.last_premarket_vol_fetch: dict[str, float] = {}
