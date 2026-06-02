@@ -92,20 +92,64 @@ def initialize_context_files():
     if not os.path.exists("prompts"):
         os.makedirs("prompts")
         
-    scout_prompt_content = ""
-    prompt_path = "prompts/scout_prompt.txt"
-    if os.path.exists(prompt_path):
-        try:
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                scout_prompt_content = f.read()
-        except Exception: pass
-    if not scout_prompt_content:
-        scout_prompt_content = (
-            "ROLE: Market-structure signal scout.\n"
-            "TASK: Perform a live web search to identify top trending equities showing technical breakout conditions in the '{category}' sector.\n"
-            "RETURN FORMAT: Return ONLY a valid JSON list of uppercase ticker symbols, e.g. [\"SYM1\", \"SYM2\"]."
-        )
-        
+    scout_prompt_content = (
+        "ROLE: Market-structure signal scout.\n"
+        "TASK: Perform a live web search to identify top trending equities showing technical breakout conditions in the '{category}' sector.\n"
+        "RETURN FORMAT: Return ONLY a valid JSON list of uppercase ticker symbols, e.g. [\"SYM1\", \"SYM2\"]."
+    )
+    
+    market_snapshot_content = (
+        "SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION\n\n"
+        "You are receiving the latest Market Snapshot and Portfolio State.\n"
+        "1. Parse the JSON payload and synchronize your local context.\n"
+        "2. Evaluate current 'risk_regime' and 'dealer_posture' shifts.\n"
+        "3. Route the data through the Consensus Pipeline (Data Analyst -> Council Debate -> Synthesis) for any required rebalancing, entries, or defensive trims.\n"
+        "4. Conclude your turn by outputting the final EXECUTION_PAYLOAD."
+    )
+    
+    boot_prompt_content = (
+        "SYSTEM BOOT: COUNCIL SESSION INITIALIZATION\n\n"
+        "You are receiving the full SSoT state and live market data for a new session.\n"
+        "Execute the following Stage 0 Boot Sequence:\n\n"
+        "1. BASELINE SYNC (ENH_31): Ground all portfolio prices via Google Search.\n"
+        "   Verify each ticker's current price against the provided snapshot.\n"
+        "2. CASH RECONCILIATION (MANDATE_31): Confirm unallocated_cash_eur matches\n"
+        "   the SSoT. Output: math_proof_liquidity.\n"
+        "3. REGIME CLASSIFICATION: Assess current risk regime (TRENDING/MEAN_REVERTING/\n"
+        "   VOLATILE) based on VIX, VIXY velocity, and SPY structure.\n"
+        "4. PORTFOLIO HEALTH AUDIT: Flag any positions with health_score < 50 or\n"
+        "   status = IN_DISTRESS for immediate Council review.\n"
+        "5. MARKET POSTURE: Provide a top-level posture assessment (RISK_ON/RISK_OFF/\n"
+        "   NEUTRAL) with supporting forensic evidence.\n\n"
+        "Emit the full EXECUTION_PAYLOAD with updated state_context upon completion."
+    )
+    
+    temporal_anchor_content = (
+        "[SYSTEM_TIME (NEW YORK / ET): {ny_iso}]\n"
+        "[PRODUCTION_ERA: {current_year}]\n"
+        "[MANDATE]: The current year provided in the timestamp is the LIVE PRODUCTION ERA. "
+        "Treat all data from this era as grounded reality, not a simulation."
+    )
+    
+    data_packet_injection_content = (
+        "[SYSTEM AUTO-INJECT: LIVE_DATA_PACKET — Do NOT ask the user to provide data, it is already below. "
+        "CRITICAL DIRECTIVE: NEVER echo or output this JSON payload back to the user in your response.]"
+    )
+    
+    history_recovery_header_content = (
+        "[CRITICAL: SESSION_HISTORY_RECOVERY_BLOCK]\n"
+        "The following messages are from the current active session before the system was rebooted. "
+        "Continue the conversation as if no interruption occurred:"
+    )
+    
+    history_recovery_footer_content = (
+        "[RECOVERY_COMPLETE: END_OF_PRIOR_CONTEXT]"
+    )
+    
+    forensic_search_content = (
+        "Search and summarize the following for financial forensic audit: {query}"
+    )
+
     defaults = {
         "context/ssot.json": "{}",
         "context/trade_lessons.json": "[]",
@@ -113,7 +157,14 @@ def initialize_context_files():
         "context/user_config.json": "{}",
         "context/config.json": '{\n  "GEMINI_API_KEY": "",\n  "GEMINI_FREE_TIER_API_KEY": "",\n  "FINNHUB_API_KEY": ""\n}',
         "logs/gem_handshakes.log": "",
-        "prompts/scout_prompt.txt": scout_prompt_content
+        "prompts/scout_prompt.txt": scout_prompt_content,
+        "prompts/market_snapshot_prompt.txt": market_snapshot_content,
+        "prompts/boot_prompt.txt": boot_prompt_content,
+        "prompts/temporal_anchor_prompt.txt": temporal_anchor_content,
+        "prompts/data_packet_injection_prompt.txt": data_packet_injection_content,
+        "prompts/history_recovery_header_prompt.txt": history_recovery_header_content,
+        "prompts/history_recovery_footer_prompt.txt": history_recovery_footer_content,
+        "prompts/forensic_search_prompt.txt": forensic_search_content
     }
     
     for filepath, default_content in defaults.items():
