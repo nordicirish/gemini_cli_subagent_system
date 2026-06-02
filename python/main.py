@@ -202,10 +202,11 @@ def main():
         sys.exit(1)
 
     try:
-        import glob
+        import fetch_stocks
+        fetch_stocks.compile_master_document()
         sync_daemon = cloud_sync.CloudSyncDaemon(framework.client)
-        sync_files = glob.glob("engine_instructions/*.md") + [
-            os.path.join("gem_trading_rules", "rules.md"),
+        sync_files = [
+            "scratch/master_trading_knowledge.md",
             "context/decision_log.json",
             "context/trade_lessons.json",
             "context/ssot.json"

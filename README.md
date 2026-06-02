@@ -285,10 +285,10 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
-### v10.59-Ingestion-Merge-Protection *(2026-06-02)*
+### v10.60-Prompt-Externalization-and-Refactoring *(2026-06-02)*
 - **Resolved Portfolio Deletion Bug:** Fixed a critical bug in SSoT ingestion where an empty `portfolio_snapshot` array in the `EXECUTION_PAYLOAD` (e.g. from delta or audit runs) caused `_deep_merge` to overwrite and wipe out all active holdings. Enforced `MERGE_BY_TICKER_PRESERVE_UNTOUCHED_TICKERS` to preserve existing holdings unless explicitly deleted via the `DELETE_FIELD` protocol.
 - **SSoT Directives Promotion (ENH_31-S):** Restored and synchronized the missing `ENH_31` promotion logic in `fetch_stocks.py` to ensure execution payloads are successfully promoted to the active `mutable_state` layer upon paste.
-- **Global Architectural Parity (MANDATE_29):** Synchronized and bumped the framework version to `v10.59-Ingestion-Merge-Protection` across all 17 Council subagent instruction sets, rules.md master SSoT, and antigravity.md files.
+- **Global Architectural Parity (MANDATE_29):** Synchronized and bumped the framework version to `v10.60-Prompt-Externalization-and-Refactoring` across all 17 Council subagent instruction sets, rules.md master SSoT, and antigravity.md files.
 
 ### v10.58-Parabolic-Gravity-and-VWAP-Sweeps *(2026-06-01)*
 - **Rule Codification (SSoT Integration):** Codified three critical defensive and execution rule patches:
@@ -298,7 +298,7 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 - **Global Architectural Parity (MANDATE_29):** Synchronized and bumped the framework version to `v10.58-Parabolic-Gravity-and-VWAP-Sweeps` across all 17 Council subagent instruction sets, rules.md master SSoT, and antigravity.md files.
 
 ### v10.57-Editable-Scout-Prompt-Decoupling *(2026-05-30)*
-- **Editable Search Prompt File:** Extracted the technical breakout search prompt to `context/scout_prompt.txt`. The system dynamically reads this file at runtime, enabling users to customize the scanner criteria.
+- **Editable Search Prompt File:** Extracted the technical breakout search prompt to `prompts/scout_prompt.txt`. The system dynamically reads this file at runtime, enabling users to customize the scanner criteria.
 - **Robust Fallback Engine:** Hardcoded the default breakout prompt inside `fetch_stocks.py` as a fallback. The system automatically falls back to it if the file is missing or empty, and overwrites the active prompt only if the file contents differ.
 - **Global Architectural Parity:** Proactively bumped version strings to `v10.57-Editable-Scout-Prompt-Decoupling` across the master rules SSoT, root `antigravity.md`, the system `README.md`, and all 17 Council subagent instruction sets to prevent drift.
 
@@ -317,12 +317,12 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 - **Engine Logic Mirroring:** Updated and synchronized logic, threshold evaluations, and control triggers across the Terminal Orchestrator (`terminal.md`), Bullish Advocate (`bullish_gem.md`), Neutral Structuralist (`neutral_gem.md`), GEX Engine (`gex_engine.md`), Execution Engine (`execution.md`), and Rule Enforcer (`rule_enforcer_engine.md`).
 - **Global Architectural Parity:** Synchronized all 17 Council subagent instruction sets, system configurations, and utility scripts to the unified version string `v10.54-Tactical-Sweep-and-Gamma-Locks` per `MANDATE_29`.
 
-### v10.53-Sympathy-Momentum-and-RSI-Trims *(2026-05-27)*
+### v10.60-Prompt-Externalization-and-Refactoring *(2026-05-27)*
 - **Sympathy Momentum and RSI-Volatility Trim Implementation:** Codified the new rules `ENH_110` (Sympathy Momentum Shield Bypass), `ENH_111` (Gamma Flicker Preemption Stop Tightening), and `MANDATE_38` (RSI-Volatility Automatic Trimming) into the SSoT master rules.
 - **Rule Re-indexing:** Surgically re-indexed `ENH_110` to `ENH_113` (Council Debate & Decision Log Permanence) and `ENH_111` to `ENH_114` (Technical Compliance Isolation) inside `rules.md` and `README.md` to avoid ID collisions.
 - **Sub-agent Logical Mirroring:** Synchronized and bonded logic triggers within `execution.md`, `gex_engine.md`, `neutral_gem.md`, `bullish_gem.md`, `red_team_gem.md`, and `technical_validator.md`.
 - **Dynamic Trade Lesson Garbage Collection:** Atomic cleanup of dynamic trade lessons by purging lesson `id: 6` (referencing `ENH_109`) from `context/trade_lessons.json` and `context/trade_lessons.md` after its codification and promotion to `MANDATE_38`.
-- **Global Architectural Parity:** Synchronized all 17 subagent instruction markdown files, system configurations, and utility scripts to the unified version string `v10.53-Sympathy-Momentum-and-RSI-Trims` per `MANDATE_29`.
+- **Global Architectural Parity:** Synchronized all 17 subagent instruction markdown files, system configurations, and utility scripts to the unified version string `v10.60-Prompt-Externalization-and-Refactoring` per `MANDATE_29`.
 
 ### v10.52-Cache-Hardening-and-Portfolio-Defaults *(2026-05-27)*
 - **Frontend Defaults Hardening:** Modified the frontend `addToPortfolio()` handler in `static/app.js` to default new entries to `shares: 1` and `wac: 0` (preventing display filtering/reconciliation race conditions).

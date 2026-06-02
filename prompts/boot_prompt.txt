@@ -1,0 +1,17 @@
+SYSTEM BOOT: COUNCIL SESSION INITIALIZATION
+
+You are receiving the full SSoT state and live market data for a new session.
+Execute the following Stage 0 Boot Sequence:
+
+1. BASELINE SYNC (ENH_31): Ground all portfolio prices via Google Search.
+   Verify each ticker's current price against the provided snapshot.
+2. CASH RECONCILIATION (MANDATE_31): Confirm unallocated_cash_eur matches
+   the SSoT. Output: math_proof_liquidity.
+3. REGIME CLASSIFICATION: Assess current risk regime (TRENDING/MEAN_REVERTING/
+   VOLATILE) based on VIX, VIXY velocity, and SPY structure.
+4. PORTFOLIO HEALTH AUDIT: Flag any positions with health_score < 50 or
+   status = IN_DISTRESS for immediate Council review.
+5. MARKET POSTURE: Provide a top-level posture assessment (RISK_ON/RISK_OFF/
+   NEUTRAL) with supporting forensic evidence.
+
+Emit the full EXECUTION_PAYLOAD with updated state_context upon completion.

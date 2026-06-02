@@ -24,25 +24,64 @@ try:
 except ImportError:
     msvcrt = None
 
-DEFAULT_SCOUT_PROMPT = (
-    "ROLE: Market-structure signal scout.\n"
-    "TASK: Perform a live web search to identify top trending equities showing technical breakout conditions in the '{category}' sector of the US stock market (NASDAQ/NYSE) based on price/volume behavior and structural momentum.\n\n"
-    "SCAN REQUIREMENTS:\n"
-    "1. Price-Action Filters:\n"
-    "   - High-Volume Breakout (HVB): Today's volume >= 200% of 20-day average AND price > prior resistance.\n"
-    "   - Range Expansion: Daily candle > 1.8x ATR(14).\n"
-    "   - Multi-Day Momentum: 3+ consecutive higher closes with expanding volume.\n"
-    "   - Gap-and-Hold: >= 3% gap up AND holds above VWAP for majority of session.\n\n"
-    "2. Structural Momentum Filters:\n"
-    "   - Price above 20 EMA, 50 EMA, and VWAP\n"
-    "   - RSI between 55-75 (momentum zone, not overextended)\n"
-    "   - MACD histogram rising for >= 3 sessions\n"
-    "   - Positive volume delta (buying pressure > selling pressure)\n\n"
-    "3. Liquidity & Float Context:\n"
-    "   - Classify breakout type: low-float momentum, mid-cap trend, or large-cap continuation\n\n"
-    "RESTRICTION: Do not give investment advice, price targets, or buy/sell language. Focus strictly on pattern recognition and market-structure signals.\n\n"
-    "RETURN FORMAT: Return ONLY a valid JSON list of their uppercase ticker symbols, for example: [\"SYM1\", \"SYM2\", \"SYM3\"]. Do not include any other markdown text, formatting, or conversational boilerplate."
-)
+def load_scout_prompt() -> str:
+    """Loads the scout prompt from prompts/scout_prompt.txt."""
+    prompt_path = "prompts/scout_prompt.txt"
+    
+    # Read from the main prompts directory
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except Exception as e:
+            print(f"[Warning] Failed to read prompt from {prompt_path}: {e}")
+            
+    # Hardcoded safety fallback if files are completely deleted/missing
+    return (
+        "ROLE: Market-structure signal scout.\n"
+        "TASK: Perform a live web search to identify top trending equities showing technical breakout conditions in the '{category}' sector.\n"
+        "RETURN FORMAT: Return ONLY a valid JSON list of uppercase ticker symbols, e.g. [\"SYM1\", \"SYM2\"]."
+    )
+
+def compile_master_document():
+    """Aggregates gem_trading_rules/rules.md and all engine instruction markdown files
+    into a single master document at scratch/master_trading_knowledge.md to optimize cloud uploads.
+    """
+    master_doc_path = os.path.join("scratch", "master_trading_knowledge.md")
+    os.makedirs("scratch", exist_ok=True)
+    
+    print("[System] Compiling Master Trading Knowledge Document...")
+    try:
+        with open(master_doc_path, 'w', encoding='utf-8') as master_file:
+            master_file.write("# Master Trading Knowledge Document\n\n")
+            master_file.write("This document contains the Single Source of Truth (SSoT) rules and all engine instructions.\n\n")
+            
+            # Append rules.md
+            rules_local_path = os.path.join("gem_trading_rules", "rules.md")
+            if os.path.exists(rules_local_path):
+                master_file.write("## 1. TRADING RULES (SSoT)\n\n")
+                with open(rules_local_path, 'r', encoding='utf-8') as rules_file:
+                    content = rules_file.read()
+                    demoted_lines = [('##' + line) if line.startswith('#') else line for line in content.splitlines()]
+                    master_file.write('\n'.join(demoted_lines))
+                master_file.write("\n\n---\n\n")
+                
+            # Append engine instructions
+            master_file.write("## 2. ENGINE INSTRUCTIONS\n\n")
+            engine_dir = "engine_instructions"
+            if os.path.exists(engine_dir):
+                for filename in sorted(os.listdir(engine_dir)):
+                    if filename.endswith('.md'):
+                        local_path = os.path.join(engine_dir, filename)
+                        master_file.write(f"### Component: {filename}\n\n")
+                        with open(local_path, 'r', encoding='utf-8') as engine_file:
+                            content = engine_file.read()
+                            demoted_lines = [('###' + line) if line.startswith('#') else line for line in content.splitlines()]
+                            master_file.write('\n'.join(demoted_lines))
+                        master_file.write("\n\n---\n\n")
+        print(f"[System] Master Document compiled successfully: {master_doc_path}")
+    except Exception as e:
+        print(f"[System Warning] Failed to compile master document: {e}")
 
 def initialize_context_files():
     """Bootstraps missing context files for fresh repository clones."""
@@ -50,6 +89,22 @@ def initialize_context_files():
         os.makedirs("context")
     if not os.path.exists("logs"):
         os.makedirs("logs")
+    if not os.path.exists("prompts"):
+        os.makedirs("prompts")
+        
+    scout_prompt_content = ""
+    prompt_path = "prompts/scout_prompt.txt"
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                scout_prompt_content = f.read()
+        except Exception: pass
+    if not scout_prompt_content:
+        scout_prompt_content = (
+            "ROLE: Market-structure signal scout.\n"
+            "TASK: Perform a live web search to identify top trending equities showing technical breakout conditions in the '{category}' sector.\n"
+            "RETURN FORMAT: Return ONLY a valid JSON list of uppercase ticker symbols, e.g. [\"SYM1\", \"SYM2\"]."
+        )
         
     defaults = {
         "context/ssot.json": "{}",
@@ -58,7 +113,7 @@ def initialize_context_files():
         "context/user_config.json": "{}",
         "context/config.json": '{\n  "GEMINI_API_KEY": "",\n  "GEMINI_FREE_TIER_API_KEY": "",\n  "FINNHUB_API_KEY": ""\n}',
         "logs/gem_handshakes.log": "",
-        "context/scout_prompt.txt": DEFAULT_SCOUT_PROMPT
+        "prompts/scout_prompt.txt": scout_prompt_content
     }
     
     for filepath, default_content in defaults.items():
@@ -71,6 +126,7 @@ def initialize_context_files():
                 print(f"[Warning] Could not initialize {filepath}: {e}")
 
 initialize_context_files()
+compile_master_document()
 
 # Load configuration from JSON file
 with open('context/config.json', 'r') as f:
@@ -120,17 +176,7 @@ def _get_dynamic_scout_tickers(category: str) -> list:
         
         client = genai.Client(api_key=api_key) if api_key else genai.Client()
         
-        prompt_path = "context/scout_prompt.txt"
-        scout_prompt = DEFAULT_SCOUT_PROMPT
-        if os.path.exists(prompt_path):
-            try:
-                with open(prompt_path, "r", encoding="utf-8") as f:
-                    file_content = f.read()
-                if file_content.strip() and file_content != DEFAULT_SCOUT_PROMPT:
-                    scout_prompt = file_content
-            except Exception as e:
-                print(f"[Scout Scanner] Error reading {prompt_path}: {e}")
-                
+        scout_prompt = load_scout_prompt()
         prompt = scout_prompt.replace("{category}", category)
         
         response = client.models.generate_content(

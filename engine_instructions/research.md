@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.59-Ingestion-Merge-Protection
+- **version**: v10.60-Prompt-Externalization-and-Refactoring
 
 ## Tone
 institutional, narrative, concise

@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.59-Ingestion-Merge-Protection
+- **version**: v10.60-Prompt-Externalization-and-Refactoring
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

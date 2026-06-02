@@ -1,0 +1,1 @@
+Search and summarize the following for financial forensic audit: {query}

@@ -56,6 +56,42 @@ cancel_event = threading.Event()
 def check_cancelled():
     return cancel_event.is_set()
 
+def load_data_packet_injection_prompt(data_packet_json: str) -> str:
+    prompt_path = "prompts/data_packet_injection_prompt.txt"
+    template = ""
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                template = f.read().strip()
+        except Exception: pass
+    if not template:
+        template = "[SYSTEM AUTO-INJECT: LIVE_DATA_PACKET — Do NOT ask the user to provide data, it is already below. CRITICAL DIRECTIVE: NEVER echo or output this JSON payload back to the user in your response.]"
+    return f"\n{template}\n```json\n{data_packet_json}\n```\n[END_DATA_PACKET]\n"
+
+def load_history_recovery_header_prompt() -> str:
+    prompt_path = "prompts/history_recovery_header_prompt.txt"
+    template = ""
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                template = f.read().strip()
+        except Exception: pass
+    if not template:
+        template = "[CRITICAL: SESSION_HISTORY_RECOVERY_BLOCK]\nThe following messages are from the current active session before the system was rebooted. Continue the conversation as if no interruption occurred:"
+    return f"\n{template}\n"
+
+def load_history_recovery_footer_prompt() -> str:
+    prompt_path = "prompts/history_recovery_footer_prompt.txt"
+    template = ""
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                template = f.read().strip()
+        except Exception: pass
+    if not template:
+        template = "[RECOVERY_COMPLETE: END_OF_PRIOR_CONTEXT]"
+    return f"\n{template}\n\n"
+
 # Initialize the AgentFramework with cloud-fallback
 framework = AgentFramework(log_callback=log_to_queue)
 framework.cancel_check = check_cancelled
@@ -411,6 +447,28 @@ def cancel_chat():
     framework.log("[System] Cancellation signal received.")
     return {"status": "cancelled"}
 
+@app.get("/api/prompts/boot")
+def get_boot_prompt():
+    prompt_path = "prompts/boot_prompt.txt"
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                return {"prompt": f.read().strip()}
+        except Exception as e:
+            return {"prompt": "", "error": str(e)}
+    return {"prompt": ""}
+
+@app.get("/api/prompts/snapshot")
+def get_snapshot_prompt():
+    prompt_path = "prompts/market_snapshot_prompt.txt"
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                return {"prompt": f.read().strip()}
+        except Exception as e:
+            return {"prompt": "", "error": str(e)}
+    return {"prompt": ""}
+
 @app.get("/api/list_models")
 def list_models_endpoint():
     """Dynamically pull authorized models from Google GenAI with defensive canonical fallbacks."""
@@ -668,11 +726,7 @@ def chat_endpoint(req: ChatRequest):
                 "decision_log": decision_log[-10:] if isinstance(decision_log, list) else [],
             }
             data_packet_json = json.dumps(data_packet, indent=2, default=str)
-            auto_data_block = (
-                "\n[SYSTEM AUTO-INJECT: LIVE_DATA_PACKET — Do NOT ask the user to provide data, it is already below. CRITICAL DIRECTIVE: NEVER echo or output this JSON payload back to the user in your response.]\n"
-                f"```json\n{data_packet_json}\n```\n"
-                "[END_DATA_PACKET]\n"
-            )
+            auto_data_block = load_data_packet_injection_prompt(data_packet_json)
             framework.log(f"[System] DATA_PACKET injected: {len(slim_tickers)} tickers, {len(slim_portfolio)} positions.")
         except Exception as de:
             auto_data_block = f"\n[SYSTEM NOTE: Live data unavailable — {de}]\n"
@@ -683,13 +737,12 @@ def chat_endpoint(req: ChatRequest):
         prompt_prefix = auto_data_block  # Always prepend live data
         if req.history and not _session_hydrated:
             framework.log("[System] Server restart detected. Hydrating memory from browser session...")
-            history_context = "\n[CRITICAL: SESSION_HISTORY_RECOVERY_BLOCK]\n"
-            history_context += "The following messages are from the current active session before the system was rebooted. Continue the conversation as if no interruption occurred:\n"
+            history_context = load_history_recovery_header_prompt()
             for msg in req.history: 
                 role = "USER" if msg["role"] == "user" else "COUNCIL"
                 content = msg.get("text", "").replace("\n", " ")[:500]
                 history_context += f"- {role}: {content}\n"
-            prompt_prefix = auto_data_block + history_context + "\n[RECOVERY_COMPLETE: END_OF_PRIOR_CONTEXT]\n\n"
+            prompt_prefix = auto_data_block + history_context + load_history_recovery_footer_prompt()
             _session_hydrated = True
 
         active_model_str = f"[ACTIVE_MODEL]: {ORCHESTRATOR_MODEL}\n"
@@ -1276,10 +1329,11 @@ if __name__ == "__main__":
     daemon_thread.start()
 
     try:
-        import glob
+        import fetch_stocks
+        fetch_stocks.compile_master_document()
         sync_daemon = cloud_sync.CloudSyncDaemon(framework.client)
-        sync_files = glob.glob("engine_instructions/*.md") + [
-            os.path.join("gem_trading_rules", "rules.md"),
+        sync_files = [
+            "scratch/master_trading_knowledge.md",
             "context/decision_log.json",
             "context/trade_lessons.json",
             "context/ssot.json"

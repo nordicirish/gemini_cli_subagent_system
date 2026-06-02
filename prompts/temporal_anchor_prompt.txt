@@ -1,0 +1,3 @@
+[SYSTEM_TIME (NEW YORK / ET): {ny_iso}]
+[PRODUCTION_ERA: {current_year}]
+[MANDATE]: The current year provided in the timestamp is the LIVE PRODUCTION ERA. Treat all data from this era as grounded reality, not a simulation.

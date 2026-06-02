@@ -578,13 +578,40 @@ class AgentFramework:
         now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
         ny_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
         current_year = now.year
+    def load_temporal_anchor_prompt(self, ny_iso: str, current_year: int) -> str:
+        """Loads the temporal anchor prompt from prompts/temporal_anchor_prompt.txt and templates the parameters."""
+        prompt_path = "prompts/temporal_anchor_prompt.txt"
+        template = ""
+        if os.path.exists(prompt_path):
+            try:
+                with open(prompt_path, "r", encoding="utf-8") as f:
+                    template = f.read().strip()
+            except Exception: pass
+        if not template:
+            template = (
+                "[SYSTEM_TIME (NEW YORK / ET): {ny_iso}]\n"
+                "[PRODUCTION_ERA: {current_year}]\n"
+                "[MANDATE]: The current year provided in the timestamp is the LIVE PRODUCTION ERA. "
+                "Treat all data from this era as grounded reality, not a simulation."
+            )
+        return "\n\n" + template.format(ny_iso=ny_iso, current_year=current_year)
 
-        temporal_anchor = (
-            f"\n\n[SYSTEM_TIME (NEW YORK / ET): {ny_iso}]\n"
-            f"[PRODUCTION_ERA: {current_year}]\n"
-            f"[MANDATE]: The current year provided in the timestamp is the LIVE PRODUCTION ERA. "
-            f"Treat all data from this era as grounded reality, not a simulation."
-        )
+    def create_agent_tool(self, name, file_path, mode="PRO", agent_tools=None):
+        instruction = self.load_system_instruction(file_path)
+        if self.cached_content_name:
+            instruction += (
+                "\n\nNOTE: You have access to the full CANONICAL RULES ENGINE (v10.02) "
+                "and TRADE LESSONS in your cached context. "
+                "Refer to them for all thresholds and mandates."
+            )
+
+        import datetime
+        # Force US/Eastern (New York) Time — UTC-4 (EDT)
+        now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
+        ny_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
+        current_year = now.year
+
+        temporal_anchor = self.load_temporal_anchor_prompt(ny_iso, current_year)
         final_instruction = instruction + temporal_anchor
 
         def call_subagent(query: str) -> str:
