@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.58-Parabolic-Gravity-and-VWAP-Sweeps
+- **version**: v10.59-Ingestion-Merge-Protection
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

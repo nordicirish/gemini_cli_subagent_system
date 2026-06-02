@@ -556,6 +556,46 @@ async def handle_paste(req: Request):
             
         extracted_mutations = extract_and_remove(payload, "rule_mutations")
 
+        # ENH_31: Promote key fields from EXECUTION_PAYLOAD to state root for immediate SSoT synchronization
+        # This ensures that 'allocations' (portfolio_snapshot) and other directives are applied to the active state.
+        incoming_ep = payload.get("EXECUTION_PAYLOAD")
+        if not incoming_ep and isinstance(payload.get("mutable_state"), dict):
+            incoming_ep = payload["mutable_state"].get("EXECUTION_PAYLOAD")
+            
+        # Determine source of truth for promotion (dict or root payload if flag is True)
+        ep_source = None
+        if isinstance(incoming_ep, dict):
+            ep_source = incoming_ep
+        elif incoming_ep is True:
+            ep_source = payload
+
+        if ep_source:
+            promotion_keys = ["portfolio_snapshot", "risk_metrics", "directive", "timestamp", 
+                              "remaining_cash_eur", "remaining_cash_usd", 
+                              "unallocated_cash_eur", "unallocated_cash_usd",
+                              "base_currency", "exchange_rate", 
+                              "portfolio_total_value_usd", "portfolio_total_value_eur",
+                              "state_context", "forensic_intelligence"]
+            
+            # Source data can be at the root of ep_source or inside its mutable_state
+            source_data = ep_source
+            if "mutable_state" in ep_source and isinstance(ep_source["mutable_state"], dict):
+                source_data = _deep_merge(ep_source, ep_source["mutable_state"])
+
+            # Determine target container for promotion
+            target_container = payload
+            if isinstance(payload.get("mutable_state"), dict):
+                target_container = payload["mutable_state"]
+                
+            for k in promotion_keys:
+                if k in source_data:
+                    # Directives Supremacy (ENH_31-P): Promote portfolio_snapshot as both active portfolio_snapshot and proposed_portfolio_snapshot
+                    if k == "portfolio_snapshot":
+                        target_container["portfolio_snapshot"] = source_data[k]
+                    # For all other promotion keys, promote/overwrite them to target_container
+                    else:
+                        target_container[k] = source_data[k]
+
         # Merge local ssot
         existing_ssot = {}
         if os.path.exists('context/ssot.json'):
@@ -595,7 +635,29 @@ async def handle_paste(req: Request):
                     # Preserve existing holdings unless explicitly deleted via DELETE_FIELD.
                     merged_portfolio = existing_portfolio
                 else:
-                    merged_portfolio = _merge_portfolio(existing_portfolio, payload_portfolio)
+                    if ep_source is not None:
+                        # Directives Supremacy (ENH_31-P): Overwrite active state fields with payload counterparts to maintain zero-drift
+                        # However, we must preserve read-only local database properties (WAC and historical_context) from the existing state
+                        # to prevent "state amnesia" or silent data loss on ingestion.
+                        existing_by_ticker = {}
+                        for item in existing_portfolio:
+                            if isinstance(item, dict) and item.get("ticker"):
+                                existing_by_ticker[item["ticker"].upper()] = item
+                        
+                        for item in payload_portfolio:
+                            if isinstance(item, dict) and item.get("ticker"):
+                                ticker_upper = item["ticker"].upper()
+                                if ticker_upper in existing_by_ticker:
+                                    existing_item = existing_by_ticker[ticker_upper]
+                                    # If the payload item does not have 'wac' or it is 0/None, carry it forward from existing
+                                    if ("wac" not in item or item.get("wac") in (0, 0.0, None)) and "wac" in existing_item:
+                                        item["wac"] = existing_item["wac"]
+                                    # Carry forward 'historical_context' if not present in the payload
+                                    if ("historical_context" not in item or not item.get("historical_context")) and "historical_context" in existing_item:
+                                        item["historical_context"] = existing_item["historical_context"]
+                        merged_portfolio = payload_portfolio
+                    else:
+                        merged_portfolio = _merge_portfolio(existing_portfolio, payload_portfolio)
                 
                 payload_without_portfolio = _deep_merge({}, payload)
                 if has_layer_model:

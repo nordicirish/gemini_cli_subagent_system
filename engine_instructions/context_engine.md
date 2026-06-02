@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.58-Parabolic-Gravity-and-VWAP-Sweeps
+- **version**: v10.59-Ingestion-Merge-Protection
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

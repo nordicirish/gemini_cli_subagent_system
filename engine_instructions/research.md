@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.58-Parabolic-Gravity-and-VWAP-Sweeps
+- **version**: v10.59-Ingestion-Merge-Protection
 
 ## Tone
 institutional, narrative, concise

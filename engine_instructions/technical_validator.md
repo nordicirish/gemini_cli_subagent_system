@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.58-Parabolic-Gravity-and-VWAP-Sweeps
+- **version**: v10.59-Ingestion-Merge-Protection
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

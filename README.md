@@ -285,6 +285,11 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v10.59-Ingestion-Merge-Protection *(2026-06-02)*
+- **Resolved Portfolio Deletion Bug:** Fixed a critical bug in SSoT ingestion where an empty `portfolio_snapshot` array in the `EXECUTION_PAYLOAD` (e.g. from delta or audit runs) caused `_deep_merge` to overwrite and wipe out all active holdings. Enforced `MERGE_BY_TICKER_PRESERVE_UNTOUCHED_TICKERS` to preserve existing holdings unless explicitly deleted via the `DELETE_FIELD` protocol.
+- **SSoT Directives Promotion (ENH_31-S):** Restored and synchronized the missing `ENH_31` promotion logic in `fetch_stocks.py` to ensure execution payloads are successfully promoted to the active `mutable_state` layer upon paste.
+- **Global Architectural Parity (MANDATE_29):** Synchronized and bumped the framework version to `v10.59-Ingestion-Merge-Protection` across all 17 Council subagent instruction sets, rules.md master SSoT, and antigravity.md files.
+
 ### v10.58-Parabolic-Gravity-and-VWAP-Sweeps *(2026-06-01)*
 - **Rule Codification (SSoT Integration):** Codified three critical defensive and execution rule patches:
   - **ENH_116 (EXTENDED_VWAP_BID_SWEEP):** Bypasses passive limit strategies to execute an immediate marketable limit order sweeping the bid if an asset is >4% extended from VWAP and a passive ask-limit order fails to fill within 15 seconds, preventing capital traps during overextensions.
