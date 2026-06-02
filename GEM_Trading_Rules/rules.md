@@ -1,7 +1,8 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.61-Scout-Ticker-Validation
+**Version:** v10.62-Scout-Limit-and-RSI-Filter
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
+
 
 ---
 

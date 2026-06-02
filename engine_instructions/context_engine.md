@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.61-Scout-Ticker-Validation
+- **version**: v10.62-Scout-Limit-and-RSI-Filter
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

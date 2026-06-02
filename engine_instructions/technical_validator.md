@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.61-Scout-Ticker-Validation
+- **version**: v10.62-Scout-Limit-and-RSI-Filter
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

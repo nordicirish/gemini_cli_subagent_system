@@ -44,6 +44,9 @@ const dScoutContainer = document.getElementById('scout-categories-container');
 const dAddScoutCategory = document.getElementById('add-scout-category');
 const dAddScoutCategoryBtn = document.getElementById('add-scout-category-btn');
 const dSaveScoutCategoriesBtn = document.getElementById('save-scout-categories-btn');
+const dAiScoutLimitSelect = document.getElementById('scout-limit-select');
+const dAiScoutMaxRsiSelect = document.getElementById('scout-max-rsi-select');
+
 
 
 // Helper for consistent UI feedback on copy/paste actions
@@ -153,6 +156,7 @@ async function init() {
     await fetchPortfolio();
     await fetchWatchlist();
     await fetchScoutCategories();
+    await fetchScoutConfig();
     pollData();
     window._pollInterval = setInterval(pollData, 3000); // 3 sec polling
 }
@@ -1119,6 +1123,48 @@ async function toggleScoutCategory(sector) {
         fetchScoutCategories();
     }
 }
+
+async function fetchScoutConfig() {
+    try {
+        const res = await fetch(`${API_BASE}/scout_config`);
+        const config = await res.json();
+        if (dAiScoutLimitSelect && config.scout_limit !== undefined) {
+            dAiScoutLimitSelect.value = config.scout_limit;
+        }
+        if (dAiScoutMaxRsiSelect && config.scout_max_rsi !== undefined) {
+            dAiScoutMaxRsiSelect.value = config.scout_max_rsi;
+        }
+    } catch (e) {
+        console.error("Failed to fetch scout config:", e);
+    }
+}
+
+async function saveScoutConfig() {
+    try {
+        const limit = dAiScoutLimitSelect ? parseInt(dAiScoutLimitSelect.value) : 2;
+        const max_rsi = dAiScoutMaxRsiSelect ? parseInt(dAiScoutMaxRsiSelect.value) : 75;
+        const res = await fetch(`${API_BASE}/scout_config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scout_limit: limit, scout_max_rsi: max_rsi })
+        });
+        if (res.ok) {
+            const updated = await res.json();
+            console.log("Scout config saved successfully:", updated);
+            pollData(); // Force immediate update of final tickers in UI
+        }
+    } catch (e) {
+        console.error("Failed to save scout config:", e);
+    }
+}
+
+if (dAiScoutLimitSelect) {
+    dAiScoutLimitSelect.addEventListener('change', saveScoutConfig);
+}
+if (dAiScoutMaxRsiSelect) {
+    dAiScoutMaxRsiSelect.addEventListener('change', saveScoutConfig);
+}
+
 
 // Global Exports
 window.deleteFromPortfolio = deleteFromPortfolio;

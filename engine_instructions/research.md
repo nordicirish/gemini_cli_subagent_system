@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.61-Scout-Ticker-Validation
+- **version**: v10.62-Scout-Limit-and-RSI-Filter
 
 ## Tone
 institutional, narrative, concise

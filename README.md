@@ -285,6 +285,11 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v10.62-Scout-Limit-and-RSI-Filter *(2026-06-02)*
+- **Scout Filter Configuration UI & Backend Controls:** Implemented the missing user configuration controls for Scout Intelligence in the dashboard UI (`static/index.html` and `static/app.js` in both repos). Added a dropdown selector for the total maximum scouted tickers (1–5) and a dropdown selector for the maximum RSI value to gate overbought tickers.
+- **RSI Filtering and Limit Gates:** Modified `fetch_stocks.py`'s data daemon to compute Wilder RSI-14 and filter dynamic scouts exceeding the user-configured `SCOUT_MAX_RSI` threshold. Enforced `SCOUT_LIMIT` to cap the total scout suggestions, eliminating silent list overflow. Added `/api/scout_config` GET/POST endpoints to save and load configuration parameters dynamically to `config.json`.
+- **Global Architectural Parity (MANDATE_29):** Synchronized and bumped the framework version to `v10.62-Scout-Limit-and-RSI-Filter` across `rules.md`, `antigravity.md`, `agent_framework.py`, and all 17 Council subagent instruction sets.
+
 ### v10.61-Scout-Ticker-Validation *(2026-06-02)*
 - **Scout Ticker Validation Gate (`is_valid_ticker`):** Introduced a structural fail-safe validator in `fetch_stocks.py` (both repos) that filters out phantom/ghost tickers (e.g. `"-"`, `"I"`, numeric strings) before they can pollute `SCOUT_TICKERS`, the SSOT cache, or the live dashboard table. Validation enforces: alphanumeric-only, length 1–10, all-uppercase, and a stop-word blacklist against known sentinel values.
 - **Three-Layer Application:** Validation is applied at (1) SSOT load time (`_load_ssot_tickers`), (2) Gemini LLM response parsing, and (3) dynamic Scout integration writes — eliminating all ingestion vectors for invalid symbols.

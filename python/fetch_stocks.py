@@ -141,10 +141,15 @@ POLYGON_API_KEY = config.get("POLYGON_API_KEY")
 USE_FINNHUB = True
 USE_POLYGON = False  # keep false unless you want Polygon volume fallback
 
+# Scout filter config — persisted in config.json, driven by UI
+SCOUT_LIMIT = max(1, min(5, int(config.get("SCOUT_LIMIT", 3))))
+SCOUT_MAX_RSI = max(30, min(100, int(config.get("SCOUT_MAX_RSI", 75))))
+
 # ─── Persistent user config ───────────────────────────────────────────────────
 USER_CONFIG_FILE = 'context/user_config.json'
 
 SCOUT_TICKER_MAP = config.get("SCOUT_TICKER_MAP", {})
+
 
 # Dynamic Sector Tickers Cache Deck (ENH_CACHE_02)
 DYNAMIC_SCOUT_CACHE = {}
@@ -334,7 +339,32 @@ GLOBAL_STATE = {
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+def save_config():
+    global config, SCOUT_LIMIT, SCOUT_MAX_RSI
+    config["SCOUT_LIMIT"] = SCOUT_LIMIT
+    config["SCOUT_MAX_RSI"] = SCOUT_MAX_RSI
+    with open('context/config.json', 'w') as f:
+        json.dump(config, f, indent=4)
+
+@app.get("/api/scout_config")
+def get_scout_config():
+    return JSONResponse({"scout_limit": SCOUT_LIMIT, "scout_max_rsi": SCOUT_MAX_RSI})
+
+@app.post("/api/scout_config")
+async def update_scout_config(req: Request):
+    global SCOUT_LIMIT, SCOUT_MAX_RSI
+    data = await req.json()
+    new_limit = data.get("scout_limit")
+    new_max_rsi = data.get("scout_max_rsi")
+    if new_limit is not None:
+        SCOUT_LIMIT = max(1, min(5, int(new_limit)))
+    if new_max_rsi is not None:
+        SCOUT_MAX_RSI = max(30, min(100, int(new_max_rsi)))
+    save_config()
+    return JSONResponse({"status": "success", "scout_limit": SCOUT_LIMIT, "scout_max_rsi": SCOUT_MAX_RSI})
+
 @app.get("/api/get_basket")
+
 def get_basket():
     try:
         if os.path.exists("context/ssot.json"):
@@ -1010,8 +1040,7 @@ class MarketDataCache:
         self.ssr_active: dict[str, bool] = {} # New: SSR Trigger Tracker
         self.cycles: int = 0
         self.vwap_pointer: int = 0
-        
-        # Cache structures per v10.61-Scout-Ticker-Validation specifications
+        # Cache structures per v10.62-Scout-Limit-and-RSI-Filter specifications
         self.last_chart_fetch: dict[str, float] = {}
         self.chart_cache: dict[str, tuple] = {}
         self.last_premarket_vol_fetch: dict[str, float] = {}
@@ -2614,13 +2643,16 @@ def run_daemon():
             scout_data = []
             for item in data:
                 if item.get("_isScout"):
-                    scout_data.append(item)
+                    # Filter out overbought tickers
+                    if item.get("rsi", 50.0) <= SCOUT_MAX_RSI:
+                        scout_data.append(item)
                 else:
                     non_scout_data.append(item)
             
             scout_data.sort(key=lambda x: x.get("score", 0), reverse=True)
-            filtered_scouts = scout_data[:5]
+            filtered_scouts = scout_data[:SCOUT_LIMIT]
             final_tickers = non_scout_data + filtered_scouts
+
 
             final_output = {
                 "_meta": {

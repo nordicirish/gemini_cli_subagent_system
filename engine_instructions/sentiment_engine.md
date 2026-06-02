@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.61-Scout-Ticker-Validation
+- **version**: v10.62-Scout-Limit-and-RSI-Filter
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

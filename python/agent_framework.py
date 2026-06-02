@@ -37,8 +37,9 @@ llm_logger.addHandler(handshake_handler)
 llm_logger.propagate = False
 
 # ---------------------------------------------------------------------------
-# Model definitions — v10.61-Scout-Ticker-Validation
+# Model definitions — v10.62-Scout-Limit-and-RSI-Filter
 # Per terminal.md > Mode Selection Matrix (Canonical)
+
 # ---------------------------------------------------------------------------
 DEFAULT_MODEL_PRO = "gemini-2.5-pro"
 DEFAULT_MODEL_FLASH = "gemini-2.5-flash"
