@@ -1,5 +1,7 @@
 # API keys and secrets
 config.json
+credentials.json
+token.json
 
 # Virtual environments
 .venv/

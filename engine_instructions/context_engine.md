@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.62-Scout-Limit-and-RSI-Filter
+- **version**: v10.63-Attribution-and-Risk-Overrides
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

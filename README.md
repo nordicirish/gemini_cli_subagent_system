@@ -285,6 +285,14 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v10.63-Attribution-and-Risk-Overrides *(2026-06-03)*
+- **MANDATE_42 (OVERRIDE_PENALTY_LOCK):** Widen trailing stops by 2% Day-2 pre-market if manual overrides occur in the final 30 minutes of RTH to absorb exhaustion gap-downs.
+- **MANDATE_43 (STRICT_ATTRIBUTION_INTEGRITY):** Mandate attribution of user-provided insights to `user_input` and log misses as `forensic_blindspot`.
+- **ENH_117 (PARABOLIC_VWAP_CASCADES):** Implement immediate 50% punitive liquidity sweeps for assets breaching VWAP floors after failed manual trims/overrides during SHORT_GAMMA regimes.
+- **ENH_118 (PRE_MARKET_SHORT_GAMMA_BLEED):** Proactively advise 25% Open trim for assets dropping >4% pre-market during SHORT_GAMMA posture, overriding standard RTH VWAP delays.
+- **ENH_119 (MACRO_YIELD_CATALYST_VERIFICATION):** Require calendar scanning for jobs/inflation data when yield-index inverse correlations are observed to prevent misclassifications.
+- **Global Architectural Parity (MANDATE_29):** Synchronized and bumped version to `v10.63-Attribution-and-Risk-Overrides` across all scope files.
+
 ### v10.62-Scout-Limit-and-RSI-Filter *(2026-06-02)*
 - **Scout Filter Configuration UI & Backend Controls:** Implemented the missing user configuration controls for Scout Intelligence in the dashboard UI (`static/index.html` and `static/app.js` in both repos). Added a dropdown selector for the total maximum scouted tickers (1–5) and a dropdown selector for the maximum RSI value to gate overbought tickers.
 - **RSI Filtering and Limit Gates:** Modified `fetch_stocks.py`'s data daemon to compute Wilder RSI-14 and filter dynamic scouts exceeding the user-configured `SCOUT_MAX_RSI` threshold. Enforced `SCOUT_LIMIT` to cap the total scout suggestions, eliminating silent list overflow. Added `/api/scout_config` GET/POST endpoints to save and load configuration parameters dynamically to `config.json`.

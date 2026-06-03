@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.62-Scout-Limit-and-RSI-Filter
+- **version**: v10.63-Attribution-and-Risk-Overrides
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

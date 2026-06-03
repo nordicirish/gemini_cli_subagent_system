@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.62-Scout-Limit-and-RSI-Filter
+- **version**: v10.63-Attribution-and-Risk-Overrides
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

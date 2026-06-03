@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.62-Scout-Limit-and-RSI-Filter
+**Version:** v10.63-Attribution-and-Risk-Overrides
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 
@@ -111,6 +111,9 @@
 - ENH_114: Technical Compliance Isolation
 - ENH_115: INFORMATION_LEAKAGE_SENTRY
 - ENH_116: EXTENDED_VWAP_BID_SWEEP - If an asset is >4% extended from its VWAP anchor and a passive ask-limit order fails to fill within 15 seconds, the Orchestrator MUST immediately cancel and replace with a marketable limit order sweeping the bid to guarantee extraction before parabolic mean reversion.
+- ENH_117: PARABOLIC_VWAP_CASCADES
+- ENH_118: PRE_MARKET_SHORT_GAMMA_BLEED
+- ENH_119: MACRO_YIELD_CATALYST_VERIFICATION
 
 
 ## Mandate Registry
@@ -154,6 +157,8 @@
 - MANDATE_39: PRE-MARKET GAP-DOWN CONVICTION THRESHOLD - If an asset gaps down > 3% in the pre-market session and possesses a trend score < 0, a 50% mechanical risk trim is mandatory prior to the RTH open to mitigate opening-bell liquidity washes.
 - MANDATE_40: OVERNIGHT_EXHAUSTION_TRIM - If an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, a mandatory 25-50% risk trim must be executed in the final 15 minutes of RTH to mitigate overnight gap-down exposure, overriding all passive HOLD mandates.
 - MANDATE_41: ABSOLUTE_PARABOLIC_GRAVITY - Regardless of active SSR status, LONG_GAMMA shielding, or user manual overrides, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST forcefully execute a minimum 15% tactical sweep trim. This is an un-bypassable terminal gravity layer.
+- MANDATE_42: OVERRIDE_PENALTY_LOCK
+- MANDATE_43: STRICT_ATTRIBUTION_INTEGRITY
 - NOTE: MANDATE_46 (LONG GAMMA SHIELD OVERRIDE) was REJECTED — content is fully covered by ENH_16_D, MANDATE_34, and MANDATE_35. MANDATE_34 has been augmented with the precision language from the proposed patch.
 
 ## Tool Supremacy Hierarchy
@@ -487,6 +492,16 @@
     *   **Status:** ACTIVE
     *   **Directive:** ABSOLUTE_PARABOLIC_GRAVITY — Regardless of active SSR status, LONG_GAMMA shielding, or user manual overrides, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST forcefully execute a minimum 15% tactical sweep trim. This is an un-bypassable terminal gravity layer.
     *   **Rationale:** Proven highly effective at stopping narrative capture during May 29th's extreme verticality. Promoted from L-236.
+
+*   **[MANDATE_42_OVERRIDE_PENALTY_LOCK]**
+    *   **Status:** ACTIVE
+    *   **Directive:** OVERRIDE_PENALTY_LOCK - If a user manually overrides an automated MANDATE_38 (Time-In-Overbought) or ENH_112 liquidation within the final 30 minutes of RTH, the system must automatically widen the Day-2 pre-market trailing stop by 2% to absorb the mathematically guaranteed exhaustion gap-down without prematurely shaking out the core position.
+    *   **Justification:** Forensic logs from 06-03 demonstrate severe portfolio vulnerability when automated defense algorithms are paused by user FOMO. Structural widening is required to absorb ensuing penalty volatility.
+
+*   **[MANDATE_43_ATTRIBUTION_INTEGRITY]**
+    *   **Status:** ACTIVE
+    *   **Directive:** STRICT_ATTRIBUTION_INTEGRITY - The system MUST NOT falsely attribute user-provided insights, correlations, or macro observations to its own autonomous scanning capabilities. If the user introduces a variable that the system previously missed, the system must explicitly log the miss as a `forensic_blindspot` and attribute the discovery exclusively to `user_input`. Falsifying system competence to cover for a macro scan failure degrades SSoT reliability and is strictly forbidden.
+    *   **Justification:** Forensic audit of 06-03 15:27 EST log revealed the engine hallucinated self-competence by claiming it independently discovered a 10-year yield correlation that was explicitly provided by the user in the preceding prompt.
 
 ## Anti Hallucination Core
 - **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.
@@ -1757,6 +1772,21 @@
 - **Constraints:**
   - This protocol possesses absolute execution supremacy over standard passive limit strategies to prevent capital entrapment.
 - **Justification:** Forensic review shows multiple instances of passive limit trims failing during extreme overextensions, trapping capital. Promoted from L-233.
+
+### [ENH_117] PARABOLIC_VWAP_CASCADES
+- **Status:** ACTIVE
+- **Content:** PARABOLIC_VWAP_CASCADES - If an asset previously exceeded a +10% VWAP extension, suffered a manual user override of a required trim, and subsequently breaches its VWAP floor within the following 48 hours while the broader index is in SHORT_GAMMA, the Orchestrator MUST execute an immediate 50% punitive liquidity sweep (superseding the standard 25% trim) to instantly neutralize the compounded tail-risk.
+- **Justification:** Successfully prevented total loss of principal on UMAC during the 12:41:30 cascade. Essential algorithmic punisher for failed manual overrides.
+
+### [ENH_118] PRE_MARKET_SHORT_GAMMA_BLEED
+- **Status:** ACTIVE
+- **Content:** PRE_MARKET_SHORT_GAMMA_BLEED - If an asset drops >4% in the pre-market session while dealer posture shifts to SHORT_GAMMA, the Orchestrator MUST immediately advise a manual 25% risk trim at the RTH open to preempt liquidity cascades, overriding standard RTH VWAP confirmation delays.
+- **Justification:** Pre-market dealer posture shifts on 06-03 proved 100% predictive of the ensuing RTH liquidation waterfall.
+
+### [ENH_119] MACRO_YIELD_CATALYST_VERIFICATION
+- **Status:** ACTIVE
+- **Content:** MACRO_YIELD_CATALYST_VERIFICATION - Whenever an inverse correlation is detected between Treasury yield proxies (e.g., IEF drop) and broad indices (SPY), the Orchestrator MUST scan the macroeconomic calendar for primary labor or inflation data before categorizing the price action. Fundamental duration repricing must not be misclassified as an isolated mechanical liquidity flush.
+- **Justification:** Forensic audit of 06-03 15:25 EST log revealed the engine missed the root jobs data catalyst, mischaracterizing a fundamental valuation compression as purely algorithmic index-coupling.
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.

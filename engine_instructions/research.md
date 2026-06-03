@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.62-Scout-Limit-and-RSI-Filter
+- **version**: v10.63-Attribution-and-Risk-Overrides
 
 ## Tone
 institutional, narrative, concise
