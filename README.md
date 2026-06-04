@@ -285,6 +285,10 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v10.65-Scout-RSI-UI-Fix *(2026-06-04)*
+- **Dashboard UI Layout Optimization:** Fixed Scout Intelligence "Max RSI" config layout. Shortened label text to "Max RSI:", shortened dropdown option labels to fit within 100px width, and applied a fixed 100px width constraint on the select element to prevent sidebar container overflow.
+- **Global Parity Sync:** Synchronized and bumped version to `v10.65-Scout-RSI-UI-Fix` across rules.md, antigravity.md, and all engine markdown files.
+
 ### v10.64-ESA-Tax-Offset-and-Friction-Trim *(2026-06-04)*
 - **ENH_54 (SSoT Mutation):** Reduced `GLOBAL_ALPHA_FRICTION_HURDLE` from 1.17% to 0.85% to integrate Finnish tax-offset mechanics for Individual Equity Savings Accounts.
 - **Global Parity Sync:** Synchronized and bumped version to `v10.64-ESA-Tax-Offset-and-Friction-Trim` across rules.md, antigravity.md, and all engine markdown files.

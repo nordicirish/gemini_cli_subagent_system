@@ -1,6 +1,6 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
-**Version:** v10.64-ESA-Tax-Offset-and-Friction-Trim
+**Version:** v10.65-Scout-RSI-UI-Fix
 **Description:** Active Enforcer of mandates and protocols defined in Gemini_Gem_Working_Data_Store.
 
 ---

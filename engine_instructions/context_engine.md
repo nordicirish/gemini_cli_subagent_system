@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.64-ESA-Tax-Offset-and-Friction-Trim
+- **version**: v10.65-Scout-RSI-UI-Fix
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

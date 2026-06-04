@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.64-ESA-Tax-Offset-and-Friction-Trim
+- **version**: v10.65-Scout-RSI-UI-Fix
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix
