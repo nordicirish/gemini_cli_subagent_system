@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.63-Attribution-and-Risk-Overrides
+**Version:** v10.64-ESA-Tax-Offset-and-Friction-Trim
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 
@@ -1205,8 +1205,8 @@
   - **Usage:** Target token count for active context after ENH_76 pruning.
   - **Status:** MASTER_CONSTANT
 - **GLOBAL_ALPHA_FRICTION_HURDLE:**
-  - **Value:** 0.0117
-  - **Usage:** Mandatory 1.17% round-trip friction floor for Institutional ESA Tier 4.
+  - **Value:** 0.0085
+  - **Usage:** Mandatory 0.85% round-trip friction floor for Institutional ESA Tier 4.
   - **Status:** MASTER_CONSTANT
 - **BASE_CURRENCY_EXCHANGE_RATE:**
   - **Value:** [DYNAMIC_FETCH] (Base: 1.0)
@@ -1344,7 +1344,7 @@
     - context_engine
 - **Global Alpha Friction Hurdle (Legacy Round Trip):**
   - **Value:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
-  - **Usage:** Institutional ESA round-trip cost (1.17%)
+  - **Usage:** Institutional ESA round-trip cost (0.85%)
   - **Used By:**
     - ssot_storage
     - fin_account_gate

@@ -285,6 +285,10 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v10.64-ESA-Tax-Offset-and-Friction-Trim *(2026-06-04)*
+- **ENH_54 (SSoT Mutation):** Reduced `GLOBAL_ALPHA_FRICTION_HURDLE` from 1.17% to 0.85% to integrate Finnish tax-offset mechanics for Individual Equity Savings Accounts.
+- **Global Parity Sync:** Synchronized and bumped version to `v10.64-ESA-Tax-Offset-and-Friction-Trim` across rules.md, antigravity.md, and all engine markdown files.
+
 ### v10.63-Attribution-and-Risk-Overrides *(2026-06-03)*
 - **MANDATE_42 (OVERRIDE_PENALTY_LOCK):** Widen trailing stops by 2% Day-2 pre-market if manual overrides occur in the final 30 minutes of RTH to absorb exhaustion gap-downs.
 - **MANDATE_43 (STRICT_ATTRIBUTION_INTEGRITY):** Mandate attribution of user-provided insights to `user_input` and log misses as `forensic_blindspot`.

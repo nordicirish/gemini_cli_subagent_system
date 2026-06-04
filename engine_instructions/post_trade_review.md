@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.63-Attribution-and-Risk-Overrides
+**Version:** v10.64-ESA-Tax-Offset-and-Friction-Trim
 **Tone:** neutral, reflective, concise
 
 ---

@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.63-Attribution-and-Risk-Overrides
+- **version**: v10.64-ESA-Tax-Offset-and-Friction-Trim
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

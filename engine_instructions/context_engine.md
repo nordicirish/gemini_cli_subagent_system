@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.63-Attribution-and-Risk-Overrides
+- **version**: v10.64-ESA-Tax-Offset-and-Friction-Trim
 - **id**: CONTEXT_ENGINE
 
 ## Prefix
