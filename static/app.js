@@ -6,15 +6,6 @@ const dStatus = document.getElementById('market-status');
 const dUpdated = document.getElementById('last-updated');
 const dIndicator = document.getElementById('live-indicator');
 
-// Progress Bar DOM Elements
-const dProgressContainer = document.getElementById('initial-fetch-progress-container');
-const dProgressPhase = document.getElementById('progress-phase-title');
-const dProgressStatus = document.getElementById('progress-status-text');
-const dProgressBar = document.getElementById('initial-fetch-progress-bar');
-const dProgressPercent = document.getElementById('progress-bar-percent');
-const dProgressDetails = document.getElementById('progress-ticker-details');
-const dTableContainer = document.getElementById('main-data-table-container');
-
 
 const dIndicesInput = document.getElementById('indices-input');
 const dUpdateIndicesBtn = document.getElementById('update-indices-btn');
@@ -44,8 +35,10 @@ const dScoutContainer = document.getElementById('scout-categories-container');
 const dAddScoutCategory = document.getElementById('add-scout-category');
 const dAddScoutCategoryBtn = document.getElementById('add-scout-category-btn');
 const dSaveScoutCategoriesBtn = document.getElementById('save-scout-categories-btn');
+const dRunAiScoutBtn = document.getElementById('run-ai-scout-btn');
 const dAiScoutLimitSelect = document.getElementById('scout-limit-select');
 const dAiScoutMaxRsiSelect = document.getElementById('scout-max-rsi-select');
+const dAiScoutStatus = document.getElementById('ai-scout-status');
 
 
 
@@ -129,6 +122,17 @@ function renderIndicesModal() {
         if (d.rsi) details += `RSI ${d.rsi.toFixed(1)}`;
         if (d.atr_percent) details += ` · ATR ${d.atr_percent.toFixed(2)}%`;
         if (d.volume) details += ` · Vol ${formatVol(d.volume)}`;
+        if (d.net_gex_total !== undefined && d.net_gex_total !== 0) {
+            const gexVal = d.net_gex_total.toFixed(2);
+            const posture = d.dealer_posture || 'NEUTRAL';
+            let curatorInterpretation = "Neutral dealer posture";
+            if (posture === "LONG_GAMMA") {
+                curatorInterpretation = "Stabilizing dealer posture";
+            } else if (posture === "SHORT_GAMMA") {
+                curatorInterpretation = "Amplifying dealer posture";
+            }
+            details += ` · GEX ${gexVal} (Antigravity curator: ${curatorInterpretation})`;
+        }
 
         let trendStr = '';
         if (d.trend === 'UP') trendStr = ' · ▲ Up';
@@ -157,9 +161,11 @@ async function init() {
     await fetchWatchlist();
     await fetchScoutCategories();
     await fetchScoutConfig();
+    await fetchGDriveConfig();
     pollData();
-    window._pollInterval = setInterval(pollData, 3000); // 3 sec polling
+    setInterval(pollData, 3000); // 3 sec polling
 }
+
 
 // Fetch current ticker list
 async function fetchTickers() {
@@ -411,8 +417,6 @@ if (dPasteBtn) dPasteBtn.addEventListener('click', () => ingestExecutionPayload(
 
 // Format large numbers (Volume)
 function formatVol(vol) {
-    if (vol === null || vol === undefined) return '—';
-    if (typeof vol === 'string') return vol;
     if (vol >= 1000000) return (vol / 1000000).toFixed(2) + 'M';
     if (vol >= 1000) return (vol / 1000).toFixed(1) + 'K';
     return vol.toString();
@@ -440,7 +444,7 @@ function renderTable(tickers, state) {
         scouts: []
     };
 
-    const userWatchlist = new Set(((ms.watched_tickers || state.watchlist) || []).map(s => s.toUpperCase()));
+    const userWatchlist = new Set((state.watchlist || []).map(s => s.toUpperCase()));
 
     tickers.forEach(t => {
         const sym = t.ticker.toUpperCase();
@@ -450,7 +454,7 @@ function renderTable(tickers, state) {
             groups.held.push(t);
         } else if (userWatchlist.has(sym)) {
             groups.watchlist.push(t);
-        } else if (t._isScout) {
+        } else {
             groups.scouts.push(t);
         }
     });
@@ -459,31 +463,7 @@ function renderTable(tickers, state) {
 
     const renderRow = (row) => {
         const sym = row.ticker;
-        
-        if (row.status === 'NO_DATA') {
-            const noteHtml = row.note ? `<span class="note-tag danger">${row.note}</span>` : '<span class="note-tag danger">NO DATA</span>';
-            return `
-                <tr class="no-data-row">
-                    <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}">
-                        <span class="ticker-symbol text-muted">${sym}</span>
-                    </td>
-                    <td class="text-muted">—</td>
-                    <td class="text-muted">—</td>
-                    <td class="text-muted">—</td>
-                    <td class="text-muted">—</td>
-                    <td class="text-muted">—</td>
-                    <td class="text-muted">—</td>
-                    <td class="text-muted">—</td>
-                    <td><span class="trend-tag flat">— Flat</span></td>
-                    <td><span class="dealer-badge dealer-neutral">NEUTRAL</span></td>
-                    <td class="score-col">
-                        <span class="score-badge neutral">0</span>${noteHtml}
-                    </td>
-                </tr>
-            `;
-        }
-
-        const p = (row.price || 0).toFixed(2);
+        const p = row.price.toFixed(2);
         
         let pClass = '';
         if(prevPrices[sym]) {
@@ -528,11 +508,11 @@ function renderTable(tickers, state) {
                     ${scoutIndicator}
                 </td>
                 <td class="${pClass}">${p}</td>
-                <td class="${dayColor}">${row.session_change_pct > 0 ? '+' : ''}${(row.session_change_pct || 0).toFixed(2)}%</td>
-                <td class="${gapColor}">${row.gap_percent > 0 ? '+' : ''}${(row.gap_percent || 0).toFixed(2)}%</td>
+                <td class="${dayColor}">${row.session_change_pct > 0 ? '+' : ''}${row.session_change_pct.toFixed(2)}%</td>
+                <td class="${gapColor}">${row.gap_percent > 0 ? '+' : ''}${row.gap_percent.toFixed(2)}%</td>
                 <td>${formatVol(row.volume)}</td>
-                <td>${(row.atr_percent || 0).toFixed(2)}%</td>
-                <td class="${rsiColor}">${(row.rsi || 0).toFixed(1)}</td>
+                <td>${row.atr_percent.toFixed(2)}%</td>
+                <td class="${rsiColor}">${row.rsi.toFixed(1)}</td>
                 <td>${row.vwap > 0 ? row.vwap.toFixed(2) : '—'}</td>
                 <td>${trendHtml}</td>
                 <td>${(() => {
@@ -586,11 +566,7 @@ function renderTable(tickers, state) {
     dTableBody.innerHTML = html;
 }
 
-let currentFetchId = 0;
-let lastProcessedFetchId = 0;
-
 async function pollData() {
-    const fetchId = ++currentFetchId;
     try {
         // Refresh managers if not focused
         const active = document.activeElement;
@@ -601,99 +577,6 @@ async function pollData() {
 
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
-        
-        // Ignore out-of-order stale responses
-        if (fetchId < lastProcessedFetchId) {
-            return;
-        }
-        lastProcessedFetchId = fetchId;
-
-        // Handle initial boot/fetch progress bar
-        if (state && state.boot_phase) {
-            dIndicator.classList.add('active');
-            let displayStatus = state.status || 'INITIALIZING...';
-            dStatus.textContent = displayStatus;
-            dStatus.style.color = 'var(--yellow)';
-
-            // Disable Consult AI Council button
-            const launcher = document.getElementById('launch-chat-btn');
-            if (launcher) {
-                launcher.disabled = true;
-                launcher.style.opacity = '0.4';
-                launcher.style.pointerEvents = 'none';
-                launcher.title = 'Consulting the AI Council is locked until all ticker data has loaded.';
-            }
-
-            // Show container & blur table
-            if (dProgressContainer) dProgressContainer.style.display = 'block';
-            if (dTableContainer) dTableContainer.classList.add('blurred-view');
-            
-            const phase = state.boot_phase;
-            const progress = state.boot_progress || 0;
-            const total = state.boot_total || 100;
-            const ticker = state.boot_ticker || '';
-
-            let overallPercent = 0;
-            let phaseTitle = 'Initializing System';
-            let phaseDesc = 'Setting up real-time stock scanners...';
-
-            if (phase === 'STARTING_UP') {
-                overallPercent = 5;
-                phaseTitle = 'Starting Daemon...';
-                phaseDesc = 'Preparing historical data structures';
-            } else if (phase === 'TECHNICAL_ANALYSIS') {
-                // Phase 1 maps to 5% to 50%
-                overallPercent = Math.round(5 + (progress / total) * 45);
-                phaseTitle = 'Phase 1: Loading Technical History';
-                phaseDesc = `Downloading 200-day daily charts to calculate SMAs and ATR%`;
-            } else if (phase === 'GEX_PROFILES') {
-                // Phase 2 maps to 50% to 95%
-                overallPercent = Math.round(50 + (progress / total) * 45);
-                phaseTitle = 'Phase 2: Compiling Option GEX Profiles';
-                phaseDesc = `Fetching option chains & computing synthetic Gamma curves`;
-            }
-
-            // Ensure constraints
-            overallPercent = Math.max(0, Math.min(100, overallPercent));
-            
-            // Prevent backward jumps due to async race conditions (persists across refreshes)
-            let maxBoot = parseInt(sessionStorage.getItem('max_boot_percent') || '0');
-            if (overallPercent > maxBoot) {
-                sessionStorage.setItem('max_boot_percent', overallPercent);
-            } else {
-                overallPercent = maxBoot;
-            }
-
-            if (dProgressPhase) dProgressPhase.textContent = phaseTitle;
-            if (dProgressStatus) dProgressStatus.textContent = phaseDesc;
-            if (dProgressBar) dProgressBar.style.width = `${overallPercent}%`;
-            if (dProgressPercent) dProgressPercent.textContent = `${overallPercent}%`;
-            
-            if (dProgressDetails) {
-                if (ticker && ticker !== 'SYSTEM') {
-                    dProgressDetails.innerHTML = `Loading ticker data: <span class="loading-ticker">${ticker}</span> [${progress}/${total}]`;
-                } else {
-                    dProgressDetails.innerHTML = `Synchronizing state with SSoT database...`;
-                }
-            }
-
-            // Do not render table data yet
-            return;
-        } else {
-            // Enable Consult AI Council button
-            const launcher = document.getElementById('launch-chat-btn');
-            if (launcher) {
-                launcher.disabled = false;
-                launcher.style.opacity = '1';
-                launcher.style.pointerEvents = 'auto';
-                launcher.title = 'Consult AI Council';
-            }
-
-            // Initialization is complete, hide container & remove blur
-            if (dProgressContainer) dProgressContainer.style.display = 'none';
-            if (dTableContainer) dTableContainer.classList.remove('blurred-view');
-            sessionStorage.removeItem('max_boot_percent');
-        }
 
         if (state && Object.keys(state).length > 0) {
             dIndicator.classList.add('active');
@@ -719,24 +602,10 @@ async function pollData() {
             }
 
             // Render table with bifurcated sections
-            if (state.tickers && Array.isArray(state.tickers)) {
-                renderTable(state.tickers, state);
-                
-                if (typeof loadingScoutSectors !== 'undefined' && loadingScoutSectors.size > 0) {
-                    const loadedCats = state.scout_categories_loaded || [];
-                    loadingScoutSectors.forEach(sector => {
-                        // Clear sector from loading list only if backend has successfully loaded it,
-                        // or if the user has deselected it (not in activeScoutCategories)
-                        if (loadedCats.includes(sector) || !activeScoutCategories.includes(sector)) {
-                            loadingScoutSectors.delete(sector);
-                        }
-                    });
-                    renderScoutCategories(activeScoutCategories);
-                }
-            }
+            renderTable(state.tickers, state);
             
             // Render Macro HUD dynamic cards
-            if (state.tickers && Array.isArray(state.tickers)) {
+            if (state.tickers) {
                 let hudHtml = '';
                 
                 currentMacroTickers.forEach(tickerStr => {
@@ -746,14 +615,26 @@ async function pollData() {
                     
                     if (row) {
                         latestMacroData[tickerStr] = row;
-                        const gapStr = (row.gap_percent > 0 ? '+' : '') + (row.gap_percent || 0).toFixed(2) + '%';
+                        const gapStr = (row.gap_percent > 0 ? '+' : '') + row.gap_percent.toFixed(2) + '%';
                         const gapColor = row.gap_percent > 0 ? 'text-green' : 'text-red';
                         
+                        let gapExtra = '';
+                        if (row.net_gex_total !== undefined && row.net_gex_total !== 0) {
+                            const gexVal = row.net_gex_total.toFixed(2);
+                            let gexColor = 'text-muted';
+                            if (row.dealer_posture === "LONG_GAMMA") {
+                                gexColor = 'text-green';
+                            } else if (row.dealer_posture === "SHORT_GAMMA") {
+                                gexColor = 'text-red';
+                            }
+                            gapExtra = ` · <span class="${gexColor}" style="font-weight: 600;">GEX: ${gexVal}</span>`;
+                        }
+
                         hudHtml += `
                             <div class="macro-card glass-panel" id="macro-card-${tickerStr.replace(/[^a-zA-Z0-9]/g, '')}">
                                 <h3>${title}</h3>
                                 <div class="macro-val">${(row.price || 0).toFixed(2)}</div>
-                                <div class="macro-gap ${gapColor}">${gapStr}</div>
+                                <div class="macro-gap ${gapColor}">${gapStr}${gapExtra}</div>
                             </div>
                         `;
                     } else {
@@ -806,13 +687,8 @@ async function pollData() {
     } catch (e) {
         console.error("Polling error", e);
         dIndicator.classList.remove('active');
-        dStatus.textContent = 'ERR: ' + (e.message ? e.message.substring(0, 150) : 'DISCONNECTED');
+        dStatus.textContent = 'DISCONNECTED';
         dStatus.style.color = 'var(--red)';
-        
-        // Stop polling so the error message stays visible
-        if (window._pollInterval) {
-            clearInterval(window._pollInterval);
-        }
     }
 }
 
@@ -834,9 +710,9 @@ function renderPortfolio(data) {
     let html = '';
     const portfolio = data.portfolio || [];
     const cash = data.unallocated_cash_eur || 0;
-    const cashUsd = data.unallocated_cash_usd || 0;
     const rate = data.eurusd_rate || 1.08;
     currentEurUsdRate = rate; // Update global rate
+    const usd = (cash * rate).toFixed(2);
     
     portfolio.forEach((item, index) => {
         html += `
@@ -850,13 +726,10 @@ function renderPortfolio(data) {
     });
 
     html += `
-        <tr class="cash-row" style="background: rgba(0, 255, 148, 0.03);">
-            <td style="color: var(--green); font-weight: 700; font-size: 0.7rem;">CASH (€)</td>
-            <td colspan="3"><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cash}" style="color: var(--green); width: 100%;"></td>
-        </tr>
-        <tr class="cash-row" style="background: rgba(0, 180, 255, 0.03);">
-            <td style="color: var(--accent); font-weight: 700; font-size: 0.7rem;">CASH ($)</td>
-            <td colspan="3"><input type="number" step="0.01" class="portfolio-input" id="cash-input-usd" value="${cashUsd}" style="color: var(--accent); width: 100%;"></td>
+        <tr class="cash-row" style="background: rgba(0, 255, 148, 0.05);">
+            <td style="color: var(--green); font-weight: 700; font-size: 0.75rem;">CASH (€)</td>
+            <td><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cash}" style="color: var(--green);"></td>
+            <td colspan="2" style="font-size: 0.75rem; color: var(--text-dim); text-align: left; padding-left: 8px;">$${usd}</td>
         </tr>
     `;
 
@@ -877,25 +750,18 @@ function getCurrentPortfolio() {
     const rows = dPortfolioBody.querySelectorAll('tr.portfolio-item-row');
     const portfolio = [];
     rows.forEach(row => {
-        const shares = parseFloat(row.querySelector('[data-key="shares"]').value) || 0;
-        if (shares > 0) {
-            portfolio.push({
-                ticker: row.cells[0].textContent,
-                shares: shares,
-                wac: parseFloat(row.querySelector('[data-key="wac"]').value) || 0
-            });
-        }
+        portfolio.push({
+            ticker: row.cells[0].textContent,
+            shares: parseFloat(row.querySelector('[data-key="shares"]').value) || 0,
+            wac: parseFloat(row.querySelector('[data-key="wac"]').value) || 0
+        });
     });
     return portfolio;
 }
 
 function getCurrentCash() {
-    const cashInputEur = document.getElementById('cash-input-eur');
-    const cashInputUsd = document.getElementById('cash-input-usd');
-    return {
-        unallocated_cash_eur: cashInputEur ? parseFloat(cashInputEur.value) || 0 : 0,
-        unallocated_cash_usd: cashInputUsd ? parseFloat(cashInputUsd.value) || 0 : 0
-    };
+    const cashInput = document.getElementById('cash-input-eur');
+    return cashInput ? parseFloat(cashInput.value) || 0 : 0;
 }
 async function savePortfolio(portfolioArr) {
     const btn = dSavePortfolioBtn;
@@ -904,11 +770,10 @@ async function savePortfolio(portfolioArr) {
     btn.disabled = true;
     try {
         const pArray = portfolioArr || getCurrentPortfolio();
-        const cashObj = getCurrentCash();
+        const cVal = getCurrentCash();
         const payload = {
             portfolio: pArray,
-            unallocated_cash_eur: cashObj.unallocated_cash_eur,
-            unallocated_cash_usd: cashObj.unallocated_cash_usd
+            unallocated_cash_eur: cVal
         };
         const res = await fetch(`${API_BASE}/basket`, {
             method: 'POST',
@@ -920,14 +785,6 @@ async function savePortfolio(portfolioArr) {
             showFeedback(btn, "✅ Synced!", "Portfolio successfully updated! (Table refreshing...)");
             await fetchPortfolio();
             pollData(); // Force immediate refresh
-        } else {
-            let errMsg = 'Failed to update portfolio.';
-            try {
-                const data = await res.json();
-                errMsg = data.detail || data.message || errMsg;
-            } catch (err) {}
-            alert(`Validation Error: ${errMsg}`);
-            await fetchPortfolio(); // rollback inputs in UI
         }
     } catch (e) { console.error("Portfolio update failed", e); }
     finally {
@@ -939,11 +796,8 @@ async function savePortfolio(portfolioArr) {
 }
 
 async function deleteFromPortfolio(index) {
-    const rows = dPortfolioBody.querySelectorAll('tr.portfolio-item-row');
-    if (rows[index]) {
-        rows[index].remove();
-    }
     const portfolio = getCurrentPortfolio();
+    portfolio.splice(index, 1);
     await savePortfolio(portfolio);
 }
 
@@ -1006,14 +860,6 @@ async function saveWatchlist(list) {
             dDataStatus.className = "status-message text-green";
             setTimeout(() => { dDataStatus.textContent = ""; }, 3000);
             pollData(); // Force immediate refresh
-        } else {
-            let errMsg = 'Failed to update watchlist.';
-            try {
-                const data = await res.json();
-                errMsg = data.detail || data.message || errMsg;
-            } catch (err) {}
-            alert(`Validation Error: ${errMsg}`);
-            await fetchWatchlist(); // rollback in UI
         }
     } catch (e) { console.error("Watchlist update failed", e); }
 }
@@ -1036,28 +882,18 @@ function toggleSection(id, header) {
 }
 
 // Scout Logic
-let verifiedScoutSectors = [];
-let activeScoutCategories = [];
-let loadingScoutSectors = new Set();
+const VERIFIED_SCOUT_SECTORS = [
+    "Technology", "Healthcare", "Financials", "Energy", "Industrials", 
+    "Consumer Discretionary", "Consumer Staples", "Utilities", 
+    "Real Estate", "Materials", "Communication Services",
+    "AI & Data", "Aerospace & Defense", "Biotech", "Semiconductors"
+];
 
 async function fetchScoutCategories() {
     try {
-        const sectorsRes = await fetch(`${API_BASE}/scout_sectors`);
-        const sectorsData = await sectorsRes.json();
-        if (sectorsData && sectorsData.length > 0) {
-            verifiedScoutSectors = sectorsData;
-        } else {
-            verifiedScoutSectors = [
-                "Technology", "Healthcare", "Financials", "Energy", "Industrials", 
-                "Consumer Discretionary", "Consumer Staples", "Utilities", 
-                "Real Estate", "Materials", "Communication Services",
-                "AI & Data", "Aerospace & Defense", "Biotech", "Semiconductors"
-            ];
-        }
-        
-        const res = await fetch(`${API_BASE}/scout`);
-        activeScoutCategories = await res.json();
-        renderScoutCategories(activeScoutCategories);
+        const res = await fetch(`${API_BASE}/scout_categories`);
+        const activeCategories = await res.json();
+        renderScoutCategories(activeCategories);
     } catch (e) { console.error("Scout categories fetch failed", e); }
 }
 
@@ -1066,27 +902,17 @@ function renderScoutCategories(activeList) {
     const activeSet = new Set(activeList);
     
     let html = '';
-    verifiedScoutSectors.forEach(sector => {
+    VERIFIED_SCOUT_SECTORS.forEach(sector => {
         const isActive = activeSet.has(sector);
-        const isLoading = loadingScoutSectors.has(sector);
-        
-        let style = '';
-        let label = sector;
-        
-        if (isLoading) {
-            style = 'background: rgba(255, 193, 7, 0.2); border-color: var(--yellow); color: var(--yellow); animation: pulse 1.5s infinite;';
-            label = sector + ' 📡';
-        } else if (isActive) {
-            style = 'background: rgba(0, 255, 148, 0.2); border-color: var(--green); color: var(--green);';
-        } else {
-            style = 'background: rgba(255, 255, 255, 0.03); border-color: var(--panel-border); color: var(--text-dim);';
-        }
+        const style = isActive 
+            ? 'background: rgba(0, 255, 148, 0.2); border-color: var(--green); color: var(--green);' 
+            : 'background: rgba(255, 255, 255, 0.03); border-color: var(--panel-border); color: var(--text-dim);';
         
         html += `
             <button class="scout-toggle-btn" 
                     onclick="toggleScoutCategory('${sector}')" 
                     style="padding: 4px 8px; border-radius: 4px; border: 1px solid; font-size: 0.65rem; font-weight: 600; cursor: pointer; transition: all 0.2s; ${style}">
-                ${label}
+                ${sector}
             </button>
         `;
     });
@@ -1095,33 +921,32 @@ function renderScoutCategories(activeList) {
 
 async function toggleScoutCategory(sector) {
     try {
-        if (activeScoutCategories.includes(sector)) {
-            activeScoutCategories = activeScoutCategories.filter(c => c !== sector);
-            loadingScoutSectors.delete(sector);
+        const res = await fetch(`${API_BASE}/scout_categories`);
+        let list = await res.json();
+        
+        if (list.includes(sector)) {
+            list = list.filter(c => c !== sector);
         } else {
-            activeScoutCategories.push(sector);
-            loadingScoutSectors.add(sector);
+            list.push(sector);
         }
         
-        // Optimistically render instantly with zero lag!
-        renderScoutCategories(activeScoutCategories);
-        
-        // POST to the backend asynchronously in the background
-        fetch(`${API_BASE}/scout`, {
+        await saveScoutCategories(list);
+    } catch (e) { console.error("Toggle failed", e); }
+}
+
+async function saveScoutCategories(list) {
+    try {
+        const res = await fetch(`${API_BASE}/scout_categories`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(activeScoutCategories)
-        }).catch(err => {
-            console.error("Scout categories POST failed, rolling back to SSoT", err);
-            loadingScoutSectors.delete(sector);
-            fetchScoutCategories(); // rollback on connection/server failure
+            body: JSON.stringify(list)
         });
-        
-    } catch (e) { 
-        console.error("Toggle failed", e); 
-        loadingScoutSectors.delete(sector);
-        fetchScoutCategories();
-    }
+        if (res.ok) {
+            const updated = await res.json();
+            renderScoutCategories(updated.categories);
+            pollData(); // Force immediate refresh to pull newly scanned scouts
+        }
+    } catch (e) { console.error("Scout categories update failed", e); }
 }
 
 async function fetchScoutConfig() {
@@ -1151,7 +976,6 @@ async function saveScoutConfig() {
         if (res.ok) {
             const updated = await res.json();
             console.log("Scout config saved successfully:", updated);
-            pollData(); // Force immediate update of final tickers in UI
         }
     } catch (e) {
         console.error("Failed to save scout config:", e);
@@ -1176,6 +1000,41 @@ window.copySessionReviewPayload = copySessionReviewPayload;
 dAddToPortfolioBtn.addEventListener('click', addToPortfolio);
 dSavePortfolioBtn.addEventListener('click', () => savePortfolio());
 dAddToWatchlistBtn.addEventListener('click', addToWatchlist);
+
+if (dRunAiScoutBtn) {
+    dRunAiScoutBtn.addEventListener('click', async () => {
+        dRunAiScoutBtn.disabled = true;
+        const originalHtml = dRunAiScoutBtn.innerHTML;
+        dRunAiScoutBtn.innerHTML = "🔭 Scouting Breakouts...";
+        dAiScoutStatus.textContent = "Querying Gemini API (Grounding Search)...";
+        dAiScoutStatus.className = "status-message inline-feedback active text-yellow";
+        
+        try {
+            const limit = dAiScoutLimitSelect ? dAiScoutLimitSelect.value : 2;
+            const maxRsi = dAiScoutMaxRsiSelect ? dAiScoutMaxRsiSelect.value : 75;
+            const res = await fetch(`${API_BASE}/ai_scout?limit=${limit}&max_rsi=${maxRsi}`, {
+                method: 'POST'
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                if (data.scouts && data.scouts.length > 0) {
+                    showFeedback(dRunAiScoutBtn, "🔭 Scout Complete! ✅", `Found stocks: ${data.scouts.join(', ')}`, false, dAiScoutStatus);
+                } else {
+                    showFeedback(dRunAiScoutBtn, "🔭 Scout Complete! ✅", "No new breakout stocks found matching regime.", false, dAiScoutStatus);
+                }
+                pollData(); // Force immediate refresh to pull newly scanned scouts
+            } else {
+                throw new Error(data.message);
+            }
+        } catch (e) {
+            console.error("AI Scout Error: ", e);
+            showFeedback(dRunAiScoutBtn, "❌ Scouting Failed", e.message || "Failed to query AI Scout.", true, dAiScoutStatus);
+        } finally {
+            dRunAiScoutBtn.disabled = false;
+            dRunAiScoutBtn.innerHTML = originalHtml;
+        }
+    });
+}
 
 // Real-time conversion feedback as user types cash value
 dPortfolioBody.addEventListener('input', (e) => {
@@ -1237,6 +1096,389 @@ if (dClearLogBtn) {
         }
     });
 }
+
+// Google Drive Config & Sync Handlers
+const dGDriveDisplayContainer = document.getElementById('gdrive-display-container');
+const dGDriveFolderDisplay = document.getElementById('gdrive-folder-display');
+const dUnlockGDriveBtn = document.getElementById('unlock-gdrive-btn');
+
+const dGDriveEditContainer = document.getElementById('gdrive-edit-container');
+const dGDriveSelect = document.getElementById('gdrive-folder-select');
+const dGDriveInput = document.getElementById('gdrive-folder-input');
+const dSaveGDriveBtn = document.getElementById('save-gdrive-btn');
+const dCancelGDriveBtn = document.getElementById('cancel-gdrive-btn');
+const dGDriveConfigStatus = document.getElementById('gdrive-config-status');
+
+// Setup Modal Elements
+const dGDriveSetupModalOverlay = document.getElementById('gdrive-setup-modal-overlay');
+const dSetupFolderLoadingMsg = document.getElementById('setup-folder-loading-msg');
+const dSetupFolderContainer = document.getElementById('setup-folder-container');
+const dSetupFolderSelect = document.getElementById('setup-folder-select');
+const dSetupFolderInput = document.getElementById('setup-folder-input');
+const dSetupLinkBtn = document.getElementById('setup-link-btn');
+const dSetupLinkBadge = document.getElementById('setup-link-badge');
+const dSetupWizardStatus = document.getElementById('setup-wizard-status');
+const dSetupSubmitBtn = document.getElementById('setup-submit-btn');
+
+// Setup Upload Elements
+const dSetupCredsUploadContainer = document.getElementById('setup-creds-upload-container');
+const dSetupCredsFileInput = document.getElementById('setup-creds-file-input');
+const dSetupUploadBtn = document.getElementById('setup-upload-btn');
+const dSetupLinkContainer = document.getElementById('setup-link-container');
+
+let gdriveStatusPollInterval = null;
+let currentGDriveFolder = 'GeminiTradingSSoT';
+let hasLoadedFoldersInModal = false;
+
+// Dynamic Google Drive Folder Fetcher and Selector Binder
+async function populateGDriveFolderSelect(selectEl, customInputEl, preselectedValue = "") {
+    try {
+        selectEl.innerHTML = '<option value="" disabled selected>Loading folders from Drive...</option>';
+        const res = await fetch(`${API_BASE}/gdrive_folders`);
+        const data = await res.json();
+        
+        selectEl.innerHTML = '';
+        
+        const folders = data.folders || [];
+        if (folders.length > 0) {
+            folders.forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f.name;
+                opt.textContent = f.name;
+                selectEl.appendChild(opt);
+            });
+        }
+        
+        // Add option to create a new folder
+        const newOpt = document.createElement('option');
+        newOpt.value = '__NEW_FOLDER__';
+        newOpt.textContent = '➕ [Create New Folder...]';
+        selectEl.appendChild(newOpt);
+        
+        // Bind dynamic visibility trigger for custom folder input
+        selectEl.onchange = () => {
+            if (selectEl.value === '__NEW_FOLDER__') {
+                customInputEl.style.display = 'block';
+                customInputEl.value = '';
+                customInputEl.focus();
+            } else {
+                customInputEl.style.display = 'none';
+                customInputEl.value = selectEl.value;
+            }
+            
+            // Enable button if setup modal submit
+            if (selectEl.id === 'setup-folder-select' && dSetupSubmitBtn) {
+                dSetupSubmitBtn.disabled = !customInputEl.value.trim();
+            }
+        };
+        
+        // Handle preselection
+        if (preselectedValue && preselectedValue.trim()) {
+            const exists = Array.from(selectEl.options).some(o => o.value === preselectedValue);
+            if (exists) {
+                selectEl.value = preselectedValue;
+                customInputEl.style.display = 'none';
+                customInputEl.value = preselectedValue;
+            } else {
+                selectEl.value = '__NEW_FOLDER__';
+                customInputEl.style.display = 'block';
+                customInputEl.value = preselectedValue;
+            }
+        } else {
+            if (folders.length > 0) {
+                selectEl.value = folders[0].name;
+                customInputEl.value = folders[0].name;
+                customInputEl.style.display = 'none';
+            } else {
+                selectEl.value = '__NEW_FOLDER__';
+                customInputEl.style.display = 'block';
+                customInputEl.value = 'GeminiTradingSSoT';
+            }
+        }
+        
+        selectEl.dispatchEvent(new Event('change'));
+        
+    } catch (e) {
+        console.error("Failed to fetch folders", e);
+        selectEl.innerHTML = '<option value="__NEW_FOLDER__">[No existing folders - Create New]</option>';
+        selectEl.value = '__NEW_FOLDER__';
+        customInputEl.style.display = 'block';
+        customInputEl.value = preselectedValue || 'GeminiTradingSSoT';
+    }
+}
+
+// Fetch Google Drive folder name and render UI
+async function fetchGDriveConfig() {
+    try {
+        const res = await fetch(`${API_BASE}/gdrive_status`);
+        const status = await res.json();
+        
+        currentGDriveFolder = status.folder_name || 'GeminiTradingSSoT';
+        if (dGDriveFolderDisplay) {
+            dGDriveFolderDisplay.textContent = currentGDriveFolder;
+        }
+        if (dGDriveInput) {
+            dGDriveInput.value = currentGDriveFolder;
+        }
+        
+        // Trigger Setup Modal if first use / missing folder or oauth token
+        if (status.needs_setup) {
+            openGDriveSetupModal(status);
+        }
+    } catch (e) {
+        console.error("Failed to fetch Google Drive status", e);
+    }
+}
+
+// Open Google Drive onboarding modal and start polling
+function openGDriveSetupModal(status) {
+    if (!dGDriveSetupModalOverlay) return;
+    openModal(dGDriveSetupModalOverlay);
+    
+    hasLoadedFoldersInModal = false;
+    if (dSetupFolderInput) {
+        dSetupFolderInput.value = status.folder_name || 'GeminiTradingSSoT';
+    }
+    
+    updateSetupModalUI(status);
+    
+    // Start polling status to detect when user authorizes via browser
+    if (gdriveStatusPollInterval) clearInterval(gdriveStatusPollInterval);
+    gdriveStatusPollInterval = setInterval(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/gdrive_status`);
+            const currentStatus = await res.json();
+            updateSetupModalUI(currentStatus);
+            
+            // If setup is now completely satisfied, highlight it
+            if (currentStatus.token_linked && dSetupFolderInput.value.trim()) {
+                dSetupSubmitBtn.disabled = false;
+            }
+        } catch (e) {
+            console.error("Setup polling failed", e);
+        }
+    }, 2000);
+}
+
+// Update modal elements based on current auth/credentials status
+function updateSetupModalUI(status) {
+    if (!dSetupLinkBadge) return;
+    
+    if (status.token_linked) {
+        dSetupLinkBadge.textContent = 'LINKED ✅';
+        dSetupLinkBadge.className = 'badge-status text-green';
+        dSetupLinkBadge.style.fontWeight = 'bold';
+        dSetupLinkBtn.disabled = true;
+        dSetupLinkBtn.textContent = '🔒 Account Linked';
+        
+        if (dSetupFolderLoadingMsg) dSetupFolderLoadingMsg.style.display = 'none';
+        if (dSetupFolderContainer) dSetupFolderContainer.style.display = 'flex';
+        
+        if (!hasLoadedFoldersInModal && dSetupFolderSelect && dSetupFolderInput) {
+            hasLoadedFoldersInModal = true;
+            populateGDriveFolderSelect(dSetupFolderSelect, dSetupFolderInput, status.folder_name || currentGDriveFolder);
+        }
+    } else {
+        dSetupLinkBadge.textContent = 'NOT LINKED ⚠️';
+        dSetupLinkBadge.className = 'badge-status text-muted';
+        dSetupLinkBtn.disabled = false;
+        dSetupLinkBtn.textContent = '🔗 Link Google Account';
+        
+        if (dSetupFolderLoadingMsg) dSetupFolderLoadingMsg.style.display = 'block';
+        if (dSetupFolderContainer) dSetupFolderContainer.style.display = 'none';
+        hasLoadedFoldersInModal = false;
+    }
+    
+    // Credentials status warning and upload container visibility
+    if (!status.credentials_uploaded) {
+        if (dSetupCredsUploadContainer) dSetupCredsUploadContainer.style.display = 'block';
+        if (dSetupLinkContainer) dSetupLinkContainer.style.display = 'none';
+        
+        dSetupWizardStatus.innerHTML = '<span style="color: var(--red); font-weight: bold;">⚠️ credentials.json is missing. Upload it below to continue.</span>';
+        dSetupLinkBtn.disabled = true;
+    } else {
+        if (dSetupCredsUploadContainer) dSetupCredsUploadContainer.style.display = 'none';
+        if (dSetupLinkContainer) dSetupLinkContainer.style.display = 'block';
+        
+        if (!status.token_linked) {
+            dSetupWizardStatus.textContent = 'credentials.json detected! Click Link Google Account to authorize Drive.';
+            dSetupWizardStatus.className = 'status-message text-yellow';
+        } else {
+            dSetupWizardStatus.textContent = 'Ready to complete setup!';
+            dSetupWizardStatus.className = 'status-message text-green';
+        }
+    }
+}
+
+// Handle Credentials file selection and upload
+if (dSetupUploadBtn && dSetupCredsFileInput) {
+    dSetupUploadBtn.addEventListener('click', () => dSetupCredsFileInput.click());
+    
+    dSetupCredsFileInput.addEventListener('change', async () => {
+        const file = dSetupCredsFileInput.files[0];
+        if (!file) return;
+        
+        if (file.name !== "credentials.json") {
+            dSetupWizardStatus.textContent = "Error: File must be named precisely 'credentials.json'";
+            dSetupWizardStatus.className = "status-message text-red";
+            return;
+        }
+        
+        dSetupUploadBtn.disabled = true;
+        dSetupUploadBtn.textContent = "Uploading...";
+        dSetupWizardStatus.textContent = "Uploading credentials.json...";
+        dSetupWizardStatus.className = "status-message text-yellow";
+        
+        try {
+            const formData = new FormData();
+            formData.append("file", file);
+            
+            const res = await fetch(`${API_BASE}/upload_credentials`, {
+                method: "POST",
+                body: formData
+            });
+            const data = await res.json();
+            if (data.status === "success") {
+                showFeedback(dSetupUploadBtn, "✅ Uploaded!", "Credentials uploaded!", false, dSetupWizardStatus);
+                // Immediately check status again to refresh UI
+                const statusRes = await fetch(`${API_BASE}/gdrive_status`);
+                const status = await statusRes.json();
+                updateSetupModalUI(status);
+            } else {
+                throw new Error(data.message);
+            }
+        } catch (e) {
+            dSetupWizardStatus.textContent = `Upload failed: ${e.message}`;
+            dSetupWizardStatus.className = "status-message text-red";
+            dSetupUploadBtn.textContent = "📂 Choose credentials.json";
+            dSetupUploadBtn.disabled = false;
+        }
+    });
+}
+
+// Setup Modal Trigger Event Link
+if (dSetupLinkBtn) {
+    dSetupLinkBtn.addEventListener('click', async () => {
+        dSetupLinkBtn.disabled = true;
+        dSetupLinkBtn.textContent = 'Launching Auth Flow...';
+        try {
+            const res = await fetch(`${API_BASE}/gdrive_link`, { method: 'POST' });
+            const data = await res.json();
+            if (data.status === 'success') {
+                dSetupWizardStatus.textContent = 'Auth flow launched! Check browser to log in and authorize Google Drive.';
+                dSetupWizardStatus.className = 'status-message text-yellow';
+            } else {
+                throw new Error(data.message);
+            }
+        } catch (e) {
+            dSetupWizardStatus.textContent = `Link Failed: ${e.message}`;
+            dSetupWizardStatus.className = 'status-message text-red';
+            dSetupLinkBtn.disabled = false;
+            dSetupLinkBtn.textContent = '🔗 Link Google Account';
+        }
+    });
+}
+
+// Complete Onboarding Setup Submission
+if (dSetupSubmitBtn) {
+    dSetupSubmitBtn.addEventListener('click', async () => {
+        const folderName = (dSetupFolderSelect.value === '__NEW_FOLDER__' ? dSetupFolderInput.value : dSetupFolderSelect.value).trim();
+        if (!folderName) {
+            dSetupWizardStatus.textContent = 'Please select or enter a valid folder name.';
+            dSetupWizardStatus.className = 'status-message text-red';
+            return;
+        }
+        
+        dSetupSubmitBtn.disabled = true;
+        dSetupSubmitBtn.textContent = 'Finalizing...';
+        try {
+            const res = await fetch(`${API_BASE}/gdrive_config`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ folder_name: folderName })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                if (gdriveStatusPollInterval) clearInterval(gdriveStatusPollInterval);
+                closeModal(dGDriveSetupModalOverlay);
+                
+                // Refresh dashboard admin values
+                currentGDriveFolder = folderName;
+                dGDriveFolderDisplay.textContent = folderName;
+                dGDriveInput.value = folderName;
+                
+                // Show a successful toast feedback on the admin status block
+                showFeedback(dUnlockGDriveBtn, "🔒", "Google Drive SSoT Setup Completed Successfully!", false, dGDriveConfigStatus);
+            } else {
+                throw new Error(data.message);
+            }
+        } catch (e) {
+            dSetupWizardStatus.textContent = `Onboarding Failed: ${e.message}`;
+            dSetupWizardStatus.className = 'status-message text-red';
+            dSetupSubmitBtn.disabled = false;
+            dSetupSubmitBtn.textContent = 'Complete Setup';
+        }
+    });
+}
+
+// Sidebar Admin Panel Locks / Unlocks Toggles
+if (dUnlockGDriveBtn) {
+    dUnlockGDriveBtn.addEventListener('click', () => {
+        // Toggle input edit visibility
+        dGDriveDisplayContainer.style.display = 'none';
+        dGDriveEditContainer.style.display = 'flex';
+        
+        // Dynamically fetch and list folders in sidebar selector
+        if (dGDriveSelect && dGDriveInput) {
+            populateGDriveFolderSelect(dGDriveSelect, dGDriveInput, currentGDriveFolder);
+        }
+    });
+}
+
+if (dCancelGDriveBtn) {
+    dCancelGDriveBtn.addEventListener('click', () => {
+        // Revert editing mode
+        dGDriveDisplayContainer.style.display = 'flex';
+        dGDriveEditContainer.style.display = 'none';
+        dGDriveConfigStatus.textContent = '';
+    });
+}
+
+if (dSaveGDriveBtn) {
+    dSaveGDriveBtn.addEventListener('click', async () => {
+        const val = (dGDriveSelect.value === '__NEW_FOLDER__' ? dGDriveInput.value : dGDriveSelect.value).trim();
+        if (!val) {
+            showFeedback(dSaveGDriveBtn, "⚠️ Empty", "Folder name cannot be empty.", true, dGDriveConfigStatus);
+            return;
+        }
+        dSaveGDriveBtn.disabled = true;
+        try {
+            const res = await fetch(`${API_BASE}/gdrive_config`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ folder_name: val })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                currentGDriveFolder = val;
+                dGDriveFolderDisplay.textContent = val;
+                
+                // Close edit mode
+                dGDriveDisplayContainer.style.display = 'flex';
+                dGDriveEditContainer.style.display = 'none';
+                
+                showFeedback(dUnlockGDriveBtn, "🔒", "Folder updated & syncing in background!", false, dGDriveConfigStatus);
+            } else {
+                throw new Error(data.message);
+            }
+        } catch (e) {
+            showFeedback(dSaveGDriveBtn, "❌ Error", e.message || "Failed to save.", true, dGDriveConfigStatus);
+        } finally {
+            dSaveGDriveBtn.disabled = false;
+        }
+    });
+}
+
 
 
 // ─── Mobile Quick Action Bridge ───

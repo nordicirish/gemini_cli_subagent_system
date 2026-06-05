@@ -75,18 +75,16 @@ body::before {
 /* ─── Glassmorphism ─── */
 .glass-panel {
     background: var(--panel-bg);
-    backdrop-filter: blur(25px) saturate(1.4);
-    -webkit-backdrop-filter: blur(25px) saturate(1.4);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px) saturate(1.2);
+    -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    border: 1px solid var(--panel-border);
     border-radius: var(--radius-lg);
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-    transition: all var(--transition);
+    box-shadow: var(--shadow-card);
+    transition: border-color var(--transition), box-shadow var(--transition);
 }
 
 .glass-panel:hover {
-    border-color: rgba(88, 166, 255, 0.25);
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45), 0 0 15px rgba(88, 166, 255, 0.08);
-    transform: translateY(-2px);
+    border-color: var(--panel-border-hover);
 }
 
 
@@ -341,17 +339,14 @@ h1 {
 }
 
 .macro-hud {
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 8px;
-    overflow-x: auto;
-    padding-bottom: 4px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
 }
 
 .macro-card {
-    flex: 1 1 0;
     min-width: 0;
-    padding: 8px 10px;
+    padding: 16px 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -381,7 +376,7 @@ h1 {
 }
 
 .macro-card h3 {
-    font-size: 0.6rem;
+    font-size: 0.7rem;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 1.5px;
@@ -390,7 +385,7 @@ h1 {
 }
 
 .macro-val {
-    font-size: 1.6rem;
+    font-size: 2rem;
     font-weight: 700;
     font-family: var(--font-mono);
     letter-spacing: -1px;
@@ -398,7 +393,7 @@ h1 {
 }
 
 .macro-gap {
-    font-size: 0.75rem;
+    font-size: 0.85rem;
     font-family: var(--font-mono);
     font-weight: 500;
 }
@@ -638,12 +633,6 @@ tbody tr:hover td {
     vertical-align: middle;
 }
 
-.note-tag.danger {
-    color: var(--red);
-    background: var(--red-dim);
-    border: 1px solid rgba(248, 81, 73, 0.2);
-}
-
 /* Trend tag*/
 .trend-tag {
     display: inline-block;
@@ -745,27 +734,25 @@ textarea:focus {
 /* ─── Buttons ─── */
 .glow-btn {
     width: 100%;
-    background: linear-gradient(135deg, rgba(88, 166, 255, 0.15), rgba(188, 140, 255, 0.15));
-    border: 1px solid rgba(88, 166, 255, 0.35);
-    color: var(--text-main);
+    background: var(--accent-dim);
+    border: 1px solid rgba(88, 166, 255, 0.25);
+    color: var(--accent);
     padding: 10px 16px;
-    border-radius: var(--radius-md);
-    font-weight: 700;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--transition);
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.8px;
     font-size: 0.72rem;
     font-family: var(--font-sans);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .glow-btn:hover {
-    background: linear-gradient(135deg, #58a6ff, #bc85ff);
-    color: #000000;
-    box-shadow: 0 0 20px rgba(88, 166, 255, 0.35), 0 0 8px rgba(188, 140, 255, 0.2);
-    border-color: transparent;
-    transform: translateY(-1px);
+    background: var(--accent);
+    color: #000;
+    box-shadow: 0 0 20px rgba(88, 166, 255, 0.3);
+    border-color: var(--accent);
 }
 
 .glow-btn:active {
@@ -919,7 +906,7 @@ textarea:focus {
 .flash-down { animation: flash-red   0.8s ease-out; }
 
 /* ─── Responsive ─── */
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
     .main-content {
         grid-template-columns: 1fr;
     }
@@ -932,7 +919,7 @@ textarea:focus {
         min-width: 280px;
     }
     .macro-hud {
-        flex-wrap: nowrap;
+        flex-wrap: wrap;
     }
     .alerts-panel {
         flex: 1 1 100%;
@@ -1040,6 +1027,45 @@ textarea:focus {
 
 .mini-input:focus {
     border-color: var(--accent);
+}
+
+.gdrive-select, .full-width-field {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.45);
+    border: 1px solid var(--panel-border);
+    color: var(--text-main);
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    padding: 8px 12px;
+    height: 38px;
+    outline: none;
+    font-family: var(--font-sans);
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.gdrive-select:focus, .full-width-field:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.gdrive-select option {
+    background-color: #0d1117;
+    color: var(--text-main);
+}
+
+.admin-stacked-row {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    gap: 8px;
+}
+
+.admin-btn-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    margin-top: 4px;
 }
 
 .add-btn {
@@ -1224,147 +1250,60 @@ textarea:focus {
     font-family: var(--font-mono);
 }
 
-/* ─── Initial Fetch Progress Container ─── */
-.progress-panel {
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 32px;
+/* ─── Admin Stacked Elements & GDrive Inputs ─── */
+.admin-stacked-row {
     display: flex;
     flex-direction: column;
-    gap: 20px;
-    background: rgba(17, 21, 28, 0.85) !important;
-    border: 1px solid rgba(88, 166, 255, 0.15) !important;
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), 0 0 40px rgba(88, 166, 255, 0.08) !important;
-    border-radius: var(--radius-lg);
-    text-align: center;
-    position: relative;
-    overflow: hidden;
+    gap: 8px;
+    width: 100%;
 }
 
-/* Pulsing aura behind progress panel */
-.progress-panel::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: radial-gradient(circle, rgba(88, 166, 255, 0.03) 0%, transparent 70%);
-    animation: rotate-aura 15s linear infinite;
-    pointer-events: none;
-    z-index: 0;
-}
-
-@keyframes rotate-aura {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-.progress-info {
-    position: relative;
-    z-index: 1;
-}
-
-.progress-info h2 {
-    font-size: 1.5rem;
-    font-weight: 700;
-    margin-bottom: 8px;
-    letter-spacing: 0.5px;
-    background: linear-gradient(135deg, var(--accent) 0%, var(--purple) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-
-.progress-info p {
-    font-size: 0.9rem;
-    color: var(--text-secondary);
-    font-weight: 500;
-}
-
-.progress-bar-wrapper {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin: 10px 0;
-}
-
-.progress-bar-track {
-    flex-grow: 1;
-    height: 12px;
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 6px;
-    overflow: hidden;
-    position: relative;
-}
-
-.progress-bar-fill {
-    height: 100%;
-    width: 0%;
-    background: linear-gradient(90deg, var(--accent) 0%, #a158ff 50%, var(--purple) 100%);
-    box-shadow: 0 0 15px rgba(188, 140, 255, 0.5);
-    border-radius: 6px;
-    transition: width 0.30s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-}
-
-/* Glow stripe animation in fill */
-.progress-bar-fill::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-        90deg,
-        rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0.25) 50%,
-        rgba(255, 255, 255, 0) 100%
-    );
-    animation: shimmer 1.5s infinite;
-}
-
-@keyframes shimmer {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(100%); }
-}
-
-.progress-percent {
-    font-family: var(--font-mono);
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: var(--purple);
-    min-width: 50px;
-    text-align: right;
-}
-
-.progress-details {
-    position: relative;
-    z-index: 1;
-    background: rgba(0, 0, 0, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+.full-width-field {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--panel-border);
     border-radius: var(--radius-sm);
-    padding: 12px 16px;
+    padding: 10px 12px;
+    color: var(--text-secondary);
     font-family: var(--font-mono);
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    min-height: 44px;
+    font-size: 0.78rem;
+    outline: none;
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.full-width-field:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.gdrive-select {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: 0.78rem;
+    outline: none;
+    cursor: pointer;
+    transition: border-color var(--transition), box-shadow var(--transition);
+    appearance: none;
+}
+
+.gdrive-select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.gdrive-select option {
+    background: var(--bg-secondary);
+    color: var(--text-main);
+}
+
+.admin-btn-row {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: color 0.2s;
-}
-
-.progress-details .loading-ticker {
-    color: var(--accent);
-    font-weight: 600;
-    font-size: 0.85rem;
-}
-
-/* Blurred View for Main Content */
-.blurred-view {
-    filter: blur(8px) saturate(0.5);
-    opacity: 0.45;
-    pointer-events: none;
-    transition: filter 0.6s var(--transition), opacity 0.6s var(--transition);
+    gap: 8px;
+    width: 100%;
+    margin-top: 4px;
 }

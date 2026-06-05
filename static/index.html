@@ -6,9 +6,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="modern_ui.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -43,41 +41,30 @@
                         <span id="last-updated" class="value">—</span>
                     </div>
                     <button id="open-indices-modal-btn" class="glow-btn outline" style="width: auto; padding: 4px 12px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; gap: 6px; margin-left: 10px; line-height: 1;">⚙️ INDICES</button>
-                    <button id="launch-chat-btn" class="glow-btn chat-launcher" style="width: auto; padding: 4px 12px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; gap: 6px; margin-left: 10px; line-height: 1;">✦ CONSULT AI COUNCIL</button>
                 </div>
             </div>
         </header>
 
         <!-- ─── Macro HUD ─── -->
-        <section class="macro-hud" id="macro-hud" style="margin-bottom: 16px; width: 100%;">
+        <section class="macro-hud" id="macro-hud">
             <div id="dynamic-macro-cards" style="display: contents;">
                 <!-- Cards injected by JS -->
             </div>
         </section>
 
+        <!-- ─── Quick Action Bar (Mobile Only) ─── -->
+        <div class="quick-action-bar glass-panel mobile-only">
+            <button id="mobile-copy-json-btn" class="glow-btn mini">📋 SNAP</button>
+            <button id="mobile-paste-payload-btn" class="glow-btn mini">📥 INGEST</button>
+            <button id="mobile-copy-session-btn" class="glow-btn mini outline">📂 BOOT</button>
+            <button id="mobile-btn-session-review" class="glow-btn mini outline">🔍 AUDIT</button>
+        </div>
+        <div id="mobile-data-status" class="status-message inline-feedback mobile-only"></div>
+
         <!-- ─── Main Content ─── -->
         <main class="main-content">
-            <div class="left-content-wrapper" style="display: flex; flex-direction: column; gap: 16px;">
-                <div class="table-overlap-wrapper" style="display: grid; grid-template-columns: 1fr; align-items: start;">
-                    <!-- Initial Fetch Progress Container -->
-                <div id="initial-fetch-progress-container" class="glass-panel progress-panel" style="display: none; grid-area: 1 / 1; align-self: start; z-index: 100;">
-                <div class="progress-info">
-                    <h2 id="progress-phase-title">Initializing Market Data Daemon...</h2>
-                    <p id="progress-status-text">Connecting to real-time data feeds...</p>
-                </div>
-                <div class="progress-bar-wrapper">
-                    <div class="progress-bar-track">
-                        <div id="initial-fetch-progress-bar" class="progress-bar-fill"></div>
-                    </div>
-                    <span id="progress-bar-percent" class="progress-percent">0%</span>
-                </div>
-                <div class="progress-details" id="progress-ticker-details">
-                    Establishing secure handshake...
-                </div>
-            </div>
-
             <!-- Data Table -->
-            <div class="table-container glass-panel" id="main-data-table-container" style="grid-area: 1 / 1;">
+            <div class="table-container glass-panel">
                 <table id="data-table">
                     <thead>
                         <tr>
@@ -99,11 +86,34 @@
                     </tbody>
                 </table>
             </div>
-            </div>
-            </div>
 
             <!-- Sidebar -->
             <aside class="sidebar">
+                <!-- Outbound Data Operations -->
+                <div class="sidebar-card glass-panel desktop-only">
+                    <h3><span class="icon">📤</span> Export to Council</h3>
+                    <p class="subtitle">Copy context for Gemini Gem analysis</p>
+                    <div class="btn-row">
+                        <button id="copy-json-btn" class="glow-btn">📋 Copy Market Snapshot</button>
+                        <div id="outbound-turn-status" class="status-message inline-feedback"></div>
+                        <button id="copy-session-btn" class="glow-btn outline">📂 New Session Boot</button>
+                        <div id="outbound-session-status" class="status-message inline-feedback"></div>
+                        <button id="btn-session-review" onclick="copySessionReviewPayload()" class="glow-btn outline">🔍 Audit & Rule Review</button>
+                        <div id="outbound-review-status" class="status-message inline-feedback"></div>
+                    </div>
+                </div>
+
+                <!-- Inbound Data Operations -->
+                <div class="sidebar-card glass-panel desktop-only">
+                    <h3><span class="icon">📥</span> Import from Council</h3>
+                    <p class="subtitle">Sync SSoT from Gem output</p>
+                    <div class="btn-row">
+                        <button id="paste-payload-btn" class="glow-btn">📥 Ingest Execution Payload</button>
+                        <div id="inbound-paste-status" class="status-message inline-feedback"></div>
+                    </div>
+                </div>
+
+
                 <!-- Portfolio Manager -->
                 <div class="sidebar-card glass-panel manager-card minimized">
                     <div class="header-row">
@@ -189,20 +199,42 @@
                                 </select>
                             </div>
                         </div>
+                        <button id="run-ai-scout-btn" class="glow-btn" style="margin-top: 8px;">🔭 Run AI Scout Scan</button>
+                        <div id="ai-scout-status" class="status-message inline-feedback" style="margin-top: 6px;"></div>
                     </div>
                 </div>
 
-                <!-- Decision Log Management -->
+                <!-- System Admin Panel -->
                 <div class="sidebar-card glass-panel manager-card minimized desktop-only">
                     <div class="header-row">
-                        <h3 onclick="toggleSection('decision-log-content', this)">
-                            <span class="icon">🗄️</span> Decision Log <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                        <h3 onclick="toggleSection('admin-content', this)">
+                            <span class="icon">⚙️</span> Admin & Sync <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
                         </h3>
                     </div>
-                    <div id="decision-log-content" style="display: none;">
-                        <p class="subtitle" style="margin-bottom: 12px;">Forensic trade history management</p>
+                    <div id="admin-content" style="display: none;">
+                        <p class="subtitle" style="margin-bottom: 8px;">Google Drive Rules Sync (SSoT)</p>
+                        
+                        <div id="gdrive-display-container" style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--panel-border); padding: 8px; border-radius: 4px;">
+                            <span style="font-size: 0.65rem; color: var(--text-dim); font-weight: 500;">Folder:</span>
+                            <span id="gdrive-folder-display" style="font-weight: 600; font-size: 0.75rem; color: var(--accent); flex: 1;">Awaiting Setup...</span>
+                            <button id="unlock-gdrive-btn" style="background: none; border: none; cursor: pointer; font-size: 0.85rem; padding: 2px; line-height: 1; transition: transform 0.2s; outline: none;" title="Unlock & Edit">🔒</button>
+                        </div>
+                        
+                        <div id="gdrive-edit-container" class="admin-stacked-row" style="display: none; margin-bottom: 12px;">
+                            <select id="gdrive-folder-select" class="gdrive-select"></select>
+                            <input type="text" id="gdrive-folder-input" placeholder="New folder name..." class="full-width-field" style="display: none;">
+                            <div class="admin-btn-row">
+                                <button id="save-gdrive-btn" class="glow-btn mini">SAVE</button>
+                                <button id="cancel-gdrive-btn" class="glow-btn outline mini">✖</button>
+                            </div>
+                        </div>
+                        <div id="gdrive-config-status" class="status-message inline-feedback" style="margin-bottom: 8px;"></div>
+                        
+                        <hr style="border: 0; border-top: 1px solid var(--panel-border); margin: 12px 0;">
+                        
+                        <p class="subtitle" style="margin-bottom: 8px;">Decision Log & Database Management</p>
                         <div class="btn-row">
-                            <button id="clear-log-btn" class="glow-btn outline danger">🗑️ Clear Decision Log</button>
+                            <button id="clear-log-btn" class="glow-btn outline danger mini">🗑️ Clear Decision Log</button>
                             <div id="clear-log-status" class="status-message inline-feedback"></div>
                         </div>
                     </div>
@@ -232,87 +264,52 @@
         </div>
     </div>
 
-    <!-- Modern Chat Overlay (Keep outside grid) -->
-    <div class="modern-chat-overlay" id="chat-window">
-        <div class="modern-chat-panel">
-            <div class="modern-chat-header">
-                <div class="modern-header-left" style="display: flex; align-items: center; gap: 20px;">
-                    <div class="modern-logo-box">✦</div>
-                    <h2 style="margin: 0; font-size: 1.4rem; letter-spacing: 1px; white-space: nowrap;">GEMINI AI COUNCIL</h2>
-                </div>
-                <div class="modern-header-right" style="display: flex; align-items: center; gap: 12px;">
-                    <div style="display: flex; gap: 2px; align-items: center; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 2px;">
-                        <button title="Decrease Text Size" onclick="adjustChatSize(-1)" style="background: transparent; border: none; color: white; padding: 2px 6px; cursor: pointer; font-size: 0.8rem;">A-</button>
-                        <button title="Increase Text Size" onclick="adjustChatSize(1)" style="background: transparent; border: none; color: white; padding: 2px 6px; cursor: pointer; font-size: 0.9rem;">A+</button>
-                    </div>
-                    <script>
-                        let currentChatSize = 0.95;
-                        function adjustChatSize(dir) {
-                            currentChatSize += dir * 0.1;
-                            if (currentChatSize < 0.6) currentChatSize = 0.6;
-                            if (currentChatSize > 1.6) currentChatSize = 1.6;
-                            let styleEl = document.getElementById('dynamic-chat-style');
-                            if (!styleEl) {
-                                styleEl = document.createElement('style');
-                                styleEl.id = 'dynamic-chat-style';
-                                document.head.appendChild(styleEl);
-                            }
-                            styleEl.textContent = `.modern-message { font-size: ${currentChatSize}rem !important; }`;
-                        }
-                    </script>
-                    <label style="color: white; font-size: 0.75rem; display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Hide the council debate in the UI (it will still be saved to the log).">
-                        <input type="checkbox" id="skip-debate-toggle" checked style="accent-color: var(--accent-blue);">
-                        Hide Debate
-                    </label>
-                    <label style="color: white; font-size: 0.75rem; display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Include paid/Pro tier models. Uncheck to show only free tier models.">
-                        <input type="checkbox" id="paid-tiers-toggle" style="accent-color: var(--accent-blue);">
-                        Include Paid Tiers
-                    </label>
-                    <span id="context-caching-toggle-container" style="display: none; align-items: center; gap: 5px;">
-                        <label style="color: white; font-size: 0.75rem; display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Enable Google GenAI Context Caching. Reduces token costs by up to 75% and increases speed 3x to 5x on repeat prompts, but only works on Pro models.">
-                            <input type="checkbox" id="context-caching-toggle" style="accent-color: var(--accent-blue);">
-                            Use Caching
-                        </label>
-                    </span>
-                    <select id="model-selector" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 5px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; outline: none;">
-                        <option value="gemini-2.0-flash-thinking-exp" selected style="background: #1a1a1a; color: white;">2.0 FLASH THINKING (FREE)</option>
-                    </select>
-                    <button id="new-chat-btn" title="New Conversation" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
-                        <span>+</span> NEW
-                    </button>
-                    <button id="history-chat-btn" title="History" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
-                        <span>📂</span> SESSIONS
-                    </button>
-                    <button class="modern-ctrl-btn" id="chat-close-btn">×</button>
+    <!-- ─── Google Drive Setup Modal ─── -->
+    <div class="modal-overlay" id="gdrive-setup-modal-overlay">
+        <div class="modal modal-medium glass-panel" style="max-width: 480px; width: 90%;">
+            <div class="modal-header">
+                <h3>☁️ Google Drive SSoT Setup</h3>
+            </div>
+            <p class="subtitle" style="margin-bottom: 16px; font-size: 0.7rem; color: var(--text-dim);">Configure your Custom Gem rules synchronization folder and link your Google Account.</p>
+            
+            <div class="setup-step" style="margin-bottom: 20px;">
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 6px; color: var(--accent);">STEP 1: Folder Selection</label>
+                <div id="setup-folder-loading-msg" class="subtitle" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 8px; text-align: left;">Please complete Step 2 (Account Authorization) to fetch folders from your Google Drive.</div>
+                <div id="setup-folder-container" class="admin-stacked-row" style="display: none;">
+                    <p class="subtitle" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 4px; text-align: left;">Choose an existing folder from your Drive or create a new one:</p>
+                    <select id="setup-folder-select" class="gdrive-select"></select>
+                    <input type="text" id="setup-folder-input" placeholder="Enter new folder name..." class="full-width-field" style="display: none; margin-top: 4px;">
                 </div>
             </div>
 
-            <div class="modern-chat-messages" id="chat-messages">
-                <div class="modern-message ai">
-                    Welcome to the council. How can I help you analyze the markets today?
+            <div class="setup-step" style="margin-bottom: 24px;">
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 6px; color: var(--accent);">STEP 2: Account Authorization</label>
+                
+                <!-- Credentials Upload Form UI -->
+                <div id="setup-creds-upload-container" style="display: none; margin-bottom: 12px; padding: 12px; border: 1px dashed var(--panel-border); border-radius: 4px; background: rgba(255, 255, 255, 0.01); text-align: center;">
+                    <p class="subtitle" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 8px;">Upload the Google Cloud credentials.json file to enable account linking:</p>
+                    <input type="file" id="setup-creds-file-input" accept=".json" style="display: none;">
+                    <button id="setup-upload-btn" class="glow-btn outline mini" style="width: auto; margin: 0 auto;">📂 Choose credentials.json</button>
+                </div>
+
+                <div id="setup-link-container">
+                    <p class="subtitle" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 12px;">Link your account securely. A desktop browser page will open on your host computer to complete the Google OAuth flow.</p>
+                    
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <button id="setup-link-btn" class="glow-btn outline" style="width: auto; height: 36px; padding: 0 16px; margin: 0; font-size: 0.75rem; line-height: 36px; display: flex; align-items: center; justify-content: center; gap: 6px;">🔗 Link Google Account</button>
+                        <span id="setup-link-badge" class="badge-status text-muted" style="font-size: 0.7rem; font-weight: bold; display: flex; align-items: center; gap: 4px;">NOT LINKED ⚠️</span>
+                    </div>
                 </div>
             </div>
 
-            <div class="modern-input-area">
-                <textarea id="chat-input" placeholder="Ask Gemini..." rows="1"></textarea>
-                <div class="modern-input-footer">
-                    <div class="modern-input-tools" style="display: flex; align-items: center; gap: 20px;">
-                        <span id="chat-status-indicator" style="color: #8b949e; font-size: 0.85rem; font-weight: 500; letter-spacing: 0.5px;">Status: Ready</span>
-                        <span id="chat-session-cost" style="color: var(--accent-blue); font-size: 0.85rem; font-weight: 500; letter-spacing: 0.5px;">Est. Session Cost: $0.00</span>
-                    </div>
-                    <button class="modern-send-btn" id="send-chat-btn" style="width: auto; border-radius: 12px; padding: 10px 24px; font-weight: 700; letter-spacing: 1px; font-size: 0.9rem; display: flex; align-items: center; gap: 10px;">
-                        <span>✦</span> CHAT WITH THE COUNCIL
-                    </button>
-                    <button class="modern-stop-btn" id="stop-chat-btn" style="display: none; width: auto; border-radius: 12px; padding: 10px 24px; font-weight: 700; letter-spacing: 1px; font-size: 0.9rem; background: #da3633; border: none; color: white; cursor: pointer; align-items: center; gap: 10px;">
-                        <span>⏸</span> STOP
-                    </button>
-                </div>
+            <div id="setup-wizard-status" class="status-message inline-feedback" style="margin-bottom: 16px; min-height: 18px; text-align: left;"></div>
+
+            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--panel-border); padding-top: 16px; margin-top: 16px;">
+                <button id="setup-submit-btn" class="glow-btn" style="width: auto; height: 36px; padding: 0 20px; font-size: 0.75rem; display: flex; align-items: center; justify-content: center; line-height: 1;" disabled>Complete Setup</button>
             </div>
         </div>
     </div>
 
-    <script src="app.js?v=10.57"></script>
-    <script src="modern_ui.js?v=10.57"></script>
-    <link rel="stylesheet" href="styles.css?v=10.57">
+    <script src="app.js?v=10.07"></script>
 </body>
 </html>
