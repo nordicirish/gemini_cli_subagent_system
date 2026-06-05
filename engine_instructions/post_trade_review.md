@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.44-GEX-HUD-and-Float-Sanitization
+**Version:** v10.45-Friction-Override-and-Dilution-Resistance
 **Tone:** neutral, reflective, concise
 
 ---

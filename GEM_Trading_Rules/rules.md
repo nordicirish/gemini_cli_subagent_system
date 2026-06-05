@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.44-GEX-HUD-and-Float-Sanitization
+**Version:** v10.45-Friction-Override-and-Dilution-Resistance
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -109,6 +109,7 @@
 - [ENH_114](#enh_114): PARABOLIC_VWAP_CASCADES
 - [ENH_115](#enh_115): PRE_MARKET_SHORT_GAMMA_BLEED
 - [ENH_116](#enh_116): MACRO_YIELD_CATALYST_VERIFICATION
+- [ENH_117](#enh_117): DILUTION_RESISTANCE_WALL - Assets with active recent equity offerings exhibit structural supply walls; avoid accumulation into these price zones without rVol > 2.0 confirmation.
 
 
 ## Mandate Registry
@@ -153,6 +154,7 @@
 - [MANDATE_40](#mandate_40): ABSOLUTE_PARABOLIC_GRAVITY - Regardless of active SSR status, LONG_GAMMA shielding, or user manual overrides, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST forcefully execute a minimum 15% tactical sweep trim. This is an un-bypassable terminal gravity layer.
 - [MANDATE_41](#mandate_41): OVERRIDE_PENALTY_LOCK
 - [MANDATE_42](#mandate_42): STRICT_ATTRIBUTION_INTEGRITY
+- [MANDATE_43](#mandate_43): FRICTION_OVERRIDE_ON_STRUCTURAL_FAILURE - If an asset exhibits structural failure (defined as losing its daily VWAP floor accompanied by rising distribution volume or negative pre-market gap metrics), the Orchestrator MUST override standard FX/commission friction hurdles (such as the 0.6% EUR round-trip constraint) and execute an immediate defensive exit. Capital preservation supersedes transactional friction optimization.
 - NOTE: MANDATE_46 (LONG GAMMA SHIELD OVERRIDE) was REJECTED — content is fully covered by ENH_16_D, MANDATE_34, and MANDATE_35. MANDATE_34 has been augmented with the precision language from the proposed patch.
 
 ## Engine Registry
@@ -553,6 +555,12 @@ This registry serves as the system-wide directory mapping all active sub-agent c
     *   **Status:** ACTIVE
     *   **Directive:** STRICT_ATTRIBUTION_INTEGRITY - The system MUST NOT falsely attribute user-provided insights, correlations, or macro observations to its own autonomous scanning capabilities. If the user introduces a variable that the system previously missed, the system must explicitly log the miss as a `forensic_blindspot` and attribute the discovery exclusively to `user_input`. Falsifying system competence to cover for a macro scan failure degrades SSoT reliability and is strictly forbidden.
     *   **Justification:** Forensic audit of 06-03 15:27 EST log revealed the engine hallucinated self-competence by claiming it independently discovered a 10-year yield correlation that was explicitly provided by the user in the preceding prompt.
+
+<a name="mandate_43"></a>
+*   **[MANDATE_43_FRICTION_OVERRIDE_ON_STRUCTURAL_FAILURE]**
+    *   **Status:** ACTIVE
+    *   **Directive:** FRICTION_OVERRIDE_ON_STRUCTURAL_FAILURE - If an asset exhibits structural failure (defined as losing its daily VWAP floor accompanied by rising distribution volume or negative pre-market gap metrics), the Orchestrator MUST override standard FX/commission friction hurdles (such as the 0.6% EUR round-trip constraint) and execute an immediate defensive exit. Capital preservation supersedes transactional friction optimization.
+    *   **Justification:** Verified via June 5 UMAC/RCAT liquidations; bypassing friction gates during active waterfalls stops drawdown leakage immediately.
 
 
 ## Anti Hallucination Core
@@ -1778,6 +1786,12 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Directive:** Fundamental analyst upgrades (e.g., PT raises) carry ZERO execution weight and cannot authorize capital deployment if the asset is currently classified as SHORT_GAMMA or is trading below its intraday VWAP.
 - **Justification:** Quarantined the "Needham PT $22" UMAC catalyst, preventing algorithmic confirmation bias during an active intraday distribution cycle.
 
+<a name="enh_117"></a>
+### [ENH_117] DILUTION_RESISTANCE_WALL
+- **Status:** ACTIVE
+- **Content:** DILUTION_RESISTANCE_WALL - Assets with active recent equity offerings exhibit structural supply walls; avoid accumulation into these price zones without rVol > 2.0 confirmation.
+- **Justification:** Prevented premium capital erosion across repeated automated buy tests into known warrant overhang corridors.
+
 ## Risk & Liquidity Parameters
 
 <a name="mandate_34"></a>
@@ -1793,6 +1807,12 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Status:** ACTIVE
 - **Content:** If an asset is shielded by LONG_GAMMA but drops past the -10% SSR threshold, the Council must prioritize the SSR structural failure. The Consensus Pipeline must forcefully override the Neutral Structuralist and execute a risk trim.
 - **Justification:** Resolves pipeline deadlocks between quantitative GEX readings and regulatory SEC circuit breakers.
+
+<a name="mandate_43"></a>
+### [MANDATE_43] FRICTION_OVERRIDE_ON_STRUCTURAL_FAILURE
+- **Status:** ACTIVE
+- **Content:** If an asset exhibits structural failure (defined as losing its daily VWAP floor accompanied by rising distribution volume or negative pre-market gap metrics), the Orchestrator MUST override standard FX/commission friction hurdles (such as the 0.6% EUR round-trip constraint) and execute an immediate defensive exit. Capital preservation supersedes transactional friction optimization.
+- **Justification:** Verified via June 5 UMAC/RCAT liquidations; bypassing friction gates during active waterfalls stops drawdown leakage immediately.
 
 ## Telemetry Filters
 
