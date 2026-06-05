@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.65-Scout-RSI-UI-Fix
+- **version**: v10.66-GEX-HUD-and-Float-Sanitization
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

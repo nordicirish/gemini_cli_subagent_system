@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.65-Scout-RSI-UI-Fix
+- **version**: v10.66-GEX-HUD-and-Float-Sanitization
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

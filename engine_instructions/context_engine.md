@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.65-Scout-RSI-UI-Fix
+- **version**: v10.66-GEX-HUD-and-Float-Sanitization
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

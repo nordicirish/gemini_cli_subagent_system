@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.65-Scout-RSI-UI-Fix
+**Version:** v10.66-GEX-HUD-and-Float-Sanitization
 **Tone:** neutral, reflective, concise
 
 ---

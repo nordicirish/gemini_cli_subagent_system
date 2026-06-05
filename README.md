@@ -285,6 +285,10 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v10.66-GEX-HUD-and-Float-Sanitization *(2026-06-05)*
+- **Float Sanitization & Data Reliability:** Integrated robust NaN and Infinity sanitization checks in option chain and GEX calculations boundary to resolve FastAPI serialization crashes.
+- **Global Parity Sync:** Synchronized and bumped version to `v10.66-GEX-HUD-and-Float-Sanitization` across rules.md, antigravity.md, and all engine markdown files.
+
 ### v10.65-Scout-RSI-UI-Fix *(2026-06-04)*
 - **Dashboard UI Layout Optimization:** Fixed Scout Intelligence "Max RSI" config layout. Shortened label text to "Max RSI:", shortened dropdown option labels to fit within 100px width, and applied a fixed 100px width constraint on the select element to prevent sidebar container overflow.
 - **Global Parity Sync:** Synchronized and bumped version to `v10.65-Scout-RSI-UI-Fix` across rules.md, antigravity.md, and all engine markdown files.
