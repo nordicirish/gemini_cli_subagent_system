@@ -10,6 +10,7 @@ import sys
 import json
 import pyperclip
 import re
+import math
 from scipy.stats import norm
 from yfinance.data import YfData
 import threading
@@ -533,9 +534,27 @@ async def save_watch_list(req: Request):
         print(f"Watch List Sync Failed: {e}")
     return JSONResponse({"status": "error"})
 
+def sanitize_json_payload(obj):
+    if isinstance(obj, dict):
+        return {k: sanitize_json_payload(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_json_payload(x) for x in obj]
+    elif isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return 0.0
+        return obj
+    elif isinstance(obj, (np.floating, np.float32, np.float64)):
+        val = float(obj)
+        if math.isnan(val) or math.isinf(val):
+            return 0.0
+        return val
+    elif isinstance(obj, (np.integer, np.int32, np.int64)):
+        return int(obj)
+    return obj
+
 @app.get("/api/data")
 def get_data():
-    return JSONResponse(GLOBAL_STATE)
+    return JSONResponse(sanitize_json_payload(GLOBAL_STATE))
 
 @app.get("/api/tickers")
 def get_tickers():
@@ -1135,8 +1154,12 @@ def get_market_status():
 def to_float(val):
     try:
         if isinstance(val, (pd.Series, pd.DataFrame)):
-            return float(val.iloc[-1])
-        return float(val)
+            v = float(val.iloc[-1])
+        else:
+            v = float(val)
+        if math.isnan(v) or math.isinf(v):
+            return 0.0
+        return v
     except:
         return 0.0
 
@@ -1646,7 +1669,7 @@ def get_gex_profile(ticker_obj, spot_price):
         if flip_price > 0:
             flip_prox = (spot_price - flip_price) / spot_price
 
-        return {
+        res = {
             'net_gex': final_gex,
             'flip_price': flip_price,
             'inventory_velocity_delta': net_delta,
@@ -1654,6 +1677,17 @@ def get_gex_profile(ticker_obj, spot_price):
             'flip_proximity_percent': flip_prox,
             'strike_oi_magnet': magnet_price
         }
+        sanitized = {}
+        for k, v in res.items():
+            try:
+                fv = float(v)
+                if math.isnan(fv) or math.isinf(fv):
+                    sanitized[k] = 0.0
+                else:
+                    sanitized[k] = fv
+            except:
+                sanitized[k] = v
+        return sanitized
 
     except Exception:
         return default_res
@@ -1709,8 +1743,12 @@ def update_history_and_technicals(symbol, t_obj):
             # --- Helper to safely get the last value from a Series or scalar ---
             def _last(val):
                 if isinstance(val, (int, float, np.floating, np.integer)):
-                    return float(val)
-                return float(val.iloc[-1])
+                    v = float(val)
+                else:
+                    v = float(val.iloc[-1])
+                if math.isnan(v) or math.isinf(v):
+                    return 0.0
+                return v
 
             # --- RSI (Wilder) ---
             delta = close.diff()
