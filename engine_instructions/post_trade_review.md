@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.48-Indices-VWAP-and-3Dec-GEX
+**Version:** v10.49-USD-Cash-Ingestion-Fix
 **Tone:** neutral, reflective, concise
 
 ---

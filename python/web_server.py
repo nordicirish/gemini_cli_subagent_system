@@ -1082,7 +1082,8 @@ def get_basket():
                 portfolio = [{"ticker": i["ticker"], "shares": i.get("shares", 0), "wac": i.get("wac", 0)} for i in raw_basket]
                 cash = ms.get("unallocated_cash_eur", state_ctx.get("unallocated_cash_eur", 0.0))
                 cash_usd = ms.get("unallocated_cash_usd", state_ctx.get("unallocated_cash_usd", 0.0))
-                rate = ms.get("eurusd_rate", state_ctx.get("eurusd_rate", 1.08))
+                import fetch_stocks
+                rate = fetch_stocks.cache.prices.get("EURUSD=X", 1.08)
                 return {
                     "portfolio": portfolio,
                     "unallocated_cash_eur": cash,
@@ -1113,20 +1114,17 @@ def save_basket(req: BasketSaveRequest):
                 if item.shares > 0:
                     new_snapshot.append({"ticker": item.ticker, "shares": item.shares, "wac": item.wac})
             
+            import fetch_stocks
+            rate = fetch_stocks.cache.prices.get("EURUSD=X", 1.08)
+            usd_val = req.unallocated_cash_usd if req.unallocated_cash_usd > 0.0 else round(req.unallocated_cash_eur * rate, 2)
+
             if "mutable_state" in data:
                 data["mutable_state"]["portfolio_snapshot"] = new_snapshot
                 data["mutable_state"]["unallocated_cash_eur"] = req.unallocated_cash_eur
-                # Sync USD cash based on eurusd rate if it's not provided or 0
-                state_ctx = data["mutable_state"].get("state_context", {})
-                rate = data["mutable_state"].get("eurusd_rate", state_ctx.get("eurusd_rate", 1.08))
-                usd_val = req.unallocated_cash_usd if req.unallocated_cash_usd > 0.0 else round(req.unallocated_cash_eur * rate, 2)
                 data["mutable_state"]["unallocated_cash_usd"] = usd_val
             else:
                 data["portfolio_snapshot"] = new_snapshot
                 data["unallocated_cash_eur"] = req.unallocated_cash_eur
-                # Fallback for flat structure
-                rate = data.get("eurusd_rate", 1.08)
-                usd_val = req.unallocated_cash_usd if req.unallocated_cash_usd > 0.0 else round(req.unallocated_cash_eur * rate, 2)
                 data["unallocated_cash_usd"] = usd_val
                 
             with open("context/ssot.json", "w") as f:

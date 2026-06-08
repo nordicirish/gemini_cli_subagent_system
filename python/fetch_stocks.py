@@ -858,11 +858,13 @@ async def handle_paste(req: Request):
 
         # SSoT schema validation — prune non-canonical top-level keys to prevent drift
         CANONICAL_SSOT_KEYS = {
-            "state_context", "portfolio_snapshot", "forensic_intelligence",
+            "state_context", "portfolio_snapshot", "proposed_portfolio_snapshot", "forensic_intelligence",
             "runtime_flags", "macro_calendar_shield", "active_orders",
             "fin_account_gate", "registry_pointers", "overnight_posture",
             "strategy_timing", "lesson_integration", "immutable_background", "mutable_state",
-            "remaining_cash_usd", "_meta"
+            "unallocated_cash_eur", "unallocated_cash_usd", 
+            "portfolio_total_value_usd", "portfolio_total_value_eur", "base_currency", "exchange_rate",
+            "scouted_assets_tracked", "risk_metrics", "directive", "EXECUTION_PAYLOAD", "_meta"
         }
         
         # Prune from root
