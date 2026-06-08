@@ -122,8 +122,9 @@ function renderIndicesModal() {
         if (d.rsi) details += `RSI ${d.rsi.toFixed(1)}`;
         if (d.atr_percent) details += ` · ATR ${d.atr_percent.toFixed(2)}%`;
         if (d.volume) details += ` · Vol ${formatVol(d.volume)}`;
+        if (d.vwap && d.vwap > 0) details += ` · VWAP ${d.vwap.toFixed(2)}`;
         if (d.net_gex_total !== undefined && d.net_gex_total !== 0) {
-            const gexVal = d.net_gex_total.toFixed(2);
+            const gexVal = d.net_gex_total.toFixed(3);
             
             const diff = d.gex_diff || 0;
             let chevron = '';
@@ -133,14 +134,7 @@ function renderIndicesModal() {
                 chevron = `<span class="text-red" style="margin-left: 2px; font-weight: bold;">▼</span>`;
             }
             
-            const posture = d.dealer_posture || 'NEUTRAL';
-            let curatorInterpretation = "Neutral dealer posture";
-            if (posture === "LONG_GAMMA") {
-                curatorInterpretation = "Stabilizing dealer posture";
-            } else if (posture === "SHORT_GAMMA") {
-                curatorInterpretation = "Amplifying dealer posture";
-            }
-            details += ` · GEX ${gexVal}${chevron} (Antigravity curator: ${curatorInterpretation})`;
+            details += ` · GEX ${gexVal}${chevron}`;
         }
 
         let trendStr = '';
@@ -540,7 +534,7 @@ function renderTable(tickers, state) {
                     if (gexVal > 0.005) dpClass = 'dealer-long';
                     else if (gexVal < -0.005) dpClass = 'dealer-short';
                     
-                    return `<span class="dealer-badge ${dpClass}">${gexVal.toFixed(2)}${chevron}</span>`;
+                    return `<span class="dealer-badge ${dpClass}">${gexVal.toFixed(3)}${chevron}</span>`;
                 })()}</td>
                 <td class="score-col">
                     <span class="score-badge ${scoreBadge}">${scoreStr}</span>${noteHtml}
@@ -654,7 +648,7 @@ async function pollData() {
                         
                         let gapExtra = '';
                         if (row.net_gex_total !== undefined && row.net_gex_total !== 0) {
-                            const gexVal = row.net_gex_total.toFixed(2);
+                            const gexVal = row.net_gex_total.toFixed(3);
                             let gexColor = 'text-muted';
                             if (row.net_gex_total > 0.005) {
                                 gexColor = 'text-green';

@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.69-Local-File-Storage-Lock
+- **version**: v10.70-Indices-VWAP-and-3Dec-GEX
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

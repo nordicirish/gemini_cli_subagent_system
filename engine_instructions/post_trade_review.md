@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.69-Local-File-Storage-Lock
+**Version:** v10.48-Indices-VWAP-and-3Dec-GEX
 **Tone:** neutral, reflective, concise
 
 ---

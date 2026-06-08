@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.69-Local-File-Storage-Lock
+- **version**: v10.70-Indices-VWAP-and-3Dec-GEX
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

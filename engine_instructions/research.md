@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.69-Local-File-Storage-Lock
+- **version**: v10.70-Indices-VWAP-and-3Dec-GEX
 
 ## Tone
 institutional, narrative, concise
