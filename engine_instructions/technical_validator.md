@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.66-GEX-HUD-and-Float-Sanitization
+- **version**: v10.69-Local-File-Storage-Lock
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

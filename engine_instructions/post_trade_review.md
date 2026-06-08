@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.45-Friction-Override-and-Dilution-Resistance
+**Version:** v10.69-Local-File-Storage-Lock
 **Tone:** neutral, reflective, concise
 
 ---

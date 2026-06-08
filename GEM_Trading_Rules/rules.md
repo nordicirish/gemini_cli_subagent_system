@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.45-Friction-Override-and-Dilution-Resistance
+**Version:** v10.69-Local-File-Storage-Lock
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -110,6 +110,8 @@
 - [ENH_115](#enh_115): PRE_MARKET_SHORT_GAMMA_BLEED
 - [ENH_116](#enh_116): MACRO_YIELD_CATALYST_VERIFICATION
 - [ENH_117](#enh_117): DILUTION_RESISTANCE_WALL - Assets with active recent equity offerings exhibit structural supply walls; avoid accumulation into these price zones without rVol > 2.0 confirmation.
+- [ENH_232](#enh_232): BROKER_LATENCY_LIMIT_SWEEP - If a critical mechanical risk trim (e.g., >4% VWAP extension) fails to execute due to broker API latency or rejection, the Orchestrator MUST NOT re-queue the order at the identical or higher limit. It must instantly queue a 'Sweeping Limit Order' priced 0.5% below the current bid to guarantee extraction.
+- [ENH_245](#enh_245): INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Automated defensive tranches must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen.
 
 
 ## Mandate Registry
@@ -1957,6 +1959,19 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Status:** ACTIVE
 - **Content:** MACRO_YIELD_CATALYST_VERIFICATION - Whenever an inverse correlation is detected between Treasury yield proxies (e.g., IEF drop) and broad indices (SPY), the Orchestrator MUST scan the macroeconomic calendar for primary labor or inflation data before categorizing the price action. Fundamental duration repricing must not be misclassified as an isolated mechanical liquidity flush.
 - **Justification:** Forensic audit of 06-03 15:25 EST log revealed the engine missed the root jobs data catalyst, mischaracterizing a fundamental valuation compression as purely algorithmic index-coupling.
+
+<a name="enh_232"></a>
+### [ENH_232] BROKER_LATENCY_LIMIT_SWEEP
+- **Status:** ACTIVE
+- **Content:** BROKER_LATENCY_LIMIT_SWEEP - If a critical mechanical risk trim (e.g., >4% VWAP extension) fails to execute due to broker API latency or rejection, the Orchestrator MUST NOT re-queue the order at the identical or higher limit. It must instantly queue a 'Sweeping Limit Order' priced 0.5% below the current bid to guarantee extraction.
+- **Justification:** Prevents ROM_01 (Market Order) violations while neutralizing API latency bottlenecks during critical liquidity flushes.
+
+<a name="enh_245"></a>
+### [ENH_245] INDEX_SHORT_GAMMA_LOCK
+- **Status:** ACTIVE
+- **Content:** INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Automated defensive tranches must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen.
+- **Justification:** Verified in the June 8 decision log. When SPY shifts to SHORT_GAMMA, liquidity voids expand exponentially, requiring immediate capital lockout.
+
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.

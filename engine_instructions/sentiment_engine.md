@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.66-GEX-HUD-and-Float-Sanitization
+- **version**: v10.69-Local-File-Storage-Lock
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

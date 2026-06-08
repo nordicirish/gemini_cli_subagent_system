@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.66-GEX-HUD-and-Float-Sanitization
+- **version**: v10.69-Local-File-Storage-Lock
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

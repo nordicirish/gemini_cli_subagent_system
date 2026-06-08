@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.66-GEX-HUD-and-Float-Sanitization
+- **version**: v10.69-Local-File-Storage-Lock
 
 ## Tone
 institutional, narrative, concise

@@ -124,6 +124,15 @@ function renderIndicesModal() {
         if (d.volume) details += ` · Vol ${formatVol(d.volume)}`;
         if (d.net_gex_total !== undefined && d.net_gex_total !== 0) {
             const gexVal = d.net_gex_total.toFixed(2);
+            
+            const diff = d.gex_diff || 0;
+            let chevron = '';
+            if (diff > 0.005) {
+                chevron = `<span class="text-green" style="margin-left: 2px; font-weight: bold;">▲</span>`;
+            } else if (diff < -0.005) {
+                chevron = `<span class="text-red" style="margin-left: 2px; font-weight: bold;">▼</span>`;
+            }
+            
             const posture = d.dealer_posture || 'NEUTRAL';
             let curatorInterpretation = "Neutral dealer posture";
             if (posture === "LONG_GAMMA") {
@@ -131,7 +140,7 @@ function renderIndicesModal() {
             } else if (posture === "SHORT_GAMMA") {
                 curatorInterpretation = "Amplifying dealer posture";
             }
-            details += ` · GEX ${gexVal} (Antigravity curator: ${curatorInterpretation})`;
+            details += ` · GEX ${gexVal}${chevron} (Antigravity curator: ${curatorInterpretation})`;
         }
 
         let trendStr = '';
@@ -153,6 +162,7 @@ function renderIndicesModal() {
 
 // Cache previous state to flash updates
 let prevPrices = {};
+let prevGex = {};
 
 // Initialization
 async function init() {
@@ -260,6 +270,7 @@ async function copyMarketSnapshot(triggerBtn, statusEl) {
             tickers: slimTickers,
             mutable_state: {
                 unallocated_cash_eur: ms.unallocated_cash_eur || 0,
+                unallocated_cash_usd: ms.unallocated_cash_usd || 0,
                 total_liquidity_eur: ms.total_liquidity_eur || 0,
                 risk_regime: (ms.state_context || {}).risk_regime || '',
                 portfolio_snapshot: slimPortfolio
@@ -516,13 +527,20 @@ function renderTable(tickers, state) {
                 <td>${row.vwap > 0 ? row.vwap.toFixed(2) : '—'}</td>
                 <td>${trendHtml}</td>
                 <td>${(() => {
-                    const dp = row.dealer_posture || 'NEUTRAL';
+                    const gexVal = row.net_gex_total || 0;
+                    const diff = row.gex_diff || 0;
+                    let chevron = '';
+                    if (diff > 0.005) {
+                        chevron = `<span class="text-green" style="margin-left: 4px; font-weight: bold;">▲</span>`;
+                    } else if (diff < -0.005) {
+                        chevron = `<span class="text-red" style="margin-left: 4px; font-weight: bold;">▼</span>`;
+                    }
+                    
                     let dpClass = 'dealer-neutral';
-                    let dpLabel = dp;
-                    if (dp === 'LONG_GAMMA') { dpClass = 'dealer-long'; dpLabel = 'LONG γ'; }
-                    else if (dp === 'SHORT_GAMMA') { dpClass = 'dealer-short'; dpLabel = 'SHORT γ'; }
-                    else { dpClass = 'dealer-neutral'; dpLabel = 'NEUTRAL'; }
-                    return `<span class="dealer-badge ${dpClass}">${dpLabel}</span>`;
+                    if (gexVal > 0.005) dpClass = 'dealer-long';
+                    else if (gexVal < -0.005) dpClass = 'dealer-short';
+                    
+                    return `<span class="dealer-badge ${dpClass}">${gexVal.toFixed(2)}${chevron}</span>`;
                 })()}</td>
                 <td class="score-col">
                     <span class="score-badge ${scoreBadge}">${scoreStr}</span>${noteHtml}
@@ -578,6 +596,22 @@ async function pollData() {
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
 
+        // Calculate GEX deltas for the current poll cycle
+        if (state && state.tickers) {
+            const newGexCache = {};
+            state.tickers.forEach(t => {
+                const sym = t.ticker;
+                const currentGex = t.net_gex_total || 0;
+                if (prevGex[sym] !== undefined) {
+                    t.gex_diff = currentGex - prevGex[sym];
+                } else {
+                    t.gex_diff = 0;
+                }
+                newGexCache[sym] = currentGex;
+            });
+            prevGex = newGexCache;
+        }
+
         if (state && Object.keys(state).length > 0) {
             dIndicator.classList.add('active');
             let displayStatus = state.status || 'FETCHING DATA...';
@@ -622,12 +656,20 @@ async function pollData() {
                         if (row.net_gex_total !== undefined && row.net_gex_total !== 0) {
                             const gexVal = row.net_gex_total.toFixed(2);
                             let gexColor = 'text-muted';
-                            if (row.dealer_posture === "LONG_GAMMA") {
+                            if (row.net_gex_total > 0.005) {
                                 gexColor = 'text-green';
-                            } else if (row.dealer_posture === "SHORT_GAMMA") {
+                            } else if (row.net_gex_total < -0.005) {
                                 gexColor = 'text-red';
                             }
-                            gapExtra = ` · <span class="${gexColor}" style="font-weight: 600;">GEX: ${gexVal}</span>`;
+                            
+                            const diff = row.gex_diff || 0;
+                            let chevron = '';
+                            if (diff > 0.005) {
+                                chevron = `<span class="text-green" style="margin-left: 2px; font-weight: bold;">▲</span>`;
+                            } else if (diff < -0.005) {
+                                chevron = `<span class="text-red" style="margin-left: 2px; font-weight: bold;">▼</span>`;
+                            }
+                            gapExtra = ` · <span class="${gexColor}" style="font-weight: 600;">GEX: ${gexVal}${chevron}</span>`;
                         }
 
                         hudHtml += `
@@ -773,7 +815,8 @@ async function savePortfolio(portfolioArr) {
         const cVal = getCurrentCash();
         const payload = {
             portfolio: pArray,
-            unallocated_cash_eur: cVal
+            unallocated_cash_eur: cVal,
+            unallocated_cash_usd: parseFloat((cVal * currentEurUsdRate).toFixed(2))
         };
         const res = await fetch(`${API_BASE}/basket`, {
             method: 'POST',
