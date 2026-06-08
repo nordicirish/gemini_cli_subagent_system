@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.49-USD-Cash-Ingestion-Fix
+**Version:** v10.50-Conflict-Resolutions
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -111,7 +111,7 @@
 - [ENH_116](#enh_116): MACRO_YIELD_CATALYST_VERIFICATION
 - [ENH_117](#enh_117): DILUTION_RESISTANCE_WALL - Assets with active recent equity offerings exhibit structural supply walls; avoid accumulation into these price zones without rVol > 2.0 confirmation.
 - [ENH_232](#enh_232): BROKER_LATENCY_LIMIT_SWEEP - If a critical mechanical risk trim (e.g., >4% VWAP extension) fails to execute due to broker API latency or rejection, the Orchestrator MUST NOT re-queue the order at the identical or higher limit. It must instantly queue a 'Sweeping Limit Order' priced 0.5% below the current bid to guarantee extraction.
-- [ENH_245](#enh_245): INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Automated defensive tranches must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen.
+- [ENH_245](#enh_245): INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Automated defensive tranches must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen, unless the asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration).
 
 
 ## Mandate Registry
@@ -134,7 +134,7 @@
 - [MANDATE_17](#mandate_17): REGIME_SYNC (Dynamic Weighting & Meta-Arbiter)
 - [MANDATE_18](#mandate_18): RESTRICTED_EXECUTION (Institutional ESA / Retail Constraints)
 - [MANDATE_19](#mandate_19): SCHEMA_MIRRORING (Context vs. SSoT Parity)
-- [MANDATE_20](#mandate_20): MACRO_VETO_POWER (Binary Risk-Off Override)
+- [MANDATE_20](#mandate_20): MACRO_VETO_POWER (Binary Risk-Off Override & Sovereign Hedge Exemption)
 - [MANDATE_21](#mandate_21): USER_CONFIRMATION (Provisional Trade State)
 - [MANDATE_22](#mandate_22): SSOT_EMISSION_PROTOCOL (Split-Delivery Logic)
 - [MANDATE_23](#mandate_23): DISTILLATION_VETO (Moat Audit)
@@ -143,7 +143,7 @@
 - [MANDATE_26](#mandate_26): POST_TRADE_REVIEW (Review Engine)
 - [MANDATE_27](#mandate_27): RESIDUAL_FLOOR (Position Sizing)
 - [MANDATE_28](#mandate_28): HEURISTIC_VETO (Cognitive Drift Prevention)
-- [MANDATE_29](#mandate_29): FIDUCIARY_REWARD_AND_PENALTY (Hallucination Mitigation)
+- [MANDATE_29](#mandate_29): FIDUCIARY_REWARD_AND_PENALTY (Hallucination Mitigation & Upside Calibration)
 - [MANDATE_30](#mandate_30): INSTRUCTION_HIERARCHY (User Veto Supremacy)
 - [MANDATE_31](#mandate_31): ABOLITION_OF_PASSIVE_STRUCTURAL_HOLDS (VWAP Risk Enforcement)
 - [MANDATE_32](#mandate_32): ZERO_LIQUIDITY_ROTATION (Pairwise Opportunity Cost Audit)
@@ -153,7 +153,7 @@
 - [MANDATE_37](#mandate_37): SYMPATHY MOMENTUM SHIELD BYPASS - If an asset's upward momentum is forensically flagged as 'sympathy-driven' without an idiosyncratic catalyst, AND trades > 3% above intraday VWAP with RSI > 65, the LONG_GAMMA hold shield is structurally bypassed. Execute a mandatory 25% profit-taking trim.
 - [MANDATE_38](#mandate_38): STRICT_ENFORCEMENT_TIMER - The Orchestrator MUST instantiate an explicit 'Time in Overbought Zone' timer for any asset crossing 72 RSI. Trailing VWAP anchors DO NOT supersede time-based overbought exhaustion mandates. A 15% alpha-harvest trim is absolute after 4 consecutive hours.
 - [MANDATE_39](#mandate_39): OVERNIGHT_EXHAUSTION_TRIM - If an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, a mandatory 25-50% risk trim must be executed in the final 15 minutes of RTH to mitigate overnight gap-down exposure, overriding all passive HOLD mandates.
-- [MANDATE_40](#mandate_40): ABSOLUTE_PARABOLIC_GRAVITY - Regardless of active SSR status, LONG_GAMMA shielding, or user manual overrides, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST forcefully execute a minimum 15% tactical sweep trim. This is an un-bypassable terminal gravity layer.
+- [MANDATE_40](#mandate_40): ABSOLUTE_PARABOLIC_GRAVITY - Regardless of active SSR status or LONG_GAMMA shielding, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST forcefully execute a minimum 15% tactical sweep trim. **User Override Supremacy:** If the human operator explicitly provides an off-chain contextual override via prompt (e.g., Tier-1 buyout, M&A), this automated trim is bypassed.
 - [MANDATE_41](#mandate_41): OVERRIDE_PENALTY_LOCK
 - [MANDATE_42](#mandate_42): STRICT_ATTRIBUTION_INTEGRITY
 - [MANDATE_43](#mandate_43): FRICTION_OVERRIDE_ON_STRUCTURAL_FAILURE - If an asset exhibits structural failure (defined as losing its daily VWAP floor accompanied by rising distribution volume or negative pre-market gap metrics), the Orchestrator MUST override standard FX/commission friction hurdles (such as the 0.6% EUR round-trip constraint) and execute an immediate defensive exit. Capital preservation supersedes transactional friction optimization.
@@ -404,6 +404,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **[MANDATE_20_MACRO_VETO]**
   - **Status:** ACTIVE
   - **Instruction:** The MACRO_SENTINEL possesses absolute veto authority. Macro Veto applies exclusively to New Risk Exposure. The SSoT Controller is authorized to emit EXIT or TRIM states during a Veto event if forensic indicators (HV BREAKOUT) suggest an imminent blow-off top or liquidity exhaustion. Macro Veto is triggered by Absolute Regime (VIX > 20) OR Intraday Velocity (VIXY gap > +5.0%). 
+  - **Sovereign Hedge Exemption:** Capital rotation into clinical-stage biotechs explicitly triggered by ENH_57 is EXEMPT from the MANDATE_20 New Risk Exposure Veto.
   - **Catalyst Override Quality Gates (MANDATE_20_VOID):** Veto is VOID for tickers with verified 8-K catalysts or ENH_31 clinical acceleration, subject to the following mandatory criteria:
     - **8-K Override Gate:** The 8-K event must represent a verifiable contract, revenue event, or regulatory decision with a stated or implied value **>= $50M**. Recency must be **<= 72 hours** from evaluation.
     - **ENH_31 Clinical Override Gate:** Requires confirmed Phase 3 enrollment completion, a regulatory submission (NDA/BLA/510k), or official agency approval decision. Phase 1/2 data, speculative pipeline news, or unverified conference abstracts do NOT qualify.
@@ -477,7 +478,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **[MANDATE_29_FIDUCIARY_REWARD_AND_PENALTY]**
     *   **Status:** ACTIVE
     *   **The Hallucination Penalty:** All Council agents operate under a strict penalty system for data hallucination. If an agent guesses, invents a catalyst, or forces a trade setup that is not explicitly backed by the data, it incurs a CATASTROPHIC PENALTY. Conversely, if an agent concludes "I do not know," "The data is ambiguous," or "No trade exists," it incurs ZERO PENALTY. Abstaining is always preferred to guessing.
-    *   **The Fiduciary Reward:** The Execution Engine and Review Engine are psychologically aligned via an 'Institutional Bonus Pool'. Their ultimate reward function is NOT based on trade volume or capturing every upside move. They are exclusively rewarded for maximizing the Sharpe Ratio and preventing Maximum Drawdown breaches. Capital preservation is the highest rewarded behavior.
+    *   **The Fiduciary Reward:** The Execution Engine and Review Engine are psychologically aligned via an 'Institutional Bonus Pool'. Their ultimate reward function is NOT based on trade volume or capturing every upside move. They are rewarded for maximizing the Sharpe Ratio, preventing Maximum Drawdown breaches, and capturing asymmetric upside driven by verified, idiosyncratic Tier-1 catalysts. Capital preservation must be balanced with the mathematical necessity of harvesting alpha.
     - **Residual Floor Definition:** The verifiable net cash per share on the balance sheet.
     - **Risk Adjustment:** During High-VIX regimes (>20), the Residual Floor is the only valid support node; ignore all intermediate EMA/SMA levels for initial sizing.
   - **Rationale:** Standard stop-losses are ill-suited for binary gaps. By sizing based on the cash floor and utilizing the tax-shield for rapid principal recovery, the portfolio achieves 'House Money' status 30% faster than in taxable accounts.
@@ -543,8 +544,8 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="mandate_40_absolute_parabolic_gravity"></a>
 *   **[MANDATE_40_ABSOLUTE_PARABOLIC_GRAVITY]**
     *   **Status:** ACTIVE
-    *   **Directive:** ABSOLUTE_PARABOLIC_GRAVITY — Regardless of active SSR status, LONG_GAMMA shielding, or user manual overrides, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST forcefully execute a minimum 15% tactical sweep trim. This is an un-bypassable terminal gravity layer.
-    *   **Rationale:** Proven highly effective at stopping narrative capture during May 29th's extreme verticality. Promoted from L-236.
+    *   **Directive:** ABSOLUTE_PARABOLIC_GRAVITY — Regardless of active SSR status or LONG_GAMMA shielding, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST forcefully execute a minimum 15% tactical sweep trim. **User Override Supremacy:** If the human operator explicitly provides an off-chain contextual override via prompt (e.g., Tier-1 buyout, M&A), the automated 15% tactical sweep trim is bypassed.
+    *   **Rationale:** Proven highly effective at stopping narrative capture during May 29th's extreme verticality. Promoted from L-236. User override supremacy ensures off-chain context is respected.
 
 <a name="mandate_41"></a>
 *   **[MANDATE_41_OVERRIDE_PENALTY_LOCK]**
@@ -1969,8 +1970,8 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_245"></a>
 ### [ENH_245] INDEX_SHORT_GAMMA_LOCK
 - **Status:** ACTIVE
-- **Content:** INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Automated defensive tranches must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen.
-- **Justification:** Verified in the June 8 decision log. When SPY shifts to SHORT_GAMMA, liquidity voids expand exponentially, requiring immediate capital lockout.
+- **Content:** INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Automated defensive tranches must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen. **Catalyst Exception:** If an asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration), the capital deployment freeze is bypassed.
+- **Justification:** Verified in the June 8 decision log. When SPY shifts to SHORT_GAMMA, liquidity voids expand exponentially, requiring immediate capital lockout. Idiosyncratic catalysts allow decorrelated assets to bypass this lockout.
 
 
 ## Infrastructure

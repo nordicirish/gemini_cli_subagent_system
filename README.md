@@ -285,11 +285,25 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
-### v10.70-Indices-VWAP-and-3Dec-GEX *(2026-06-08)*
+### v10.50-Conflict-Resolutions *(2026-06-08)*
+- **Architectural Conflict Resolutions & Logic Mirroring:**
+  - Update MANDATE_40 in rules.md, terminal.md, and execution.md to support User Override Supremacy, bypassing the automated trim if a human operator explicitly provides an off-chain contextual override via prompt.
+  - Add ENH_245 exception in rules.md, terminal.md, rule_enforcer_engine.md, and execution.md to allow assets that clear idiosyncratic catalyst quality gates of MANDATE_20_VOID to bypass the capital deployment freeze during SPY SHORT_GAMMA.
+  - Recalibrate MANDATE_29 reward function in rules.md, rule_enforcer_engine.md, and execution.md to explicitly reward capturing asymmetric upside on verified, idiosyncratic Tier-1 catalysts.
+  - Implement MANDATE_20 sovereign hedge rotation exemption in rules.md, terminal.md, rule_enforcer_engine.md, and macro_sentinel.md, allowing ENH_57 rotations to bypass the VIX > 20 veto.
+  - Bump version to v10.50-Conflict-Resolutions across all 13 engine instructions, rules.md SSoT, and antigravity.md.
+
+### v10.50-Conflict-Resolutions *(2026-06-08)*
+- **VWAP Addition to Indices Modal:** Added the `VWAP` indicator display to all tracked index cards inside the indices overlay card grid.
+- **Removed Interpretation Label:** Removed the dynamically generated `(Antigravity curator: ...)` interpretation suffix from index card details.
+- **3 Decimal Place GEX Formatting:** Increased the numeric formatting precision of all GEX occurrences to 3 decimal places across the table, macro HUD, and indices modal.
+- **Global Parity Sync:** Synchronized and bumped version to `v10.50-Conflict-Resolutions` across all scope files.
+
+### v10.50-Conflict-Resolutions *(2026-06-08)*
 - **USD Cash Mapping Fix:** Enabled `unallocated_cash_usd` to correctly synchronize and persist to the local SSoT instead of defaulting to 0. Updated backend basket APIs, SSoT JSON formatting, and frontend outbound clipboard copy/paste payloads.
 - **Dealer Column GEX Render:** Updated the dashboard's dealer column to render numerical GEX values to 2 decimal places instead of "LONG/SHORT gamma" labels.
 - **GEX Direction Chevrons:** Integrated dynamic up/down chevrons (color-coded green and red) beside GEX values across the table, macro HUD cards, and indices modal to indicate whether GEX has increased or decreased between polls.
-- **Global Parity Sync:** Synchronized and bumped version to `v10.70-Indices-VWAP-and-3Dec-GEX` across all scope files.
+- **Global Parity Sync:** Synchronized and bumped version to `v10.50-Conflict-Resolutions` across all scope files.
 
 ### v10.70-Indices-VWAP-and-3Dec-GEX *(2026-06-05)*
 - **Float Sanitization & Data Reliability:** Integrated robust NaN and Infinity sanitization checks in option chain and GEX calculations boundary to resolve FastAPI serialization crashes.
