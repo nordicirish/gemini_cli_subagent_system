@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.70-Indices-VWAP-and-3Dec-GEX
+- **version**: v10.69-Diversified-Retrieval-Matrix
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

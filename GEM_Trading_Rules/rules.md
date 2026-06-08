@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.50-Conflict-Resolutions
+**Version:** v10.69-Diversified-Retrieval-Matrix
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -102,7 +102,7 @@
 - [ENH_106](#enh_106): LONG GAMMA SSR OVERRIDE - If an asset suffers a catastrophic intraday structural failure (triggering the SEC Rule 201 Short Sale Restriction by dropping >10%), any active LONG_GAMMA shield is instantly invalidated. The Orchestrator must prioritize the SSR structural failure over GEX stabilization and permit mechanical risk trims.
 - [ENH_107](#enh_107): GEX-SSR Conflict Protocol
 - [ENH_108](#enh_108): Persistent Stop-Loss Telemetry
-- [ENH_110](#enh_110): SYMPATHY MOMENTUM SHIELD BYPASS - If an asset's upward momentum is flagged as 'sympathy-driven' lacking an idiosyncratic catalyst, AND trades > 3% above intraday VWAP with RSI > 65, the LONG_GAMMA hold shield is structurally bypassed to allow mechanical 25% profit-taking trims.
+- [ENH_110](#enh_110): SYMPATHY MOMENTUM SHIELD BYPASS - If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven". The LONG_GAMMA shield is bypassed, and the mandatory 25% profit-taking trim is executed.
 - [ENH_111](#enh_111): GAMMA FLICKER PREEMPTION - If an asset with an RSI > 70 experiences a transient SHORT_GAMMA flip (even if LONG_GAMMA is subsequently restored intraday), mechanical trailing stops MUST be tightened by 50% immediately.
 - [ENH_112](#enh_112): EXTENDED_VWAP_BID_SWEEP - If an asset is >4% extended from its VWAP anchor and a passive ask-limit order fails to fill within 15 seconds, the Orchestrator MUST immediately cancel and replace with a marketable limit order sweeping the bid to guarantee extraction before parabolic mean reversion.
 - [ENH_113](#enh_113): INFORMATION_LEAKAGE_SENTRY - Tags stealth accumulation patterns (session_change > 3%, linear walk-up, rVol 0.8–1.5, no hard catalyst) and authorizes pilot tranche capped at 25% of standard sizing.
@@ -150,7 +150,7 @@
 - [MANDATE_33](#mandate_33): SHORT_GAMMA_DEGRADATION_TRIMS (VWAP Degradation Protocol)
 - [MANDATE_34](#mandate_34): INSTITUTIONAL PEG & AH GRAVITY
 - [MANDATE_36_ENH_104](#mandate_36_enh_104): PERSISTENT STOP-LOSS TELEMETRY - The Execution Payload must persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP.
-- [MANDATE_37](#mandate_37): SYMPATHY MOMENTUM SHIELD BYPASS - If an asset's upward momentum is forensically flagged as 'sympathy-driven' without an idiosyncratic catalyst, AND trades > 3% above intraday VWAP with RSI > 65, the LONG_GAMMA hold shield is structurally bypassed. Execute a mandatory 25% profit-taking trim.
+- [MANDATE_37](#mandate_37): SYMPATHY MOMENTUM SHIELD BYPASS - If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven". The LONG_GAMMA shield is subsequently bypassed, and the mandatory 25% profit-taking trim is executed.
 - [MANDATE_38](#mandate_38): STRICT_ENFORCEMENT_TIMER - The Orchestrator MUST instantiate an explicit 'Time in Overbought Zone' timer for any asset crossing 72 RSI. Trailing VWAP anchors DO NOT supersede time-based overbought exhaustion mandates. A 15% alpha-harvest trim is absolute after 4 consecutive hours.
 - [MANDATE_39](#mandate_39): OVERNIGHT_EXHAUSTION_TRIM - If an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, a mandatory 25-50% risk trim must be executed in the final 15 minutes of RTH to mitigate overnight gap-down exposure, overriding all passive HOLD mandates.
 - [MANDATE_40](#mandate_40): ABSOLUTE_PARABOLIC_GRAVITY - Regardless of active SSR status or LONG_GAMMA shielding, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST forcefully execute a minimum 15% tactical sweep trim. **User Override Supremacy:** If the human operator explicitly provides an off-chain contextual override via prompt (e.g., Tier-1 buyout, M&A), this automated trim is bypassed.
@@ -532,8 +532,8 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="mandate_37_sympathy_momentum_shield_bypass"></a>
 *   **[MANDATE_37_SYMPATHY_MOMENTUM_SHIELD_BYPASS]**
     *   **Status:** ACTIVE
-    *   **Directive:** SYMPATHY MOMENTUM SHIELD BYPASS: If an asset's upward momentum is forensically flagged as 'sympathy-driven' without an idiosyncratic catalyst, AND trades > 3% above intraday VWAP with RSI > 65, the LONG_GAMMA hold shield is structurally bypassed. Execute a mandatory 25% profit-taking trim.
-    *   **Rationale:** Converts L-222 to a permanent mandate to prevent the portfolio from holding transient alpha into algorithmic mean-reversion.
+    *   **Directive:** SYMPATHY MOMENTUM SHIELD BYPASS: If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven". The LONG_GAMMA shield is subsequently bypassed, and the mandatory 25% profit-taking trim is executed.
+    *   **Rationale:** Converts L-222 to a permanent mandate to prevent the portfolio from holding transient alpha into algorithmic mean-reversion. Tied to diversified_retrieval_queries.
 
 <a name="mandate_38_strict_enforcement_timer"></a>
 *   **[MANDATE_38_STRICT_ENFORCEMENT_TIMER]**
@@ -745,6 +745,8 @@ This registry serves as the system-wide directory mapping all active sub-agent c
               - **Verdict:** STRING
               - **Confidence:** FLOAT
               - **Self Critique:** STRING
+    - **Forensic Intelligence:**
+      - **diversified_retrieval_queries:** ARRAY of objects (M distinct retrieval types: `short_term_query`, `medium_term_query`, `long_term_query`, and `catalyst_specific_query`). These query strings must be isolated from standard trading summaries to prevent noise contamination during historical vector matching.
   - **Calculation Logic:**
     - **Gex Exposure:** shares * net_gex_total
     - **Total Portfolio Gex:** sum(gex_exposure)
@@ -899,6 +901,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **[ENH_48 - Narrative Bridge Protocol]**
   - **Status:** ACTIVE
   - **Instruction:** Enforce Narrative Bridge resonance. Re-rate ticker sensitivity based on narrative resonance.
+  - **Diversified Retrieval Integration:** The `DATA_ANALYST` and `RESEARCH_ENGINE` must generate separate, parallel search queries tailored to multi-perspective dimensions (e.g., "Tier-1 regulatory events" vs "safe-haven macro rotations") to populate the `diversified_retrieval_queries` array. This avoids mixing idiosyncratic alpha with macroeconomic noise during vector matching.
 <a name="enh_49"></a>
 - **[ENH_49 - Air-Gap Sandbox Bridge Protocol]**
   - **Instruction:** The Gem operates in a Web UI sandbox. It has ZERO direct write access to local files; all state updates MUST be emitted in the EXECUTION_PAYLOAD. The user will copy and paste this payload into the local fetch_stocks.py paste handler, which acts as the bridge to update local JSON files.
@@ -1080,6 +1083,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
     *   **Status:** ACTIVE
     *   **Instruction:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (sec_link) and Government/DoW press releases (dow_link) when not explicitly provided in the payload. 
     *   **Tool Disambiguation:** You are explicitly mandated to use the native "Google Search" tool for this action. You must strictly BLACKLIST the "File Fetcher" and "Research Tool" for any ticker not currently existing in the `portfolio_snapshot` to prevent false-positive recursive call vetoes.
+    *   **Diversified Query Generation:** The `DATA_ANALYST` and `RESEARCH_ENGINE` must populate the `diversified_retrieval_queries` schema defined in `ENH_32`. When evaluating an asset, they must generate separate, parallel search queries tailored to multi-perspective dimensions (e.g., querying specifically for "Tier-1 regulatory events" vs "safe-haven macro rotations"), establishing an M×K matrix of historical intelligence for the deliberative agents to evaluate.
 <a name="enh_77_b"></a>
 *   **[ENH_77_B - Intraday Low Hallucination Guard]**
     - **Status:** ACTIVE
@@ -1892,8 +1896,8 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_110"></a>
 ### [ENH_110] SYMPATHY MOMENTUM SHIELD BYPASS
 - **Status:** ACTIVE
-- **Content:** SYMPATHY MOMENTUM SHIELD BYPASS - If an asset's upward momentum is flagged as 'sympathy-driven' lacking an idiosyncratic catalyst, AND trades > 3% above intraday VWAP with RSI > 65, the LONG_GAMMA hold shield is structurally bypassed to allow mechanical 25% profit-taking trims.
-- **Justification:** Forensic logs confirm dealer positioning (GEX) lags retail momentum, creating false-positive LONG_GAMMA hold signals at structural tops.
+- **Content:** SYMPATHY MOMENTUM SHIELD BYPASS - If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven". The LONG_GAMMA shield is subsequently bypassed, and the mandatory 25% profit-taking trim is executed.
+- **Justification:** Forensic logs confirm dealer positioning (GEX) lags retail momentum, creating false-positive LONG_GAMMA hold signals at structural tops. Tied to diversified_retrieval_queries.
 
 <a name="enh_111"></a>
 ### [ENH_111] GAMMA FLICKER PREEMPTION

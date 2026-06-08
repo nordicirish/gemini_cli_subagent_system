@@ -285,6 +285,13 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v10.69-Diversified-Retrieval-Matrix *(2026-06-08)*
+- **SSoT Schema & GEX Calculation Protocol (ENH_32):** Injected the `diversified_retrieval_queries` array (supporting M distinct retrieval types: `short_term_query`, `medium_term_query`, `long_term_query`, and `catalyst_specific_query`) into the `forensic_intelligence` object within the `ENH_32` schema. Isolated these query strings from standard trading summaries to prevent noise contamination during historical vector matching.
+- **Narrative Bridge & Proactive Search (ENH_48 & ENH_77_LIVE_WEB):** Mandated that `DATA_ANALYST` and `RESEARCH_ENGINE` populate the new `diversified_retrieval_queries` schema. When evaluating an asset, they generate separate, parallel search queries tailored to multi-perspective dimensions (e.g., "Tier-1 regulatory events" vs "safe-haven macro rotations"), establishing an M×K matrix of historical intelligence for the deliberative agents.
+- **Sympathy Momentum Bypass (MANDATE_37 / ENH_110):** Tied the sympathy momentum bypass rule explicitly to `diversified_retrieval_queries`. If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven", the LONG_GAMMA shield is bypassed, and the mandatory 25% profit-taking trim is executed.
+- **Sub-agent Instruction Mirroring (ENH_98):** Mirrored schema requirements into `data_analyst.md`, `research.md`, and `execution.md`.
+- **Global Parity Sync (MANDATE_29):** Bumped and synchronized version to `v10.69-Diversified-Retrieval-Matrix` across rules SSoT, root `antigravity.md`, `README.md`, and all engine markdown files.
+
 ### v10.50-Conflict-Resolutions *(2026-06-08)*
 - **Architectural Conflict Resolutions & Logic Mirroring:**
   - Update MANDATE_40 in rules.md, terminal.md, and execution.md to support User Override Supremacy, bypassing the automated trim if a human operator explicitly provides an off-chain contextual override via prompt.
