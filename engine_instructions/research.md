@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.80-Advanced-Oscillator-Integration
+- **version**: v10.90-Schema-Alignment-and-Voice
 
 ## Tone
 institutional, narrative, concise

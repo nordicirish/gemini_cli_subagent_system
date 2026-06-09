@@ -368,7 +368,7 @@ async function copySessionBoot(triggerBtn, statusEl) {
                 "   the SSoT. Output: math_proof_liquidity.",
                 "3. REGIME CLASSIFICATION: Assess current risk regime (TRENDING/MEAN_REVERTING/",
                 "   VOLATILE) based on VIX, VIXY velocity, and SPY structure.",
-                "4. PORTFOLIO HEALTH AUDIT: Flag any positions with health_score < 50 or",
+                "4. PORTFOLIO HEALTH AUDIT: Flag any positions with score < 0 or",
                 "   status = IN_DISTRESS for immediate Council review.",
                 "5. MARKET POSTURE: Provide a top-level posture assessment (RISK_ON/RISK_OFF/",
                 "   NEUTRAL) with supporting forensic evidence.",

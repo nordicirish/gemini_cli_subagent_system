@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.80-Advanced-Oscillator-Integration
+- **version**: v10.90-Schema-Alignment-and-Voice
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

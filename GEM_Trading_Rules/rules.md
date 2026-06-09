@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.80-Advanced-Oscillator-Integration
+**Version:** v10.90-Schema-Alignment-and-Voice
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -243,7 +243,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="mandate_08_schema_enforcement"></a>
 - **[MANDATE_08_SCHEMA_ENFORCEMENT]**
   - **Status:** ACTIVE
-  - **Instruction:** All state updates must conform to the schema defined in ENH_32. Reject handshakes lacking forensic fields: health_score, net_gex_total, and dealer_posture.
+  - **Instruction:** All state updates must conform to the schema defined in ENH_32. Reject handshakes lacking forensic fields: score, net_gex_total, and dealer_posture.
 <a name="mandate_09_state_emission"></a>
 - **[MANDATE_09_STATE_EMISSION]**
   - **Status:** STRICT_ENFORCE
@@ -435,7 +435,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="mandate_23_distillation_veto"></a>
 - **[MANDATE_23_DISTILLATION_VETO]**
   - **Status:** ACTIVE
-  - **Instruction:** Enforce a Moat Audit on SaaS assets; cap health_score at 60 if logic is portable via industrial-scale distillation.
+  - **Instruction:** Enforce a Moat Audit on SaaS assets; cap score at 2 if logic is portable via industrial-scale distillation.
 <a name="mandate_24_gap_defense"></a>
 - **[MANDATE_24_GAP_DEFENSE]**
   - **Status:** ACTIVE
@@ -1045,7 +1045,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Instruction:** Monitor and flag Defense Industrial Base correlation cascades.
 <a name="enh_70"></a>
 - **[ENH_70 - Adaptive Catalyst Decay (Health Aging)]**
-  - **Instruction:** For every session a ticker fails to reclaim its 'Post-Catalyst High,' decay the health_score by 3 points.
+  - **Instruction:** For every session a ticker fails to reclaim its 'Post-Catalyst High,' decay the score by 0.5 points.
   - **Rationale:** Prevents 'thesis marriage' where the system holds a winner until it becomes a laggard.
 <a name="enh_72"></a>
 - **[ENH_72 - VVIX/VIX Divergence Guard]**
@@ -1153,7 +1153,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
         *   **Step 1 — Exposure Calculation:** For each active position with a Tier-1 catalyst in the blackout window, calculate `unmitigated_gap_exposure = shares * price * P_gap_down`, where `P_gap_down` is estimated from: IV Rank, ATR, and historical average earnings gap for the ticker (if known). Use `ATR * 2` as a minimum floor if IV is unavailable.
         *   **Step 2 — Threshold Test:** IF `unmitigated_gap_exposure > (portfolio_total_value * 0.05)` (5% of total portfolio value), the BLACKOUT_RISK_AUDIT is TRIGGERED.
         *   **Step 3 — Forced Trim Evaluation:** The Council MUST evaluate a partial trim (minimum 25% position reduction) to reduce blackout exposure. The EXECUTION_ENGINE must present a concrete sizing recommendation.
-        *   **Step 4 — Override Path:** The only valid reasons to override the trim recommendation are: (1) `macro_calendar_shield.shield_posture == 'OFFENSIVE'` AND `health_score >= 90` AND `dealer_posture == 'LONG_GAMMA'` across all flagged positions — documented in `no_trade_reason`. (2) Explicit user override via `MANDATE_21_USER_CONFIRMATION`.
+        *   **Step 4 — Override Path:** The only valid reasons to override the trim recommendation are: (1) `macro_calendar_shield.shield_posture == 'OFFENSIVE'` AND `score >= 4` AND `dealer_posture == 'LONG_GAMMA'` across all flagged positions — documented in `no_trade_reason`. (2) Explicit user override via `MANDATE_21_USER_CONFIRMATION`.
     *   **WAC Buffer Blackout Exemption (CRITICAL PROHIBITION):** The Council is EXPLICITLY FORBIDDEN from citing the WAC buffer (cost basis) as a justification to bypass the BLACKOUT_RISK_AUDIT. WAC buffer measures unrealized P&L relative to entry — it provides ZERO protection against a gap-down that exceeds the buffer in a single tick. If any agent cites WAC buffer as a gap-risk defense during the Pre-Blackout Window, the RULE_ENFORCER MUST intercept with: `HEURISTIC_VETO: WAC_BUFFER_BLACKOUT_EXEMPTION_VIOLATION — WAC is not gap insurance. Re-evaluate via ENH_91 Step 2.`
     *   **Relationship to MANDATE_24:** MANDATE_24 (Gap Defense) is REACTIVE — it manages positions AFTER a gap occurs. ENH_91 is PROACTIVE — it forces defensive action BEFORE the execution window closes. They operate in sequence: ENH_91 fires during RTH → MANDATE_24 governs the RTH open the next day.
     *   **Emission:** Results of the BLACKOUT_RISK_AUDIT must be emitted in `forensic_intelligence.blackout_risk_audit` within the EXECUTION_PAYLOAD.
@@ -1195,7 +1195,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Authority:** CANONICAL
   - **Block If:**
     - Risk_Regime == 'CRITICAL' AND hard_catalyst == 'NONE'
-    - health_score < HEALTH_SCORE_MINIMUM
+    - score < 0
     - dealer_posture == 'SHORT_GAMMA' AND Price < VWAP
     - dealer_posture == 'SHORT_GAMMA' AND Price < system_thresholds.DIB_PSYCH_PARITY (for DIB assets)
   - **Esa Posture:** Defensive logic is strictly maintained; tax-free trading does not justify ignoring a Short Gamma waterfall.
@@ -1419,7 +1419,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Value:** 0.65
   - **Usage:** S_A below this = consensus failure
   - **Used By:**
-    - health_score_protocol
+    - score_protocol
     - technical_validator
 - **Global Alpha Friction Hurdle:**
   - **Value:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
@@ -2010,3 +2010,8 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Volatility Expansion:** Use Bollinger Band %B. A %B > 0.8 with expanding bands validates continuation; a %B > 1.0 with shrinking MFI indicates exhaustion.
 - **Justification:** High-beta momentum assets require multi-dimensional confirmation (price, volume, momentum) to prevent premature liquidation on standard RSI overbought signals.
 ---
+
+<a name="enh_251_schema_alignment_score"></a>
+### [ENH_251_SCHEMA_ALIGNMENT_SCORE] - Deprecation of Legacy Health Score Metric
+- **Status:** ACTIVE
+- **Instruction:** The system explicitly tracks asset health natively via the score metric, which operates on a gradient scale of -6 to +6. The legacy 0-100 health_score metric is completely deprecated and structurally invalid. All engines MUST utilize the score value for quantitative health audits and decline any references to health_score to eliminate logic-translation friction.

@@ -2284,6 +2284,11 @@ def calculate_score(symbol):
         else:
             note = "[LIQ⚠️]"
 
+    # -----------------------------
+    # CLAMP SCORE
+    # -----------------------------
+    score = max(-6, min(6, int(score)))
+
     return score, note
 
 

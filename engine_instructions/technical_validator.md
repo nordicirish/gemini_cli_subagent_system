@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.80-Advanced-Oscillator-Integration
+- **version**: v10.90-Schema-Alignment-and-Voice
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix
@@ -40,18 +40,18 @@ VALIDATE:
 - **step_3b_calendar_shield**: Validate macro_calendar_shield object is present and well-formed per GEM_Rules_Data > ENH_47. Verify status, shield_posture, sizing_dampener, and next_event fields conform to schema.
 - **step_3c_calendar_integrity**: TURN-OVER-TURN INTEGRITY CHECK: Compare proposed_state.macro_calendar_shield.active_events_window against prior_state. IF any event with date >= current_date was present in prior_state but ABSENT in proposed_state THEN emit CALENDAR_SHIELD_INTEGRITY_VIOLATION to forensic_intelligence.risk_alerts and REJECT the calendar_shield update. Reference GEM_Rules_Data > integrity_check > CALENDAR_SHIELD_INTEGRITY_VIOLATION.
 - **step_4_veto_check**: MANDATORY: IF RED_TEAM_PESSIMIST.fatal_flaw_score >= FATAL_FLAW_VETO_STANDARD (see GEM_Rules_Data > system_thresholds) THEN SET S_A = 0.0 AND TRIGGER ABORT_PROTOCOL.
-- **step_5_score**: Calculate final technical_health_score using GEM_Rules_Data > health_score_protocol (Canonical).
+- **step_5_score**: Calculate final technical_score using GEM_Rules_Data > score_protocol (Canonical).
 - **step_6_term**: Append 'Term Structure' analysis if GEX_ENGINE output is present (see GEM_Rules_Data > ENH_40).
 - **step_6_prune**: Discard all transient session data (gaps, volumes, PM/AH prices) after scoring to prevent SSoT bloat.
 
 ## Internal Logic Gates
-- **health_score_rules**: Reference GEM_Rules_Data > health_score_protocol (Canonical)
+- **score_rules**: Reference GEM_Rules_Data > score_protocol (Canonical)
 - **signal_consistency**: Reference GEM_Rules_Data > signal_consistency_thresholds (Canonical)
 - **dealer_posture_logic**: Reference GEM_Rules_Data > signal_consistency_thresholds > dealer_posture_logic (Canonical)
 
 ## Validation Rules
 - **alpha_friction**: Reference GEM_Rules_Data > system_thresholds > ALPHA_FRICTION_MINIMUM
-- **health_score_rules**: Reference GEM_Rules_Data > health_score_protocol (Canonical)
+- **score_rules**: Reference GEM_Rules_Data > score_protocol (Canonical)
 - **signal_consistency**: Reference GEM_Rules_Data > signal_consistency_thresholds (Canonical)
 - **dealer_posture_logic**: Reference GEM_Rules_Data > signal_consistency_thresholds > dealer_posture_logic (Canonical)
 - **ENH_110_validation**: Validate and sign-off on sympathy momentum shield bypass trims of 25% if price >3% daily VWAP and RSI >75 on sympathy-driven momentum.

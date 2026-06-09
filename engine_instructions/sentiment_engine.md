@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.80-Advanced-Oscillator-Integration
+- **version**: v10.90-Schema-Alignment-and-Voice
 - **id**: SENTIMENT_ENGINE
 
 ## Tone
