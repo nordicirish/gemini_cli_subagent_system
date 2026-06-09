@@ -18,6 +18,7 @@ let currentEurUsdRate = 1.08; // Store EURUSD rate globally for real-time conver
 
 const dCopyBtn = document.getElementById('copy-json-btn');
 const dCopySessionBtn = document.getElementById('copy-session-btn');
+const dNewsScanBtn = document.getElementById('btn-news-scan');
 const dPasteBtn = document.getElementById('paste-payload-btn');
 const dMobileStatus = document.getElementById('mobile-data-status');
 
@@ -115,8 +116,9 @@ function renderIndicesModal() {
                 <div class="index-gap text-muted">Awaiting data</div>
             </div>`;
 
-        const gapStr = (d.gap_percent > 0 ? '+' : '') + d.gap_percent.toFixed(2) + '%';
-        const gapColor = d.gap_percent > 0 ? 'text-green' : (d.gap_percent < 0 ? 'text-red' : 'text-white');
+        const changeVal = d.session_change_pct || 0;
+        const changeStr = (changeVal > 0 ? '+' : '') + changeVal.toFixed(2) + '%';
+        const changeColor = changeVal > 0 ? 'text-green' : (changeVal < 0 ? 'text-red' : 'text-white');
 
         let details = '';
         if (d.rsi) details += `RSI ${d.rsi.toFixed(1)}`;
@@ -146,7 +148,7 @@ function renderIndicesModal() {
             <div class="index-card">
                 <div class="index-name">${label} (${ticker})</div>
                 <div class="index-price">${d.price.toFixed(2)}</div>
-                <div class="index-gap ${gapColor}">${gapStr}${trendStr}</div>
+                <div class="index-gap ${changeColor}">${changeStr}${trendStr}</div>
                 <div class="index-details">${details}</div>
             </div>`;
     }).join('');
@@ -384,6 +386,77 @@ async function copySessionBoot(triggerBtn, statusEl) {
     }
 }
 
+async function copyNewsScan(triggerBtn, statusEl) {
+    try {
+        const res = await fetch(`${API_BASE}/data`);
+        const state = await res.json();
+        
+        const ssot = state.local_storage_state || {};
+        const ms = ssot.mutable_state || {};
+        const portfolio = ms.portfolio_snapshot || [];
+        const watchlist = state.watchlist || [];
+        
+        const targetTickers = new Set([
+            ...portfolio.map(p => p.ticker.toUpperCase()),
+            ...watchlist.map(w => w.toUpperCase())
+        ]);
+        
+        const slimTickers = (state.tickers || [])
+            .filter(t => targetTickers.has(t.ticker.toUpperCase()))
+            .map(t => ({
+                ticker: t.ticker,
+                price: t.price,
+                historical_context: t.historical_context
+            }));
+            
+        const now = new Date();
+        const tOffset = -now.getTimezoneOffset();
+        const offSign = tOffset >= 0 ? '+' : '-';
+        const offPad = (num) => String(Math.floor(Math.abs(num))).padStart(2, '0');
+        const localTS = now.getFullYear() +
+            '-' + offPad(now.getMonth() + 1) +
+            '-' + offPad(now.getDate()) +
+            'T' + offPad(now.getHours()) +
+            ':' + offPad(now.getMinutes()) +
+            ':' + offPad(now.getSeconds()) +
+            offSign + offPad(tOffset / 60) +
+            ':' + offPad(tOffset % 60);
+            
+        const scanPayload = {
+            timestamp: localTS,
+            status: state.status,
+            tickers: slimTickers,
+            macro_calendar_shield: ms.macro_calendar_shield || {},
+            portfolio_snapshot: portfolio.map(p => ({
+                ticker: p.ticker,
+                shares: p.shares,
+                wac: p.wac,
+                status: p.status,
+                trade_state: p.trade_state,
+                historical_context: p.historical_context
+            }))
+        };
+        
+        let newsScanPrompt = "";
+        try {
+            const promptRes = await fetch(`${API_BASE}/prompts/news_scan`);
+            const promptData = await promptRes.json();
+            newsScanPrompt = promptData.prompt || "";
+        } catch (pe) {
+            console.warn("Failed to fetch news scan prompt:", pe);
+        }
+        if (!newsScanPrompt) {
+            newsScanPrompt = "SYSTEM DIRECTIVE: MACRO & STOCK NEWS SCAN\nPerform a search for macroeconomic/political events and stock-specific news.";
+        }
+        const jsonString = newsScanPrompt + "\n\n```json\n" + JSON.stringify(scanPayload, null, 2) + "\n```";
+        await navigator.clipboard.writeText(jsonString);
+        showFeedback(triggerBtn, "✅ Copied!", "News scan prompt ready!", false, statusEl);
+    } catch (e) {
+        console.error(e);
+        showFeedback(triggerBtn, "❌ Error", "Failed to copy news scan.", true, statusEl);
+    }
+}
+
 async function ingestExecutionPayload(triggerBtn, statusEl) {
     triggerBtn.disabled = true;
     try {
@@ -414,6 +487,7 @@ async function ingestExecutionPayload(triggerBtn, statusEl) {
 // --- Listeners ---
 if (dCopyBtn) dCopyBtn.addEventListener('click', () => copyMarketSnapshot(dCopyBtn, document.getElementById('outbound-turn-status')));
 if (dCopySessionBtn) dCopySessionBtn.addEventListener('click', () => copySessionBoot(dCopySessionBtn, document.getElementById('outbound-session-status')));
+if (dNewsScanBtn) dNewsScanBtn.addEventListener('click', () => copyNewsScan(dNewsScanBtn, document.getElementById('outbound-newsscan-status')));
 if (dPasteBtn) dPasteBtn.addEventListener('click', () => ingestExecutionPayload(dPasteBtn, document.getElementById('inbound-paste-status')));
 
 
@@ -643,8 +717,9 @@ async function pollData() {
                     
                     if (row) {
                         latestMacroData[tickerStr] = row;
-                        const gapStr = (row.gap_percent > 0 ? '+' : '') + row.gap_percent.toFixed(2) + '%';
-                        const gapColor = row.gap_percent > 0 ? 'text-green' : 'text-red';
+                        const changeVal = row.session_change_pct || 0;
+                        const changeStr = (changeVal > 0 ? '+' : '') + changeVal.toFixed(2) + '%';
+                        const changeColor = changeVal > 0 ? 'text-green' : 'text-red';
                         
                         let gapExtra = '';
                         if (row.net_gex_total !== undefined && row.net_gex_total !== 0) {
@@ -670,7 +745,7 @@ async function pollData() {
                             <div class="macro-card glass-panel" id="macro-card-${tickerStr.replace(/[^a-zA-Z0-9]/g, '')}">
                                 <h3>${title}</h3>
                                 <div class="macro-val">${(row.price || 0).toFixed(2)}</div>
-                                <div class="macro-gap ${gapColor}">${gapStr}${gapExtra}</div>
+                                <div class="macro-gap ${changeColor}">${changeStr}${gapExtra}</div>
                             </div>
                         `;
                     } else {

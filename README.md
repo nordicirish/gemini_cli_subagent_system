@@ -285,12 +285,16 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v10.80-Advanced-Oscillator-Integration *(2026-06-09)*
+- **Multi-Dimensional Momentum (ENH_250):** Shifted the core Technical Engine's RSI calculation from a 14-day to a highly sensitive 9-day period. Introduced MACD (12/26/9), Bollinger Bands (20-day, 2 std dev, %B), and Money Flow Index (14-day MFI) into the stock scoring loop.
+- **Engine Rule Adaptations:** Systematically shifted hardcoded RSI thresholds across all sub-agent prompts (e.g., `MANDATE_38`, `MANDATE_40`) up by 5-10 points to accommodate the "hotter" 9-day RSI, preventing premature execution trims during strong high-beta trends.
+- **Global Parity Sync (MANDATE_29):** Bumped and synchronized version to `v10.80-Advanced-Oscillator-Integration` across rules SSoT, root `antigravity.md`, `README.md`, and all engine markdown files in both repositories.
+
 ### v10.70-News-Scan-Integration *(2026-06-09)*
 - **News Scan Prompt Template (NEW):** Created `prompts/news_scan_prompt.txt` to instruct the Council to execute targeted Google searches for macroeconomic/political events (today and tomorrow) and stock-specific catalysts, assigning Torque Scores (1-10) per MANDATE_11.
 - **Backend API Integration:** Added `/api/prompts/news_scan` route in `python/fetch_stocks.py` to serve the news scan prompt template.
 - **UI Button Integration:** Added a premium-styled "📰 News Scan" button to the "Export to Council" sidebar panel in `static/index.html`.
 - **UI Action Logic:** Implemented click handler in `static/app.js` to fetch both the news scan prompt and current market snapshot, combine them, copy to the clipboard, and display success indicators.
-- **Global Parity Sync (MANDATE_29):** Bumped and synchronized version to `v10.70-News-Scan-Integration` across rules SSoT, root `antigravity.md`, `README.md`, and all engine markdown files in both repositories.
 
 ### v10.69-Diversified-Retrieval-Matrix *(2026-06-08)*
 - **SSoT Schema & GEX Calculation Protocol (ENH_32):** Injected the `diversified_retrieval_queries` array (supporting M distinct retrieval types: `short_term_query`, `medium_term_query`, `long_term_query`, and `catalyst_specific_query`) into the `forensic_intelligence` object within the `ENH_32` schema. Isolated these query strings from standard trading summaries to prevent noise contamination during historical vector matching.

@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.70-News-Scan-Integration
+- **version**: v10.80-Advanced-Oscillator-Integration
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

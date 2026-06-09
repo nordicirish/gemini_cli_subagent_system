@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.70-News-Scan-Integration
+**Version:** v10.80-Advanced-Oscillator-Integration
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -1999,4 +1999,14 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Research Folder:**
   - **Path:** Trading_Research
   - **Description:** Folder containing research materials and PDF uploads
+
+<a name="enh_250"></a>
+### [ENH_250] ADVANCED_OSCILLATOR_INTEGRATION
+- **Status:** ACTIVE
+- **Content:** The core Technical Engine has been upgraded to include a 9-day RSI, MACD, Bollinger Bands, and Money Flow Index (MFI). 
+- **Directive:** 
+  - **RSI Calibration:** Due to the shift from a 14-day to a 9-day RSI, the oscillator is significantly more sensitive. All legacy RSI thresholds (MANDATE_38, MANDATE_40, ENH_110) must be evaluated with a wider tolerance: consider RSI > 80 as standard overbought and RSI > 85 as extreme overbought.
+  - **Momentum Confirmation:** Use MACD Histogram and MFI > 70 to confirm breakout validity. A high RSI (overbought) combined with a rising MACD Histogram and MFI > 70 indicates a sustainable high-beta momentum trend, not an immediate mean-reversion short.
+  - **Volatility Expansion:** Use Bollinger Band %B. A %B > 0.8 with expanding bands validates continuation; a %B > 1.0 with shrinking MFI indicates exhaustion.
+- **Justification:** High-beta momentum assets require multi-dimensional confirmation (price, volume, momentum) to prevent premature liquidation on standard RSI overbought signals.
 ---

@@ -1752,12 +1752,54 @@ def update_history_and_technicals(symbol, t_obj):
                     return 0.0
                 return v
 
-            # --- RSI (Wilder) ---
+            # --- RSI (Wilder 9-day) ---
             delta = close.diff()
-            gain = (delta.where(delta > 0, 0)).ewm(com=13, adjust=False).mean()
-            loss = (-delta.where(delta < 0, 0)).ewm(com=13, adjust=False).mean()
+            gain = (delta.where(delta > 0, 0)).ewm(com=8, adjust=False).mean()
+            loss = (-delta.where(delta < 0, 0)).ewm(com=8, adjust=False).mean()
             rs = gain / (loss + 1e-9)
             rsi_val = _last(100 - (100 / (1 + rs)))
+
+            # --- MACD ---
+            ema_12 = close.ewm(span=12, adjust=False).mean()
+            ema_26 = close.ewm(span=26, adjust=False).mean()
+            macd_line = ema_12 - ema_26
+            signal_line = macd_line.ewm(span=9, adjust=False).mean()
+            macd_hist = macd_line - signal_line
+            macd_val = _last(macd_line)
+            macd_hist_val = _last(macd_hist)
+
+            # --- Bollinger Bands (20-day, 2 std) ---
+            if len(close) >= 20:
+                sma_20_bb = close.rolling(20).mean()
+                std_20_bb = close.rolling(20).std()
+                upper_bb = sma_20_bb + (std_20_bb * 2)
+                lower_bb = sma_20_bb - (std_20_bb * 2)
+                bb_upper_val = _last(upper_bb)
+                bb_lower_val = _last(lower_bb)
+                last_c = _last(close)
+                if bb_upper_val != bb_lower_val:
+                    bb_pct_val = (last_c - bb_lower_val) / (bb_upper_val - bb_lower_val)
+                else:
+                    bb_pct_val = 0.5
+            else:
+                bb_upper_val = 0.0
+                bb_lower_val = 0.0
+                bb_pct_val = 0.5
+
+            # --- MFI (Money Flow Index 14-day) ---
+            if 'Volume' in hist.columns and 'High' in hist.columns and 'Low' in hist.columns:
+                typ_price = (hist['High'] + hist['Low'] + close) / 3
+                raw_money_flow = typ_price * hist['Volume']
+                diff_typ = typ_price.diff()
+                pos_flow = raw_money_flow.where(diff_typ > 0, 0.0)
+                neg_flow = raw_money_flow.where(diff_typ < 0, 0.0)
+                pos_flow_sum = pos_flow.rolling(14).sum()
+                neg_flow_sum = neg_flow.rolling(14).sum()
+                money_ratio = pos_flow_sum / (neg_flow_sum + 1e-9)
+                mfi_series = 100 - (100 / (1 + money_ratio))
+                mfi_val = _last(mfi_series)
+            else:
+                mfi_val = 50.0
 
             # --- ATR (Wilder) ---
             tr = pd.concat([
@@ -1803,6 +1845,12 @@ def update_history_and_technicals(symbol, t_obj):
                 "SMA_50": sma_50,
                 "SMA_200": sma_200,
                 "RSI": to_float(rsi_val),
+                "MACD": to_float(macd_val),
+                "MACD_Hist": to_float(macd_hist_val),
+                "BB_Upper": to_float(bb_upper_val),
+                "BB_Lower": to_float(bb_lower_val),
+                "BB_Pct": to_float(bb_pct_val),
+                "MFI": to_float(mfi_val),
                 "ATR_Pct": to_float(atr_pct),
                 "ATR": to_float(atr),
                 "Trend_Score": int(trend_score),
@@ -2173,13 +2221,43 @@ def calculate_score(symbol):
         score -= 1  # Low volume = lack of conviction
 
     # -----------------------------
-    # 5. GAP% COMPONENT (new)
+    # 5. GAP% COMPONENT
     # Range: -1 to +1
     # -----------------------------
     if gap > 1.0:
         score += 1
     elif gap < -1.0:
         score -= 1
+
+    # -----------------------------
+    # NEW: MACD COMPONENT
+    # Range: -1 to +1
+    # -----------------------------
+    macd_hist = t.get("MACD_Hist", 0)
+    if macd_hist > 0:
+        score += 1
+    elif macd_hist < 0:
+        score -= 1
+
+    # -----------------------------
+    # NEW: BOLLINGER BANDS COMPONENT (%B)
+    # Range: -1 to +1
+    # -----------------------------
+    bb_pct = t.get("BB_Pct", 0.5)
+    if bb_pct > 0.8:
+        score += 1  # Strong uptrend / riding the upper band
+    elif bb_pct < 0.2:
+        score -= 1  # Weakness / riding the lower band
+
+    # -----------------------------
+    # NEW: MFI COMPONENT
+    # Range: -1 to +1
+    # -----------------------------
+    mfi = t.get("MFI", 50)
+    if mfi > 70:
+        score += 1  # Strong money flow
+    elif mfi < 30:
+        score -= 1  # Weak money flow
 
     # -----------------------------
     # 6. GEX REGIME MODIFIER (new)

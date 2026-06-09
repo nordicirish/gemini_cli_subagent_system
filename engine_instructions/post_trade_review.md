@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.70-News-Scan-Integration
+**Version:** v10.80-Advanced-Oscillator-Integration
 **Tone:** neutral, reflective, concise
 
 ---

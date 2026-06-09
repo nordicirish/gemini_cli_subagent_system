@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.70-News-Scan-Integration
+- **version**: v10.80-Advanced-Oscillator-Integration
 
 ## Tone
 institutional, narrative, concise

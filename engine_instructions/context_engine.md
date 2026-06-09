@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.70-News-Scan-Integration
+- **version**: v10.80-Advanced-Oscillator-Integration
 - **id**: CONTEXT_ENGINE
 
 ## Prefix
