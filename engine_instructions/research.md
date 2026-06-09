@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.69-Diversified-Retrieval-Matrix
+- **version**: v10.70-News-Scan-Integration
 
 ## Tone
 institutional, narrative, concise

@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v10.69-Diversified-Retrieval-Matrix
+- **version**: v10.70-News-Scan-Integration
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

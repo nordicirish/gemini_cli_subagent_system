@@ -9,8 +9,15 @@ const ModernChat = {
     
     BOOT_PROMPT: 'SYSTEM BOOT: Execute the full Stage 0 Council Boot Sequence. Using the live DATA_PACKET just injected: (1) Baseline sync — ground all portfolio prices. (2) Cash reconciliation. (3) Regime classification. (4) Portfolio health audit. (5) Market posture assessment. Output a clear, human-readable summary of your findings.',
 
-    // Quick-prompt definitions (5 core actions — log/execute handled automatically)
+    // Quick-prompt definitions (6 core actions — log/execute handled automatically)
     QUICK_PROMPTS: [
+        {
+            icon: '📰',
+            label: 'News Scan',
+            id: 'qp-news-scan',
+            tooltip: 'Search for macroeconomic, political, and stock-specific news.',
+            prompt: 'SYSTEM DIRECTIVE: MACRO & STOCK NEWS SCAN. Perform a search for macroeconomic/political events and stock-specific news.'
+        },
         {
             icon: '📊',
             label: 'Market Analysis',
@@ -176,6 +183,15 @@ const ModernChat = {
     },
 
     async fireQuickPrompt(qp) {
+        if (qp.id === 'qp-news-scan') {
+            try {
+                const res = await fetch('/api/prompts/news_scan');
+                const data = await res.json();
+                qp.prompt = data.prompt || qp.prompt;
+            } catch (e) {
+                console.error("Failed to fetch news scan prompt", e);
+            }
+        }
         if (qp.id === 'qp-scout') {
             try {
                 const res = await fetch('/api/data');

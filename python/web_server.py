@@ -469,6 +469,19 @@ def get_snapshot_prompt():
             return {"prompt": "", "error": str(e)}
     return {"prompt": ""}
 
+@app.get("/api/prompts/news_scan")
+def get_news_scan_prompt():
+    prompt_path = "prompts/news_scan_prompt.txt"
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                return {"prompt": f.read().strip()}
+        except Exception as e:
+            return {"prompt": "", "error": str(e)}
+    return {"prompt": ""}
+
+
+
 @app.get("/api/list_models")
 def list_models_endpoint():
     """Dynamically pull authorized models from Google GenAI with defensive canonical fallbacks."""

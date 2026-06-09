@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.69-Diversified-Retrieval-Matrix
+- **version**: v10.70-News-Scan-Integration
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

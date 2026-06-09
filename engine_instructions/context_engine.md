@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v10.69-Diversified-Retrieval-Matrix
+- **version**: v10.70-News-Scan-Integration
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

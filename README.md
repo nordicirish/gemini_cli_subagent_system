@@ -285,6 +285,13 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v10.70-News-Scan-Integration *(2026-06-09)*
+- **News Scan Prompt Template (NEW):** Created `prompts/news_scan_prompt.txt` to instruct the Council to execute targeted Google searches for macroeconomic/political events (today and tomorrow) and stock-specific catalysts, assigning Torque Scores (1-10) per MANDATE_11.
+- **Backend API Integration:** Added `/api/prompts/news_scan` route in `python/fetch_stocks.py` to serve the news scan prompt template.
+- **UI Button Integration:** Added a premium-styled "📰 News Scan" button to the "Export to Council" sidebar panel in `static/index.html`.
+- **UI Action Logic:** Implemented click handler in `static/app.js` to fetch both the news scan prompt and current market snapshot, combine them, copy to the clipboard, and display success indicators.
+- **Global Parity Sync (MANDATE_29):** Bumped and synchronized version to `v10.70-News-Scan-Integration` across rules SSoT, root `antigravity.md`, `README.md`, and all engine markdown files in both repositories.
+
 ### v10.69-Diversified-Retrieval-Matrix *(2026-06-08)*
 - **SSoT Schema & GEX Calculation Protocol (ENH_32):** Injected the `diversified_retrieval_queries` array (supporting M distinct retrieval types: `short_term_query`, `medium_term_query`, `long_term_query`, and `catalyst_specific_query`) into the `forensic_intelligence` object within the `ENH_32` schema. Isolated these query strings from standard trading summaries to prevent noise contamination during historical vector matching.
 - **Narrative Bridge & Proactive Search (ENH_48 & ENH_77_LIVE_WEB):** Mandated that `DATA_ANALYST` and `RESEARCH_ENGINE` populate the new `diversified_retrieval_queries` schema. When evaluating an asset, they generate separate, parallel search queries tailored to multi-perspective dimensions (e.g., "Tier-1 regulatory events" vs "safe-haven macro rotations"), establishing an M×K matrix of historical intelligence for the deliberative agents.
