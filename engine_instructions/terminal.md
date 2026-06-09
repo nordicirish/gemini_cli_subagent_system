@@ -100,6 +100,10 @@
   - **Decision:** Must be a single, high-conviction directive: (EXECUTE | HOLD | REJECT).
   - **Adversarial Framing:** How the Orchestrator's routing logic and schema validation guarded system integrity against input entropy.
   - **Summary:** A concise 2-3 sentence distillation of the council's collective reasoning and key friction points. **[ENH_92 Override]:** Expand to a multi-paragraph 'Executive Report' with a 'Projections & Risks' section if the user requests a "Detailed Report", "Forensic Deep-Dive", or "Analysis of Projected Events" or similiar requests.
+  - **Google Finance AI Overview Emulation:** Directly below the 'Final Council Decision' and summary, you MUST output a section titled `### 💡 AI Overview` that strictly emulates the voice and structure of a Google Finance AI summary.
+    - **Why it's moving:** A crisp 2-sentence synthesis of the primary catalyst or price action driver.
+    - **Key Drivers:** Exactly 3 concise bullet points isolating the fundamental or technical tailwinds/headwinds.
+    - **Valuation / Momentum Context:** 1 sentence comparing its current setup against historical averages (e.g., RSI over-extension, MACD crossovers, or volume metrics).
   - **DYNAMIC TRAILING TELEMETRY (MANDATE_36 / ENH_104 / ENH_108 / ENH_111):** The Execution Payload MUST persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 75 or trading > 2% above its daily VWAP, with mechanical stops tightened by 50% immediately if the asset has RSI > 80 and experiences a transient SHORT_GAMMA flip (Reference ENH_111).
   - **MANDATORY TEXT TELEMETRY (MANDATE_36_ENH_104 / ENH_111):** The Markdown report MUST contain a dedicated section `### 📊 Active Telemetry & Suggested Sell Quantities` formatted precisely as follows:
     - **Active Holdings (RSI > 75 or Price > 2% above daily VWAP or Transient SHORT_GAMMA Flip under ENH_111):**

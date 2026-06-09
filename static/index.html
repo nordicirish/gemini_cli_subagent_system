@@ -6,9 +6,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="modern_ui.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -43,7 +41,6 @@
                         <span id="last-updated" class="value">—</span>
                     </div>
                     <button id="open-indices-modal-btn" class="glow-btn outline" style="width: auto; padding: 4px 12px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; gap: 6px; margin-left: 10px; line-height: 1;">⚙️ INDICES</button>
-                    <button id="launch-chat-btn" class="glow-btn chat-launcher" style="width: auto; padding: 4px 12px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; gap: 6px; margin-left: 10px; line-height: 1;">💬 CONSULT AI COUNCIL</button>
                 </div>
             </div>
         </header>
@@ -103,6 +100,8 @@
                         <div id="outbound-session-status" class="status-message inline-feedback"></div>
                         <button id="btn-session-review" onclick="copySessionReviewPayload()" class="glow-btn outline">🔍 Audit & Rule Review</button>
                         <div id="outbound-review-status" class="status-message inline-feedback"></div>
+                        <button id="btn-news-scan" class="glow-btn outline">📰 News Scan</button>
+                        <div id="outbound-newsscan-status" class="status-message inline-feedback"></div>
                     </div>
                 </div>
 
@@ -313,86 +312,6 @@
         </div>
     </div>
 
-    <!-- Modern Chat Overlay (Keep outside grid) -->
-    <div class="modern-chat-overlay" id="chat-window">
-        <div class="modern-chat-panel">
-            <div class="modern-chat-header">
-                <div class="modern-header-left" style="display: flex; align-items: center; gap: 20px;">
-                    <div class="modern-logo-box">⚖️</div>
-                    <h2 style="margin: 0; font-size: 1.4rem; letter-spacing: 1px; white-space: nowrap;">GEMINI AI COUNCIL</h2>
-                </div>
-                <div class="modern-header-right" style="display: flex; align-items: center; gap: 12px;">
-                    <div style="display: flex; gap: 2px; align-items: center; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 2px;">
-                        <button title="Decrease Text Size" onclick="adjustChatSize(-1)" style="background: transparent; border: none; color: white; padding: 2px 6px; cursor: pointer; font-size: 0.8rem;">A-</button>
-                        <button title="Increase Text Size" onclick="adjustChatSize(1)" style="background: transparent; border: none; color: white; padding: 2px 6px; cursor: pointer; font-size: 0.9rem;">A+</button>
-                    </div>
-                    <script>
-                        let currentChatSize = 0.95;
-                        function adjustChatSize(dir) {
-                            currentChatSize += dir * 0.1;
-                            if (currentChatSize < 0.6) currentChatSize = 0.6;
-                            if (currentChatSize > 1.6) currentChatSize = 1.6;
-                            let styleEl = document.getElementById('dynamic-chat-style');
-                            if (!styleEl) {
-                                styleEl = document.createElement('style');
-                                styleEl.id = 'dynamic-chat-style';
-                                document.head.appendChild(styleEl);
-                            }
-                            styleEl.textContent = `.modern-message { font-size: ${currentChatSize}rem !important; }`;
-                        }
-                    </script>
-                    <label style="color: white; font-size: 0.75rem; display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Hide the council debate in the UI (it will still be saved to the log).">
-                        <input type="checkbox" id="skip-debate-toggle" checked style="accent-color: var(--accent-blue);">
-                        Hide Debate
-                    </label>
-                    <label style="color: white; font-size: 0.75rem; display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Include paid/Pro model tiers. Uncheck to show only free tier models.">
-                        <input type="checkbox" id="paid-tiers-toggle" style="accent-color: var(--accent-blue);">
-                        Include Paid Tiers
-                    </label>
-                    <span id="context-caching-toggle-container" style="display: none; align-items: center; gap: 5px;">
-                        <label style="color: white; font-size: 0.75rem; display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Enable Google GenAI Context Caching. Reduces token costs by up to 75% and increases speed 3x to 5x on repeat prompts, but only works on Pro models.">
-                            <input type="checkbox" id="context-caching-toggle" style="accent-color: var(--accent-blue);">
-                            Use Caching
-                        </label>
-                    </span>
-                    <select id="model-selector" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 5px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; outline: none;">
-                        <option value="gemini-2.0-flash-thinking-exp" selected style="background: #1a1a1a; color: white;">2.0 FLASH THINKING (FREE)</option>
-                    </select>
-                    <button id="new-chat-btn" title="New Conversation" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
-                        <span>+</span> NEW
-                    </button>
-                    <button id="history-chat-btn" title="History" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
-                        <span>📂</span> SESSIONS
-                    </button>
-                    <button class="modern-ctrl-btn" id="chat-close-btn">×</button>
-                </div>
-            </div>
-
-            <div class="modern-chat-messages" id="chat-messages">
-                <div class="modern-message ai">
-                    Welcome to the council. How can I help you analyze the markets today?
-                </div>
-            </div>
-
-            <div class="modern-input-area">
-                <textarea id="chat-input" placeholder="Ask Gemini..." rows="1"></textarea>
-                <div class="modern-input-footer">
-                    <div class="modern-input-tools" style="display: flex; align-items: center; gap: 20px;">
-                        <span id="chat-status-indicator" style="color: #8b949e; font-size: 0.85rem; font-weight: 500; letter-spacing: 0.5px;">Status: Ready</span>
-                        <span id="chat-session-cost" style="color: var(--accent-blue); font-size: 0.85rem; font-weight: 500; letter-spacing: 0.5px;">Est. Session Cost: $0.00</span>
-                    </div>
-                    <button class="modern-send-btn" id="send-chat-btn" style="width: auto; border-radius: 12px; padding: 10px 24px; font-weight: 700; letter-spacing: 1px; font-size: 0.9rem; display: flex; align-items: center; gap: 10px;">
-                        <span>✦</span> CHAT WITH THE COUNCIL
-                    </button>
-                    <button class="modern-stop-btn" id="stop-chat-btn" style="display: none; width: auto; border-radius: 12px; padding: 10px 24px; font-weight: 700; letter-spacing: 1px; font-size: 0.9rem; background: #da3633; border: none; color: white; cursor: pointer; align-items: center; gap: 10px;">
-                        <span>⏸</span> STOP
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <script src="app.js?v=10.08"></script>
-    <script src="modern_ui.js?v=10.08"></script>
 </body>
 </html>
