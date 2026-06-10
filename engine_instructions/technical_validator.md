@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v10.90-Schema-Alignment-and-Voice
+- **version**: v11.01-L249-Cascade-Patch
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

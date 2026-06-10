@@ -285,16 +285,21 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
-### v10.90-Schema-Alignment-and-Voice *(2026-06-09)*
+### v11.01-L249-Cascade-Patch *(2026-06-10)*
+- **SSoT Cascade Mitigation Rule (ENH_249):** Codified a revised version of L-249 (POST-10:30 CASCADE MITIGATION) into rules.md with absolute execution supremacy. This rule triggers a mechanical 25% trim via marketable limit orders when index dealer posture is SHORT_GAMMA and an asset falls below its daily VWAP after 10:30 AM EST.
+- **Bypasses and Exclusions:** Configured ENH_249 to bypass the ENH_FIN_02 Alpha-Friction Gate (volatility_override = TRUE), the MANDATE_34 LONG_GAMMA shield paradox, and the MANDATE_13 Consensus Deadlock pipeline.
+- **Global Parity Sync:** Synchronized and bumped the framework version to `v11.01-L249-Cascade-Patch` across master rules, antigravity.md, and all sub-agent markdown files.
+
+### v11.00-NotebookLM-Bridge *(2026-06-09)*
 - **Terminal Schema Realignment (ENH_251):** Systemically scrubbed and permanently deprecated the legacy 0-100 `health_score` metric. The Council and Stage 0 Boot Prompts are now natively aligned with the master `-6 to +6` `score` SSoT gradient to eliminate execution friction.
 - **SSoT Math Clamping:** Injected a hard `-6, 6` range clamp into the `fetch_stocks.py` scoring engine to permanently bound the values, preventing recent oscillator additions (MACD/BB) from overflowing the baseline logic thresholds.
 - **Google Finance AI Voice Emulation:** Upgraded the Master Router (`terminal.md`) to natively format and synthesize the final `EXECUTION_PAYLOAD` with a `💡 AI Overview` block. This identically mimics the structure of Google Finance's internal LLM (Catalyst synthesis, 3 Key Drivers, Valuation Context).
-- **Global Documentation Sync:** Bumped and synchronized version to `v10.90-Schema-Alignment-and-Voice` across rules SSoT, root `antigravity.md`, and all 15+ sub-agent markdown files.
+- **Global Documentation Sync:** Bumped and synchronized version to `v11.01-L249-Cascade-Patch` across rules SSoT, root `antigravity.md`, and all 15+ sub-agent markdown files.
 
 ### v10.80-Advanced-Oscillator-Integration *(2026-06-09)*
 - **Multi-Dimensional Momentum (ENH_250):** Shifted the core Technical Engine's RSI calculation from a 14-day to a highly sensitive 9-day period. Introduced MACD (12/26/9), Bollinger Bands (20-day, 2 std dev, %B), and Money Flow Index (14-day MFI) into the stock scoring loop.
 - **Engine Rule Adaptations:** Systematically shifted hardcoded RSI thresholds across all sub-agent prompts (e.g., `MANDATE_38`, `MANDATE_40`) up by 5-10 points to accommodate the "hotter" 9-day RSI, preventing premature execution trims during strong high-beta trends.
-- **Global Parity Sync (MANDATE_29):** Bumped and synchronized version to `v10.90-Schema-Alignment-and-Voice` across rules SSoT, root `antigravity.md`, `README.md`, and all engine markdown files in both repositories.
+- **Global Parity Sync (MANDATE_29):** Bumped and synchronized version to `v11.01-L249-Cascade-Patch` across rules SSoT, root `antigravity.md`, `README.md`, and all engine markdown files in both repositories.
 
 ### v10.70-News-Scan-Integration *(2026-06-09)*
 - **News Scan Prompt Template (NEW):** Created `prompts/news_scan_prompt.txt` to instruct the Council to execute targeted Google searches for macroeconomic/political events (today and tomorrow) and stock-specific catalysts, assigning Torque Scores (1-10) per MANDATE_11.

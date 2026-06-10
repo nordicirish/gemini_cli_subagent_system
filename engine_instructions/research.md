@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v10.90-Schema-Alignment-and-Voice
+- **version**: v11.01-L249-Cascade-Patch
 
 ## Tone
 institutional, narrative, concise

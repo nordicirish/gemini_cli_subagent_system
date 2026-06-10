@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v10.90-Schema-Alignment-and-Voice
+**Version:** v11.01-L249-Cascade-Patch
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -112,6 +112,7 @@
 - [ENH_117](#enh_117): DILUTION_RESISTANCE_WALL - Assets with active recent equity offerings exhibit structural supply walls; avoid accumulation into these price zones without rVol > 2.0 confirmation.
 - [ENH_232](#enh_232): BROKER_LATENCY_LIMIT_SWEEP - If a critical mechanical risk trim (e.g., >4% VWAP extension) fails to execute due to broker API latency or rejection, the Orchestrator MUST NOT re-queue the order at the identical or higher limit. It must instantly queue a 'Sweeping Limit Order' priced 0.5% below the current bid to guarantee extraction.
 - [ENH_245](#enh_245): INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Automated defensive tranches must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen, unless the asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration).
+- [ENH_249](#enh_249): POST-10:30 CASCADE MITIGATION - If broad index markers (SPY) enter a SHORT_GAMMA architecture and a position tracks below its daily VWAP floor past 10:30 AM EST on negative delta force, a mechanical 25% trim must execute instantly, bypassing standard gates and shields.
 
 
 ## Mandate Registry
@@ -1976,6 +1977,18 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Status:** ACTIVE
 - **Content:** INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Automated defensive tranches must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen. **Catalyst Exception:** If an asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration), the capital deployment freeze is bypassed.
 - **Justification:** Verified in the June 8 decision log. When SPY shifts to SHORT_GAMMA, liquidity voids expand exponentially, requiring immediate capital lockout. Idiosyncratic catalysts allow decorrelated assets to bypass this lockout.
+
+<a name="enh_249"></a>
+### [ENH_249] POST-10:30 CASCADE MITIGATION
+- **Status:** ACTIVE
+- **Content:** If broad index markers (SPY) enter a SHORT_GAMMA architecture and a position tracks below its daily VWAP floor past 10:30 AM EST on negative delta force, a mechanical 25% trim must execute instantly.
+- **Execution Supremacy Overrides:** To ensure the trim is not blocked by existing systemic shields, ENH_249 possesses Absolute Execution Supremacy over all conflicting structural logic. It MUST explicitly:
+  1. Set volatility_override = TRUE to immediately bypass the ENH_FIN_02 Alpha-Friction Gate.
+  2. Bypass the localized LONG_GAMMA shield paradox defined in MANDATE_34.
+  3. Bypass the MANDATE_13 Consensus Deadlock pipeline completely to prevent compromised scores from forcing a HOLD_FOR_RESEARCH.
+- **Behavioral Ban:** The Council is strictly forbidden from utilizing the logical fallacy of citing a "HOLD pending VWAP reclaim" as a defense to ignore the hard stop during this cascade condition.
+- **Execution Route Integration:** To guarantee capital extraction before broker latency traps the order (ENH_232), the trim MUST be instantiated strictly as a 'Sweeping Limit Order' priced 0.5% below the current bid.
+- **Justification:** Forensic audit of the June 10 cascade revealed that prior drafts failed to prevent "hold paralysis" because they did not account for deeply embedded systemic gates.
 
 
 ## Infrastructure

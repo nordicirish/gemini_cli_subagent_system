@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v10.90-Schema-Alignment-and-Voice
+**Version:** v11.01-L249-Cascade-Patch
 **Tone:** neutral, reflective, concise
 
 ---

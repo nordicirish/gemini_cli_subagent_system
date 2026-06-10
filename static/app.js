@@ -225,76 +225,27 @@ dUpdateIndicesBtn.addEventListener('click', async () => {
 
 async function copyMarketSnapshot(triggerBtn, statusEl) {
     try {
-        const res = await fetch(`${API_BASE}/data`);
-        const state = await res.json();
-        
-        const slimTickers = (state.tickers || []).map(t => ({
-            ticker: t.ticker,
-            price: t.price,
-            gap_percent: t.gap_percent,
-            vwap: t.vwap,
-            rsi: t.rsi,
-            atr_percent: t.atr_percent,
-            net_gex_total: t.net_gex_total,
-            dealer_posture: t.dealer_posture,
-            score: t.score,
-            trend: t.trend,
-            signal: t.signal,
-            historical_context: t.historical_context
-        }));
-        
-        const ssot = state.local_storage_state || {};
-        const ms = ssot.mutable_state || {};
-        const portfolioFull = ms.portfolio_snapshot || [];
-        
-        const slimPortfolio = portfolioFull.map(p => {
-            const entry = { ticker: p.ticker };
-            if (p.shares !== undefined) entry.shares = p.shares;
-            if (p.wac !== undefined) entry.wac = p.wac;
-            if (p.status) entry.status = p.status;
-            if (p.limit !== undefined) entry.limit = p.limit;
-            if (p.action) entry.action = p.action;
-            if (p.trade_state) entry.trade_state = p.trade_state;
-            if (p.historical_context) entry.historical_context = p.historical_context;
-            return entry;
-        });
-        
-        const turnPayload = {
-            _meta: state._meta,
-            timestamp: state.timestamp,
-            status: state.status,
-            tickers: slimTickers,
-            mutable_state: {
-                unallocated_cash_eur: ms.unallocated_cash_eur || 0,
-                unallocated_cash_usd: ms.unallocated_cash_usd || 0,
-                total_liquidity_eur: ms.total_liquidity_eur || 0,
-                risk_regime: (ms.state_context || {}).risk_regime || '',
-                portfolio_snapshot: slimPortfolio
-            }
-        };
-        
         let snapshotPrompt = "";
         try {
             const promptRes = await fetch(`${API_BASE}/prompts/snapshot`);
             const promptData = await promptRes.json();
             snapshotPrompt = promptData.prompt || "";
         } catch (pe) {
-            console.warn("Failed to fetch dynamic snapshot prompt, using fallback:", pe);
+            console.warn("Failed to fetch dynamic snapshot prompt.");
         }
         if (!snapshotPrompt) {
             snapshotPrompt = [
                 "SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION",
                 "",
-                "You are receiving the latest Market Snapshot and Portfolio State.",
-                "1. Parse the JSON payload and synchronize your local context.",
+                "1. Read the linked `local_ssot_shadow` document via your Gem_Store source to synchronize your local context.",
                 "2. Evaluate current 'risk_regime' and 'dealer_posture' shifts.",
                 "3. Route the data through the Consensus Pipeline (Data Analyst -> Council Debate -> Synthesis) for any required rebalancing, entries, or defensive trims.",
                 "4. Conclude your turn by outputting the final EXECUTION_PAYLOAD."
             ].join("\n");
         }
-        const jsonString = snapshotPrompt + "\n\n```json\n" + JSON.stringify(turnPayload, null, 2) + "\n```";
-        await navigator.clipboard.writeText(jsonString);
-        showFeedback(triggerBtn, "✅ Copied!", "Market snapshot ready!", false, statusEl);
+        
+        await navigator.clipboard.writeText(snapshotPrompt);
+        showFeedback(triggerBtn, "✅ Copied!", "Market snapshot prompt ready! (Gem_Store holds SSoT context)", false, statusEl);
     } catch (e) {
         console.error(e);
         showFeedback(triggerBtn, "❌ Error", "Failed to copy snapshot.", true, statusEl);
@@ -303,157 +254,41 @@ async function copyMarketSnapshot(triggerBtn, statusEl) {
 
 async function copySessionBoot(triggerBtn, statusEl) {
     try {
-        const res = await fetch(`${API_BASE}/data`);
-        const state = await res.json();
-        
-        const ssot = state.local_storage_state || {};
-        const ms = ssot.mutable_state || {};
-        const portfolio = ms.portfolio_snapshot || [];
-        const heldTickers = new Set(portfolio.map(p => p.ticker.toUpperCase()));
-        
-        const filteredTickers = (state.tickers || []).filter(t => {
-            const sym = t.ticker.toUpperCase();
-            const isHeld = heldTickers.has(sym);
-            const isMacro = (currentMacroTickers || []).map(m => m.toUpperCase()).includes(sym);
-            return isHeld || isMacro;
-        });
-
-        const now = new Date();
-        const tOffset = -now.getTimezoneOffset();
-        const offSign = tOffset >= 0 ? '+' : '-';
-        const offPad = (num) => String(Math.floor(Math.abs(num))).padStart(2, '0');
-        const localTS = now.getFullYear() +
-            '-' + offPad(now.getMonth() + 1) +
-            '-' + offPad(now.getDate()) +
-            'T' + offPad(now.getHours()) +
-            ':' + offPad(now.getMinutes()) +
-            ':' + offPad(now.getSeconds()) +
-            offSign + offPad(tOffset / 60) +
-            ':' + offPad(tOffset % 60);
-
-        const sessionPayload = {
-            _meta: state._meta,
-            timestamp: localTS,
-            status: state.status,
-            tickers: filteredTickers,
-            local_storage_state: state.local_storage_state,
-            trade_lessons: state.trade_lessons
-        };
-
-        if (sessionPayload.local_storage_state && 
-            sessionPayload.local_storage_state.mutable_state && 
-            sessionPayload.local_storage_state.mutable_state.state_context) {
-            sessionPayload.local_storage_state.mutable_state.state_context.timestamp = localTS;
-            sessionPayload.local_storage_state.mutable_state.state_context.status = state.status;
-        }
-        
         let bootPrompt = "";
         try {
             const promptRes = await fetch(`${API_BASE}/prompts/boot`);
             const promptData = await promptRes.json();
             bootPrompt = promptData.prompt || "";
         } catch (pe) {
-            console.warn("Failed to fetch dynamic boot prompt, using fallback:", pe);
+            console.warn("Failed to fetch dynamic boot prompt.");
         }
-        if (!bootPrompt) {
-            bootPrompt = [
-                "SYSTEM BOOT: COUNCIL SESSION INITIALIZATION",
-                "",
-                "You are receiving the full SSoT state and live market data for a new session.",
-                "Execute the following Stage 0 Boot Sequence:",
-                "",
-                "1. BASELINE SYNC (ENH_31): Ground all portfolio prices via Google Search.",
-                "   Verify each ticker's current price against the provided snapshot.",
-                "2. CASH RECONCILIATION (MANDATE_31): Confirm unallocated_cash_eur matches",
-                "   the SSoT. Output: math_proof_liquidity.",
-                "3. REGIME CLASSIFICATION: Assess current risk regime (TRENDING/MEAN_REVERTING/",
-                "   VOLATILE) based on VIX, VIXY velocity, and SPY structure.",
-                "4. PORTFOLIO HEALTH AUDIT: Flag any positions with score < 0 or",
-                "   status = IN_DISTRESS for immediate Council review.",
-                "5. MARKET POSTURE: Provide a top-level posture assessment (RISK_ON/RISK_OFF/",
-                "   NEUTRAL) with supporting forensic evidence.",
-                "",
-                "Emit the full EXECUTION_PAYLOAD with updated state_context upon completion."
-            ].join("\n");
-        }
-        const jsonString = bootPrompt + "\n\n```json\n" + JSON.stringify(sessionPayload, null, 2) + "\n```";
+        if (!bootPrompt) bootPrompt = "SYSTEM BOOT: COUNCIL SESSION INITIALIZATION";
         
-        await navigator.clipboard.writeText(jsonString);
-        showFeedback(triggerBtn, "✅ Copied!", "Session boot payload ready!", false, statusEl);
+        await navigator.clipboard.writeText(bootPrompt);
+        showFeedback(triggerBtn, "✅ Copied!", "Session boot prompt ready! (Gem_Store holds SSoT context)", false, statusEl);
     } catch (e) {
         console.error(e);
-        showFeedback(triggerBtn, "❌ Error", "Failed to copy session boot.", true, statusEl);
+        showFeedback(triggerBtn, "❌ Error", "Failed to copy prompt", true, statusEl);
     }
 }
 
 async function copyNewsScan(triggerBtn, statusEl) {
     try {
-        const res = await fetch(`${API_BASE}/data`);
-        const state = await res.json();
-        
-        const ssot = state.local_storage_state || {};
-        const ms = ssot.mutable_state || {};
-        const portfolio = ms.portfolio_snapshot || [];
-        const watchlist = state.watchlist || [];
-        
-        const targetTickers = new Set([
-            ...portfolio.map(p => p.ticker.toUpperCase()),
-            ...watchlist.map(w => w.toUpperCase())
-        ]);
-        
-        const slimTickers = (state.tickers || [])
-            .filter(t => targetTickers.has(t.ticker.toUpperCase()))
-            .map(t => ({
-                ticker: t.ticker,
-                price: t.price,
-                historical_context: t.historical_context
-            }));
-            
-        const now = new Date();
-        const tOffset = -now.getTimezoneOffset();
-        const offSign = tOffset >= 0 ? '+' : '-';
-        const offPad = (num) => String(Math.floor(Math.abs(num))).padStart(2, '0');
-        const localTS = now.getFullYear() +
-            '-' + offPad(now.getMonth() + 1) +
-            '-' + offPad(now.getDate()) +
-            'T' + offPad(now.getHours()) +
-            ':' + offPad(now.getMinutes()) +
-            ':' + offPad(now.getSeconds()) +
-            offSign + offPad(tOffset / 60) +
-            ':' + offPad(tOffset % 60);
-            
-        const scanPayload = {
-            timestamp: localTS,
-            status: state.status,
-            tickers: slimTickers,
-            macro_calendar_shield: ms.macro_calendar_shield || {},
-            portfolio_snapshot: portfolio.map(p => ({
-                ticker: p.ticker,
-                shares: p.shares,
-                wac: p.wac,
-                status: p.status,
-                trade_state: p.trade_state,
-                historical_context: p.historical_context
-            }))
-        };
-        
         let newsScanPrompt = "";
         try {
             const promptRes = await fetch(`${API_BASE}/prompts/news_scan`);
             const promptData = await promptRes.json();
             newsScanPrompt = promptData.prompt || "";
         } catch (pe) {
-            console.warn("Failed to fetch news scan prompt:", pe);
+            console.warn("Failed to fetch news scan prompt.");
         }
-        if (!newsScanPrompt) {
-            newsScanPrompt = "SYSTEM DIRECTIVE: MACRO & STOCK NEWS SCAN\nPerform a search for macroeconomic/political events and stock-specific news.";
-        }
-        const jsonString = newsScanPrompt + "\n\n```json\n" + JSON.stringify(scanPayload, null, 2) + "\n```";
-        await navigator.clipboard.writeText(jsonString);
+        if (!newsScanPrompt) newsScanPrompt = "SYSTEM DIRECTIVE: MACRO & STOCK NEWS SCAN";
+        
+        await navigator.clipboard.writeText(newsScanPrompt);
         showFeedback(triggerBtn, "✅ Copied!", "News scan prompt ready!", false, statusEl);
     } catch (e) {
         console.error(e);
-        showFeedback(triggerBtn, "❌ Error", "Failed to copy news scan.", true, statusEl);
+        showFeedback(triggerBtn, "❌ Error", "Failed to copy news scan payload.", true, statusEl);
     }
 }
 
@@ -1175,10 +1010,10 @@ async function copySessionReviewPayload(triggerBtn, statusEl) {
         const data = await response.json();
         
         await navigator.clipboard.writeText(data.payload);
-        showFeedback(btn, "✅ Copied!", "Audit & Rule Review payload ready!", false, targetStatus);
+        showFeedback(btn, "✅ Copied!", "Audit & Rule Review prompt ready! (Gem_Store holds SSoT context)", false, targetStatus);
     } catch (error) {
         console.error("Failed to copy Review payload:", error);
-        showFeedback(btn, "❌ Error", "Failed to fetch review log.", true, targetStatus);
+        showFeedback(btn, "❌ Error", "Failed to copy review prompt", true, targetStatus);
     }
 }
 
