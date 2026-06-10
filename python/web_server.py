@@ -13,7 +13,7 @@ import threading
 from agent_framework import AgentFramework
 import agent_framework
 import tools
-import cloud_sync
+# cloud_sync removed — GDrive Decoupling Guardrail (ANTIGRAVITY v11.03)
 
 # Import the existing FastAPI app from fetch_stocks
 from fetch_stocks import app, run_daemon, GLOBAL_STATE
@@ -1352,17 +1352,9 @@ if __name__ == "__main__":
     try:
         import fetch_stocks
         fetch_stocks.compile_master_document()
-        sync_daemon = cloud_sync.CloudSyncDaemon(framework.client)
-        sync_files = [
-            "scratch/master_trading_knowledge.md",
-            "context/decision_log.json",
-            "context/trade_lessons.json",
-            "context/ssot.json"
-        ]
-        sync_thread = threading.Thread(target=sync_daemon.start_background_sync, args=(sync_files,), daemon=True)
-        sync_thread.start()
+        # Cloud sync daemon removed — GDrive Decoupling Guardrail (ANTIGRAVITY v11.03)
     except Exception as e:
-        print(f"Failed to start Cloud Sync Daemon: {e}")
+        print(f"Failed to compile master document: {e}")
 
     try:
         uvicorn.run(app, host="0.0.0.0", port=port)

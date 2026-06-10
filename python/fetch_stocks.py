@@ -2361,6 +2361,15 @@ def run_daemon():
             }
     print(f"{GREEN}GEX profiles loaded.{RESET}                    ")
 
+    # Hold boot panel at 100% for a minimum window so the browser poll loop
+    # (every 3s) can observe the completed state before we clear it.
+    # This prevents the race condition on fast restarts with cached GEX data.
+    GLOBAL_STATE["boot_phase"] = "GEX_PROFILES"
+    GLOBAL_STATE["boot_progress"] = GLOBAL_STATE.get("boot_total", len(ALL_TICKERS))
+    GLOBAL_STATE["boot_ticker"] = "COMPLETE"
+    print(f"{YELLOW}Holding boot panel visible for browser poll window...{RESET}")
+    t_time.sleep(5)
+
     # Clear boot progress keys to signal completion to the frontend
     GLOBAL_STATE.pop("boot_phase", None)
     GLOBAL_STATE.pop("boot_progress", None)

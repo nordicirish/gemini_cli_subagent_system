@@ -547,10 +547,17 @@ async function pollData() {
                 phaseTitle = 'Phase 1: Loading Technical History';
                 phaseDesc = `Downloading 200-day daily charts to calculate SMAs and ATR%`;
             } else if (phase === 'GEX_PROFILES') {
-                // Phase 2 maps to 50% to 95%
-                overallPercent = Math.round(50 + (progress / total) * 45);
-                phaseTitle = 'Phase 2: Compiling Option GEX Profiles';
-                phaseDesc = `Fetching option chains & computing synthetic Gamma curves`;
+                if (ticker === 'COMPLETE') {
+                    // Hold window at 100% before dismissal
+                    overallPercent = 100;
+                    phaseTitle = '✅ System Ready';
+                    phaseDesc = `All market data loaded. Launching dashboard...`;
+                } else {
+                    // Phase 2 maps to 50% to 95%
+                    overallPercent = Math.round(50 + (progress / total) * 45);
+                    phaseTitle = 'Phase 2: Compiling Option GEX Profiles';
+                    phaseDesc = `Fetching option chains & computing synthetic Gamma curves`;
+                }
             }
 
             // Ensure constraints
@@ -570,7 +577,9 @@ async function pollData() {
             if (dProgressPercent) dProgressPercent.textContent = `${overallPercent}%`;
             
             if (dProgressDetails) {
-                if (ticker && ticker !== 'SYSTEM') {
+                if (ticker === 'COMPLETE') {
+                    dProgressDetails.innerHTML = `<span class="loading-ticker">All systems ready — initializing live data stream</span>`;
+                } else if (ticker && ticker !== 'SYSTEM') {
                     dProgressDetails.innerHTML = `Loading ticker data: <span class="loading-ticker">${ticker}</span> [${progress}/${total}]`;
                 } else {
                     dProgressDetails.innerHTML = `Synchronizing state with SSoT database...`;
