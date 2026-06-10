@@ -43,7 +43,12 @@ pip install -r requirements.txt
 $env:GEMINI_API_KEY="your_api_key_here"
 
 # 4. Launch the system
-python python/web_server.py
+# Option A: Run using the virtual environment interpreter explicitly
+.venv\Scripts\python.exe web_server.py
+
+# Option B: Activate the virtual environment first, then run
+.venv\Scripts\Activate.ps1
+python web_server.py
 ```
 
 The dashboard will be available at **http://localhost:8000**
