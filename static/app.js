@@ -6,6 +6,15 @@ const dStatus = document.getElementById('market-status');
 const dUpdated = document.getElementById('last-updated');
 const dIndicator = document.getElementById('live-indicator');
 
+// Progress Bar DOM Elements
+const dProgressContainer = document.getElementById('initial-fetch-progress-container');
+const dProgressPhase = document.getElementById('progress-phase-title');
+const dProgressStatus = document.getElementById('progress-status-text');
+const dProgressBar = document.getElementById('initial-fetch-progress-bar');
+const dProgressPercent = document.getElementById('progress-bar-percent');
+const dProgressDetails = document.getElementById('progress-ticker-details');
+const dTableContainer = document.getElementById('main-data-table-container');
+
 
 const dIndicesInput = document.getElementById('indices-input');
 const dUpdateIndicesBtn = document.getElementById('update-indices-btn');
@@ -498,6 +507,93 @@ async function pollData() {
 
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
+
+        // Handle initial boot/fetch progress bar
+        if (state && state.boot_phase) {
+            dIndicator.classList.add('active');
+            let displayStatus = state.status || 'INITIALIZING...';
+            dStatus.textContent = displayStatus;
+            dStatus.style.color = 'var(--yellow)';
+
+            // Disable Consult AI Council button
+            const launcher = document.getElementById('launch-chat-btn');
+            if (launcher) {
+                launcher.disabled = true;
+                launcher.style.opacity = '0.4';
+                launcher.style.pointerEvents = 'none';
+                launcher.title = 'Consulting the AI Council is locked until all ticker data has loaded.';
+            }
+
+            // Show container & blur table
+            if (dProgressContainer) dProgressContainer.style.display = 'block';
+            if (dTableContainer) dTableContainer.classList.add('blurred-view');
+            
+            const phase = state.boot_phase;
+            const progress = state.boot_progress || 0;
+            const total = state.boot_total || 100;
+            const ticker = state.boot_ticker || '';
+
+            let overallPercent = 0;
+            let phaseTitle = 'Initializing System';
+            let phaseDesc = 'Setting up real-time stock scanners...';
+
+            if (phase === 'STARTING_UP') {
+                overallPercent = 5;
+                phaseTitle = 'Starting Daemon...';
+                phaseDesc = 'Preparing historical data structures';
+            } else if (phase === 'TECHNICAL_ANALYSIS') {
+                // Phase 1 maps to 5% to 50%
+                overallPercent = Math.round(5 + (progress / total) * 45);
+                phaseTitle = 'Phase 1: Loading Technical History';
+                phaseDesc = `Downloading 200-day daily charts to calculate SMAs and ATR%`;
+            } else if (phase === 'GEX_PROFILES') {
+                // Phase 2 maps to 50% to 95%
+                overallPercent = Math.round(50 + (progress / total) * 45);
+                phaseTitle = 'Phase 2: Compiling Option GEX Profiles';
+                phaseDesc = `Fetching option chains & computing synthetic Gamma curves`;
+            }
+
+            // Ensure constraints
+            overallPercent = Math.max(0, Math.min(100, overallPercent));
+            
+            // Prevent backward jumps due to async race conditions (persists across refreshes)
+            let maxBoot = parseInt(sessionStorage.getItem('max_boot_percent') || '0');
+            if (overallPercent > maxBoot) {
+                sessionStorage.setItem('max_boot_percent', overallPercent);
+            } else {
+                overallPercent = maxBoot;
+            }
+
+            if (dProgressPhase) dProgressPhase.textContent = phaseTitle;
+            if (dProgressStatus) dProgressStatus.textContent = phaseDesc;
+            if (dProgressBar) dProgressBar.style.width = `${overallPercent}%`;
+            if (dProgressPercent) dProgressPercent.textContent = `${overallPercent}%`;
+            
+            if (dProgressDetails) {
+                if (ticker && ticker !== 'SYSTEM') {
+                    dProgressDetails.innerHTML = `Loading ticker data: <span class="loading-ticker">${ticker}</span> [${progress}/${total}]`;
+                } else {
+                    dProgressDetails.innerHTML = `Synchronizing state with SSoT database...`;
+                }
+            }
+
+            // Do not render table data yet
+            return;
+        } else {
+            // Enable Consult AI Council button
+            const launcher = document.getElementById('launch-chat-btn');
+            if (launcher) {
+                launcher.disabled = false;
+                launcher.style.opacity = '1';
+                launcher.style.pointerEvents = 'auto';
+                launcher.title = 'Consult AI Council';
+            }
+
+            // Initialization is complete, hide container & remove blur
+            if (dProgressContainer) dProgressContainer.style.display = 'none';
+            if (dTableContainer) dTableContainer.classList.remove('blurred-view');
+            sessionStorage.removeItem('max_boot_percent');
+        }
 
         // Calculate GEX deltas for the current poll cycle
         if (state && state.tickers) {

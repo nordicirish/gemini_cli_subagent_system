@@ -59,28 +59,47 @@
 
         <!-- ─── Main Content ─── -->
         <main class="main-content">
-            <!-- Data Table -->
-            <div class="table-container glass-panel">
-                <table id="data-table">
-                    <thead>
-                        <tr>
-                            <th>Ticker</th>
-                            <th>Price</th>
-                            <th>Day %</th>
-                            <th>Gap %</th>
-                            <th>Volume</th>
-                            <th>ATR %</th>
-                            <th>RSI</th>
-                            <th>VWAP</th>
-                            <th>Trend</th>
-                            <th>Dealer</th>
-                            <th class="score-col">Score</th>
-                        </tr>
-                    </thead>
-                    <tbody id="table-body">
-                        <!-- Data rows injected by JS -->
-                    </tbody>
-                </table>
+            <div class="left-content-wrapper" style="display: grid; grid-template-columns: 1fr; align-items: start; gap: 16px;">
+                <!-- Initial Fetch Progress Container -->
+                <div id="initial-fetch-progress-container" class="glass-panel progress-panel" style="display: none; grid-area: 1 / 1; align-self: start; z-index: 100;">
+                    <div class="progress-info">
+                        <h2 id="progress-phase-title">Initializing Market Data Daemon...</h2>
+                        <p id="progress-status-text">Connecting to real-time data feeds...</p>
+                    </div>
+                    <div class="progress-bar-wrapper">
+                        <div class="progress-bar-track">
+                            <div id="initial-fetch-progress-bar" class="progress-bar-fill"></div>
+                        </div>
+                        <span id="progress-bar-percent" class="progress-percent">0%</span>
+                    </div>
+                    <div class="progress-details" id="progress-ticker-details">
+                        Establishing secure handshake...
+                    </div>
+                </div>
+
+                <!-- Data Table -->
+                <div class="table-container glass-panel" id="main-data-table-container" style="grid-area: 1 / 1;">
+                    <table id="data-table">
+                        <thead>
+                            <tr>
+                                <th>Ticker</th>
+                                <th>Price</th>
+                                <th>Day %</th>
+                                <th>Gap %</th>
+                                <th>Volume</th>
+                                <th>ATR %</th>
+                                <th>RSI</th>
+                                <th>VWAP</th>
+                                <th>Trend</th>
+                                <th>Dealer</th>
+                                <th class="score-col">Score</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-body">
+                            <!-- Data rows injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <!-- Sidebar -->

@@ -1307,3 +1307,148 @@ textarea:focus {
     width: 100%;
     margin-top: 4px;
 }
+
+/* ─── Initial Fetch Progress Container ─── */
+.progress-panel {
+    max-width: 800px;
+    margin: 8px auto 40px;
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    background: rgba(17, 21, 28, 0.85) !important;
+    border: 1px solid rgba(88, 166, 255, 0.15) !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), 0 0 40px rgba(88, 166, 255, 0.08) !important;
+    border-radius: var(--radius-lg);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Pulsing aura behind progress panel */
+.progress-panel::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(88, 166, 255, 0.03) 0%, transparent 70%);
+    animation: rotate-aura 15s linear infinite;
+    pointer-events: none;
+    z-index: 0;
+}
+
+@keyframes rotate-aura {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.progress-info {
+    position: relative;
+    z-index: 1;
+}
+
+.progress-info h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--purple) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.progress-info p {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.progress-bar-wrapper {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 10px 0;
+}
+
+.progress-bar-track {
+    flex-grow: 1;
+    height: 12px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent) 0%, #a158ff 50%, var(--purple) 100%);
+    box-shadow: 0 0 15px rgba(188, 140, 255, 0.5);
+    border-radius: 6px;
+    transition: width 0.30s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+/* Glow stripe animation in fill */
+.progress-bar-fill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.25) 50%,
+        rgba(255, 255, 255, 0) 100%
+    );
+    animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.progress-percent {
+    font-family: var(--font-mono);
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--purple);
+    min-width: 50px;
+    text-align: right;
+}
+
+.progress-details {
+    position: relative;
+    z-index: 1;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: var(--radius-sm);
+    padding: 12px 16px;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s;
+}
+
+.progress-details .loading-ticker {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+/* Blurred View for Main Content */
+.blurred-view {
+    filter: blur(8px) saturate(0.5);
+    opacity: 0.45;
+    pointer-events: none;
+    transition: filter 0.6s var(--transition), opacity 0.6s var(--transition);
+}
