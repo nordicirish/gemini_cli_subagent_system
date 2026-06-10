@@ -164,11 +164,25 @@
                         </h3>
                     </div>
                     <div id="scout-content" style="display: none;">
-                        <p class="subtitle" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 12px;">Toggle target sectors for autonomous screening</p>
-                        <div id="scout-categories-container" class="scout-grid-container" style="margin-top: 0; min-height: 40px; border: 1px dashed var(--panel-border); padding: 8px; border-radius: 4px;">
+
+                        <!-- Action 1: Scan Watchlist -->
+                        <div style="background: rgba(88,166,255,0.05); border: 1px solid rgba(88,166,255,0.2); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
+                            <p style="font-size: 0.6rem; color: var(--accent); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 6px;">🎯 Watchlist Rescan</p>
+                            <p style="font-size: 0.62rem; color: var(--text-dim); margin-bottom: 8px; line-height: 1.4;">Force a fresh signal evaluation on tickers already in your Watchlist.</p>
+                            <button id="scan-watchlist-btn" class="glow-btn outline" style="font-size: 0.7rem; padding: 5px 10px;" title="Triggers a forced refresh cycle on your current Watchlist tickers">🎯 Scan Watchlist</button>
+                            <div id="scan-watchlist-status" class="status-message inline-feedback" style="margin-top: 5px;"></div>
+                        </div>
+
+                        <!-- Divider -->
+                        <div style="border-top: 1px solid var(--panel-border); margin: 2px 0 10px;"></div>
+
+                        <!-- Action 2: Scout New Sectors -->
+                        <p style="font-size: 0.6rem; color: var(--text-dim); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px;">🔭 Sector Discovery</p>
+                        <p style="font-size: 0.62rem; color: var(--text-dim); margin-bottom: 8px; line-height: 1.4;">Enable sectors below, then scan to discover new candidate tickers from those industries.</p>
+                        <div id="scout-categories-container" class="scout-grid-container" style="margin-top: 0; min-height: 40px; border: 1px dashed var(--panel-border); padding: 8px; border-radius: 4px; margin-bottom: 10px;">
                             <!-- Grid injected by JS -->
                         </div>
-                        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px; margin-top: 12px;">
+                        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
                             <p style="font-size: 0.6rem; color: var(--text-dim); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 10px;">Filter Config</p>
                             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
                                 <label for="scout-limit-select" style="font-size: 0.65rem; color: var(--text-dim); font-weight: 600; flex: 1;">Max Tickers (1–5):</label>
@@ -192,7 +206,7 @@
                                 </select>
                             </div>
                         </div>
-                        <button id="run-ai-scout-btn" class="glow-btn" style="margin-top: 8px;">🔭 Run AI Scout Scan</button>
+                        <button id="run-ai-scout-btn" class="glow-btn" style="margin-top: 0; font-size: 0.7rem;" title="Discover new tickers from enabled sectors above">🔭 Scout New Sectors</button>
                         <div id="ai-scout-status" class="status-message inline-feedback" style="margin-top: 6px;"></div>
                     </div>
                 </div>
@@ -318,7 +332,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=10.09"></script>
+    <script src="app.js?v=10.10"></script>
     <script src="modern_ui.js?v=10.08"></script>
 </body>
 </html>

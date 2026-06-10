@@ -1255,6 +1255,77 @@ async def save_watch_list(req: Request):
         framework.log(f"[Error] Watch List Save Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/ai_scout")
+async def run_ai_scout(request: Request, background_tasks: BackgroundTasks):
+    """
+    Triggers an AI-powered scout scan in one of two modes:
+      - mode='sectors': discovers new tickers from active scout sector categories
+      - mode='watchlist': rescans current watchlist tickers with signal model
+    Both modes reload the daemon tickers after finding candidates.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    mode = body.get("mode", "sectors")  # 'sectors' | 'watchlist'
+    limit = int(body.get("limit", 2))
+    max_rsi = int(body.get("max_rsi", 75))
+
+    try:
+        import fetch_stocks
+
+        # ── Mode: Watchlist rescan ───────────────────────────────────────────
+        if mode == "watchlist":
+            watchlist = []
+            try:
+                with open("context/ssot.json", "r") as f:
+                    ssot = json.load(f)
+                ms = ssot.get("mutable_state", ssot)
+                watchlist = ms.get("watched_tickers", ssot.get("watched_tickers", []))
+            except Exception:
+                pass
+
+            if not watchlist:
+                return JSONResponse({"status": "error", "message": "No tickers in Watchlist. Add tickers to the Watchlist first."})
+
+            # Force a refresh cycle so daemon re-evaluates them
+            fetch_stocks.FORCE_REFRESH = True
+            background_tasks.add_task(reload_scout_tickers_task)
+            return JSONResponse({
+                "status": "success",
+                "scouts": watchlist,
+                "message": f"Watchlist rescan triggered for {len(watchlist)} tickers."
+            })
+
+        # ── Mode: Sector discovery ───────────────────────────────────────────
+        else:
+            categories = []
+            try:
+                with open("context/ssot.json", "r") as f:
+                    ssot = json.load(f)
+                ms = ssot.get("mutable_state", ssot)
+                categories = ms.get("scout_categories", ssot.get("scout_categories", []))
+            except Exception:
+                pass
+
+            if not categories:
+                return JSONResponse({"status": "error", "message": "No Scout Sectors enabled. Toggle at least one sector to scan."})
+
+            # Trigger the dynamic scout ticker discovery in background
+            fetch_stocks.FORCE_REFRESH = True
+            background_tasks.add_task(reload_scout_tickers_task)
+
+            return JSONResponse({
+                "status": "success",
+                "scouts": [],
+                "message": f"Sector scout triggered for {len(categories)} sector(s): {', '.join(categories)}. New tickers will appear in the table shortly."
+            })
+
+    except Exception as e:
+        framework.log(f"[Error] AI Scout Failed: {e}")
+        return JSONResponse({"status": "error", "message": str(e)})
+
 @app.get("/api/scout_categories")
 def get_scout_categories():
     try:

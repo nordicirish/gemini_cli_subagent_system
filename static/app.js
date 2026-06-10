@@ -1048,45 +1048,63 @@ window.deleteFromWatchlist = deleteFromWatchlist;
 window.toggleScoutCategory = toggleScoutCategory;
 window.toggleSection = toggleSection;
 window.copySessionReviewPayload = copySessionReviewPayload;
+window.runScout = runScout;
 
 dAddToPortfolioBtn.addEventListener('click', addToPortfolio);
 dSavePortfolioBtn.addEventListener('click', () => savePortfolio());
 dAddToWatchlistBtn.addEventListener('click', addToWatchlist);
 
-if (dRunAiScoutBtn) {
-    dRunAiScoutBtn.addEventListener('click', async () => {
-        dRunAiScoutBtn.disabled = true;
-        const originalHtml = dRunAiScoutBtn.innerHTML;
-        dRunAiScoutBtn.innerHTML = "🔭 Scouting Breakouts...";
-        dAiScoutStatus.textContent = "Querying Gemini API (Grounding Search)...";
-        dAiScoutStatus.className = "status-message inline-feedback active text-yellow";
-        
-        try {
-            const limit = dAiScoutLimitSelect ? dAiScoutLimitSelect.value : 2;
-            const maxRsi = dAiScoutMaxRsiSelect ? dAiScoutMaxRsiSelect.value : 75;
-            const res = await fetch(`${API_BASE}/ai_scout?limit=${limit}&max_rsi=${maxRsi}`, {
-                method: 'POST'
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                if (data.scouts && data.scouts.length > 0) {
-                    showFeedback(dRunAiScoutBtn, "🔭 Scout Complete! ✅", `Found stocks: ${data.scouts.join(', ')}`, false, dAiScoutStatus);
-                } else {
-                    showFeedback(dRunAiScoutBtn, "🔭 Scout Complete! ✅", "No new breakout stocks found matching regime.", false, dAiScoutStatus);
-                }
-                pollData(); // Force immediate refresh to pull newly scanned scouts
-            } else {
-                throw new Error(data.message);
-            }
-        } catch (e) {
-            console.error("AI Scout Error: ", e);
-            showFeedback(dRunAiScoutBtn, "❌ Scouting Failed", e.message || "Failed to query AI Scout.", true, dAiScoutStatus);
-        } finally {
-            dRunAiScoutBtn.disabled = false;
-            dRunAiScoutBtn.innerHTML = originalHtml;
+// Shared scout runner — mode: 'sectors' | 'watchlist'
+async function runScout(mode) {
+    const isWatchlist = mode === 'watchlist';
+    const btn = isWatchlist ? document.getElementById('scan-watchlist-btn') : dRunAiScoutBtn;
+    const statusEl = isWatchlist ? document.getElementById('scan-watchlist-status') : dAiScoutStatus;
+    
+    if (!btn) return;
+    btn.disabled = true;
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = isWatchlist ? '🎯 Scanning...' : '🔭 Scouting Sectors...';
+    if (statusEl) {
+        statusEl.textContent = isWatchlist ? 'Triggering watchlist refresh...' : 'Querying sector discovery...';
+        statusEl.className = 'status-message inline-feedback active text-yellow';
+    }
+
+    try {
+        const limit = dAiScoutLimitSelect ? parseInt(dAiScoutLimitSelect.value) : 2;
+        const maxRsi = dAiScoutMaxRsiSelect ? parseInt(dAiScoutMaxRsiSelect.value) : 75;
+        const res = await fetch(`${API_BASE}/ai_scout`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode, limit, max_rsi: maxRsi })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            const msg = data.message || (data.scouts && data.scouts.length > 0
+                ? `Found: ${data.scouts.join(', ')}`
+                : 'Scan triggered — table will update shortly.');
+            showFeedback(btn, isWatchlist ? '🎯 Done! ✅' : '🔭 Triggered! ✅', msg, false, statusEl);
+            pollData();
+        } else {
+            throw new Error(data.message);
         }
-    });
+    } catch (e) {
+        console.error('Scout Error:', e);
+        showFeedback(btn, '❌ Failed', e.message || 'Scout request failed.', true, statusEl);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
 }
+
+if (dRunAiScoutBtn) {
+    dRunAiScoutBtn.addEventListener('click', () => runScout('sectors'));
+}
+
+const dScanWatchlistBtn = document.getElementById('scan-watchlist-btn');
+if (dScanWatchlistBtn) {
+    dScanWatchlistBtn.addEventListener('click', () => runScout('watchlist'));
+}
+
 
 // Real-time conversion feedback as user types cash value
 dPortfolioBody.addEventListener('input', (e) => {
