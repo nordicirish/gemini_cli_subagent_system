@@ -1255,7 +1255,7 @@ async def save_watch_list(req: Request):
         framework.log(f"[Error] Watch List Save Failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/scout")
+@app.get("/api/scout_categories")
 def get_scout_categories():
     try:
         if os.path.exists("context/ssot.json"):
@@ -1289,7 +1289,7 @@ def reload_scout_tickers_task():
     except Exception as se:
         print(f"[Warning] Failed to hot-reload TICKERS in background: {se}")
 
-@app.post("/api/scout")
+@app.post("/api/scout_categories")
 def save_scout_categories(categories: List[str], background_tasks: BackgroundTasks):
     try:
         if os.path.exists("context/ssot.json"):
@@ -1310,7 +1310,7 @@ def save_scout_categories(categories: List[str], background_tasks: BackgroundTas
                 
     except Exception as e:
         framework.log(f"[Error] Scout Categories Save Failed: {e}")
-    return {"status": "success"}
+    return {"status": "success", "categories": categories}
 
 @app.get("/api/system_logs")
 async def system_logs_endpoint():
