@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.01-L249-Cascade-Patch
+- **version**: v11.03-GDrive-Decoupling-Patch
 
 ## Tone
 institutional, narrative, concise

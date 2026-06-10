@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.01-L249-Cascade-Patch
+- **version**: v11.03-GDrive-Decoupling-Patch
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

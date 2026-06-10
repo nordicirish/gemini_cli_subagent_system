@@ -456,6 +456,7 @@ class AgentFramework:
                     max_output_tokens=8192,
                     tools=client_tools,
                     cached_content=client_cache,
+                    automatic_function_calling={"disable": True},
                     safety_settings=[
                         types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
                         types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),

@@ -290,6 +290,11 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v11.03-GDrive-Decoupling-Patch *(2026-06-11)*
+- **UI Safety & Decoupling:** Added a repository-specific UI decoupling guardrail to the Master Custodian rules (`antigravity.md`) to prevent layout mixing between the subagent dashboard (which utilizes direct FastAPI background database payload ingestion and local streaming) and the trading agent dashboard (which uses manual import/export clipboard operations).
+- **UI Restoration:** Restored the interactive Gemini AI Council chat modal and launcher button (`launch-chat-btn`), re-linked `modern_ui.js` and `marked.js` library, and removed the redundant manual `Export to Council` and `Import from Council` sidebars from the `gemini_cli_subagent_system` dashboard UI.
+- **Global Parity Sync:** Bumped and synchronized the framework version to `v11.03-GDrive-Decoupling-Patch` across master rules, `antigravity.md`, and all sub-agent markdown files in both repositories.
+
 ### v11.01-L249-Cascade-Patch *(2026-06-10)*
 - **SSoT Cascade Mitigation Rule (ENH_249):** Codified a revised version of L-249 (POST-10:30 CASCADE MITIGATION) into rules.md with absolute execution supremacy. This rule triggers a mechanical 25% trim via marketable limit orders when index dealer posture is SHORT_GAMMA and an asset falls below its daily VWAP after 10:30 AM EST.
 - **Bypasses and Exclusions:** Configured ENH_249 to bypass the ENH_FIN_02 Alpha-Friction Gate (volatility_override = TRUE), the MANDATE_34 LONG_GAMMA shield paradox, and the MANDATE_13 Consensus Deadlock pipeline.
@@ -571,6 +576,11 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 - **Proactive Fallbacks:** Integrated real-time client failovers, seamlessly falling back to the primary key upon encountering rate limits (429), quota limits, or authentication failures.
 - **Config & Model Calibration:** Synchronized the `Mode Selection Matrix` in `terminal.md` with active subagent modes, and appended the `GEMINI_FREE_TIER_API_KEY` placeholder in `config.json`.
 - **Parity Alignment:** Performed a global version synchronization across all subagent instruction sets, rules, and the custodian engine to maintain absolute structural integrity.
+
+### v11.03-GDrive-Decoupling-Patch *(2026-06-11)*
+- **API and Model Fix:** Disabled automatic function calling (`automatic_function_calling=False`) in `GenerateContentConfig` across `web_server.py` and `main.py` to prevent SDK errors (`KeyError: 'run_code'`) when the model invokes built-in code execution tools.
+- **Google Drive Decoupling:** Completely removed Google Drive rules synchronization scripts, UI admin panels, and modals.
+- **Antigravity Custodian Updates:** Added rules and veto conditions to root `antigravity.md` and `.agents/rules/antigravity.md` to forbid Google Drive synchronization.
 
 ### v10.70-Indices-VWAP-and-3Dec-GEX *(2026-05-22)*
 - **Architectural Update:** Implemented the Cross-Repository Synchronization Protocol (ENH_100-SYNC) in `antigravity.md`.

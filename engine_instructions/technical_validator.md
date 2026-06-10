@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.01-L249-Cascade-Patch
+- **version**: v11.03-GDrive-Decoupling-Patch
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

@@ -423,6 +423,7 @@ def create_new_session():
             max_output_tokens=8192,
             tools=terminal_tools if not cache_to_use else None,
             cached_content=cache_to_use,
+            automatic_function_calling={"disable": True},
             safety_settings=[
                 agent_framework.types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
                 agent_framework.types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),
@@ -947,6 +948,8 @@ def chat_endpoint(req: ChatRequest):
             "warning": active_model_warning
         }
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         error_msg = str(e)
         if cancel_event.is_set() or "cancelled" in error_msg.lower():
             return {"status": "success", "response": "[OFFLINE] Session terminated by user interrupt."}
