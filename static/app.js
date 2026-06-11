@@ -661,7 +661,7 @@ async function pollData() {
                         const changeStr = (changeVal > 0 ? '+' : '') + changeVal.toFixed(2) + '%';
                         const changeColor = changeVal > 0 ? 'text-green' : 'text-red';
                         
-                        let gapExtra = '';
+                        let gexLine = '';
                         if (row.net_gex_total !== undefined && row.net_gex_total !== 0) {
                             const gexVal = row.net_gex_total.toFixed(3);
                             let gexColor = 'text-muted';
@@ -678,14 +678,14 @@ async function pollData() {
                             } else if (diff < -0.005) {
                                 chevron = `<span class="text-red" style="margin-left: 2px; font-weight: bold;">▼</span>`;
                             }
-                            gapExtra = ` · <span class="${gexColor}" style="font-weight: 600;">GEX: ${gexVal}${chevron}</span>`;
+                            gexLine = `<div class="macro-gex ${gexColor}">GEX: ${gexVal}${chevron}</div>`;
                         }
 
                         hudHtml += `
                             <div class="macro-card glass-panel" id="macro-card-${tickerStr.replace(/[^a-zA-Z0-9]/g, '')}">
                                 <h3>${title}</h3>
                                 <div class="macro-val">${(row.price || 0).toFixed(2)}</div>
-                                <div class="macro-gap ${changeColor}">${changeStr}${gapExtra}</div>
+                                <div class="macro-gap ${changeColor}"><span>${changeStr}</span>${gexLine}</div>
                             </div>
                         `;
                     } else {

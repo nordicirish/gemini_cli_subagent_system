@@ -41,10 +41,11 @@ const ModernChat = {
         },
         {
             icon: '🎯',
-            label: 'Scout Opportunities',
+            label: 'Deep Dive Watchlist',
             id: 'qp-scout',
-            tooltip: 'Scan non-portfolio watchlist tickers for top entry candidates based on regime.',
-            prompt: 'SYSTEM DIRECTIVE: SCOUT INTELLIGENCE SCAN. Using the live DATA_PACKET just injected, evaluate the non-portfolio tickers to identify top entry candidates. Assess risk/reward vs current regime. Output a clear, human-readable summary.'
+            tooltip: 'Deep dive research on all tickers in your Watchlist — entry signals, risk/reward, and regime alignment.',
+            watchlistOnly: true,  // hidden when watchlist is empty
+            prompt: 'SYSTEM DIRECTIVE: DEEP DIVE WATCHLIST RESEARCH. Using the live DATA_PACKET just injected, perform a deep-dive research analysis on ALL tickers currently in the Watchlist section. For each ticker: (1) Assess technical setup, RSI, ATR%, GEX posture and trend. (2) Score risk/reward vs. current regime. (3) Provide a clear entry/avoid recommendation with supporting evidence. Output a structured, human-readable summary.'
         },
         {
             icon: '📝',
@@ -120,7 +121,57 @@ const ModernChat = {
 
         this.loadHistory();
         this.fetchModels();
+        // Always hide chat on page load — only shown when user clicks the launcher
+        this.hide();
         console.log('Gemini CLI Chat UI Initialized');
+    },
+
+    // Update watchlist-only quick prompt visibility based on watchlist + active scout tickers
+    async updateWatchlistPromptVisibility() {
+        try {
+            // Fetch watchlist, live data, and ticker config in parallel
+            const [watchlistRes, dataRes, tickersRes] = await Promise.all([
+                fetch('/api/watchlist'),
+                fetch('/api/data'),
+                fetch('/api/tickers')
+            ]);
+            const watchlist = await watchlistRes.json();
+            const state = await dataRes.json();
+            const tickerConfig = await tickersRes.json();
+
+            const watchlistTickers = Array.isArray(watchlist) ? watchlist.map(t => t.toUpperCase()) : [];
+
+            // Get macro tickers from the /api/tickers config (not from /api/data which doesn't have 'macro')
+            const macroTickers = (tickerConfig.macro || []).map(t => t.toUpperCase());
+
+            // Extract portfolio tickers from live state
+            const ssot = state.local_storage_state || {};
+            const ms = ssot.mutable_state || {};
+            const portfolio = (ms.portfolio_snapshot || []).map(p => p.ticker.toUpperCase());
+
+            // Any ticker in live data that is not portfolio, not macro, not watchlist = scout intelligence
+            const allTickers = (state.tickers || []).map(t => t.ticker.toUpperCase());
+            const scoutTickers = allTickers.filter(t =>
+                !portfolio.includes(t) &&
+                !macroTickers.includes(t) &&
+                !watchlistTickers.includes(t)
+            );
+
+            // Combine: manual watchlist + scout intelligence tickers
+            const combined = [...new Set([...watchlistTickers, ...scoutTickers])];
+
+            const hasAny = combined.length > 0;
+            const scoutBtn = document.getElementById('qp-scout');
+            if (scoutBtn) {
+                scoutBtn.style.display = hasAny ? '' : 'none';
+                // Stash resolved tickers on the button so fireQuickPrompt can read them
+                scoutBtn._resolvedTickers = combined;
+            }
+        } catch (e) {
+            // On error, default to showing the button
+            const scoutBtn = document.getElementById('qp-scout');
+            if (scoutBtn) scoutBtn.style.display = '';
+        }
     },
 
     renderQuickPromptBar() {
@@ -192,23 +243,49 @@ const ModernChat = {
                 console.error("Failed to fetch news scan prompt", e);
             }
         }
+        // If this is the Deep Dive Watchlist prompt, build the full ticker list dynamically
         if (qp.id === 'qp-scout') {
             try {
-                const res = await fetch('/api/data');
-                const state = await res.json();
-                const ssot = state.local_storage_state || {};
-                const ms = ssot.mutable_state || {};
-                const watched = ms.watched_tickers || [];
-                const scouts = ms.scout_categories || [];
-                
-                if (watched.length === 0 && scouts.length === 0) {
-                    alert("Validation Error: Please add at least one Watchlist ticker or enable a Scout Sector before running a Scout Scan.");
+                // Prefer pre-resolved tickers cached on the button element
+                const scoutBtn = document.getElementById('qp-scout');
+                let combined = scoutBtn && scoutBtn._resolvedTickers ? scoutBtn._resolvedTickers : null;
+
+                if (!combined) {
+                    // Fallback: fetch live if not yet cached
+                    const [watchlistRes, dataRes, tickersRes] = await Promise.all([
+                        fetch('/api/watchlist'),
+                        fetch('/api/data'),
+                        fetch('/api/tickers')
+                    ]);
+                    const watchlist = await watchlistRes.json();
+                    const state = await dataRes.json();
+                    const tickerConfig = await tickersRes.json();
+                    const watchlistTickers = Array.isArray(watchlist) ? watchlist.map(t => t.toUpperCase()) : [];
+                    const macroTickers = (tickerConfig.macro || []).map(t => t.toUpperCase());
+                    const ssot = state.local_storage_state || {};
+                    const ms = ssot.mutable_state || {};
+                    const portfolio = (ms.portfolio_snapshot || []).map(p => p.ticker.toUpperCase());
+                    const allTickers = (state.tickers || []).map(t => t.ticker.toUpperCase());
+                    const scoutTickers = allTickers.filter(t =>
+                        !portfolio.includes(t) &&
+                        !macroTickers.includes(t) &&
+                        !watchlistTickers.includes(t)
+                    );
+                    combined = [...new Set([...watchlistTickers, ...scoutTickers])];
+                }
+
+                if (combined.length === 0) {
+                    alert('Validation Error: Please add tickers to your Watchlist or run a sector scout before using Deep Dive Watchlist.');
                     return;
                 }
+
+                // Inject the resolved tickers into the prompt
+                qp = { ...qp, prompt: `SYSTEM DIRECTIVE: DEEP DIVE WATCHLIST RESEARCH. Strategic Watchlist tickers: [${combined.join(', ')}]. Using the live DATA_PACKET just injected, perform a deep-dive research analysis on ALL of these tickers (includes both manual watchlist and scout intelligence candidates). For each ticker: (1) Assess technical setup, RSI, ATR%, GEX posture and trend. (2) Score risk/reward vs. current regime. (3) Provide a clear entry/avoid recommendation with supporting evidence. Output a structured, human-readable summary.` };
             } catch (e) {
-                console.error("Scout validation failed", e);
+                console.error('Deep Dive Watchlist prompt build failed', e);
             }
         }
+
 
         // Store the friendly display label so the chat bubble shows icon+name, not the raw system prompt
         this._pendingDisplayLabel = `${qp.icon} ${qp.label}`;
@@ -527,7 +604,19 @@ const ModernChat = {
             let sessions = JSON.parse(localStorage.getItem('gemini_chat_sessions') || '[]');
             sessions = sessions.filter(s => s.id !== id);
             localStorage.setItem('gemini_chat_sessions', JSON.stringify(sessions));
-            this.showHistory();
+            if (sessions.length === 0) {
+                // Show empty state inline instead of an alert
+                this.messages.innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #8b949e;">
+                        <div style="font-size: 2rem; margin-bottom: 12px;">📂</div>
+                        <div style="font-weight: 600; margin-bottom: 6px;">No Archived Sessions</div>
+                        <div style="font-size: 0.85rem;">Start a new chat to create your first archived session.</div>
+                        <button onclick="window.chatUI.restoreCurrentView()" style="margin-top: 16px; padding: 8px 16px; background: #238636; border: none; color: white; border-radius: 6px; cursor: pointer;">← Back to Chat</button>
+                    </div>`;
+                this.restoreHtml = null;
+            } else {
+                this.showHistory();
+            }
         }
     },
 
@@ -624,6 +713,8 @@ const ModernChat = {
     show() {
         this.overlay.classList.add('active');
         this.input.focus();
+        // Update watchlist-gated quick prompt visibility each time chat opens
+        this.updateWatchlistPromptVisibility();
     },
 
     hide() {
@@ -867,7 +958,10 @@ const ModernChat = {
         this.input.disabled = true;
         this.sendBtn.style.display = 'none';
         this.stopBtn.style.display = 'flex';
-        document.getElementById('chat-status-indicator').textContent = 'Status: Orchestrating...';
+        // Status indicator is intentionally left blank while the thinking bubble
+        // in the chat is already showing real-time progress feedback
+        const statusIndicator = document.getElementById('chat-status-indicator');
+        if (statusIndicator) statusIndicator.textContent = '';
 
         try {
             // Get last 15 messages for session hydration

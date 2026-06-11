@@ -340,20 +340,26 @@ h1 {
 
 .macro-hud {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    align-items: stretch;
+}
+
+.macro-hud .macro-card {
+    min-height: 100px;
 }
 
 .macro-card {
     min-width: 0;
-    padding: 16px 20px;
+    padding: 14px 16px;
     display: flex;
     flex-direction: column;
     align-items: center;
     text-align: center;
-    justify-content: center;
+    justify-content: space-between;
     position: relative;
     overflow: hidden;
+    gap: 6px;
 }
 
 .macro-card::before {
@@ -376,26 +382,45 @@ h1 {
 }
 
 .macro-card h3 {
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 1.5px;
     font-weight: 600;
-    margin-bottom: auto;
+    margin: 0;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
 }
 
 .macro-val {
-    font-size: 2rem;
+    font-size: 1.8rem;
     font-weight: 700;
     font-family: var(--font-mono);
     letter-spacing: -1px;
     line-height: 1.1;
+    margin: 0;
 }
 
 .macro-gap {
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     font-family: var(--font-mono);
     font-weight: 500;
+    line-height: 1.3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.macro-gex {
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    color: var(--text-muted);
+    line-height: 1.2;
 }
 
 /* ─── Main Grid ─── */
