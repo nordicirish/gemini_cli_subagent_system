@@ -51,7 +51,18 @@ if (Test-Path "requirements.txt") {
     Exit 1
 }
 
-# 5. Offer to install dependencies globally
+# 5. Create required directories
+$requiredDirs = @("logs", "context", "scripts", "prompts", "engine_instructions", "gem_trading_rules", "static")
+foreach ($dir in $requiredDirs) {
+    $dirPath = Join-Path $PSScriptRoot $dir
+    if (-not (Test-Path $dirPath)) {
+        Write-Host "Creating directory: $dir..." -ForegroundColor Yellow
+        New-Item -ItemType Directory -Force -Path $dirPath | Out-Null
+        Write-Host "Directory '$dir' created successfully." -ForegroundColor Green
+    }
+}
+
+# 6. Offer to install dependencies globally
 $choice = Read-Host "Would you also like to install dependencies globally? (y/N)"
 if ($choice -eq 'y' -or $choice -eq 'Y') {
     Write-Host "Installing dependencies globally..." -ForegroundColor Yellow
