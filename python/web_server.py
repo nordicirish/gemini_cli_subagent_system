@@ -363,12 +363,7 @@ framework.setup_context_cache(
     tools=all_tools
 )
 
-if not getattr(framework, "cached_content_name", None):
-    rules_path = os.path.join("gem_trading_rules", "rules.md")
-    if os.path.exists(rules_path):
-        with open(rules_path, "r", encoding="utf-8") as f:
-            rules_content = f.read()
-        terminal_instruction += f"\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{rules_content}"
+
 
 active_model_warning = None
 
@@ -412,16 +407,24 @@ if active_model_warning:
 def create_new_session():
     global ORCHESTRATOR_MODEL
     cache_to_use = None
-    if getattr(framework, "cached_content_name", None):
+    if getattr(framework, "cached_content_name", None) and getattr(framework, "cached_content_model", None) == ORCHESTRATOR_MODEL:
         cache_to_use = framework.cached_content_name
         framework.log(f"[System] Binding Context Cache to Orchestrator chat: {cache_to_use}")
     else:
         framework.log("[System] Orchestrator session created without Context Cache.")
 
+    sys_instruction = terminal_instruction
+    if not cache_to_use:
+        rules_path = os.path.join("gem_trading_rules", "rules.md")
+        if os.path.exists(rules_path):
+            with open(rules_path, "r", encoding="utf-8") as f:
+                rules_content = f.read()
+            sys_instruction = f"{terminal_instruction}\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{rules_content}"
+
     return framework.client.chats.create(
         model=ORCHESTRATOR_MODEL,
         config=agent_framework.types.GenerateContentConfig(
-            system_instruction=terminal_instruction if not cache_to_use else None,
+            system_instruction=sys_instruction if not cache_to_use else None,
             temperature=1.0,
             max_output_tokens=8192,
             tools=terminal_tools if not cache_to_use else None,

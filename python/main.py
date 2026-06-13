@@ -146,13 +146,7 @@ def main():
         tools=all_tools
     )
 
-    rules_path = os.path.join("gem_trading_rules", "rules.md")
-    if not getattr(framework, "cached_content_name", None):
-        # Attach canonical rules knowledge base
-        if os.path.exists(rules_path):
-            with open(rules_path, "r", encoding="utf-8") as f:
-                rules_content = f.read()
-            terminal_instruction += f"\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{rules_content}"
+
 
     # ---------------------------------------------------------------------------
     # Startup banner
@@ -217,14 +211,22 @@ def main():
         print(f"Failed to start Cloud Sync Daemon: {e}")
 
     cache_to_use = None
-    if getattr(framework, "cached_content_name", None):
+    if getattr(framework, "cached_content_name", None) and getattr(framework, "cached_content_model", None) == valid_model:
         cache_to_use = framework.cached_content_name
         print(f"[System] Binding Context Cache to CLI chat session: {cache_to_use}")
+
+    sys_instruction = terminal_instruction
+    if not cache_to_use:
+        rules_path = os.path.join("gem_trading_rules", "rules.md")
+        if os.path.exists(rules_path):
+            with open(rules_path, "r", encoding="utf-8") as f:
+                rules_content = f.read()
+            sys_instruction = f"{terminal_instruction}\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{rules_content}"
 
     chat = framework.client.chats.create(
         model=valid_model,
         config=agent_framework.types.GenerateContentConfig(
-            system_instruction=terminal_instruction if not cache_to_use else None,
+            system_instruction=sys_instruction if not cache_to_use else None,
             temperature=1.0,
             tools=terminal_tools if not cache_to_use else None,
             cached_content=cache_to_use,
