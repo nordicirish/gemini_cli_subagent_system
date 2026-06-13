@@ -797,7 +797,7 @@ def chat_endpoint(req: ChatRequest):
                 return {"status": "success", "response": "[OFFLINE] Session terminated by user interrupt."}
 
             turn_count += 1
-            framework.log(f"[Orchestrator] Starting turn {turn_count}...")
+            framework.log(f"[Orchestrator ({ORCHESTRATOR_MODEL})] Starting turn {turn_count}...")
 
             # --- GUARD: strip orphaned function_call turns from history (causes 400 INVALID_ARGUMENT)
             # Only run this guard if we are sending a NEW text prompt (not returning a function response)

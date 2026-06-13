@@ -115,6 +115,7 @@ class AgentFramework:
 
         # Caching state (ENH_CACHE_01)
         self.cached_content_name = None
+        self.cached_content_model = None
         self.last_cache_hash = None
         self.cache_disabled = self._local_config.get("DISABLE_CACHE", False)  # Track Free Tier or manual override
         
@@ -280,7 +281,7 @@ class AgentFramework:
             
         # If Gemini Subscription is linked, dynamically upgrade free tier models to equivalent Gemini PRO models
         if getattr(self, "gemini_subscription_linked", False):
-            if mode in ["FAST", "GEMMA", "FLASH"]:
+            if mode in ["FAST", "GEMMA", "FLASH", "THINKING"]:
                 pro_model = overrides.get(DEFAULT_MODEL_PRO, DEFAULT_MODEL_PRO)
                 if pro_model not in resolved:
                     resolved.insert(0, pro_model)
@@ -330,6 +331,7 @@ class AgentFramework:
                 except Exception as e:
                     self.log(f"[System] Cache delete failed: {e}")
             self.cached_content_name = None
+            self.cached_content_model = None
             self.last_cache_hash = None
             return
 
@@ -394,8 +396,9 @@ class AgentFramework:
                 ),
             )
             self.cached_content_name = cache.name
+            self.cached_content_model = target_model
             self.last_cache_hash = content_hash
-            self.log(f"[System] Context Cache SUCCESS: {cache.name}")
+            self.log(f"[System] Context Cache SUCCESS: {cache.name} for {target_model}")
         except Exception as e:
             error_str = str(e)
             if "RESOURCE_EXHAUSTED" in error_str or "limit=0" in error_str:
@@ -404,6 +407,7 @@ class AgentFramework:
             else:
                 self.log(f"[System] Context Cache FAILED: {e}. Falling back to standard inference.")
             self.cached_content_name = None
+            self.cached_content_model = None
 
     # -----------------------------------------------------------------------
     # Core generation method
@@ -453,6 +457,7 @@ class AgentFramework:
                 # Caching must be completely stripped when using the Free-Tier Key (since Free Tier has no caching support).
                 use_cache_for_this_client = (
                     self.cached_content_name 
+                    and getattr(self, "cached_content_model", None) == model_name
                     and mode in ["PRO", "THINKING"] 
                     and client_label != "Free-Tier Key"
                 )
