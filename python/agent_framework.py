@@ -67,6 +67,11 @@ class AgentFramework:
         self._local_config = self._load_local_config()
         self.free_tier_only = self._local_config.get("FREE_TIER_ONLY", True)
         self.gemini_subscription_linked = self._local_config.get("GEMINI_SUBSCRIPTION_LINKED", False)
+        
+        # Gemini Plan unlocks Context Caching automatically
+        if self.gemini_subscription_linked:
+            self.free_tier_only = False
+            
         self.log_callback = log_callback
 
         # Cloud client (Gemini)
