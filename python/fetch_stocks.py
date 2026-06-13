@@ -1119,11 +1119,75 @@ class MarketDataCache:
         self.premarket_vol_cache: dict[str, int] = {}
         self.last_gex_fetch: dict[str, float] = {}
         self.gex_cache: dict[str, dict] = {}
+        # Date tracker for daily history updates
+        self.last_history_fetch_date: dict[str, str] = {}
 
     def clear(self):
         self.__init__()
 
+    def garbage_collect(self, active_tickers):
+        if not active_tickers:
+            return
+        active_set = {sym.upper() for sym in active_tickers}
+        for dict_attr in ('history', 'technicals', 'last_history_fetch_date'):
+            d = getattr(self, dict_attr, {})
+            keys_to_remove = [k for k in list(d.keys()) if k.upper() not in active_set]
+            for k in keys_to_remove:
+                d.pop(k, None)
+        if keys_to_remove:
+            print(f"[Cache] Garbage collected {len(keys_to_remove)} redundant tickers: {keys_to_remove}")
+
+    def save_to_disk(self, active_tickers=None):
+        try:
+            if active_tickers:
+                self.garbage_collect(active_tickers)
+            path = "context/daily_history_cache.json"
+            serialized_history = {}
+            for sym, df in self.history.items():
+                if df is not None and not df.empty:
+                    serialized_history[sym] = {
+                        "index": [idx.isoformat() if hasattr(idx, 'isoformat') else str(idx) for idx in df.index],
+                        "columns": list(df.columns),
+                        "data": df.values.tolist()
+                    }
+            payload = {
+                "history": serialized_history,
+                "technicals": self.technicals,
+                "last_history_fetch_date": self.last_history_fetch_date
+            }
+            os.makedirs("context", exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            print(f"[Cache] Successfully saved daily history cache for {len(serialized_history)} tickers to disk.")
+        except Exception as e:
+            print(f"[Cache Warning] Failed to save daily history cache: {e}")
+
+    def load_from_disk(self):
+        try:
+            path = "context/daily_history_cache.json"
+            if not os.path.exists(path):
+                return
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            serialized_history = payload.get("history", {})
+            for sym, serialized in serialized_history.items():
+                try:
+                    df = pd.DataFrame(
+                        data=serialized["data"],
+                        index=pd.to_datetime(serialized["index"]),
+                        columns=serialized["columns"]
+                    )
+                    self.history[sym] = df
+                except Exception as df_err:
+                    print(f"[Cache Warning] Failed to parse DataFrame for {sym}: {df_err}")
+            self.technicals.update(payload.get("technicals", {}))
+            self.last_history_fetch_date.update(payload.get("last_history_fetch_date", {}))
+            print(f"[Cache] Successfully loaded daily history cache for {len(self.history)} tickers from disk.")
+        except Exception as e:
+            print(f"[Cache Warning] Failed to load daily history cache: {e}")
+
 cache = MarketDataCache()
+cache.load_from_disk()
 yf_data = YfData()  # Initialize yfinance data handler (handles crumbs/cookies)
 
 # -----------------------------
@@ -1699,7 +1763,27 @@ def get_gex_profile(ticker_obj, spot_price):
 # LOGIC (UPDATED)
 # -----------------------------
 
+try:
+    from zoneinfo import ZoneInfo
+    ny_tz = ZoneInfo("America/New_York")
+except:
+    ny_tz = None
+
+def get_today_str():
+    if ny_tz:
+        try:
+            return datetime.now(ny_tz).strftime("%Y-%m-%d")
+        except: pass
+    return datetime.now().strftime("%Y-%m-%d")
+
 def update_history_and_technicals(symbol, t_obj):
+    today_str = get_today_str()
+    if (symbol in cache.history 
+            and not cache.history[symbol].empty 
+            and cache.last_history_fetch_date.get(symbol) == today_str):
+        # Already updated today! Skip download.
+        return
+
     try:
         hist = t_obj.history(period="2y", interval="1d")
         if hist.empty:
@@ -1717,6 +1801,7 @@ def update_history_and_technicals(symbol, t_obj):
             'Open': 0.0, 'High': 0.0, 'Low': 0.0, 'Close': 0.0, 'Volume': 0
         }], index=[pd.Timestamp.now()])
         cache.history[symbol] = hist
+        cache.last_history_fetch_date[symbol] = today_str
         cache.technicals[symbol] = {
             "SMA_20": None,
             "SMA_50": None,
@@ -1730,6 +1815,7 @@ def update_history_and_technicals(symbol, t_obj):
         return
 
     cache.history[symbol] = hist
+    cache.last_history_fetch_date[symbol] = today_str
 
     if not hist.empty:
         try:
@@ -2312,6 +2398,8 @@ def run_daemon():
         print(f"Loading {sym}...", end="\r")
         update_history_and_technicals(sym, obj)
 
+    cache.save_to_disk(ALL_TICKERS)
+
     # Initial GEX population — uses batch quotes for spot price, then computes
     # GEX per ticker with a throttled delay to avoid Yahoo Finance rate limits.
     print(f"{YELLOW}Loading initial GEX profiles...{RESET}")
@@ -2484,6 +2572,8 @@ def run_daemon():
                 'VIXY': {'price': 0.0, 'gap': 0.0}
             }
 
+            needs_save = False
+
             for i, sym in enumerate(ALL_TICKERS):
                 # Dynamic sleep: slower on heavy refresh to respect rate limits
                 if is_heavy or sym not in cache.history or cache.history[sym].empty:
@@ -2497,6 +2587,7 @@ def run_daemon():
 
                 if is_heavy or sym not in cache.history or cache.history[sym].empty:
                     update_history_and_technicals(sym, obj)
+                    needs_save = True
 
                 update_price_tick(sym, obj, status, batch_quotes.get(sym))
 
@@ -2763,7 +2854,8 @@ def run_daemon():
 
                 data.append(item_dict)
 
-
+            if needs_save:
+                cache.save_to_disk(ALL_TICKERS)
 
             print("-" * table_width)
             ief = macro_state.get('IEF', {})

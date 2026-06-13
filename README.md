@@ -148,6 +148,15 @@ The system aggregates the entire rulebook, trade history, and subagent instructi
 > **Cost-Aware Caching Policy:** Context caching is a dynamic, user-controlled toggle available under paid model tiers (Pro tiers) in the dashboard overlay. The framework automatically disables context caching on Free Tiers to prevent API quota exhaustion and rate-limit blocks.
 
 
+### 💾 Daily Stock History Cache (ENH_CACHE_02)
+
+To minimize start-up latency and prevent yfinance/Polygon API rate limits, the system features an intelligent local caching layer:
+- **Daily Persistence**: Historical daily chart data (2-year lookback) is fetched at most once per calendar day (aligned to the US Eastern Time zone).
+- **Fast Reboots**: On application restarts, historical data is loaded from `context/daily_history_cache.json` in under a second.
+- **On-Demand Updates**: Historical data is only fetched for newly added tickers, bypassing unnecessary requests for existing data.
+- **Automatic Garbage Collection**: The background daemon automatically runs a pruning routine to remove redundant or inactive tickers from both memory and disk caches when ticker list configurations change.
+
+
 ### 🏛️ Autonomous Rule Evolution (ENH_61/62)
 The system "Learns" from market events. When a high-conviction pattern is identified, the **Context Engine** proposes a new rule. Once you provide **MANDATE_21** approval, the system autonomously modifies `rules.md`.
 
