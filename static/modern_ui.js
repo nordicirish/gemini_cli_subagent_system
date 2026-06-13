@@ -362,12 +362,7 @@ const ModernChat = {
             if (data.status === 'success') {
                 this.showModelWarning(data.warning);
                 const currentModel = this.modelSelector.value;
-                const subLinked = this.geminiSubscriptionToggle ? this.geminiSubscriptionToggle.checked : false;
-                // If subscription is active and no meaningful model is set, prefer the latest Pro model.
-                // Treat the deprecated flash-thinking fallback as "not explicitly chosen".
-                const isDefaultFallback = !currentModel || currentModel === 'gemini-2.0-flash-thinking-exp';
-                const preferPro = subLinked && isDefaultFallback;
-                const activeModel = (preferPro ? data.models.find(m => m.name.toLowerCase().includes('pro') && !m.name.toLowerCase().includes('exp'))?.name : null) || currentModel || data.current_model || 'gemini-2.0-flash-thinking-exp';
+                const activeModel = currentModel || data.current_model || 'gemini-2.5-flash';
                 this.modelSelector.innerHTML = '';
                 
                 const includePaidToggle = this.paidTiersToggle ? this.paidTiersToggle.checked : false;
