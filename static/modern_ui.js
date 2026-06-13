@@ -362,7 +362,7 @@ const ModernChat = {
             if (data.status === 'success') {
                 this.showModelWarning(data.warning);
                 const currentModel = this.modelSelector.value;
-                const activeModel = currentModel || data.current_model || 'gemini-2.5-flash';
+                const activeModel = data.current_model || currentModel || 'gemini-2.5-flash';
                 this.modelSelector.innerHTML = '';
                 
                 const includePaidToggle = this.paidTiersToggle ? this.paidTiersToggle.checked : false;

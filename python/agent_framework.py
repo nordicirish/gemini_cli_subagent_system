@@ -44,7 +44,7 @@ llm_logger.propagate = False
 DEFAULT_MODEL_PRO = "gemini-2.5-pro"
 DEFAULT_MODEL_FLASH = "gemini-2.5-flash"
 DEFAULT_MODEL_GEMMA = "gemma-4-31b-it"
-DEFAULT_MODEL_THINKING = "gemini-2.5-flash"
+DEFAULT_MODEL_THINKING = "gemini-2.5-pro"
 
 MODEL_MAPPING = {
     "PRO":      [DEFAULT_MODEL_PRO, "gemini-3.1-pro-preview", "gemini-2.0-pro-exp", "gemini-1.5-pro", DEFAULT_MODEL_FLASH],
@@ -173,12 +173,13 @@ class AgentFramework:
                 best_model = all_thinking_models[0]
                 self.log(f"[Dynamic Model Discovery] Found best general thinking model: {best_model}")
                 return best_model
-            
-            self.log("[Dynamic Model Discovery] No specific thinking models returned by key. Defaulting to gemini-2.5-flash.")
-            return "gemini-2.5-flash"
+            fallback = "gemini-2.5-flash" if self.free_tier_only else "gemini-2.5-pro"
+            self.log(f"[Dynamic Model Discovery] No specific thinking models returned by key. Defaulting to {fallback}.")
+            return fallback
         except Exception as e:
-            self.log(f"[Dynamic Model Discovery Warning] Failed to dynamically probe models from API: {e}. Defaulting to gemini-2.5-flash.")
-            return "gemini-2.5-flash"
+            fallback = "gemini-2.5-flash" if self.free_tier_only else "gemini-2.5-pro"
+            self.log(f"[Dynamic Model Discovery Warning] Failed to dynamically probe models from API: {e}. Defaulting to {fallback}.")
+            return fallback
 
     def _log_handshake(self, direction, model_name, client_label, prompt, config, response=None, error=None, latency=None):
         """Record structured LLM interactions to gem_handshakes.log"""
