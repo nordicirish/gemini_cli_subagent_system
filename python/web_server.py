@@ -528,15 +528,21 @@ def list_models_endpoint():
             if gm["name"] not in existing_names:
                 models.append(gm)
 
-        # Sort so Thinking is first, followed by Pro, then Flash
+        # Sort so Thinking is first, followed by Pro, then Flash, and highest versions are listed first
         def sort_key(x):
             name = x["name"].lower()
+            tier = 2
             if "thinking" in name:
-                return (0, name)
+                tier = 0
             elif "pro" in name:
-                return (1, name)
-            else:
-                return (2, name)
+                tier = 1
+                
+            import re
+            match = re.search(r"(\d+\.\d+)", name)
+            version = float(match.group(1)) if match else 0.0
+            
+            # Sort by tier ascending, then version descending, then name ascending
+            return (tier, -version, name)
 
         models.sort(key=sort_key)
         global active_model_warning
@@ -607,6 +613,23 @@ def set_model(data: dict):
     # Fallback to current model if none provided
     new_model = data.get("model", ORCHESTRATOR_MODEL)
     include_paid = data.get("include_paid", True)
+    gemini_linked = data.get("gemini_subscription_linked", False)
+
+    # Update config.json
+    try:
+        config_path = "context/config.json"
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+            
+            if config_data.get("GEMINI_SUBSCRIPTION_LINKED") != gemini_linked:
+                config_data["GEMINI_SUBSCRIPTION_LINKED"] = gemini_linked
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(config_data, f, indent=2)
+    except Exception as ce:
+        framework.log(f"[System Error] Failed to write subscription policy to config.json: {ce}")
+
+    framework.gemini_subscription_linked = gemini_linked
 
     # Dynamically toggle free_tier_only in the framework
     old_free = getattr(framework, "free_tier_only", True)
@@ -772,6 +795,22 @@ def chat_endpoint(req: ChatRequest):
 
             turn_count += 1
             framework.log(f"[Orchestrator] Starting turn {turn_count}...")
+
+            # --- GUARD: strip orphaned function_call turns from history (causes 400 INVALID_ARGUMENT)
+            # Only run this guard if we are sending a NEW text prompt (not returning a function response)
+            if isinstance(current_message, str):
+                try:
+                    h = global_chat_session.get_history()
+                    if h and hasattr(h[-1], 'parts'):
+                        last_parts = h[-1].parts
+                        has_fc = any(hasattr(p, 'function_call') and p.function_call for p in last_parts)
+                        has_fr = any(hasattr(p, 'function_response') and p.function_response for p in last_parts)
+                        if has_fc and not has_fr:
+                            framework.log("[Orchestrator] WARNING: Orphaned function_call in history — pruning to avoid 400 error.")
+                            global_chat_session._history = list(h[:-1])  # drop the dangling turn
+                except Exception as guard_err:
+                    framework.log(f"[Orchestrator] History guard check failed (non-critical): {guard_err}")
+
             response = global_chat_session.send_message(current_message)
             
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
@@ -876,6 +915,14 @@ def chat_endpoint(req: ChatRequest):
                         payload_processed = True
                     except Exception as pe:
                         framework.log(f"[System Error] Failed to update SSoT with sliced payload: {pe}")
+                        # Even if parsing fails, hide the broken payload from the chat UI
+                        payload_html = (
+                            f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
+                            f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; list-style: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated) <span style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; margin-left: 10px;">[Show/Hide]</span></summary>'
+                            f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
+                        )
+                        cleaned_response = full_response[:idx] + payload_html + full_response[close_idx + 3:]
+                        payload_processed = True
                         
         if not payload_processed:
             # Fallback to direct curly brace extraction
@@ -898,6 +945,15 @@ def chat_endpoint(req: ChatRequest):
                         payload_processed = True
                     except Exception as pe:
                         framework.log(f"[System Error] Failed to update SSoT with brace payload: {pe}")
+                        # Even if parsing fails, hide the broken payload from the chat UI
+                        payload_html = (
+                            f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
+                            f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; list-style: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated) <span style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; margin-left: 10px;">[Show/Hide]</span></summary>'
+                            f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
+                        )
+                        # We still extract it from the UI so it doesn't look like an error wall of text
+                        cleaned_response = full_response[:start_idx] + payload_html + full_response[end_idx+1:]
+                        payload_processed = True
                         
         if payload_processed:
             import re

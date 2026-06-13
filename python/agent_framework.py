@@ -66,6 +66,7 @@ class AgentFramework:
         # Load optional local model config from config.json
         self._local_config = self._load_local_config()
         self.free_tier_only = self._local_config.get("FREE_TIER_ONLY", True)
+        self.gemini_subscription_linked = self._local_config.get("GEMINI_SUBSCRIPTION_LINKED", False)
         self.log_callback = log_callback
 
         # Cloud client (Gemini)
@@ -266,6 +267,13 @@ class AgentFramework:
                 filtered.append(overrides.get(DEFAULT_MODEL_FLASH, DEFAULT_MODEL_FLASH))
             return filtered
             
+        # If Gemini Subscription is linked, dynamically upgrade free tier models to equivalent Gemini PRO models
+        if getattr(self, "gemini_subscription_linked", False):
+            if mode in ["FAST", "GEMMA", "FLASH"]:
+                pro_model = overrides.get(DEFAULT_MODEL_PRO, DEFAULT_MODEL_PRO)
+                if pro_model not in resolved:
+                    resolved.insert(0, pro_model)
+                    
         return resolved
 
     def load_system_instruction(self, file_path: str) -> str:
@@ -523,6 +531,12 @@ class AgentFramework:
                         match = re.search(r"retry in (\d+(?:\.\d+)?)s", error_msg, re.IGNORECASE)
                         if match:
                             wait_time = int(float(match.group(1))) + 1
+                            
+                        if getattr(self, "gemini_subscription_linked", False):
+                            self._log_handshake("WARNING", model_name, client_label, prompt, config, error=f"Rate limit hit. Subscription active, skipping {wait_time}s wait and failing over.")
+                            self.log(f"[System] Rate limit hit for {model_name}. Subscription active, bypassing delay and routing to next tier...")
+                            continue
+                            
                         self._log_handshake("WARNING", model_name, client_label, prompt, config, error=f"Rate limit hit. Waiting {wait_time}s to retry...")
                         self.log(f"[System] Rate limit hit for {model_name}. Waiting {wait_time}s...")
                         time.sleep(wait_time)

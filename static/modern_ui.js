@@ -76,19 +76,42 @@ const ModernChat = {
         if (this.newChatBtn) this.newChatBtn.onclick = () => this.startNewChat();
         if (this.historyBtn) this.historyBtn.onclick = () => this.showHistory();
 
+        // --- Settings gear popover ---
+        const gearBtn = document.getElementById('settings-gear-btn');
+        const popover = document.getElementById('settings-popover');
+        if (gearBtn && popover) {
+            gearBtn.onclick = (e) => {
+                e.stopPropagation();
+                const isOpen = popover.style.display !== 'none';
+                popover.style.display = isOpen ? 'none' : 'block';
+                this.syncSettingsPopover();
+            };
+            document.addEventListener('click', (e) => {
+                if (!gearBtn.contains(e.target) && !popover.contains(e.target)) {
+                    popover.style.display = 'none';
+                }
+            });
+        }
+
         this.modelSelector = document.getElementById('model-selector');
         if (this.modelSelector) {
             this.modelSelector.onchange = () => this.changeModel();
         }
         this.paidTiersToggle = document.getElementById('paid-tiers-toggle');
-        if (this.paidTiersToggle) {
-            this.paidTiersToggle.onchange = () => this.fetchModels();
-        }
+        this.geminiSubscriptionToggle = document.getElementById('gemini-subscription-toggle');
+        this.skipDebateToggle = document.getElementById('skip-debate-toggle');
         this.cachingToggle = document.getElementById('context-caching-toggle');
         this.cachingContainer = document.getElementById('context-caching-toggle-container');
         if (this.cachingToggle) {
             this.cachingToggle.onchange = () => this.toggleCaching();
-            this.cachingToggle.checked = true; // Default to checked (recommended for paid)
+            this.cachingToggle.checked = true;
+        }
+        // Default subscription ON
+        if (this.geminiSubscriptionToggle) {
+            this.geminiSubscriptionToggle.checked = true;
+        }
+        if (this.paidTiersToggle) {
+            this.paidTiersToggle.checked = true; // plan users get all models
         }
 
         if (this.input) {
@@ -123,6 +146,12 @@ const ModernChat = {
         this.fetchModels();
         // Always hide chat on page load — only shown when user clicks the launcher
         this.hide();
+        // If subscription is active by default, auto-trigger caching on startup
+        if (this.geminiSubscriptionToggle && this.geminiSubscriptionToggle.checked && this.cachingToggle) {
+            this.cachingToggle.checked = true;
+            // Small delay so fetchModels() has set the model first
+            setTimeout(() => this.toggleCaching(), 800);
+        }
         console.log('Gemini CLI Chat UI Initialized');
     },
 
@@ -333,29 +362,56 @@ const ModernChat = {
             if (data.status === 'success') {
                 this.showModelWarning(data.warning);
                 const currentModel = this.modelSelector.value;
-                const activeModel = currentModel || data.current_model || 'gemini-2.0-flash-thinking-exp';
+                const subLinked = this.geminiSubscriptionToggle ? this.geminiSubscriptionToggle.checked : false;
+                // If subscription is active and no meaningful model is set, prefer the latest Pro model.
+                // Treat the deprecated flash-thinking fallback as "not explicitly chosen".
+                const isDefaultFallback = !currentModel || currentModel === 'gemini-2.0-flash-thinking-exp';
+                const preferPro = subLinked && isDefaultFallback;
+                const activeModel = (preferPro ? data.models.find(m => m.name.toLowerCase().includes('pro') && !m.name.toLowerCase().includes('exp'))?.name : null) || currentModel || data.current_model || 'gemini-2.0-flash-thinking-exp';
                 this.modelSelector.innerHTML = '';
                 
-                const includePaid = this.paidTiersToggle ? this.paidTiersToggle.checked : false;
+                const includePaidToggle = this.paidTiersToggle ? this.paidTiersToggle.checked : false;
+                const includePaid = includePaidToggle || subLinked;
                 
+                // Split models into stable and experimental
+                const stableModels = [];
+                const experimentalModels = [];
                 data.models.forEach(m => {
                     const nameLower = m.name.toLowerCase();
                     const isPaid = nameLower.includes('pro') || (nameLower.includes('preview') && !nameLower.includes('flash') && !nameLower.includes('thinking'));
-                    
-                    if (!includePaid && isPaid) {
-                        return; // Skip paid models if includePaid toggle is unchecked
+                    if (!includePaid && isPaid) return;
+                    if (nameLower.includes('-exp') || nameLower.includes('experimental') || nameLower.includes('thinking-exp')) {
+                        experimentalModels.push(m);
+                    } else {
+                        stableModels.push(m);
                     }
-                    
+                });
+
+                const makeOpt = (m) => {
                     const opt = document.createElement('option');
                     opt.value = m.name;
                     opt.textContent = m.label;
                     opt.style.background = '#1a1a1a';
                     opt.style.color = 'white';
-                    if (m.name === activeModel) {
-                        opt.selected = true;
-                    }
-                    this.modelSelector.appendChild(opt);
-                });
+                    if (m.name === activeModel) opt.selected = true;
+                    return opt;
+                };
+
+                // Stable models group
+                if (stableModels.length > 0) {
+                    const grp = document.createElement('optgroup');
+                    grp.label = '✅ Stable Models';
+                    stableModels.forEach(m => grp.appendChild(makeOpt(m)));
+                    this.modelSelector.appendChild(grp);
+                }
+
+                // Experimental models group
+                if (experimentalModels.length > 0) {
+                    const grp = document.createElement('optgroup');
+                    grp.label = '⚠️ Experimental — Use with caution';
+                    experimentalModels.forEach(m => grp.appendChild(makeOpt(m)));
+                    this.modelSelector.appendChild(grp);
+                }
 
                 if (!this.modelSelector.value && this.modelSelector.options.length > 0) {
                     this.modelSelector.selectedIndex = 0;
@@ -375,11 +431,17 @@ const ModernChat = {
         statusIndicator.textContent = `Status: Re-Calibrating Council (${model})...`;
         statusIndicator.style.color = 'var(--accent-blue)';
         try {
-            const includePaid = this.paidTiersToggle ? this.paidTiersToggle.checked : false;
+            const includePaidToggle = this.paidTiersToggle ? this.paidTiersToggle.checked : false;
+            const subLinked = this.geminiSubscriptionToggle ? this.geminiSubscriptionToggle.checked : false;
+            const includePaid = includePaidToggle || subLinked;
             const res = await fetch('/api/set_model', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model, include_paid: includePaid })
+                body: JSON.stringify({ 
+                    model, 
+                    include_paid: includePaid,
+                    gemini_subscription_linked: subLinked 
+                })
             });
             if (res.ok) {
                 const data = await res.json();
@@ -393,6 +455,63 @@ const ModernChat = {
             console.error('Model switch failed', e);
             statusIndicator.textContent = 'Status: Calibration Error';
         }
+    },
+
+    // --- Settings Popover helpers ---
+    _setKnob(knobId, trackId, isOn) {
+        const knob = document.getElementById(knobId);
+        const track = document.getElementById(trackId);
+        if (knob) knob.style.left = isOn ? '22px' : '4px';
+        if (track) track.style.background = isOn ? '#238636' : '#30363d';
+    },
+
+    syncSettingsPopover() {
+        const subOn = this.geminiSubscriptionToggle ? this.geminiSubscriptionToggle.checked : true;
+        const debateHidden = this.skipDebateToggle ? this.skipDebateToggle.checked : true;
+        const paidOn = this.paidTiersToggle ? this.paidTiersToggle.checked : false;
+        const cacheOn = this.cachingToggle ? this.cachingToggle.checked : true;
+
+        this._setKnob('settings-sub-knob', 'settings-sub-toggle', subOn);
+        this._setKnob('settings-debate-knob', 'settings-debate-toggle', debateHidden);
+        this._setKnob('settings-paid-knob', 'settings-paid-toggle', paidOn);
+        this._setKnob('settings-caching-knob', 'settings-caching-toggle', cacheOn);
+
+        // Show/hide plan banner and advanced section based on subscription state
+        const banner = document.getElementById('settings-plan-banner');
+        const advanced = document.getElementById('settings-advanced-section');
+        if (banner) banner.style.display = subOn ? 'flex' : 'none';
+        if (advanced) advanced.style.display = subOn ? 'none' : 'block';
+    },
+
+    toggleSettingsSub() {
+        if (!this.geminiSubscriptionToggle) return;
+        this.geminiSubscriptionToggle.checked = !this.geminiSubscriptionToggle.checked;
+        const isOn = this.geminiSubscriptionToggle.checked;
+        if (isOn && this.cachingToggle) { this.cachingToggle.checked = true; this.toggleCaching(); }
+        if (isOn && this.paidTiersToggle) this.paidTiersToggle.checked = true;
+        this.fetchModels();
+        this.updateTotalSessionCost();
+        this.syncSettingsPopover();
+    },
+
+    toggleSettingsDebate() {
+        if (!this.skipDebateToggle) return;
+        this.skipDebateToggle.checked = !this.skipDebateToggle.checked;
+        this.syncSettingsPopover();
+    },
+
+    toggleSettingsPaid() {
+        if (!this.paidTiersToggle) return;
+        this.paidTiersToggle.checked = !this.paidTiersToggle.checked;
+        this.fetchModels();
+        this.syncSettingsPopover();
+    },
+
+    toggleSettingsCaching() {
+        if (!this.cachingToggle) return;
+        this.cachingToggle.checked = !this.cachingToggle.checked;
+        this.toggleCaching();
+        this.syncSettingsPopover();
     },
 
     async toggleCaching() {
@@ -414,21 +533,29 @@ const ModernChat = {
     },
 
     async updateCachingToggleVisibility() {
-        if (!this.modelSelector || !this.cachingContainer || !this.cachingToggle) return;
+        if (!this.modelSelector || !this.cachingToggle) return;
         const model = this.modelSelector.value || '';
         const nameLower = model.toLowerCase();
         const isPaid = nameLower.includes('pro') || (nameLower.includes('preview') && !nameLower.includes('flash') && !nameLower.includes('thinking'));
-        
-        if (isPaid) {
-            this.cachingContainer.style.display = 'flex';
-        } else {
-            this.cachingContainer.style.display = 'none';
-            // If it was checked, uncheck it and call backend to deactivate caching
+
+        // cachingContainer is now inside the settings popover — never show it in the header
+        if (this.cachingContainer) this.cachingContainer.style.display = 'none';
+
+        if (!isPaid) {
+            // Non-pro model: disable caching silently
             if (this.cachingToggle.checked) {
                 this.cachingToggle.checked = false;
                 await this.toggleCaching();
             }
+        } else if (this.geminiSubscriptionToggle && this.geminiSubscriptionToggle.checked) {
+            // Subscription + pro: force caching on
+            if (!this.cachingToggle.checked) {
+                this.cachingToggle.checked = true;
+                await this.toggleCaching();
+            }
         }
+        // Sync popover knob if open
+        this.syncSettingsPopover();
     },
 
     renderQuotaExhaustedCard(thinkingId) {
@@ -503,7 +630,7 @@ const ModernChat = {
     async enablePaidTiersAndSwitch() {
         this.appendMessage('ai', 'Initiating Paid Tier calibration sequence...', false);
         
-        // 1. Check Include Paid Tiers checkbox
+        // 1. Check Include Paid Tiers and Subscription checkbox if it was a quota error upgrade
         if (this.paidTiersToggle) {
             this.paidTiersToggle.checked = true;
         }
@@ -533,8 +660,9 @@ const ModernChat = {
 
     async startNewChat() {
         if (confirm('Archive current session and start a new conversation?')) {
-            this.archiveCurrentSession();
+            try { this.archiveCurrentSession(); } catch(e) { console.error('Archive failed', e); }
             this.messages.innerHTML = '';
+            this.restoreHtml = null;
             localStorage.removeItem('gem_chat_history');
             this.saveHistory();
             try {
@@ -547,7 +675,7 @@ const ModernChat = {
 
     archiveCurrentSession() {
         const history = JSON.parse(localStorage.getItem('gem_chat_history') || '[]');
-        if (history.length < 2) return;
+        if (history.length === 0) return;
         const sessions = JSON.parse(localStorage.getItem('gemini_chat_sessions') || '[]');
         const firstUserMsg = history.find(m => m.role === 'user')?.text || 'Empty Session';
         const sessionPreview = firstUserMsg.substring(0, 40) + (firstUserMsg.length > 40 ? '...' : '');
@@ -625,8 +753,10 @@ const ModernChat = {
         const session = sessions.find(s => s.id === id);
         if (session) {
             if (confirm('Load this archived session? (Current session will be archived)')) {
-                this.archiveCurrentSession();
+                try { this.archiveCurrentSession(); } catch(e) {}
                 localStorage.setItem('gem_chat_history', JSON.stringify(session.messages));
+                this.restoreHtml = null;
+                try { fetch('/api/reset_chat', { method: 'POST' }); } catch(e) {} // Force backend LLM hydration next message
                 this.loadHistory();
             }
         }
@@ -640,26 +770,12 @@ const ModernChat = {
     },
 
     loadHistory() {
-        const history = localStorage.getItem('gem_chat_history');
-        let parsed = [];
-        if (history) {
-            try {
-                parsed = JSON.parse(history);
-            } catch (e) {
-                console.error('Failed to parse chat history', e);
-            }
-        }
-
-        if (parsed.length > 0) {
-            this.messages.innerHTML = '';
-            parsed.forEach(msg => {
-                this.appendMessage(msg.role, msg.text, false, msg.cost || 0.0, msg.usage || null, msg.model || null);
-            });
-            this.updateTotalSessionCost();
-        } else {
-            this.updateTotalSessionCost();
-            this.triggerAutoBoot();
-        }
+        // Always start clean — wipe any stale session from localStorage.
+        // Old sessions are accessible via the SESSIONS archive button.
+        localStorage.removeItem('gem_chat_history');
+        this.saveHistory();
+        this.updateTotalSessionCost();
+        this.triggerAutoBoot();
     },
 
     async triggerAutoBoot() {
@@ -698,7 +814,13 @@ const ModernChat = {
         });
         const costEl = document.getElementById('chat-session-cost');
         if (costEl) {
-            costEl.textContent = `Est. Session Cost: $${totalCost.toFixed(2)}`;
+            const subActive = this.geminiSubscriptionToggle && this.geminiSubscriptionToggle.checked;
+            if (subActive) {
+                costEl.style.display = 'none';
+            } else {
+                costEl.style.display = '';
+                costEl.textContent = `Est. Session Cost: $${totalCost.toFixed(2)}`;
+            }
         }
     },
 
@@ -824,7 +946,8 @@ const ModernChat = {
                     contentDiv.style.marginTop = '12px';
                     details.appendChild(contentDiv);
                     
-                    let siblingsToMove = [debateHeader];
+                    // Do NOT include debateHeader itself — the <summary> already shows the title
+                    let siblingsToMove = [];
                     let next = debateHeader.nextSibling;
                     while (next) {
                         if (next.nodeType === 1 && (next.tagName.startsWith('H') || next.tagName === 'HR')) {
@@ -853,17 +976,28 @@ const ModernChat = {
                     siblingsToMove.forEach(node => {
                         contentDiv.appendChild(node);
                     });
+                    // Remove the original header element — summary is the only title needed
+                    debateHeader.remove();
                 }
             }
             if (cost > 0 || (usage && Object.keys(usage).length > 0)) {
-                const badge = document.createElement('div');
-                badge.className = 'cost-estimator';
-                let tokenInfo = '';
-                if (usage) {
-                    tokenInfo = ` <span style="font-size:0.65rem;opacity:0.7">(${usage.prompt_tokens + usage.cached_tokens} in / ${usage.candidates_tokens} out)</span>`;
+                const subActive = this.geminiSubscriptionToggle && this.geminiSubscriptionToggle.checked;
+                if (!subActive) {
+                    const badge = document.createElement('div');
+                    badge.className = 'cost-estimator';
+                    let tokenInfo = '';
+                    if (usage) {
+                        tokenInfo = ` <span style="font-size:0.65rem;opacity:0.7">(${usage.prompt_tokens + usage.cached_tokens} in / ${usage.candidates_tokens} out)</span>`;
+                    }
+                    badge.innerHTML = `🪙 Est. Cost: $${cost.toFixed(2)}${tokenInfo}`;
+                    msgDiv.appendChild(badge);
+                } else if (usage) {
+                    // Subscription active: show only token counts, not cost
+                    const badge = document.createElement('div');
+                    badge.className = 'cost-estimator';
+                    badge.innerHTML = `<span style="font-size:0.65rem;opacity:0.6">📊 ${usage.prompt_tokens + usage.cached_tokens} in / ${usage.candidates_tokens} out tokens</span>`;
+                    msgDiv.appendChild(badge);
                 }
-                badge.innerHTML = `🪙 Est. Cost: $${cost.toFixed(2)}${tokenInfo}`;
-                msgDiv.appendChild(badge);
             }
         } else {
             // Truncate display for long quick-prompts (show only first line)

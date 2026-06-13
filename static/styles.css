@@ -508,9 +508,10 @@ th {
 
 td {
     padding: 12px 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     white-space: nowrap;
     background: transparent;
+    transition: background-color var(--transition);
 }
 
 /* Mobile Condensing */
@@ -526,7 +527,7 @@ td {
 }
 
 tbody tr:hover td {
-    background-color: rgba(255, 255, 255, 0.03);
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
 /* ─── Table Section Headers ─── */
@@ -707,17 +708,20 @@ tbody tr:hover td {
 }
 
 .sidebar-card.minimized {
-    padding: 12px 20px;
+    padding: 10px 16px;
 }
 
 .sidebar-card h3 {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 10px;
+    justify-content: flex-start;
+    gap: 8px;
     margin-bottom: 8px;
-    font-size: 1.1rem;
+    font-size: 0.78rem;
     font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-main);
 }
 
 .sidebar-card h3 .icon {
@@ -1014,7 +1018,7 @@ textarea:focus {
     display: flex;
     flex-direction: row;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
     gap: 12px;
     margin-bottom: 16px;
     transition: margin-bottom var(--transition);
@@ -1026,11 +1030,10 @@ textarea:focus {
 
 .manager-card h3 {
     margin: 0 !important;
-    width: 100%;
-    text-align: center;
-    justify-content: center;
+    text-align: left;
     cursor: pointer;
     user-select: none;
+    flex: 1;
 }
 
 .input-group {
