@@ -862,9 +862,16 @@ const ModernChat = {
                 if (summaryText) {
                     details.addEventListener('toggle', () => {
                         const isOpened = details.open;
-                        summaryText.childNodes[0].textContent = isOpened 
-                            ? '⚖️ SSoT Execution Payload (Visible) ' 
-                            : '⚖️ SSoT Execution Payload (Hidden) ';
+                        const text = summaryText.textContent;
+                        if (text.includes('Incomplete') || text.includes('⚠️')) {
+                            summaryText.textContent = isOpened 
+                                ? '⚠️ Incomplete SSoT Payload' 
+                                : '⚠️ Incomplete SSoT Payload (Truncated)';
+                        } else {
+                            summaryText.textContent = isOpened 
+                                ? '⚖️ SSoT Execution Payload' 
+                                : '⚖️ SSoT Execution Payload (Hidden)';
+                        }
                     });
                 }
             });

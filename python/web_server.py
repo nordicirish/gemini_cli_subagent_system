@@ -915,7 +915,7 @@ def chat_endpoint(req: ChatRequest):
                         framework.log(f"[System] SSoT update result: {res}")
                         payload_html = (
                             f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
-                            f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; list-style: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden) <span style="font-size: 0.75rem; color: var(--accent-blue); cursor: pointer; margin-left: 10px;">[Show/Hide]</span></summary>'
+                            f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden)</summary>'
                             f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
                         )
                         cleaned_response = full_response[:idx] + payload_html + full_response[close_idx + 3:]
@@ -925,7 +925,7 @@ def chat_endpoint(req: ChatRequest):
                         # Even if parsing fails, hide the broken payload from the chat UI
                         payload_html = (
                             f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
-                            f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; list-style: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated) <span style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; margin-left: 10px;">[Show/Hide]</span></summary>'
+                            f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated)</summary>'
                             f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
                         )
                         cleaned_response = full_response[:idx] + payload_html + full_response[close_idx + 3:]
@@ -945,7 +945,7 @@ def chat_endpoint(req: ChatRequest):
                         framework.log(f"[System] SSoT update result: {res}")
                         payload_html = (
                             f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
-                            f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; list-style: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden) <span style="font-size: 0.75rem; color: var(--accent-blue); cursor: pointer; margin-left: 10px;">[Show/Hide]</span></summary>'
+                            f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden)</summary>'
                             f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
                         )
                         cleaned_response = full_response[:start_idx] + payload_html + full_response[end_idx+1:]
@@ -955,7 +955,7 @@ def chat_endpoint(req: ChatRequest):
                         # Even if parsing fails, hide the broken payload from the chat UI
                         payload_html = (
                             f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
-                            f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; list-style: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated) <span style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer; margin-left: 10px;">[Show/Hide]</span></summary>'
+                            f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated)</summary>'
                             f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
                         )
                         # We still extract it from the UI so it doesn't look like an error wall of text
