@@ -113,6 +113,7 @@ Sub-agents marked as **Research**, **Sentiment**, **Bullish Advocate**, **Red Te
 | `context/ssot.json` | **Master Data Store.** The Single Source of Truth for portfolio holdings, cost basis (WAC), and the dynamic watch list. Synchronized in real-time with the Web Dashboard. |
 | `context/trade_lessons.json` | **Historical trade lessons.** Appended autonomously via ENH_62 to prevent repeating past mistakes. |
 | `gem_trading_rules/rules.md` | **Canonical Rules Engine.** Local rules document containing all mandates, thresholds, and autonomous logic updates. |
+| `scripts/` | **Automation Utilities.** Reusable Python scripts for bulk-refactoring and parsing logic across the ecosystem, minimizing token overhead. |
 | `context/config.json` | **API Configuration.** Keys for Gemini, Finnhub, and local model routing overrides. |
 
 ---
@@ -176,10 +177,13 @@ The system uses a **tiered fallback model** strategy defined in `agent_framework
 
 | Mode | Model Priority | Used By |
 |------|---------------|---------|
-| `THINKING` | `gemini-2.0-flash-thinking-exp` → `gemini-2.5-pro` | Orchestrator, Council advocates, Research |
-| `PRO` | `gemini-2.5-pro` | Macro Sentinel, complex fallbacks |
+| `THINKING` | `Dynamic Flash Thinking` → `gemini-3.1-pro-preview` | Orchestrator, Council advocates, Research |
+| `PRO` | `gemini-2.5-pro` → `gemini-3.1-pro-preview` | Macro Sentinel, complex fallbacks |
 | `GEMMA` | `gemma-4-31b-it` → `gemini-2.5-flash` | Context, Execution, Structural, Rule Enforcement |
-| `FAST` | `gemini-2.5-flash` → `gemini-2.0-flash` | Utility engines (Sentiment, Review, etc.) |
+| `FAST` | `gemini-2.5-flash` → `gemini-3-flash-preview` | Utility engines (Sentiment, Review, etc.) |
+
+> [!NOTE]
+> **Gemini Plan Upgrade:** If `GEMINI_SUBSCRIPTION_LINKED` is set to true in your configuration, the system automatically upgrades the `GEMMA` routing tier to use superior `PRO` models (`gemini-2.5-pro` → `gemini-3.1-pro-preview`) for execution and rule enforcement.
 
 If a model returns a `429 Resource Exhausted` error, the system automatically parses the specific `retry-after` wait time from Google's API header and executes a dynamic backoff before retrying.
 
@@ -193,6 +197,7 @@ The glassmorphic dashboard is served at **http://localhost:8000** and includes:
 - **Macro HUD** — Live cards for tracked macro indices (VIX, SPY, IEF, UUP, GDX, etc.).
 - **Dynamic Portfolio Basket** — Inline management of your holdings. Add/Delete tickers and update cost basis (`UAC ($)`) with real-time **SSoT Sync**.
 - **Interactive Watch List** — Monitor new setups by injecting symbols directly into the background data daemon.
+- **Settings Gear Popover** — A professional configuration menu for managing API endpoints and caching logic. Includes dynamic plan-aware visibility that automatically isolates and hides raw advanced settings if you are an active Gemini Plan user, ensuring a seamless, clutter-free experience.
 - **GEMINI AI COUNCIL Chat** — Full AI chat interface. Supports **Markdown rendering**, parallel "Council Debate" synthesis, and dynamic "Thinking..." indicators.
 
 ### Keyboard Shortcuts

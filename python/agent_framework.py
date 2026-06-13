@@ -99,6 +99,12 @@ class AgentFramework:
         else:
             MODEL_MAPPING["THINKING"].insert(0, best_thinking)
 
+        # Upgrade GEMMA tier to PRO models for Gemini Plan users
+        if self.gemini_subscription_linked:
+            MODEL_MAPPING["GEMMA"] = [DEFAULT_MODEL_PRO, "gemini-3.1-pro-preview", "gemini-1.5-pro", DEFAULT_MODEL_GEMMA, DEFAULT_MODEL_FLASH]
+            if self.log_callback:
+                self.log_callback("[System] Gemini Plan Active: Upgraded GEMMA tier to PRO reasoning models.")
+
         self.agents = {}
 
 
