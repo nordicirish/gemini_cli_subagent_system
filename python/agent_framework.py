@@ -671,8 +671,26 @@ class AgentFramework:
             try:
                 queries = json.loads(queries_json)
             except Exception as e:
-                self.log(f"[Parallel Dispatcher Error] Failed to parse queries_json: {e}")
-                return json.dumps({"error": f"Failed to parse queries_json: {e}"})
+                try:
+                    import re
+                    cleaned = queries_json.strip()
+                    if cleaned.startswith("```json"):
+                        cleaned = cleaned[7:]
+                    elif cleaned.startswith("```"):
+                        cleaned = cleaned[3:]
+                    if cleaned.endswith("```"):
+                        cleaned = cleaned[:-3]
+                    cleaned = cleaned.strip()
+                    
+                    try:
+                        queries = json.loads(cleaned)
+                    except Exception:
+                        pattern = re.compile(r'(\\(?:["\\/n]|u[0-9a-fA-F]{4}))|\\')
+                        sanitized = pattern.sub(lambda m: m.group(1) if m.group(1) else r'\\', cleaned)
+                        queries = json.loads(sanitized)
+                except Exception as sanitize_err:
+                    self.log(f"[Parallel Dispatcher Error] Failed to parse queries_json: {e} (Sanitization also failed: {sanitize_err})")
+                    return json.dumps({"error": f"Failed to parse queries_json: {e} | Sanitization error: {sanitize_err}"})
 
             self.log(f"\n[Parallel Dispatcher] Initializing parallel session for {list(queries.keys())}...")
             results = {}
