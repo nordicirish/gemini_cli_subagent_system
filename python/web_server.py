@@ -671,6 +671,7 @@ def chat_endpoint(req: ChatRequest):
     # Ensure session exists (handle model switches)
     if global_chat_session is None:
         global_chat_session = create_new_session()
+    session = global_chat_session
 
     cancel_event.clear()
     framework.reset_turn_usage()
@@ -803,18 +804,18 @@ def chat_endpoint(req: ChatRequest):
             # Only run this guard if we are sending a NEW text prompt (not returning a function response)
             if isinstance(current_message, str):
                 try:
-                    h = global_chat_session.get_history()
+                    h = session.get_history()
                     if h and hasattr(h[-1], 'parts'):
                         last_parts = h[-1].parts
                         has_fc = any(hasattr(p, 'function_call') and p.function_call for p in last_parts)
                         has_fr = any(hasattr(p, 'function_response') and p.function_response for p in last_parts)
                         if has_fc and not has_fr:
                             framework.log("[Orchestrator] WARNING: Orphaned function_call in history — pruning to avoid 400 error.")
-                            global_chat_session._history = list(h[:-1])  # drop the dangling turn
+                            session._history = list(h[:-1])  # drop the dangling turn
                 except Exception as guard_err:
                     framework.log(f"[Orchestrator] History guard check failed (non-critical): {guard_err}")
 
-            response = global_chat_session.send_message(current_message)
+            response = session.send_message(current_message)
             
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 framework.turn_usage['prompt_tokens'] += (response.usage_metadata.prompt_token_count or 0)

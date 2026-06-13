@@ -283,8 +283,9 @@ class AgentFramework:
         if getattr(self, "gemini_subscription_linked", False):
             if mode in ["FAST", "GEMMA", "FLASH", "THINKING"]:
                 pro_model = overrides.get(DEFAULT_MODEL_PRO, DEFAULT_MODEL_PRO)
-                if pro_model not in resolved:
-                    resolved.insert(0, pro_model)
+                if pro_model in resolved:
+                    resolved.remove(pro_model)
+                resolved.insert(0, pro_model)
                     
         return resolved
 
