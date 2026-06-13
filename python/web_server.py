@@ -302,18 +302,7 @@ terminal_instruction = framework.load_system_instruction("engine_instructions/te
 
 all_tools = terminal_tools + [tools.perform_web_forensic_search]
 
-framework.setup_context_cache(
-    subagent_files=subagent_instructions,
-    system_instruction=terminal_instruction,
-    tools=all_tools
-)
 
-if not getattr(framework, "cached_content_name", None):
-    rules_path = os.path.join("gem_trading_rules", "rules.md")
-    if os.path.exists(rules_path):
-        with open(rules_path, "r", encoding="utf-8") as f:
-            rules_content = f.read()
-        terminal_instruction += f"\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{rules_content}"
 
 # Find a valid model for the Orchestrator from the THINKING tier
 terminal_models = framework._get_cloud_models("THINKING")
@@ -366,6 +355,20 @@ if not valid_model:
 
 # Use the verified valid model from the THINKING tier, fallback to framework default
 ORCHESTRATOR_MODEL = valid_model or agent_framework.DEFAULT_MODEL_THINKING
+
+framework.setup_context_cache(
+    model=ORCHESTRATOR_MODEL,
+    subagent_files=subagent_instructions,
+    system_instruction=terminal_instruction,
+    tools=all_tools
+)
+
+if not getattr(framework, "cached_content_name", None):
+    rules_path = os.path.join("gem_trading_rules", "rules.md")
+    if os.path.exists(rules_path):
+        with open(rules_path, "r", encoding="utf-8") as f:
+            rules_content = f.read()
+        terminal_instruction += f"\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{rules_content}"
 
 active_model_warning = None
 
