@@ -521,7 +521,6 @@ def list_models_endpoint():
 
         # Ensure key canonical modern models are ALWAYS present
         guaranteed_models = [
-            {"name": "gemini-2.0-flash-thinking-exp", "label": "GEMINI-2.0-FLASH-THINKING-EXP (THINKING)"},
             {"name": "gemini-2.0-flash", "label": "GEMINI-2.0-FLASH (FLASH)"},
             {"name": "gemini-2.5-pro", "label": "GEMINI-2.5-PRO (PRO)"},
             {"name": "gemini-2.5-flash", "label": "GEMINI-2.5-FLASH (FLASH)"},
@@ -992,6 +991,14 @@ def chat_endpoint(req: ChatRequest):
             except Exception as ie:
                 framework.log(f"[System Warning] Decision interception inside chat_endpoint failed: {ie}")
             
+        import re
+        full_response = re.sub(
+            r"TEMPORAL_CHECK:\s*[^\n\)]*\)\s*", 
+            "", 
+            full_response, 
+            flags=re.IGNORECASE
+        )
+
         try:
             with open("scratch/debug_output.txt", "w", encoding="utf-8") as df:
                 df.write("=== RAW FULL RESPONSE ===\n")
