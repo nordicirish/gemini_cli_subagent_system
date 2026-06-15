@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.12-Merton-JSON-Output
+- **version**: v11.13-API-Gateway-Retry
 
 ## Tone
 institutional, narrative, concise

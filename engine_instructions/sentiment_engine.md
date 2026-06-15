@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.12-Merton-JSON-Output
+- **version**: v11.13-API-Gateway-Retry
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

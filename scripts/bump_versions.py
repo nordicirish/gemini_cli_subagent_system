@@ -3,8 +3,9 @@ import os
 import sys
 
 def main():
-    target_version = "v11.12-Merton-JSON-Output"
+    target_version = "v11.13-API-Gateway-Retry"
     legacy_versions = [
+        "v11.12-Merton-JSON-Output",
         "v11.11-YF-TLS-Fix",
         "v11.10-UI-Clean-Debate-Collapse",
         "v11.03-GDrive-Decoupling-Patch"

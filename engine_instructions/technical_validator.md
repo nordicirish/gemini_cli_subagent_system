@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.12-Merton-JSON-Output
+- **version**: v11.13-API-Gateway-Retry
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

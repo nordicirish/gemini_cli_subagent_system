@@ -571,9 +571,9 @@ class AgentFramework:
                             self._log_handshake("ERROR", model_name, client_label, prompt, config, error=f"Retry attempt failed: {retry_e}", latency=elapsed)
                             continue
 
-                    elif "503" in error_msg or "unavailable" in error_msg.lower():
-                        self._log_handshake("WARNING", model_name, client_label, prompt, config, error="503 Unavailable. Retrying in 5s...")
-                        self.log(f"[System] 503 UNAVAILABLE for {model_name}. Retrying in 5s...")
+                    elif "503" in error_msg or "502" in error_msg or "unavailable" in error_msg.lower() or "bad gateway" in error_msg.lower():
+                        self._log_handshake("WARNING", model_name, client_label, prompt, config, error=f"{error_msg}. Retrying in 5s...")
+                        self.log(f"[System] {error_msg} for {model_name}. Retrying in 5s...")
                         time.sleep(5)
                         try:
                             self._log_handshake("REQUEST", model_name, client_label, prompt, config)
@@ -585,7 +585,7 @@ class AgentFramework:
                         except Exception as retry_e:
                             last_error = retry_e
                             elapsed = time.time() - start_time
-                            self._log_handshake("ERROR", model_name, client_label, prompt, config, error=f"Retry after 503 failed: {retry_e}", latency=elapsed)
+                            self._log_handshake("ERROR", model_name, client_label, prompt, config, error=f"Retry after 502/503 failed: {retry_e}", latency=elapsed)
                             pass
                         continue
 
