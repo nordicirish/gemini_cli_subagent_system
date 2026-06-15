@@ -127,9 +127,11 @@ Maintain "Zero-Drift" across the Gemini Gem Stock Market Council ecosystem. Ensu
 - **Action:** Whenever performing bulk file edits, parsing large datasets, validating rules across multiple engines, or extracting logic, you MUST write and execute reusable Python scripts. **Save these scripts to the `scripts/` directory** so they can be retained and reused for future system maintenance, rather than treating them as temporary scratch files. Use native Python libraries (`os`, `re`, `glob`, `json`) to automate directory iteration and execute precise string manipulations to minimize token overhead.
 
 ### 19. Installation & Dependency Synchronization Mandate
-- **Constraint:** System environments must remain reproducible. Shadow dependencies cause catastrophic deployment failures.
-- **Action:** Whenever a new Python package, library, or system-level dependency is introduced to the architecture (e.g., `curl_cffi` for TLS patches), you MUST proactively and atomically update `requirements.txt` with the exact version required. 
-- **Validation:** You must also review `install.ps1` and the `README.md` Installation section to ensure the new dependency or architectural breaking change is fully supported by the deployment scripts.
+- **Constraint:** System environments must remain reproducible. Shadow dependencies and missing folder structures cause catastrophic deployment failures.
+- **Action:** 
+  1. **Dependencies:** Whenever a new Python package, library, or system-level dependency is introduced to the architecture (e.g., `curl_cffi` for TLS patches), you MUST proactively and atomically update `requirements.txt` with the exact version required. 
+  2. **File/Folder Architecture:** Whenever you create, rename, or delete directories (e.g., migrating cache files to a new `cache/` directory), you MUST proactively update the required directories array in `install.ps1` so fresh clones build the correct infrastructure.
+- **Validation:** You must also review `install.ps1` and the `README.md` Installation section to ensure any new dependencies, file structures, or architectural breaking changes are fully supported by the deployment scripts.
 
 ## 🔄 Refactoring Workflow
 When commanded to update or "Sync" the terminal:
