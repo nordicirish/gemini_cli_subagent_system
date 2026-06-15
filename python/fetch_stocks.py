@@ -1701,6 +1701,9 @@ def get_gex_profile(ticker_obj, spot_price):
         
         if avg_vol and avg_vol > 0:
             final_gex = net_gex / (avg_vol * spot_price)
+        else:
+            # Fallback for indices or missing volume: Assume 100M volume to align with UI decimal thresholds (e.g. 0.015)
+            final_gex = net_gex / (100_000_000 * spot_price)
 
         # 2. Calc Gamma Flip (Scan +/- 50%)
         flip_price = 0.0
