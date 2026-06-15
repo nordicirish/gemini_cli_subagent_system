@@ -3,8 +3,9 @@ import os
 import sys
 
 def main():
-    target_version = "v11.14-UI-Model-Selector-Sync"
+    target_version = "v11.15-README-Engines-Sync"
     legacy_versions = [
+        "v11.14-UI-Model-Selector-Sync",
         "v11.13-API-Gateway-Retry",
         "v11.12-Merton-JSON-Output",
         "v11.11-YF-TLS-Fix",

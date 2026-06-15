@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.14-UI-Model-Selector-Sync
+- **version**: v11.15-README-Engines-Sync
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

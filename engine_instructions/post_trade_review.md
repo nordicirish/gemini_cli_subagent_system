@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.14-UI-Model-Selector-Sync
+**Version:** v11.15-README-Engines-Sync
 **Tone:** neutral, reflective, concise
 
 ---

@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.14-UI-Model-Selector-Sync
+- **version**: v11.15-README-Engines-Sync
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

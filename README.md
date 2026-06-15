@@ -121,11 +121,12 @@ Sub-agents marked as **Research**, **Sentiment**, **Bullish Advocate**, **Red Te
 ## ⚡ High-Performance Features
 
 ### 🧠 Hybrid Model Routing (v18.0)
-To optimize for both **cost** and **precision**, the system now routes sub-agents to specific model tiers:
+To optimize for both cost and precision, the system now routes sub-agents to specific model tiers:
 - **GEMMA Tier (Gemma 4 31B)**: Handles deterministic, JSON-heavy, and structural analysis (Context, Structural, Technical Validator).
 - **FLASH Tier (Gemini 2.5 Flash)**: Handles high-speed research, social sentiment, and news velocity monitoring.
 - **THINKING Tier (Gemini 2.0 Flash Thinking)**: Reserved for the Terminal Orchestrator and deep-reasoning sub-agents (advocates, Research).
 - **PRO Tier (Gemini 2.5 Pro)**: Reserved for complex Macro Arbitration (e.g. Macro Sentinel).
+Gemma is no longer used if using a gemini plan
 
 ### 🛡️ Smart Key Routing (Gemini Free Tier Key Routing)
 To minimize development and operational costs, the framework features **Autonomous Key Routing**:
@@ -166,19 +167,24 @@ Each file below (located in the `engine_instructions/` folder) is loaded as a sy
 
 | File | Agent Name | Mode | Role |
 |------|-----------|------|------|
-| `terminal.md` | **Terminal Orchestrator** | THINKING | Routes user queries, delegates to sub-agents, synthesises final decisions |
+| `terminal.md` | **Terminal Orchestrator** | THINKING | Routes user queries, delegates to sub-agents, synthesizes final decisions |
 | `macro_sentinel.md` | **Macro Sentinel** | PRO | Macro regime detection, Calendar Shield monitoring (Search Enabled) |
+| `data_analyst.md` | **Data Analyst** | PRO | Lean Actuator, Live Web Grounding Specialist, and Data Aggregator (Search Enabled) |
+| `state_validation_router.md` | **State & Validation Router** | PRO | State Synthesis, Schema Audit, and Drift Detection |
+| `research.md` | **Research Engine** | THINKING | Live web search for macro narrative, filings, sector rotation signals (Search Enabled) |
+| `macro_narrative_engine.md` | **Macro-Narrative Engine** | THINKING | Macro-Narrative & Torque Specialist (Search Enabled) |
 | `bullish_gem.md` | **Bullish Advocate** | THINKING | Constructs the strongest bull case + self-critique (Search Enabled) |
 | `red_team_gem.md` | **Red Team Pessimist** | THINKING | Constructs the strongest bear case + self-critique (Search Enabled) |
-| `neutral_gem.md` | **Neutral Structuralist**| GEMMA | Unbiased structural analysis; breaks ties with quantitative evidence |
-| `execution.md` | **Execution Engine** | GEMMA | Generates `EXECUTION_PAYLOAD` JSON; manages sizing and order routing |
-| `structural_engine.md` | **Structural Engine** | GEMMA | GEX regime, dark pool posture, VWAP structure analysis |
-| `technical_validator.md` | **Technical Validator** | GEMMA | Final gate — validates thesis against quantitative restrictions |
-| `research.md` | **Research Engine** | THINKING | Live web search for macro narrative, filings, sector rotation signals |
-| `sentiment_engine.md` | **Sentiment Engine** | GEMMA | Social sentiment, news velocity, dark pool order flow (Search Enabled) |
-| `context_engine.md` | **Context Engine** | GEMMA | SSoT state bridge — maintains session continuity and trade thesis integrity |
-| `gex_engine.md` | **GEX Engine** | GEMMA | Gamma Exposure modelling, dealer hedging flow, pin risk analysis |
 | `post_trade_review.md` | **Review Engine** | FAST | Post-trade reflection — thesis vs. outcome, misfire detection, lesson authoring |
+| `neutral_gem.md` | **Neutral Structuralist**| GEMMA | Unbiased structural analysis; breaks ties with quantitative evidence |
+| `sentiment_engine.md` | **Sentiment Engine** | GEMMA | Social sentiment, news velocity, dark pool order flow (Search Enabled) |
+| `structural_engine.md` | **Structural Engine** | GEMMA | GEX regime, dark pool posture, VWAP structure analysis (Search Enabled) |
+| `rule_enforcer_engine.md` | **Rule Enforcer Engine** | GEMMA | The Terminal's Supreme Legal Authority and Risk Veto (SSoT Auditor) |
+| `context_engine.md` | **Context Engine** | GEMMA | SSoT state bridge — maintains session continuity and trade thesis integrity (Search Enabled) |
+| `execution.md` | **Execution Engine** | GEMMA | Generates `EXECUTION_PAYLOAD` JSON; manages sizing and order routing |
+| `technical_validator.md` | **Technical Validator** | GEMMA | Final gate — validates thesis against quantitative restrictions |
+| `gex_engine.md` | **GEX Engine** | GEMMA | Gamma Exposure modelling, dealer hedging flow, pin risk analysis |
+
 
 ### Model Hierarchy
 
@@ -304,18 +310,18 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
-### v11.14-UI-Model-Selector-Sync *(2026-06-15)*
+### v11.15-README-Engines-Sync *(2026-06-15)*
 - **Integrated 502 Bad Gateway Retries:** Updated the core agent fallback network layer in `agent_framework.py` to intercept 502 Bad Gateway and Bad Gateway responses, executing a standard 5-second backoff and retry loop to align with 503 Service Unavailable tolerance pathways.
-- **Synchronized Version Parity:** Synchronized the target version to `v11.14-UI-Model-Selector-Sync` across the entire rules database, readme, instructions, and all 17 Council sub-agent engine specification structures.
+- **Synchronized Version Parity:** Synchronized the target version to `v11.15-README-Engines-Sync` across the entire rules database, readme, instructions, and all 17 Council sub-agent engine specification structures.
 
-### v11.14-UI-Model-Selector-Sync *(2026-06-15)*
+### v11.15-README-Engines-Sync *(2026-06-15)*
 - **Calculated Optimal Asset Allocation under Power Utility:** Added dynamic calculation of Merton's optimal portfolio weights under a Constant Relative Risk Aversion (CRRA) utility model. Annualized expected returns and return covariances are computed from historical daily stock charts and solved using ridge-regularized matrix equations.
 - **Injected Merton Allocations into JSON API:** Embedded the calculated raw weights, normalized long-only target weights, and asset covariance statistics (expected return, volatility, Sharpe ratio) directly into the `GLOBAL_STATE` object returned by the `/api/data` endpoint, addressing the asset allocation metrics requirement.
 
-### v11.14-UI-Model-Selector-Sync *(2026-06-15)*
+### v11.15-README-Engines-Sync *(2026-06-15)*
 - **Resolved yfinance TLS Connection Error:** Patched the initialization of `curl_cffi` sessions in the background data daemon to use a stable `chrome120` browser impersonation profile. This bypasses the OpenSSL `invalid library` connection failures observed on Windows systems when using the default `'chrome'` target.
 
-### v11.14-UI-Model-Selector-Sync *(2026-06-14)*
+### v11.15-README-Engines-Sync *(2026-06-14)*
 - **Removed Debate Toggle Checkbox:** Removed the `skip-debate-toggle` input checkbox element from `static/index.html` and cleared all corresponding event listener initializations and programmatic variables inside `static/modern_ui.js`.
 - **Default Debate Collapse Behavior:** Configured the council debate rendering logic inside `appendMessage()` to unconditionally wrap debate content in a `<details>` element that is closed/collapsed by default, allowing manual expand/collapse via standard browser interaction with the summary tag.
 - **Removed Redundant Settings References:** Cleaned up unused variables and toggle settings methods (`toggleSettingsDebate` and `updateExistingDebatesVisibility`) inside `static/modern_ui.js`.
@@ -333,10 +339,10 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 - **History Guard 400 Error Fix:** Resolved a critical race condition triggering a `400 INVALID_ARGUMENT` API exception on multi-turn loops. The history guard—which prunes orphaned `function_call` parts—was over-aggressively wiping out valid `function_call` requests inside the tool loop *before* the Orchestrator could respond with the required `function_response`. The guard is now strictly gated to `isinstance(current_message, str)` and only executes upon fresh user text submissions.
 - **Global Documentation Sync:** Renamed core agent instructions to `INSTRUCTIONS.md`, created universal `.cursorrules` routing, and bumped framework version to `v11.08-UI-DeepDive-Patch`.
 
-### v11.14-UI-Model-Selector-Sync *(2026-06-11)*
+### v11.15-README-Engines-Sync *(2026-06-11)*
 - **UI Safety & Decoupling:** Added a repository-specific UI decoupling guardrail to the Master Custodian rules (`antigravity.md`) to prevent layout mixing between the subagent dashboard (which utilizes direct FastAPI background database payload ingestion and local streaming) and the trading agent dashboard (which uses manual import/export clipboard operations).
 - **UI Restoration:** Restored the interactive Gemini AI Council chat modal and launcher button (`launch-chat-btn`), re-linked `modern_ui.js` and `marked.js` library, and removed the redundant manual `Export to Council` and `Import from Council` sidebars from the `gemini_cli_subagent_system` dashboard UI.
-- **Global Parity Sync:** Bumped and synchronized the framework version to `v11.14-UI-Model-Selector-Sync` across master rules, `antigravity.md`, and all sub-agent markdown files in both repositories.
+- **Global Parity Sync:** Bumped and synchronized the framework version to `v11.15-README-Engines-Sync` across master rules, `antigravity.md`, and all sub-agent markdown files in both repositories.
 
 ### v11.01-L249-Cascade-Patch *(2026-06-10)*
 - **SSoT Cascade Mitigation Rule (ENH_249):** Codified a revised version of L-249 (POST-10:30 CASCADE MITIGATION) into rules.md with absolute execution supremacy. This rule triggers a mechanical 25% trim via marketable limit orders when index dealer posture is SHORT_GAMMA and an asset falls below its daily VWAP after 10:30 AM EST.
@@ -620,12 +626,17 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 - **Config & Model Calibration:** Synchronized the `Mode Selection Matrix` in `terminal.md` with active subagent modes, and appended the `GEMINI_FREE_TIER_API_KEY` placeholder in `config.json`.
 - **Parity Alignment:** Performed a global version synchronization across all subagent instruction sets, rules, and the custodian engine to maintain absolute structural integrity.
 
-### v11.14-UI-Model-Selector-Sync *(2026-06-15)*
+### v11.15-README-Engines-Sync *(2026-06-15)*
+- **Sub-Agent Registry Documentation Update:** Updated `README.md` to document the complete set of 17 active sub-agent engines configured in `main.py` and `web_server.py`, adding `data_analyst.md`, `macro_narrative_engine.md`, `rule_enforcer_engine.md`, and `state_validation_router.md`.
+- **Hybrid Model Routing Alignment:** Updated the `Hybrid Model Routing (v18.0)` documentation section in `README.md` to specify that the `GEMMA` routing tier is bypassed when utilizing a Gemini plan.
+- **Global Architectural Parity:** Synchronized version strings to `v11.15-README-Engines-Sync` across Master rules.md SSoT, README.md, INSTRUCTIONS.md, and all 17 active subagent engine instruction sets per MANDATE_29.
+
+### v11.15-README-Engines-Sync *(2026-06-15)*
 - **Model Selector Dropdown Synchronization:** Resolved discrepancy between backend orchestrator model and frontend dropdown value. Added `autocomplete="off"` to the dropdown select element in `index.html` to prevent browser form state caching across page refreshes.
 - **Dynamic Selection Alignment:** Configured `fetchModels()` and `appendMessage()` inside `modern_ui.js` to dynamically synchronize the model selector element's selected value with the active backend model returned in log payloads and chat responses.
-- **Global Architectural Parity:** Synchronized version strings to `v11.14-UI-Model-Selector-Sync` across Master rules.md SSoT, README.md, INSTRUCTIONS.md, and all 13 active subagent engine instruction sets per MANDATE_29.
+- **Global Architectural Parity:** Synchronized version strings to `v11.15-README-Engines-Sync` across Master rules.md SSoT, README.md, INSTRUCTIONS.md, and all 13 active subagent engine instruction sets per MANDATE_29.
 
-### v11.14-UI-Model-Selector-Sync *(2026-06-11)*
+### v11.15-README-Engines-Sync *(2026-06-11)*
 - **API and Model Fix:** Disabled automatic function calling (`automatic_function_calling=False`) in `GenerateContentConfig` across `web_server.py` and `main.py` to prevent SDK errors (`KeyError: 'run_code'`) when the model invokes built-in code execution tools.
 - **Google Drive Decoupling:** Completely removed Google Drive rules synchronization scripts, UI admin panels, and modals.
 - **Antigravity Custodian Updates:** Added rules and veto conditions to root `antigravity.md` and `.agents/rules/antigravity.md` to forbid Google Drive synchronization.

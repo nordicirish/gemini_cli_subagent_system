@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.14-UI-Model-Selector-Sync
+- **version**: v11.15-README-Engines-Sync
 
 ## Tone
 institutional, narrative, concise
