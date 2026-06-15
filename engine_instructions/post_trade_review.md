@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.02-UI-Safety-Patch
+**Version:** v11.12-Merton-JSON-Output
 **Tone:** neutral, reflective, concise
 
 ---

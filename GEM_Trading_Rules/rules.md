@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v11.02-UI-Safety-Patch
+**Version:** v11.12-Merton-JSON-Output
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -110,6 +110,7 @@
 - [ENH_115](#enh_115): PRE_MARKET_SHORT_GAMMA_BLEED
 - [ENH_116](#enh_116): MACRO_YIELD_CATALYST_VERIFICATION
 - [ENH_117](#enh_117): DILUTION_RESISTANCE_WALL - Assets with active recent equity offerings exhibit structural supply walls; avoid accumulation into these price zones without rVol > 2.0 confirmation.
+- [ENH_118](#enh_118): MERTON_SIZING_INTEGRATION_AND_HEDGING_DEMAND - Integration of theoretical Merton weights with tactical structural vetoes.
 - [ENH_232](#enh_232): BROKER_LATENCY_LIMIT_SWEEP - If a critical mechanical risk trim (e.g., >4% VWAP extension) fails to execute due to broker API latency or rejection, the Orchestrator MUST NOT re-queue the order at the identical or higher limit. It must instantly queue a 'Sweeping Limit Order' priced 0.5% below the current bid to guarantee extraction.
 - [ENH_245](#enh_245): INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Automated defensive tranches must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen, unless the asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration).
 - [ENH_249](#enh_249): POST-10:30 CASCADE MITIGATION - If broad index markers (SPY) enter a SHORT_GAMMA architecture and a position tracks below its daily VWAP floor past 10:30 AM EST on negative delta force, a mechanical 25% trim must execute instantly, bypassing standard gates and shields.
@@ -205,6 +206,15 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Instruction:** Assets with 0 shares and 0 WAC MUST be strictly excluded from the `portfolio_snapshot` array in the `EXECUTION_PAYLOAD`.
   - **Action:** During state synthesis, the State & Validation Router must prune any ticker with `shares == 0`. Such tickers are classified as "Watched" and are tracked via the Strategic Watchlist in `config.json`, not the active portfolio state.
   - **Rationale:** Prevents "Phantom Exposure" and UI clutter where watchlist items are mistakenly categorized as portfolio holdings.
+
+<a name="enh_118"></a>
+- **[ENH_118 - Merton Sizing Integration & Intertemporal Hedging Demand]**
+  - **Status:** ACTIVE
+  - **Supremacy Clause:** Merton Optimization is derived from mathematical variance/covariance over a 500-day lookback. It is fundamentally unaware of intraday microstructure or structural failure. Therefore, **Structural and Risk Vetoes possess Absolute Execution Supremacy over theoretical Merton weights.** If an asset triggers a macro veto (VIX > 20), an SSR drop (>10%), or SHORT_GAMMA degradation, the Merton weight MUST be ignored and defensive trims executed.
+  - **Conviction Ceiling:** The theoretical Merton Optimal Weight acts as a mathematical ceiling for swing trades. No single swing tranche may exceed the Merton Optimal Weight by more than +25% unless explicitly overridden by a verified Phase 3 / $50M Catalyst.
+  - **Intertemporal Hedging Demand (Stable vs High Beta):** Following Merton's continuous-time models, optimal allocation incorporates a hedging component against macro state variables (e.g., interest rate shocks, VIX spikes).
+    - **Stable Stocks (Low Correlation to Macro Shocks):** Can be allocated up to 100% of their Merton weight in volatile regimes as a volatility hedge.
+    - **High Beta Swing Trades:** Must be dynamically scaled down from their baseline Merton weight using the `merton_hedging_modifier` if the underlying macro state (e.g., VIX > 15) is unstable. High Beta stocks provide zero hedging utility and act purely as myopic momentum vehicles.
 
 <a name="mandate_01_gatekeeper"></a>
 - **[MANDATE_01_GATEKEEPER]**

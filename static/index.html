@@ -457,9 +457,6 @@
                     <h2 style="margin: 0; font-size: 1.1rem; letter-spacing: 1px; white-space: nowrap;">GEMINI AI COUNCIL</h2>
                 </div>
                 <div class="modern-header-right" style="display: flex; align-items: center; gap: 8px;">
-
-                    <!-- Hidden checkbox controls (still in DOM for JS compatibility) -->
-                    <input type="checkbox" id="skip-debate-toggle" checked style="display:none;">
                     <input type="checkbox" id="paid-tiers-toggle" style="display:none;">
                     <input type="checkbox" id="gemini-subscription-toggle" checked style="display:none;">
                     <span id="context-caching-toggle-container" style="display:none;"><input type="checkbox" id="context-caching-toggle" checked></span>
@@ -513,15 +510,6 @@
 
                             <!-- Display section -->
                             <div style="font-size:0.58rem; font-weight:700; letter-spacing:1.2px; color:#8b949e; text-transform:uppercase; margin-bottom:10px;">Display</div>
-                            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
-                                <div>
-                                    <div style="font-size:0.8rem; color:white; font-weight:500;">Hide Council Debate</div>
-                                    <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Collapse debate (still logged)</div>
-                                </div>
-                                <div id="settings-debate-toggle" onclick="window.chatUI&&window.chatUI.toggleSettingsDebate()" style="width:42px;height:24px;background:#238636;border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
-                                    <div id="settings-debate-knob" style="position:absolute;top:4px;left:22px;width:16px;height:16px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>
-                                </div>
-                            </div>
                             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
                                 <div style="font-size:0.8rem; color:white; font-weight:500;">Text Size</div>
                                 <div style="display:flex;gap:5px;">

@@ -99,7 +99,6 @@ const ModernChat = {
         }
         this.paidTiersToggle = document.getElementById('paid-tiers-toggle');
         this.geminiSubscriptionToggle = document.getElementById('gemini-subscription-toggle');
-        this.skipDebateToggle = document.getElementById('skip-debate-toggle');
         this.cachingToggle = document.getElementById('context-caching-toggle');
         this.cachingContainer = document.getElementById('context-caching-toggle-container');
         if (this.cachingToggle) {
@@ -366,6 +365,7 @@ const ModernChat = {
                 this.modelSelector.innerHTML = '';
                 
                 const includePaidToggle = this.paidTiersToggle ? this.paidTiersToggle.checked : false;
+                const subLinked = this.geminiSubscriptionToggle ? this.geminiSubscriptionToggle.checked : false;
                 const includePaid = includePaidToggle || subLinked;
                 
                 // Split models into stable and experimental
@@ -462,12 +462,10 @@ const ModernChat = {
 
     syncSettingsPopover() {
         const subOn = this.geminiSubscriptionToggle ? this.geminiSubscriptionToggle.checked : true;
-        const debateHidden = this.skipDebateToggle ? this.skipDebateToggle.checked : true;
         const paidOn = this.paidTiersToggle ? this.paidTiersToggle.checked : false;
         const cacheOn = this.cachingToggle ? this.cachingToggle.checked : true;
 
         this._setKnob('settings-sub-knob', 'settings-sub-toggle', subOn);
-        this._setKnob('settings-debate-knob', 'settings-debate-toggle', debateHidden);
         this._setKnob('settings-paid-knob', 'settings-paid-toggle', paidOn);
         this._setKnob('settings-caching-knob', 'settings-caching-toggle', cacheOn);
 
@@ -489,11 +487,6 @@ const ModernChat = {
         this.syncSettingsPopover();
     },
 
-    toggleSettingsDebate() {
-        if (!this.skipDebateToggle) return;
-        this.skipDebateToggle.checked = !this.skipDebateToggle.checked;
-        this.syncSettingsPopover();
-    },
 
     toggleSettingsPaid() {
         if (!this.paidTiersToggle) return;
@@ -916,71 +909,70 @@ const ModernChat = {
                 msgDiv.appendChild(details);
             }
             
-            const skipToggle = document.getElementById('skip-debate-toggle');
-            if (skipToggle && skipToggle.checked) {
-                const headers = msgDiv.querySelectorAll('h1, h2, h3, h4, h5, h6, p, strong');
-                let debateHeader = null;
-                for (const h of headers) {
-                    const text = h.textContent.toLowerCase();
-                    if (text.includes('debate') || text.includes('advocate') || text.includes('pessimist')) {
-                        debateHeader = h;
-                        break;
-                    }
+            const headers = msgDiv.querySelectorAll('h1, h2, h3, h4, h5, h6');
+            let debateHeader = null;
+            for (const h of headers) {
+                const text = h.textContent.toLowerCase();
+                if (text.includes('debate') || text.includes('advocate') || text.includes('pessimist')) {
+                    debateHeader = h;
+                    break;
                 }
-                
-                if (debateHeader) {
-                    const details = document.createElement('details');
-                    details.style.cssText = 'margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);';
-                    const summary = document.createElement('summary');
-                    summary.style.fontWeight = '700';
-                    summary.style.color = 'var(--text-secondary)';
-                    summary.style.letterSpacing = '0.5px';
-                    summary.textContent = '🏛️ Gemini Gem Council Debate (Hidden)';
-                    details.appendChild(summary);
+            }
+            
+            if (debateHeader) {
+                const details = document.createElement('details');
+                details.classList.add('council-debate-details');
+                details.open = false;
+                details.style.cssText = 'margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);';
+                const summary = document.createElement('summary');
+                summary.style.fontWeight = '700';
+                summary.style.color = 'var(--text-secondary)';
+                summary.style.letterSpacing = '0.5px';
+                summary.textContent = '🏛️ Gemini Gem Council Debate (Hidden)';
+                details.appendChild(summary);
 
-                    details.addEventListener('toggle', () => {
-                        summary.textContent = details.open 
-                            ? '🏛️ Gemini Gem Council Debate' 
-                            : '🏛️ Gemini Gem Council Debate (Hidden)';
-                    });
-                    
-                    const contentDiv = document.createElement('div');
-                    contentDiv.style.marginTop = '12px';
-                    details.appendChild(contentDiv);
-                    
-                    // Do NOT include debateHeader itself — the <summary> already shows the title
-                    let siblingsToMove = [];
-                    let next = debateHeader.nextSibling;
-                    while (next) {
-                        if (next.nodeType === 1 && (next.tagName.startsWith('H') || next.tagName === 'HR')) {
-                            const text = next.textContent.toLowerCase();
-                            if (next.tagName.startsWith('H')) {
-                                const isAgentOrDebate = text.includes('debate') || 
-                                                        text.includes('advocate') || 
-                                                        text.includes('pessimist') || 
-                                                        text.includes('structuralist') || 
-                                                        text.includes('sentinel') || 
-                                                        text.includes('engine') || 
-                                                        text.includes('validator');
-                                if (!isAgentOrDebate) {
-                                    break;
-                                }
-                            }
-                            if (text.includes('decision') || text.includes('metrics') || text.includes('reconciliation') || text.includes('unallocated') || text.includes('proof')) {
+                details.addEventListener('toggle', () => {
+                    summary.textContent = details.open 
+                        ? '🏛️ Gemini Gem Council Debate' 
+                        : '🏛️ Gemini Gem Council Debate (Hidden)';
+                });
+                
+                const contentDiv = document.createElement('div');
+                contentDiv.style.marginTop = '12px';
+                details.appendChild(contentDiv);
+                
+                // Do NOT include debateHeader itself — the <summary> already shows the title
+                let siblingsToMove = [];
+                let next = debateHeader.nextSibling;
+                while (next) {
+                    if (next.nodeType === 1 && (next.tagName.startsWith('H') || next.tagName === 'HR')) {
+                        const text = next.textContent.toLowerCase();
+                        if (next.tagName.startsWith('H')) {
+                            const isAgentOrDebate = text.includes('debate') || 
+                                                    text.includes('advocate') || 
+                                                    text.includes('pessimist') || 
+                                                    text.includes('structuralist') || 
+                                                    text.includes('sentinel') || 
+                                                    text.includes('engine') || 
+                                                    text.includes('validator');
+                            if (!isAgentOrDebate) {
                                 break;
                             }
                         }
-                        siblingsToMove.push(next);
-                        next = next.nextSibling;
+                        if (text.includes('decision') || text.includes('metrics') || text.includes('reconciliation') || text.includes('unallocated') || text.includes('proof')) {
+                            break;
+                        }
                     }
-                    
-                    msgDiv.insertBefore(details, debateHeader);
-                    siblingsToMove.forEach(node => {
-                        contentDiv.appendChild(node);
-                    });
-                    // Remove the original header element — summary is the only title needed
-                    debateHeader.remove();
+                    siblingsToMove.push(next);
+                    next = next.nextSibling;
                 }
+                
+                msgDiv.insertBefore(details, debateHeader);
+                siblingsToMove.forEach(node => {
+                    contentDiv.appendChild(node);
+                });
+                // Remove the original header element — summary is the only title needed
+                debateHeader.remove();
             }
             if (cost > 0 || (usage && Object.keys(usage).length > 0)) {
                 const subActive = this.geminiSubscriptionToggle && this.geminiSubscriptionToggle.checked;

@@ -1,3 +1,16 @@
+import sys
+# Monkeypatch curl_cffi to use chrome120 instead of chrome to avoid TLS errors on Windows
+try:
+    from curl_cffi import requests as curl_requests
+    _orig_init = curl_requests.Session.__init__
+    def _patched_init(self, *args, **kwargs):
+        if kwargs.get('impersonate') == 'chrome':
+            kwargs['impersonate'] = 'chrome120'
+        _orig_init(self, *args, **kwargs)
+    curl_requests.Session.__init__ = _patched_init
+except Exception as e:
+    sys.stderr.write(f"[Warning] Failed to monkeypatch curl_cffi: {e}\n")
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -2378,6 +2391,101 @@ def calculate_score(symbol):
     return score, note
 
 
+def compute_merton_allocation(gamma=3.0, r=0.04):
+    try:
+        prices_dict = {}
+        for sym in TICKERS:
+            sym_upper = sym.upper()
+            if sym_upper in cache.history and not cache.history[sym_upper].empty:
+                df = cache.history[sym_upper]
+                if 'Close' in df.columns:
+                    close = df['Close']
+                    if isinstance(close, pd.DataFrame):
+                        close = close.iloc[:, 0]
+                    valid_close = close[close > 0.0]
+                    if len(valid_close) > 10:
+                        prices_dict[sym_upper] = valid_close
+                        
+        if not prices_dict:
+            return {
+                "status": "error",
+                "message": "No historical price data found in cache for active tickers."
+            }
+            
+        df_prices = pd.DataFrame(prices_dict).ffill().bfill()
+        df_returns = df_prices.pct_change().dropna(how='all')
+        if df_returns.empty:
+            return {
+                "status": "error",
+                "message": "Calculated returns dataframe is empty."
+            }
+            
+        stds = df_returns.std()
+        valid_cols = stds[stds > 1e-7].index.tolist()
+        if len(valid_cols) < 1:
+            return {
+                "status": "error",
+                "message": "Insufficient variance in asset price history to compute covariance matrix."
+            }
+            
+        df_returns = df_returns[valid_cols]
+        df_prices = df_prices[valid_cols]
+        
+        mean_daily = df_returns.mean()
+        mu = mean_daily * 252
+        
+        cov_daily = df_returns.cov()
+        Sigma = cov_daily * 252
+        
+        n_assets = Sigma.shape[0]
+        Sigma_reg = Sigma + np.eye(n_assets) * 1e-4
+        
+        excess_returns = mu - r
+        
+        weights = np.linalg.solve(Sigma_reg, excess_returns) / gamma
+        
+        raw_allocation = {ticker: float(w) for ticker, w in zip(df_prices.columns, weights)}
+        
+        clipped_weights = np.clip(weights, 0, None)
+        sum_clipped = np.sum(clipped_weights)
+        if sum_clipped > 0:
+            normalized_weights = clipped_weights / sum_clipped
+        else:
+            normalized_weights = np.zeros_like(weights)
+            
+        normalized_allocation = {ticker: float(w) for ticker, w in zip(df_prices.columns, normalized_weights)}
+        
+        vols = df_returns.std() * np.sqrt(252)
+        sharpe_ratios = {}
+        for ticker in df_prices.columns:
+            vol = vols[ticker]
+            expected_ret = mu[ticker]
+            sharpe_ratios[ticker] = float((expected_ret - r) / vol) if vol > 0 else 0.0
+            
+        return {
+            "status": "success",
+            "parameters": {
+                "risk_aversion_gamma": float(gamma),
+                "annual_risk_free_rate": float(r),
+                "trading_days": 252
+            },
+            "raw_merton_weights": raw_allocation,
+            "normalized_long_only_weights": normalized_allocation,
+            "annualized_statistics": {
+                ticker: {
+                    "expected_return": float(mu[ticker]),
+                    "volatility": float(vols[ticker]),
+                    "sharpe_ratio": sharpe_ratios[ticker]
+                } for ticker in df_prices.columns
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Calculation failed: {str(e)}"
+        }
+
+
 # -----------------------------
 # MAIN LOOP
 # -----------------------------
@@ -2929,6 +3037,8 @@ def run_daemon():
             final_tickers = non_scout_data + filtered_scouts
 
 
+            merton_alloc = compute_merton_allocation()
+
             final_output = {
                 "_meta": {
                     "description": "LIVE MARKET DATA - DO NOT TREAT AS SIMULATED",
@@ -2942,7 +3052,8 @@ def run_daemon():
                 "tickers": final_tickers,
                 "scout_categories_loaded": list(PROCESSED_SCOUT_CATEGORIES),
                 "local_storage_state": supplemental_ssot,
-                "trade_lessons": supplemental_lessons
+                "trade_lessons": supplemental_lessons,
+                "merton_optimal_allocation": merton_alloc
             }
             GLOBAL_STATE = final_output
 

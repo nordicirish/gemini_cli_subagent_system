@@ -304,6 +304,24 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v11.12-Merton-JSON-Output *(2026-06-15)*
+- **Calculated Optimal Asset Allocation under Power Utility:** Added dynamic calculation of Merton's optimal portfolio weights under a Constant Relative Risk Aversion (CRRA) utility model. Annualized expected returns and return covariances are computed from historical daily stock charts and solved using ridge-regularized matrix equations.
+- **Injected Merton Allocations into JSON API:** Embedded the calculated raw weights, normalized long-only target weights, and asset covariance statistics (expected return, volatility, Sharpe ratio) directly into the `GLOBAL_STATE` object returned by the `/api/data` endpoint, addressing the asset allocation metrics requirement.
+
+### v11.11-YF-TLS-Fix *(2026-06-15)*
+- **Resolved yfinance TLS Connection Error:** Patched the initialization of `curl_cffi` sessions in the background data daemon to use a stable `chrome120` browser impersonation profile. This bypasses the OpenSSL `invalid library` connection failures observed on Windows systems when using the default `'chrome'` target.
+
+### v11.10-UI-Clean-Debate-Collapse *(2026-06-14)*
+- **Removed Debate Toggle Checkbox:** Removed the `skip-debate-toggle` input checkbox element from `static/index.html` and cleared all corresponding event listener initializations and programmatic variables inside `static/modern_ui.js`.
+- **Default Debate Collapse Behavior:** Configured the council debate rendering logic inside `appendMessage()` to unconditionally wrap debate content in a `<details>` element that is closed/collapsed by default, allowing manual expand/collapse via standard browser interaction with the summary tag.
+- **Removed Redundant Settings References:** Cleaned up unused variables and toggle settings methods (`toggleSettingsDebate` and `updateExistingDebatesVisibility`) inside `static/modern_ui.js`.
+
+### v11.09-UI-Debate-Toggle-Sync *(2026-06-14)*
+- **Relocated Hide Debate Toggle:** Moved the `skip-debate-toggle` checkbox control from the DOM hidden controls to a visible, styled toggle element in `modern-header-right` next to the model selector. Removed the display setting from the settings popover.
+- **Dynamic Collapse State Sync:** Integrated a change listener on `skip-debate-toggle` that programmatically expands/collapses all existing `.council-debate-details` blocks dynamically across the chat messages area.
+- **Fixed Selector Parsing Bug:** Restricted selector parsing to headings (`h1, h2, h3, h4, h5, h6`) to prevent paragraph blocks from being matched as debate headers and deleted from response summaries.
+- **Model List Reference Fix:** Fixed the `subLinked` ReferenceError inside `fetchModels()` by ensuring it is properly defined in scope.
+
 ### v11.08-UI-DeepDive-Patch *(2026-06-13)*
 - **Dashboard Refinement & Formatting:** Executed a comprehensive CSS/HTML UI overhaul targeting excessive margins and padding in the Chat Modal and Dashboard. Dialed chat UI typography down from `1.1rem` to `0.95rem` and compacted line heights to fit data-dense fintech profiles. Refined grid table borders with a low-opacity `0.06` divider line and `0.04` hover highlight for rapid row scanning.
 - **Settings Gear Overhaul:** Replaced the cluttered top-right checkbox controls in the chat modal with a premium animated settings popover (`⚙️`). Subscriptions are dynamically tracked—users with an active Gemini Plan automatically have "Advanced" fallback elements (Paid Tiers, Context Caching overrides) hidden behind a clean `✅ GEMINI PLAN ACTIVE` banner to reduce cognitive load.
