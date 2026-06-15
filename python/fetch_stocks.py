@@ -1154,7 +1154,7 @@ class MarketDataCache:
         try:
             if active_tickers:
                 self.garbage_collect(active_tickers)
-            path = "context/daily_history_cache.json"
+            path = "cache/daily_history_cache.json"
             serialized_history = {}
             for sym, df in self.history.items():
                 if df is not None and not df.empty:
@@ -1177,7 +1177,7 @@ class MarketDataCache:
 
     def load_from_disk(self):
         try:
-            path = "context/daily_history_cache.json"
+            path = "cache/daily_history_cache.json"
             if not os.path.exists(path):
                 return
             with open(path, "r", encoding="utf-8") as f:

@@ -126,6 +126,11 @@ Maintain "Zero-Drift" across the Gemini Gem Stock Market Council ecosystem. Ensu
 - **Constraint:** Manual file-by-file iterations, bulk refactoring, and large-scale data extraction consume excessive context windows and degrade logical reasoning speed.
 - **Action:** Whenever performing bulk file edits, parsing large datasets, validating rules across multiple engines, or extracting logic, you MUST write and execute reusable Python scripts. **Save these scripts to the `scripts/` directory** so they can be retained and reused for future system maintenance, rather than treating them as temporary scratch files. Use native Python libraries (`os`, `re`, `glob`, `json`) to automate directory iteration and execute precise string manipulations to minimize token overhead.
 
+### 19. Installation & Dependency Synchronization Mandate
+- **Constraint:** System environments must remain reproducible. Shadow dependencies cause catastrophic deployment failures.
+- **Action:** Whenever a new Python package, library, or system-level dependency is introduced to the architecture (e.g., `curl_cffi` for TLS patches), you MUST proactively and atomically update `requirements.txt` with the exact version required. 
+- **Validation:** You must also review `install.ps1` and the `README.md` Installation section to ensure the new dependency or architectural breaking change is fully supported by the deployment scripts.
+
 ## 🔄 Refactoring Workflow
 When commanded to update or "Sync" the terminal:
 1. **Baseline Check:** Ingest `Gemini_Gem_Working_Data_Store` (rules.md, v7.8+) first to identify the current Master Constants.
