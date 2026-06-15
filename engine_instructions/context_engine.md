@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.03-GDrive-Decoupling-Patch
+- **version**: v11.12-Merton-JSON-Output
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.03-GDrive-Decoupling-Patch
+- **version**: v11.12-Merton-JSON-Output
 
 ## Tone
 institutional, narrative, concise

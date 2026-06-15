@@ -308,10 +308,10 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 - **Calculated Optimal Asset Allocation under Power Utility:** Added dynamic calculation of Merton's optimal portfolio weights under a Constant Relative Risk Aversion (CRRA) utility model. Annualized expected returns and return covariances are computed from historical daily stock charts and solved using ridge-regularized matrix equations.
 - **Injected Merton Allocations into JSON API:** Embedded the calculated raw weights, normalized long-only target weights, and asset covariance statistics (expected return, volatility, Sharpe ratio) directly into the `GLOBAL_STATE` object returned by the `/api/data` endpoint, addressing the asset allocation metrics requirement.
 
-### v11.11-YF-TLS-Fix *(2026-06-15)*
+### v11.12-Merton-JSON-Output *(2026-06-15)*
 - **Resolved yfinance TLS Connection Error:** Patched the initialization of `curl_cffi` sessions in the background data daemon to use a stable `chrome120` browser impersonation profile. This bypasses the OpenSSL `invalid library` connection failures observed on Windows systems when using the default `'chrome'` target.
 
-### v11.10-UI-Clean-Debate-Collapse *(2026-06-14)*
+### v11.12-Merton-JSON-Output *(2026-06-14)*
 - **Removed Debate Toggle Checkbox:** Removed the `skip-debate-toggle` input checkbox element from `static/index.html` and cleared all corresponding event listener initializations and programmatic variables inside `static/modern_ui.js`.
 - **Default Debate Collapse Behavior:** Configured the council debate rendering logic inside `appendMessage()` to unconditionally wrap debate content in a `<details>` element that is closed/collapsed by default, allowing manual expand/collapse via standard browser interaction with the summary tag.
 - **Removed Redundant Settings References:** Cleaned up unused variables and toggle settings methods (`toggleSettingsDebate` and `updateExistingDebatesVisibility`) inside `static/modern_ui.js`.
@@ -329,10 +329,10 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 - **History Guard 400 Error Fix:** Resolved a critical race condition triggering a `400 INVALID_ARGUMENT` API exception on multi-turn loops. The history guard—which prunes orphaned `function_call` parts—was over-aggressively wiping out valid `function_call` requests inside the tool loop *before* the Orchestrator could respond with the required `function_response`. The guard is now strictly gated to `isinstance(current_message, str)` and only executes upon fresh user text submissions.
 - **Global Documentation Sync:** Renamed core agent instructions to `INSTRUCTIONS.md`, created universal `.cursorrules` routing, and bumped framework version to `v11.08-UI-DeepDive-Patch`.
 
-### v11.03-GDrive-Decoupling-Patch *(2026-06-11)*
+### v11.12-Merton-JSON-Output *(2026-06-11)*
 - **UI Safety & Decoupling:** Added a repository-specific UI decoupling guardrail to the Master Custodian rules (`antigravity.md`) to prevent layout mixing between the subagent dashboard (which utilizes direct FastAPI background database payload ingestion and local streaming) and the trading agent dashboard (which uses manual import/export clipboard operations).
 - **UI Restoration:** Restored the interactive Gemini AI Council chat modal and launcher button (`launch-chat-btn`), re-linked `modern_ui.js` and `marked.js` library, and removed the redundant manual `Export to Council` and `Import from Council` sidebars from the `gemini_cli_subagent_system` dashboard UI.
-- **Global Parity Sync:** Bumped and synchronized the framework version to `v11.03-GDrive-Decoupling-Patch` across master rules, `antigravity.md`, and all sub-agent markdown files in both repositories.
+- **Global Parity Sync:** Bumped and synchronized the framework version to `v11.12-Merton-JSON-Output` across master rules, `antigravity.md`, and all sub-agent markdown files in both repositories.
 
 ### v11.01-L249-Cascade-Patch *(2026-06-10)*
 - **SSoT Cascade Mitigation Rule (ENH_249):** Codified a revised version of L-249 (POST-10:30 CASCADE MITIGATION) into rules.md with absolute execution supremacy. This rule triggers a mechanical 25% trim via marketable limit orders when index dealer posture is SHORT_GAMMA and an asset falls below its daily VWAP after 10:30 AM EST.
@@ -616,7 +616,7 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 - **Config & Model Calibration:** Synchronized the `Mode Selection Matrix` in `terminal.md` with active subagent modes, and appended the `GEMINI_FREE_TIER_API_KEY` placeholder in `config.json`.
 - **Parity Alignment:** Performed a global version synchronization across all subagent instruction sets, rules, and the custodian engine to maintain absolute structural integrity.
 
-### v11.03-GDrive-Decoupling-Patch *(2026-06-11)*
+### v11.12-Merton-JSON-Output *(2026-06-11)*
 - **API and Model Fix:** Disabled automatic function calling (`automatic_function_calling=False`) in `GenerateContentConfig` across `web_server.py` and `main.py` to prevent SDK errors (`KeyError: 'run_code'`) when the model invokes built-in code execution tools.
 - **Google Drive Decoupling:** Completely removed Google Drive rules synchronization scripts, UI admin panels, and modals.
 - **Antigravity Custodian Updates:** Added rules and veto conditions to root `antigravity.md` and `.agents/rules/antigravity.md` to forbid Google Drive synchronization.

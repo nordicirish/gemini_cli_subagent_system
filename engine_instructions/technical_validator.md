@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.03-GDrive-Decoupling-Patch
+- **version**: v11.12-Merton-JSON-Output
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

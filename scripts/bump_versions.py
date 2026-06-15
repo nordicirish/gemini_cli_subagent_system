@@ -6,7 +6,8 @@ def main():
     target_version = "v11.12-Merton-JSON-Output"
     legacy_versions = [
         "v11.11-YF-TLS-Fix",
-        "v11.10-UI-Clean-Debate-Collapse"
+        "v11.10-UI-Clean-Debate-Collapse",
+        "v11.03-GDrive-Decoupling-Patch"
     ]
     
     files_to_update = [

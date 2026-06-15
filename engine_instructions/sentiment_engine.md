@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.03-GDrive-Decoupling-Patch
+- **version**: v11.12-Merton-JSON-Output
 - **id**: SENTIMENT_ENGINE
 
 ## Tone
