@@ -1187,7 +1187,7 @@ class MarketDataCache:
                 try:
                     df = pd.DataFrame(
                         data=serialized["data"],
-                        index=pd.to_datetime(serialized["index"]),
+                        index=pd.to_datetime(serialized["index"], utc=True),
                         columns=serialized["columns"]
                     )
                     self.history[sym] = df

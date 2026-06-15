@@ -131,7 +131,8 @@ Maintain "Zero-Drift" across the Gemini Gem Stock Market Council ecosystem. Ensu
 - **Action:** 
   1. **Dependencies:** Whenever a new Python package, library, or system-level dependency is introduced to the architecture (e.g., `curl_cffi` for TLS patches), you MUST proactively and atomically update `requirements.txt` with the exact version required. 
   2. **File/Folder Architecture:** Whenever you create, rename, or delete directories (e.g., migrating cache files to a new `cache/` directory), you MUST proactively update the required directories array in `install.ps1` so fresh clones build the correct infrastructure.
-- **Validation:** You must also review `install.ps1` and the `README.md` Installation section to ensure any new dependencies, file structures, or architectural breaking changes are fully supported by the deployment scripts.
+  3. **Gitignore Synchronization:** Whenever exempted files or directories are moved, renamed, or created (e.g., migrating cache files), you MUST proactively verify and update `.gitignore` to ensure these files remain properly exempted from version control.
+- **Validation:** You must also review `install.ps1`, the `README.md` Installation section, and `.gitignore` to ensure any new dependencies, file structures, or architectural breaking changes are fully supported and properly tracked/ignored.
 
 ## 🔄 Refactoring Workflow
 When commanded to update or "Sync" the terminal:

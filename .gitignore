@@ -42,7 +42,10 @@ scratch/
 logs/
 
 
+# Cache Files
+cache/
 
 # Logs
 *.log
 
+cache/daily_history_cache.json
