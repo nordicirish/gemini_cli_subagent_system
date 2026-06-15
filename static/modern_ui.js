@@ -408,6 +408,11 @@ const ModernChat = {
                     this.modelSelector.appendChild(grp);
                 }
 
+                // Force model selector to match the active model from the backend
+                if (activeModel) {
+                    this.modelSelector.value = activeModel;
+                }
+
                 if (!this.modelSelector.value && this.modelSelector.options.length > 0) {
                     this.modelSelector.selectedIndex = 0;
                     this.changeModel();
@@ -991,6 +996,14 @@ const ModernChat = {
                     badge.className = 'cost-estimator';
                     badge.innerHTML = `<span style="font-size:0.65rem;opacity:0.6">📊 ${usage.prompt_tokens + usage.cached_tokens} in / ${usage.candidates_tokens} out tokens</span>`;
                     msgDiv.appendChild(badge);
+                }
+            }
+            // Synchronize the model selector dropdown to the actual model that responded
+            if (model && this.modelSelector && this.modelSelector.value !== model) {
+                const exists = Array.from(this.modelSelector.options).some(opt => opt.value === model);
+                if (exists) {
+                    this.modelSelector.value = model;
+                    this.updateCachingToggleVisibility();
                 }
             }
         } else {

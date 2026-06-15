@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.13-API-Gateway-Retry
+- **version**: v11.14-UI-Model-Selector-Sync
 
 ## Tone
 institutional, narrative, concise

@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.13-API-Gateway-Retry
+**Version:** v11.14-UI-Model-Selector-Sync
 **Tone:** neutral, reflective, concise
 
 ---

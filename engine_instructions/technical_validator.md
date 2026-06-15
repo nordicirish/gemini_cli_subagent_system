@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.13-API-Gateway-Retry
+- **version**: v11.14-UI-Model-Selector-Sync
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

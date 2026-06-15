@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.13-API-Gateway-Retry
+- **version**: v11.14-UI-Model-Selector-Sync
 - **id**: CONTEXT_ENGINE
 
 ## Prefix
