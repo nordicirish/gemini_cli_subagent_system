@@ -711,7 +711,7 @@ def chat_endpoint(req: ChatRequest):
                     "signal": t.get("signal"),
                     "score": t.get("score"),
                     "dealer_posture": t.get("dealer_posture"),
-                    "net_gex_total": t.get("net_gex_total"),
+                    "net_gex_total": round(t.get("net_gex_total", 0.0), 3) if t.get("net_gex_total") is not None else 0.0,
                     "note": t.get("note"),
                 }
                 for t in (live_state.get("tickers") or [])
@@ -756,15 +756,7 @@ def chat_endpoint(req: ChatRequest):
                 "timestamp": live_state.get("timestamp", current_iso),
                 "market_status": live_state.get("status", "UNKNOWN"),
                 "tickers": slim_tickers,
-                "ssot": {
-                    "portfolio_snapshot": slim_portfolio,
-                    "watched_tickers": watched,
-                    "scout_categories": scouts,
-                    "unallocated_cash_eur": ms.get("unallocated_cash_eur", state_ctx.get("unallocated_cash_eur", 0)),
-                    "unallocated_cash_usd": ms.get("unallocated_cash_usd", state_ctx.get("unallocated_cash_usd", 0)),
-                    "total_liquidity_eur": ms.get("total_liquidity_eur", state_ctx.get("total_liquidity_eur", 0)),
-                    "risk_regime": state_ctx.get("risk_regime", ""),
-                },
+                "ssot": ssot,
                 "trade_lessons": trade_lessons[-10:] if isinstance(trade_lessons, list) else [],
                 "decision_log": decision_log[-10:] if isinstance(decision_log, list) else [],
             }
