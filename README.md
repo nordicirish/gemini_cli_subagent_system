@@ -4,7 +4,7 @@
 
 Each Markdown file (`.md`) is a **system instruction** for a dedicated AI sub-agent. Together, these agents form an institutional-grade investment portfolio council that analyses live market data, enforces risk protocols, and produces consensus-driven investment decisions — all accessible via a real-time, Web Dashboard with a built-in AI chat interface.
 
-> **Cost-Optimized & Local-First.** The system uses a hybrid model architecture routing to Gemini 2.0 Flash Thinking (THINKING), Gemini 2.5 Pro (PRO), Gemini 2.5 Flash (FAST), and Gemma 4 31B (GEMMA) tiers — fully synchronized with the GEM Investment Portfolio Agent System source of truth.
+> **Cost-Optimized & Local-First.** The system uses a hybrid model architecture routing to Gemini 2.0 Flash Thinking (THINKING), Gemini 2.5 Pro (PRO), Gemini 2.5 Flash (FAST), and Gemma 4 31B (GEMMA) tiers (automatically upgraded to Gemini Pro models when utilizing a Gemini Plan) — fully synchronized with the GEM Investment Portfolio Agent System source of truth.
 
 ---
 
