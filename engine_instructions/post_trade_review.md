@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.22-Diagnostics-Cost-Fix
+**Version:** v11.23-UI-Feedback-Cost-Fix
 **Tone:** neutral, reflective, concise
 
 ---

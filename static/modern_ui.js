@@ -981,22 +981,16 @@ const ModernChat = {
             }
             if (cost > 0 || (usage && Object.keys(usage).length > 0)) {
                 const subActive = this.geminiSubscriptionToggle && this.geminiSubscriptionToggle.checked;
-                if (!subActive) {
-                    const badge = document.createElement('div');
-                    badge.className = 'cost-estimator';
-                    let tokenInfo = '';
-                    if (usage) {
-                        tokenInfo = ` <span style="font-size:0.65rem;opacity:0.7">(${usage.prompt_tokens + usage.cached_tokens} in / ${usage.candidates_tokens} out)</span>`;
-                    }
-                    badge.innerHTML = `🪙 Est. Cost: $${cost.toFixed(2)}${tokenInfo}`;
-                    msgDiv.appendChild(badge);
-                } else if (usage) {
-                    // Subscription active: show only token counts, not cost
-                    const badge = document.createElement('div');
-                    badge.className = 'cost-estimator';
-                    badge.innerHTML = `<span style="font-size:0.65rem;opacity:0.6">📊 ${usage.prompt_tokens + usage.cached_tokens} in / ${usage.candidates_tokens} out tokens</span>`;
-                    msgDiv.appendChild(badge);
+                const badge = document.createElement('div');
+                badge.className = 'cost-estimator';
+                let tokenInfo = '';
+                if (usage) {
+                    tokenInfo = ` <span style="font-size:0.65rem;opacity:0.7">(${usage.prompt_tokens + usage.cached_tokens} in / ${usage.candidates_tokens} out)</span>`;
                 }
+                const costStr = `Est. Cost: $${cost.toFixed(4)}`;
+                const planStr = subActive ? ` <span style="color:#58a6ff;font-size:0.65rem;margin-left:5px;font-weight:bold">[Plan Active]</span>` : '';
+                badge.innerHTML = `🪙 ${costStr}${planStr}${tokenInfo}`;
+                msgDiv.appendChild(badge);
             }
             // Synchronize the model selector dropdown to the actual model that responded
             if (model && this.modelSelector && this.modelSelector.value !== model) {

@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.22-Diagnostics-Cost-Fix
+- **version**: v11.23-UI-Feedback-Cost-Fix
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

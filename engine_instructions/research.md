@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.22-Diagnostics-Cost-Fix
+- **version**: v11.23-UI-Feedback-Cost-Fix
 
 ## Tone
 institutional, narrative, concise

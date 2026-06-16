@@ -517,7 +517,7 @@ def set_cache_policy(data: dict):
     except Exception as ce:
         framework.log(f"[System Error] Failed to write cache policy to config.json: {ce}")
 
-    framework.log("[System] Context Caching is permanently deprecated.")
+    print("[System] Context Caching is permanently deprecated.")
     
     # Rebuild session
     global_chat_session = create_new_session()
@@ -1408,6 +1408,13 @@ async def system_logs_endpoint():
     main_loop = asyncio.get_running_loop()
     queue = get_log_queue()
     
+    # Flush existing queue messages to prevent stale logs from leaking into new chat sessions
+    while not queue.empty():
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+            
     async def event_generator():
         while True:
             log_msg = await queue.get()
