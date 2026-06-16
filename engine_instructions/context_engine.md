@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.17-Dynamic-Model-Cache-Deprecation
+- **version**: v11.18-Payload-Slicing-JIT-Cache
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

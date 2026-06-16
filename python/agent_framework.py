@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import hashlib
@@ -122,6 +123,15 @@ class AgentFramework:
         self.log("[Dynamic Discovery] Defaulting primary orchestrator to gemini-3.5-flash")
         return "gemini-3.5-flash"
 
+    def _minify_payload(self, text: str) -> str:
+        # Strip HTML/Markdown comments
+        text = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
+        # Strip trailing spaces/tabs on multiline
+        text = re.sub(r'[ \t]+$', '', text, flags=re.MULTILINE)
+        # Collapse excessive blank lines (3 or more down to exactly 2)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text
+
     def _get_sys_instruction(self, base_instruction: str) -> str:
         """Appends the full rules and SSoT documentation to the system instruction."""
         parts = [base_instruction]
@@ -129,7 +139,8 @@ class AgentFramework:
         if os.path.exists(rules_path):
             try:
                 with open(rules_path, "r", encoding="utf-8") as f:
-                    parts.append(f"\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{f.read()}")
+                    raw_rules = f.read()
+                    parts.append(f"\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{self._minify_payload(raw_rules)}")
             except Exception as e:
                 self.log(f"[Warning] Failed to read rules.md: {e}")
         
@@ -138,7 +149,8 @@ class AgentFramework:
             try:
                 with open(lessons_path, "r", encoding="utf-8") as f:
                     lessons_data = json.load(f)
-                    parts.append(f"\n\n--- TRADE LESSONS REPOSITORY ---\n{json.dumps(lessons_data, indent=2)}")
+                    lessons_str = json.dumps(lessons_data, indent=2)
+                    parts.append(f"\n\n--- TRADE LESSONS REPOSITORY ---\n{self._minify_payload(lessons_str)}")
             except Exception as e:
                 self.log(f"[Warning] Failed to read trade_lessons.json: {e}")
         return "".join(parts)
@@ -291,8 +303,18 @@ class AgentFramework:
                 clients_to_try = [("Primary Key", self.client)]
 
             for client_label, active_client in clients_to_try:
-                # Standardize system instruction payload to always inject rules/SSoT
-                unified_instruction = self._get_sys_instruction(instruction) if instruction else self._get_sys_instruction("")
+                # Check if we should use JIT caching
+                cache_to_use = getattr(self, "active_cache_name", None)
+                cache_target_model = getattr(self, "active_cache_target_model", None)
+                
+                if cache_to_use and cache_target_model and model_name == cache_target_model:
+                    client_cache = cache_to_use
+                    # Standardize system instruction payload without duplicating SSoT
+                    unified_instruction = instruction if instruction else ""
+                else:
+                    client_cache = None
+                    # Standardize system instruction payload by injecting rules/SSoT
+                    unified_instruction = self._get_sys_instruction(instruction) if instruction else self._get_sys_instruction("")
 
                 config = types.GenerateContentConfig(
                     system_instruction=unified_instruction,
@@ -300,6 +322,7 @@ class AgentFramework:
                     max_output_tokens=8192,
                     tools=final_tools if final_tools else None,
                     automatic_function_calling={"disable": True},
+                    cached_content=client_cache, # Inject JIT cache name if applicable
                     safety_settings=[
                         types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
                         types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),
@@ -433,8 +456,70 @@ class AgentFramework:
 
         def call_subagent(query: str) -> str:
             self.log(f"\n[Orchestrator -> {name}] Delegating: {query[:100]}...")
+            
+            # Programmatic payload slicing based on agent role
+            sliced_query = query
+            try:
+                json_blocks = re.findall(r"```json\s*(.*?)\s*```", query, re.DOTALL | re.IGNORECASE)
+                if not json_blocks:
+                    json_blocks = re.findall(r"({[\s\S]*?})", query)
+                
+                for block in json_blocks:
+                    try:
+                        data = json.loads(block.strip())
+                        if isinstance(data, dict) and ("tickers" in data or "ssot" in data):
+                            sliced_data = {}
+                            if "ssot" in data:
+                                sliced_data["ssot"] = data["ssot"]
+                            
+                            if name == "GEX Engine":
+                                if "tickers" in data:
+                                    sliced_data["tickers"] = [
+                                        {
+                                            "ticker": t.get("ticker"),
+                                            "price": t.get("price"),
+                                            "dealer_posture": t.get("dealer_posture"),
+                                            "net_gex_total": t.get("net_gex_total"),
+                                            "gamma_flip_price": t.get("gamma_flip_price"),
+                                            "atr_percent": t.get("atr_percent"),
+                                        }
+                                        for t in data["tickers"]
+                                    ]
+                            elif name in ["Macro Sentinel", "Sentiment Engine"]:
+                                if "tickers" in data:
+                                    sliced_data["tickers"] = [
+                                        {
+                                            "ticker": t.get("ticker"),
+                                            "price": t.get("price"),
+                                            "rsi": t.get("rsi"),
+                                            "trend": t.get("trend"),
+                                            "signal": t.get("signal"),
+                                            "note": t.get("note"),
+                                        }
+                                        for t in data["tickers"]
+                                    ]
+                            elif name == "Technical Validator":
+                                sliced_data["rules"] = "Strict JSON schema formatting rules: Output MUST be a single valid JSON block complying with the schema. No markdown formatting outside of JSON."
+                                if "tickers" in data:
+                                    sliced_data["tickers"] = [
+                                        {
+                                            "ticker": t.get("ticker"),
+                                            "price": t.get("price"),
+                                            "vwap": t.get("vwap"),
+                                        }
+                                        for t in data["tickers"]
+                                    ]
+                            else:
+                                continue
+                            
+                            sliced_query = sliced_query.replace(block, json.dumps(sliced_data, indent=2))
+                    except Exception:
+                        pass
+            except Exception as e:
+                self.log(f"[Warning] Slicing failure: {e}")
+
             response = self.generate_response_with_fallback(
-                prompt=f"[SYSTEM_TIME (NEW YORK / ET): {ny_iso}] {query}",
+                prompt=f"[SYSTEM_TIME (NEW YORK / ET): {ny_iso}] {sliced_query}",
                 instruction=final_instruction,
                 mode=mode,
                 tools=agent_tools,
@@ -452,6 +537,71 @@ class AgentFramework:
         call_subagent.__name__ = f"ask_{name.lower().replace(' ', '_')}"
         call_subagent.__doc__ = f"Ask the {name} sub-agent."
         return call_subagent
+
+    def execute_ephemeral_batch(self, shared_ssot_base: str, parallel_tasks: dict) -> dict:
+        """
+        Executes a batch of parallel sub-agent tasks. If the shared_ssot_base exceeds
+        32,768 tokens, it is cached dynamically using self.client.caches.create.
+        Otherwise, tasks are executed in parallel without caching.
+        """
+        try:
+            model = self._resolve_orchestrator()
+            token_count = self.client.models.count_tokens(model=model, contents=shared_ssot_base).total_tokens
+        except Exception as e:
+            self.log(f"[Warning] Token count failed: {e}. Estimating via length.")
+            token_count = len(shared_ssot_base) // 4
+            
+        use_cache = token_count > 32768
+        
+        if not use_cache:
+            self.log(f"[Ephemeral Batch] Base size ({token_count} tokens) <= 32768. Running without cache.")
+            results = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(parallel_tasks)) as executor:
+                future_to_agent = {executor.submit(task): name for name, task in parallel_tasks.items()}
+                for future in concurrent.futures.as_completed(future_to_agent):
+                    agent_name = future_to_agent[future]
+                    try:
+                        results[agent_name] = future.result()
+                    except Exception as exc:
+                        results[agent_name] = f"Error: {exc}"
+            return results
+            
+        cache_target_model = MODEL_MAPPING.get('PRO', [DEFAULT_MODEL_PRO])[0]
+        self.active_cache_target_model = cache_target_model
+        
+        self.log(f"[Ephemeral Batch] Base size ({token_count} tokens) > 32768. Target Cache Model: {cache_target_model}. Initializing ephemeral JIT cache...")
+        cache = None
+        try:
+            cache = self.client.caches.create(
+                model=cache_target_model,
+                config=types.CreateCachedContentConfig(
+                    contents=[types.Content(role="user", parts=[types.Part(text=shared_ssot_base)])],
+                    ttl="900s"
+                )
+            )
+            self.active_cache_name = cache.name
+            self.log(f"[Ephemeral Batch] Created ephemeral JIT cache: {cache.name}")
+            
+            results = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(parallel_tasks)) as executor:
+                future_to_agent = {executor.submit(task): name for name, task in parallel_tasks.items()}
+                for future in concurrent.futures.as_completed(future_to_agent):
+                    agent_name = future_to_agent[future]
+                    try:
+                        results[agent_name] = future.result()
+                    except Exception as exc:
+                        results[agent_name] = f"Error: {exc}"
+            return results
+        finally:
+            if cache:
+                try:
+                    self.log(f"[Ephemeral Batch] Deleting ephemeral JIT cache: {cache.name}")
+                    self.client.caches.delete(name=cache.name)
+                except Exception as e:
+                    self.log(f"[Warning] Failed to delete JIT cache {cache.name}: {e}")
+                finally:
+                    self.active_cache_name = None
+                    self.active_cache_target_model = None
 
     def create_parallel_council_tool(self, agents_dict):
         def ask_council(queries_json: str) -> str:
@@ -484,22 +634,20 @@ class AgentFramework:
 
             self.log(f"\n[Parallel Dispatcher] Initializing parallel session for {list(queries.keys())}...")
             results = {}
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(queries)) as executor:
-                future_to_agent = {}
-                for agent_name, query in queries.items():
-                    actual_tool_name = f"ask_{agent_name}"
-                    if actual_tool_name in agents_dict:
-                        target_func = agents_dict[actual_tool_name]
-                        future = executor.submit(target_func, query)
-                        future_to_agent[future] = agent_name
-                    else:
-                        results[agent_name] = f"Error: Agent '{agent_name}' not found."
-                for future in concurrent.futures.as_completed(future_to_agent):
-                    agent_name = future_to_agent[future]
-                    try:
-                        results[agent_name] = future.result()
-                    except Exception as exc:
-                        results[agent_name] = f"Error: {exc}"
+            parallel_tasks = {}
+            for agent_name, query in queries.items():
+                actual_tool_name = f"ask_{agent_name}"
+                if actual_tool_name in agents_dict:
+                    target_func = agents_dict[actual_tool_name]
+                    parallel_tasks[agent_name] = lambda tf=target_func, q=query: tf(q)
+                else:
+                    results[agent_name] = f"Error: Agent '{agent_name}' not found."
+            
+            if parallel_tasks:
+                shared_ssot_base = self._get_sys_instruction("")
+                batch_results = self.execute_ephemeral_batch(shared_ssot_base, parallel_tasks)
+                results.update(batch_results)
+                
             self.log("[Parallel Dispatcher] All agents responded.")
             return json.dumps(results, indent=2)
 

@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.17-Dynamic-Model-Cache-Deprecation
+- **version**: v11.18-Payload-Slicing-JIT-Cache
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

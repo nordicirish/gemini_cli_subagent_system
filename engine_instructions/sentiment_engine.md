@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.17-Dynamic-Model-Cache-Deprecation
+- **version**: v11.18-Payload-Slicing-JIT-Cache
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.17-Dynamic-Model-Cache-Deprecation
+**Version:** v11.18-Payload-Slicing-JIT-Cache
 **Tone:** neutral, reflective, concise
 
 ---
