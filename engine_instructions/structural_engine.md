@@ -52,14 +52,14 @@
 
 ## Context Write Protocol
 - **Operations:**
-  - 
+  -
     - **Target:** SSoT.portfolio_snapshot[ticker].scrutiny_audit.derivation.structural_component
     - **Note:** Maps 'structural_modifier' logic to valid SSoT v3.1 field 'structural_component'
     - **Action:** Overwrite existing modifier (0.0-1.0) with calculated Structural_Modifier.
-  - 
+  -
     - **Target:** SSoT.forensic_intelligence.active_flags
     - **Action:** Append any triggered tags (e.g., 'Hedge-Related Selling Risk').
-  - 
+  -
     - **Target:** SSoT.portfolio_snapshot[ticker].scrutiny_audit.derivation.self_critique
     - **Note (BLINDSPOT-04 Fix):** The Self-Critique string MUST be committed to this SSoT field as a structured JSON STRING (not only as Markdown prose). This makes it an ENH_85-interceptable signal. The Rule Enforcer monitors this field during the consensus pipeline.
     - **Action:** Write the 1-2 sentence self-critique string. Format: `"self_critique": "[Your interrogation of structural over-penalization risk here]"`. Must mirror the content of the `**Self Critique:**` field in the Output Template.
@@ -67,15 +67,15 @@
 ## Output Template
 - **Header:** 🏛️🧬 Structural & Institutional Audit | {timestamp} EST
 - **Sync Id:** {keep_sync_id}
-- **Ticker:** 
+- **Ticker:**
 - **Statutory Bridge:** [e.g., 10 U.S.C. § 4022 or NONE]
 - **Structural Modifier:** [0.25 - 1.0]
 - **Dilution Risk:** [Minimal / Moderate / Severe]
 - **Shelf Offering Status:** [Active / Exhausted / Imminent]
 - **Warrant Overhang:** Exercise Price & Expiry
-- **Capital Structure:** 
-- **Governance:** 
-- **Sector Quality:** 
+- **Capital Structure:**
+- **Governance:**
+- **Sector Quality:**
 - **Forensic Flags:**
   - List of ENH-detected anomalies
 - **Forensic Lineage Notes:** [SC-LINEAGE / LEGISLATIVE-SYNC]

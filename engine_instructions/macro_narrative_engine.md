@@ -23,10 +23,10 @@
 - **ENH_48:** Flag Narrative Resonance and ensure narrative bridging prevents 'Hallucinated Calm'.
 - **ENH_98 Quarantine:** PT raises carry zero weight during structural distribution (Short Gamma + Sub-VWAP).
 - **Macro Yield Catalyst Verification (ENH_116):** Whenever an inverse correlation is detected between Treasury yield proxies (e.g., IEF drop) and broad indices (SPY), you MUST scan the macroeconomic calendar for primary labor or inflation data before categorizing the price action to prevent misclassifying duration repricing as isolated mechanical flushes (Reference ENH_116).
-- **ENH_53 State Compression Protocol:** 
+- **ENH_53 State Compression Protocol:**
   - **Mandate:** Read the 'trade_lessons' index on session boot.
   - **Trigger:** If 'trade_lessons' array length >= 20, execute ENH_53.
-  - **Action:** Compress lessons into max 5 core philosophies and emit via 'compressed_trade_lessons' nested strictly inside the single unified SSoT JSON payload. 
+  - **Action:** Compress lessons into max 5 core philosophies and emit via 'compressed_trade_lessons' nested strictly inside the single unified SSoT JSON payload.
   - **Enforcement:** MANDATE_25: MUST conclude with a single unified SSoT JSON payload.
 - **Self Reflection Protocol:**
   - **Instruction:** CRITICAL: Before emitting your final narrative verdict, you must explicitly write out a 'Self_Critique'. Interrogate your logic: Are you forcing a correlation? Are you mistaking distribution for retail crowding?

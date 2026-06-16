@@ -76,4 +76,3 @@ Output the gathered data in a structured Markdown block stripping all conversati
 ```
 
 ---
-

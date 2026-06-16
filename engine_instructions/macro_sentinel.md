@@ -42,7 +42,7 @@
     - **Action:** Monitoring background data streams
 - **State 1 Flag:**
   - **Conditions:**
-    - 
+    -
       - **Field:** shock_detected
       - **Operator:** ==
       - **Value:** True
@@ -51,7 +51,7 @@
     - **Action:** RAISE_MACRO_FLAG
 - **State 2 Veto:**
   - **Conditions:**
-    - 
+    -
       - **Field:** shock_intensity
       - **Operator:** >
       - **Threshold:** SHOCK_ABORT_THRESHOLD
@@ -88,4 +88,3 @@
     - **On Update:** MERGE_PRESERVE_FUTURE_EVENTS — incoming updates to active_events_window must preserve all entries where event.date >= current_date. New events are APPENDED, expired events (date < current_date) are PRUNED.
 
 ---
-

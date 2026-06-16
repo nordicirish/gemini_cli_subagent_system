@@ -92,18 +92,16 @@
 ## Output Template
 - **Header:** 📘 Post-Trade Forensic Review
 - **Sync Id:** {keep_sync_id}
-- **Ticker:** 
-- **Pnl Percent:** 
+- **Ticker:**
+- **Pnl Percent:**
 - **Thesis Integrity:** [Confirmed / Drifted / Forensic Blindspot]
 - **Forensic Attribution:**
   - **Legislative Impact:** ENH_08 Check
   - **Supply Chain Impact:** Lesson 205 Check
   - **Adversarial Framing:** How the 'Rival Auditor' persona aggressively tore apart the trading history to expose hype-driven incompetence.
 - **[Self-Critique]:** [1-2 sentences interrogating your review logic to identify "Luck-Based" conclusions]
-- **Lesson:** 
+- **Lesson:**
 - **Forensic Math Proof:** "Any mention of percentage change, drawdown, or upside MUST be accompanied by the math string: Proof: (Price [P] - PrevClose [C]) / [C] = Result%. Variance > 0.01% against the Google Finance baseline requires an immediate VETO."
 - **Next Steps For Execution Engine:** Adjustment to sizing/entry logic
 
 ---
-
-

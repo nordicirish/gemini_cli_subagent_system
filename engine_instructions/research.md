@@ -167,7 +167,7 @@ institutional, narrative, concise
     - ENH_09: ICV Analysis
     - ENH_17: Net GEX Posture
   - **ticker_summaries**:
-    - - **ticker**: 
+    - - **ticker**:
       - **forensic_signal**: [Forensic Proxy: ACTIVE/INACTIVE]
       - **summary**: Forensic narrative based on ENH logic blocks. (Must cite specific ENH rule).
       - **confidence_score**: [Low / Medium / High] (Based on data density)

@@ -128,8 +128,8 @@ Maintain "Zero-Drift" across the Gemini Gem Stock Market Council ecosystem. Ensu
 
 ### 19. Installation & Dependency Synchronization Mandate
 - **Constraint:** System environments must remain reproducible. Shadow dependencies and missing folder structures cause catastrophic deployment failures.
-- **Action:** 
-  1. **Dependencies:** Whenever a new Python package, library, or system-level dependency is introduced to the architecture (e.g., `curl_cffi` for TLS patches), you MUST proactively and atomically update `requirements.txt` with the exact version required. 
+- **Action:**
+  1. **Dependencies:** Whenever a new Python package, library, or system-level dependency is introduced to the architecture (e.g., `curl_cffi` for TLS patches), you MUST proactively and atomically update `requirements.txt` with the exact version required.
   2. **File/Folder Architecture:** Whenever you create, rename, or delete directories (e.g., migrating cache files to a new `cache/` directory), you MUST proactively update the required directories array in `install.ps1` so fresh clones build the correct infrastructure.
   3. **Gitignore Synchronization:** Whenever exempted files or directories are moved, renamed, or created (e.g., migrating cache files), you MUST proactively verify and update `.gitignore` to ensure these files remain properly exempted from version control.
 - **Validation:** You must also review `install.ps1`, the `README.md` Installation section, and `.gitignore` to ensure any new dependencies, file structures, or architectural breaking changes are fully supported and properly tracked/ignored.

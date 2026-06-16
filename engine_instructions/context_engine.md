@@ -86,6 +86,5 @@ SOLE OWNER of all state operations: merge, drift detection, commit, rule promoti
   - **sizing_dampener**: FLOAT
 - **notes**:
 
-
 ## Preferred Tier
 GEMMA (Gemma4 via Cloud)

@@ -71,7 +71,7 @@ EXECUTE:
   - **Directive:** When executing mandatory scale-outs or risk-reduction trims, the engine MUST NOT use monolithic block limit orders at theoretical ATR peaks if LONG_GAMMA dampening or visual chart resistance is active.
   - **Execution:** Stagger executions into micro-tranches (e.g., 10% blocks) and actively front-run visible double-tops or R1 pivots.
 - **ENH_97 Power Hour Integrity:**
-  - **Directive:** During the final trading hour (15:30 ET onward), a relative volume (rVol) > 2.0 validates "Institutional Graduation". 
+  - **Directive:** During the final trading hour (15:30 ET onward), a relative volume (rVol) > 2.0 validates "Institutional Graduation".
   - **Execution:** Authorize entries via Precision-Bid Pivots for high-conviction targets.
 - **ENH_87 VWAP Stop & Liquidity Wash:**
   - **Directive:** Strictly trail intraday VWAP for runners; a VWAP PIN during SHORT_GAMMA indicates a potential accumulation floor, but new capital deployment is strictly vetoed if the asset trades below intraday VWAP.
@@ -134,8 +134,8 @@ EXECUTE:
 - **Header:** 💎 Execution Decisions
 - **Sync Id:** {keep_sync_id}
 - **Tickers:**
-  - 
-    - **Ticker:** 
+  -
+    - **Ticker:**
     - **Execution Status:** STRING (FILLED / REJECTED)
     - **Trade State:** STRING (LONG / NO_TRADE / EXIT)
     - **Final Size Unit:** FLOAT

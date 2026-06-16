@@ -115,7 +115,6 @@
 - [ENH_245](#enh_245): INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Automated defensive tranches must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen, unless the asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration).
 - [ENH_249](#enh_249): POST-10:30 CASCADE MITIGATION - If broad index markers (SPY) enter a SHORT_GAMMA architecture and a position tracks below its daily VWAP floor past 10:30 AM EST on negative delta force, a mechanical 25% trim must execute instantly, bypassing standard gates and shields.
 
-
 ## Mandate Registry
 - [MANDATE_01](#mandate_01): GATEKEEPER (SSoT Exclusive Write Authority)
 - [MANDATE_02](#mandate_02): WRITE_AUTHORITY (Terminal State Commit)
@@ -186,7 +185,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 ## Tool Supremacy Hierarchy
 - **Google Search:** Primary Numeric Arbiter (Prices, Rates, Statutory text).
 - **Google Finance Extension:** Spatial/Visual Verification (Charts, Trends) only.
-*   **Consumer AI Sandbox (ANTI-RECURSION MANDATE):** All agents are STRICTLY FORBIDDEN from utilizing Google Finance's consumer AI features (AI Overview, Spark Overlays, AI Earnings Summaries). The Council MUST ingest RAW data. 
+*   **Consumer AI Sandbox (ANTI-RECURSION MANDATE):** All agents are STRICTLY FORBIDDEN from utilizing Google Finance's consumer AI features (AI Overview, Spark Overlays, AI Earnings Summaries). The Council MUST ingest RAW data.
     *   **TOOL DISAMBIGUATION:** The "Google Search" tool is MANDATORY for SEC and Macro verification (per ENH_77). However, agents must not use the internal "Gemini Research Tool" to summarize that data. You must extract the raw numbers from the Google Search results and perform the synthesis manually.
 
 ## Behavioral Guardrails
@@ -342,17 +341,17 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Tax Regime:** DEFERRED_UNTIL_WITHDRAWAL
   - **Description:** Hard-codes platform limitations and Alpha-Friction logic for high-fee accounts. Factoring tax-deferred status for FIFO neutralization.
   - **Logic Gates:**
-    - 
+    -
       - **Gate Id:** TAX_01
       - **Name:** Tax-Neutral Capital Velocity
       - **Instruction:** Individual trades do NOT trigger taxable events. Wash-Sale tax friction is neutralized for intraday rebalancing. Operational decisions (Adds/Trims) are dictated by VWAP geometry and VIX regimes rather than tax-preservation inertia.
       - **Effect:** Treat all shares of a ticker as a single liquidity block. Churn is permitted to maximize cash generation on sector volatility.
-    - 
+    -
       - **Gate Id:** ROM_01
       - **Name:** Restricted Order Mapping
       - **Instruction:** Strictly prohibit MOC/LOC suggestions. Default to 'Auction Hunter' (Marketable Limit at 15:59:45 EST).
       - **Limit Buffer Pct:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
-    - 
+    -
       - **Gate Id:** ENH_FIN_02
       - **Name:** Alpha-Friction / Nordea ESA Protocol
       - **Status:** ACTIVE
@@ -362,19 +361,19 @@ This registry serves as the system-wide directory mapping all active sub-agent c
       - **Volatility Override:**
         - **Description:** Protective Exit Override — bypasses friction gate during active breakdowns or macro stress to prevent holding through avoidable losses.
         - **Conditions:**
-          - 
+          -
             - **Field:** atr_percent
             - **Operator:** >
             - **Threshold:** PROTECTIVE_EXIT_ATR
-          - 
+          -
             - **Field:** session_change_pct
             - **Operator:** <
             - **Threshold:** PROTECTIVE_EXIT_SESSION_DROP (Dynamic: -2.0% Normal | -1.0% Stressed)
-          - 
+          -
             - **Field:** rvol
             - **Operator:** >
             - **Threshold:** RVOL_CONFIRMATION
-          - 
+          -
             - **Field:** macro_shock_intensity
             - **Operator:** >=
             - **Threshold:** SHOCK_CAUTION_THRESHOLD
@@ -386,7 +385,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
           - **Instruction:** During confirmed `MID_QUARTER_REVIEW_WINDOWS` (per `temporal_events`), the Alpha-Friction Protocol is suspended for TRIM orders ONLY.
           - **Conditions:** This override requires BOTH (1) `rvol > 1.5` AND (2) `Distance from VWAP > 2.0%` for the position being harvested.
           - **Authority:** ENH_FIN_02 friction gate is explicitly bypassed by ENH_46. This creates the formal authority chain: ENH_46 > Mid-Quarter Review > Harvest Efficiency clause → ENH_FIN_02 Bypass → Execution. This override does NOT permit new entries.
-    - 
+    -
       - **Gate Id:** NDS_01
       - **Name:** Narrative Divergence Sentry
       - **Instruction:** Auto-trigger 'Grok Flash' if Social Score drops >0.4 OR RS Rating > 90.
@@ -394,7 +393,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
         - X_Velocity
         - SEC_EDGAR
         - DoD_Portals
-    - 
+    -
       - **Gate Id:** ATR_01
       - **Name:** Volatility Buffer Calibration
       - **Formula:** VWAP + (0.25 * Current_ATR)
@@ -406,7 +405,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="mandate_20_macro_veto"></a>
 - **[MANDATE_20_MACRO_VETO]**
   - **Status:** ACTIVE
-  - **Instruction:** The MACRO_SENTINEL possesses absolute veto authority. Macro Veto applies exclusively to New Risk Exposure. The SSoT Controller is authorized to emit EXIT or TRIM states during a Veto event if forensic indicators (HV BREAKOUT) suggest an imminent blow-off top or liquidity exhaustion. Macro Veto is triggered by Absolute Regime (VIX > 20) OR Intraday Velocity (VIXY gap > +5.0%). 
+  - **Instruction:** The MACRO_SENTINEL possesses absolute veto authority. Macro Veto applies exclusively to New Risk Exposure. The SSoT Controller is authorized to emit EXIT or TRIM states during a Veto event if forensic indicators (HV BREAKOUT) suggest an imminent blow-off top or liquidity exhaustion. Macro Veto is triggered by Absolute Regime (VIX > 20) OR Intraday Velocity (VIXY gap > +5.0%).
   - **Sovereign Hedge Exemption:** Capital rotation into clinical-stage biotechs explicitly triggered by ENH_57 is EXEMPT from the MANDATE_20 New Risk Exposure Veto.
   - **Catalyst Override Quality Gates (MANDATE_20_VOID):** Veto is VOID for tickers with verified 8-K catalysts or ENH_31 clinical acceleration, subject to the following mandatory criteria:
     - **8-K Override Gate:** The 8-K event must represent a verifiable contract, revenue event, or regulatory decision with a stated or implied value **>= $50M**. Recency must be **<= 72 hours** from evaluation.
@@ -568,7 +567,6 @@ This registry serves as the system-wide directory mapping all active sub-agent c
     *   **Directive:** FRICTION_OVERRIDE_ON_STRUCTURAL_FAILURE - If an asset exhibits structural failure (defined as losing its daily VWAP floor accompanied by rising distribution volume or negative pre-market gap metrics), the Orchestrator MUST override standard FX/commission friction hurdles (such as the 0.6% EUR round-trip constraint) and execute an immediate defensive exit. Capital preservation supersedes transactional friction optimization.
     *   **Justification:** Verified via June 5 UMAC/RCAT liquidations; bypassing friction gates during active waterfalls stops drawdown leakage immediately.
 
-
 ## Anti Hallucination Core
 - **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.
   - **Proactive Search Mandate [CODIFIED: PROTOCOL_01]:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (`sec_link`) and Government/DoW press releases (`dow_link`) when not explicitly provided in the payload. This protocol overrides the default 'INSUFFICIENT_DATA' fallback for these specific source links. Probabilistic or assumed URLs remain strictly prohibited; links must be verified via search prior to SSoT injection.
@@ -697,7 +695,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
     - **Note:** Modifiers are multiplicative. shelf_offering_active (0.25) applies when 424B filed within < 72h.
 <a name="enh_31"></a>
 - **[ENH_31 - Temporal Logic & Protocol Sync]**
-  - **Logic:** 
+  - **Logic:**
     - **MANDATORY_PREAMBLE:** Every response MUST begin with a 'TEMPORAL_CHECK' header. This header must extract the ISO string from the payload and determine the current Market Status (PRE-MARKET, OPEN, POWER_HOUR, or CLOSED). Predictors are blocked until status is verified.
     - **Baseline Sync:** Google Search is the Primary Baseline Arbiter for numeric Previous Close ($C$) and Open ($O$) prices. Before any session_change_pct calculation, the engine MUST perform a Google Search query specifically for "[Ticker] Google Finance quote". It must extract the explicit lastClosePrice and openPrice fields to establish the objective constant ($C$) for that session.
     - **FX Baseline Sync:** Before any sizing calculation or P&L report, the engine MUST perform a Google Search query for "USD to Base Currency exchange rate". It must extract the current rate and update system_thresholds.BASE_CURRENCY_EXCHANGE_RATE.
@@ -707,7 +705,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Schema Authority:** CANONICAL — All other Gems MUST reference this schema via 'Gemini_Gem_Working_Data_Store > ENH_32'. Do NOT duplicate inline.
   - **Schema Definition:**
     - **Portfolio Snapshot:**
-      - 
+      -
         - **Ticker:** STRING
         - **Shares:** INT
         - **Wac:** FLOAT
@@ -743,7 +741,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
           - **Statutory Anchors:**
             - **Success Memo (ENH_73):** Sa = 0.95 (Overrides technical overrides)
           - **Agent Votes:**
-            - 
+            -
               - **Agent:** STRING (BULLISH_ADVOCATE | RED_TEAM_PESSIMIST | NEUTRAL_STRUCTURALIST)
               - **Verdict:** STRING
               - **Confidence:** FLOAT
@@ -922,24 +920,24 @@ This registry serves as the system-wide directory mapping all active sub-agent c
     - **Trade Lessons Handling:**
       - **Description:** The orchestrator recognizes exactly three keys for trade_lessons management. Priority order (first match wins):
       - **Keys:**
-        - 
+        -
           - **Key:** compressed_trade_lessons
           - **Type:** ARRAY<STRING>
           - **Action:** OVERWRITE trade_lessons.json entirely
           - **Trigger:** ENH_53 State Compression (>= 20 lessons)
-        - 
+        -
           - **Key:** new_trade_lessons (alias: session_trade_lessons)
           - **Type:** ARRAY<STRING>
           - **Action:** APPEND to existing trade_lessons.json
           - **Trigger:** ENH_51 Retrospective (post-mortem lesson)
-        - 
+        -
           - **Key:** trade_lessons
           - **Type:** ARRAY<OBJECT>
           - **Action:** UPSERT by ID into trade_lessons.json: update existing lessons where id matches, append new ones
           - **Trigger:** Full or partial SSoT state emission
     - **Trade Lessons Architecture:**
-      - The system MUST NOT rely on a dedicated 'Memory Gem' for historical context. Logical consistency and financial maximization are achieved purely through the Air-Gap Bridge. 
-      - The live 'trade_lessons.md' file must be attached natively at Session Init (MANDATE_12). 
+      - The system MUST NOT rely on a dedicated 'Memory Gem' for historical context. Logical consistency and financial maximization are achieved purely through the Air-Gap Bridge.
+      - The live 'trade_lessons.md' file must be attached natively at Session Init (MANDATE_12).
       - The MACRO_NARRATIVE_ENGINE acts as the reader/compressor (ENH_53) and the REVIEW_ENGINE acts as the writer (MANDATE_25) to maintain the registry within the Orchestrator's active 1-million-token context window.
 <a name="enh_50"></a>
 - **[ENH_50 - Pre-Execution Formulation Protocol]**
@@ -1057,12 +1055,12 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_72"></a>
 - **[ENH_72 - VVIX/VIX Divergence Guard]**
   - **Status:** ACTIVE
-  - **Instruction:** Monitor the divergence between VVIX (Volatility of Volatility) and VIX. 
+  - **Instruction:** Monitor the divergence between VVIX (Volatility of Volatility) and VIX.
   - **Logic:** IF VVIX > system_thresholds.VVIX_SHOCK_THRESHOLD AND VIX < system_thresholds.VIX_FEAR_THRESHOLD, the system MUST transition to 'PREEMPTIVE_DEFENSE' mode and apply a mandatory 2x ATR stop-loss buffer per Lesson L-179. Maintain 2x ATR stop-loss buffers regardless of the 'Normal' VIX regime, as a high VVIX environment indicates institutional pre-positioning for a 'Hidden Shock.'
 <a name="enh_73"></a>
 - **[ENH_73 - Success Memo Production Gate]**
   - **Status:** ACTIVE
-  - **Instruction:** Codify the non-competitive bridge granted by 10 U.S.C. § 4022. 
+  - **Instruction:** Codify the non-competitive bridge granted by 10 U.S.C. § 4022.
   - **Logic:** IF a 'Success Memo' is verified for a Defense Prime, the Agreement Score (Sa) is effectively anchored to 0.95. This statutory transition from R&D to Production Revenue overrides technical RSI overbought signals.
 <a name="enh_74"></a>
 - **[ENH_74 - Noon Spike Guard]**
@@ -1088,7 +1086,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_77_live_web"></a>
 *   **[ENH_77_LIVE_WEB - Proactive Search Mandate]**
     *   **Status:** ACTIVE
-    *   **Instruction:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (sec_link) and Government/DoW press releases (dow_link) when not explicitly provided in the payload. 
+    *   **Instruction:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (sec_link) and Government/DoW press releases (dow_link) when not explicitly provided in the payload.
     *   **Tool Disambiguation:** You are explicitly mandated to use the native "Google Search" tool for this action. You must strictly BLACKLIST the "File Fetcher" and "Research Tool" for any ticker not currently existing in the `portfolio_snapshot` to prevent false-positive recursive call vetoes.
     *   **Diversified Query Generation:** The `DATA_ANALYST` and `RESEARCH_ENGINE` must populate the `diversified_retrieval_queries` schema defined in `ENH_32`. When evaluating an asset, they must generate separate, parallel search queries tailored to multi-perspective dimensions (e.g., querying specifically for "Tier-1 regulatory events" vs "safe-haven macro rotations"), establishing an M×K matrix of historical intelligence for the deliberative agents to evaluate.
 <a name="enh_77_b"></a>
@@ -1210,7 +1208,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Id:** ENH_40
   - **Note:** MANDATE_13 consensus is non-negotiable. Tax-deferred status increases trade frequency, but each trade must still clear the 0.75 S_A hurdle.
   - **Conditions:**
-    - 
+    -
       - **Field:** S_A
       - **Operator:** <
       - **Value:** 0.75
@@ -1287,38 +1285,38 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Authority:** CANONICAL — Gemini_Gem_Technical_Validator MUST reference this protocol.
 - **Base Score:** 100
 - **Penalties:**
-  - 
+  -
     - **Condition:** S_A < 0.65
     - **Deduction:** 100
     - **Label:** Consensus Failure/Deadlock
-  - 
+  -
     - **Condition:** Risk_Regime == CRITICAL
     - **Deduction:** 50
     - **Label:** ENH_08 Critical Regime
     - **Enh Ref:** ENH_08
-  - 
+  -
     - **Condition:** Trade_State == EXIT AND Drawdown_Gap < 1.5% AND volatility_override == FALSE
     - **Deduction:** 30
     - **Label:** Alpha-Friction Violation (churn only — bypassed during Protective Exit Override)
     - **Enh Ref:** ENH_FIN_02
-  - 
+  -
     - **Condition:** fields labeled Unverified
     - **Deduction:** 20
     - **Label:** MANDATE_04 Drift
-  - 
+  -
     - **Condition:** Supply Chain flags active
     - **Deduction:** 15
     - **Label:** Lesson 205 Supply Chain
     - **Enh Ref:** Lesson 205
-  - 
+  -
     - **Condition:** Signal/Trend mismatch
     - **Deduction:** 15
     - **Label:** Drift Detection
-  - 
+  -
     - **Condition:** rvol < 0.5 OR rvol > 4.0
     - **Deduction:** 10
     - **Label:** rVol Anomaly
-  - 
+  -
     - **Condition:** Failure to reclaim Post-Catalyst High
     - **Deduction:** 3
     - **Label:** ENH_70 Adaptive Decay (per session)
@@ -1327,16 +1325,16 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 ## Signal Consistency Thresholds
 - **Authority:** CANONICAL — Gemini_Gem_Technical_Validator MUST reference these thresholds.
 - **Rules:**
-  - 
+  -
     - **Condition:** rsi < 30
     - **Expected Label:** OVERSOLD
-  - 
+  -
     - **Condition:** rsi > 70
     - **Expected Label:** OVERBOUGHT
-  - 
+  -
     - **Condition:** abs(distance_from_vwap) < VWAP_PIN_DISTANCE
     - **Expected Label:** VWAP PIN
-  - 
+  -
     - **Condition:** rsi >= 30 AND rsi <= 70
     - **Expected Label:** NEUTRAL
 - **Dealer Posture Logic:**
@@ -1670,8 +1668,6 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Used By:**
     - GATE_REG_01
 
-
-
 ## Sector Taxonomy
 - **Authority:** CANONICAL — SSoT sector_exposure fields MUST align with these categories.
 - **Categories:**
@@ -1790,7 +1786,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Id:** ENH_97
 - **Title:** Power Hour Integrity
 - **Status:** ACTIVE
-- **Directive:** During the final trading hour (15:30 ET onward), a relative volume (rVol) > 2.0 MUST be treated as a mathematical validation of "Institutional Graduation". 
+- **Directive:** During the final trading hour (15:30 ET onward), a relative volume (rVol) > 2.0 MUST be treated as a mathematical validation of "Institutional Graduation".
 - **Execution:** When this condition is met on a high-conviction target, the Execution Engine is authorized to execute entries via Precision-Bid Pivots.
 
 ## Enh 98 Analyst Upgrade Quarantine
@@ -2005,7 +2001,6 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Execution Route Integration:** To guarantee capital extraction before broker latency traps the order (ENH_232), the trim MUST be instantiated strictly as a 'Sweeping Limit Order' priced 0.5% below the current bid.
 - **Justification:** Forensic audit of the June 10 cascade revealed that prior drafts failed to prevent "hold paralysis" because they did not account for deeply embedded systemic gates.
 
-
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.
 - **Hierarchy of Authority [CODIFIED: PROTOCOL_02]:**
@@ -2031,8 +2026,8 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_250"></a>
 ### [ENH_250] ADVANCED_OSCILLATOR_INTEGRATION
 - **Status:** ACTIVE
-- **Content:** The core Technical Engine has been upgraded to include a 9-day RSI, MACD, Bollinger Bands, and Money Flow Index (MFI). 
-- **Directive:** 
+- **Content:** The core Technical Engine has been upgraded to include a 9-day RSI, MACD, Bollinger Bands, and Money Flow Index (MFI).
+- **Directive:**
   - **RSI Calibration:** Due to the shift from a 14-day to a 9-day RSI, the oscillator is significantly more sensitive. All legacy RSI thresholds (MANDATE_38, MANDATE_40, ENH_110) must be evaluated with a wider tolerance: consider RSI > 80 as standard overbought and RSI > 85 as extreme overbought.
   - **Momentum Confirmation:** Use MACD Histogram and MFI > 70 to confirm breakout validity. A high RSI (overbought) combined with a rising MACD Histogram and MFI > 70 indicates a sustainable high-beta momentum trend, not an immediate mean-reversion short.
   - **Volatility Expansion:** Use Bollinger Band %B. A %B > 0.8 with expanding bands validates continuation; a %B > 1.0 with shrinking MFI indicates exhaustion.

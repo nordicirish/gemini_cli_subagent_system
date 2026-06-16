@@ -31,25 +31,25 @@
 - **Mandate Source:** See Gemini_Gem_Terminal > shared_behavior > mandate_source
 
 ## Update Flow
-- 
+-
   - **Index:** 1
   - **Step Id:** LOAD_RULES
   - **Action:** Ingest static rules from Gemini_Gem_Working_Data_Store to establish the legislative framework.
-- 
+-
   - **Index:** 2
   - **Step Id:** CONTEXT_ECHO
   - **Action:** Build internal working memory from the full prior state provided in the prompt payload; enforce zero-discard policy.
-- 
+-
   - **Index:** 3
   - **Step Id:** REASON
   - **Action:** Evaluate new market data, research, and agent votes (BULLISH/RED_TEAM/NEUTRAL).
-- 
+-
   - **Index:** 4
   - **Step Id:** VALIDATE_MACRO
   - **Action:**
     - **Description:** Check MACRO_SENTINEL for active Veto/Flags
     - **Conditions:**
-      - 
+      -
         - **Field:** shock_intensity
         - **Operator:** >
         - **Threshold:** SHOCK_ABORT_THRESHOLD
@@ -58,19 +58,19 @@
       - **Enh Ref:** ENH_45
     - **Emit False:**
       - **Action:** Continue
-- 
+-
   - **Index:** 5
   - **Step Id:** VALIDATE_CALENDAR_SHIELD
   - **Action:**
     - **Description:** Check macro_calendar_shield for event proximity and apply sizing_dampener
     - **Logic Source:** Gemini_Gem_Working_Data_Store > enh_protocols > ENH_47
-- 
+-
   - **Index:** 6
   - **Step Id:** VALIDATE_NARRATIVE_BRIDGE
   - **Action:**
     - **Description:** Check Narrative Bridge Protocol for resonance
     - **Logic Source:** Gemini_Gem_Working_Data_Store > enh_protocols > ENH_48
-- 
+-
   - **Index:** 7
   - **Step Id:** VALIDATE_INSTITUTIONAL_SENTINEL
   - **Action:**
@@ -122,4 +122,3 @@
   - **Instruction:** Before signing off on any EXECUTION_PAYLOAD, scan all tickers in `portfolio_snapshot`. If any ticker has RSI > 75 or price > 2% above VWAP, confirm `trailing_stop_audit` is present and non-null. If absent, SET `RULE_COMPLIANCE = REJECTED` and route back to Execution Engine for re-emission.
 
 ---
-

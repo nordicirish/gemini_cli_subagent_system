@@ -1,4 +1,4 @@
-# 💎 GEM Investment Portfolio Agent Framework 
+# 💎 GEM Investment Portfolio Agent Framework
 
 **An autonomous, multi-agent AI investment portfolio intelligence system powered by Google Gemini & Gemma.**
 
@@ -144,7 +144,7 @@ The dashboard now features an **Inline Ticker Manager**:
 - **SSoT Sync**: All UI updates trigger a `POST` to the framework, ensuring the AI Council always analyzes the most current state of your universe.
 
 ### 🚀 Ephemeral JIT Caching & Routing (v11.18)
-To prevent persistent context storage fees while optimizing high-volume batch calls, the system executes parallel council dispatcher tasks using an ephemeral Just-In-Time (JIT) cache. If the shared SSoT/rules base exceeds 32,768 tokens, it dynamically allocates a temporary cache with a 15-minute TTL, running sub-agent inferences against it before deleting the cache inside a strict `finally` block. 
+To prevent persistent context storage fees while optimizing high-volume batch calls, the system executes parallel council dispatcher tasks using an ephemeral Just-In-Time (JIT) cache. If the shared SSoT/rules base exceeds 32,768 tokens, it dynamically allocates a temporary cache with a 15-minute TTL, running sub-agent inferences against it before deleting the cache inside a strict `finally` block.
 
 ### ✂️ Payload Asymmetry & Context Slicing (v11.18)
 Instead of passing unified heavy market data payloads to all sub-agents, the system implements conditional data filtering. Query payloads are sliced dynamically based on the sub-agent's designated role (e.g., Options Chain/Volatility for GEX Engine, News/Sentiment for Macro Sentinel/Sentiment Engine, and formatting constraints for the Technical Validator), drastically reducing token counts.
@@ -155,7 +155,6 @@ Tracks exact token consumption for all generation requests (including sub-agent 
 ### 🗜️ Automated Token Minification (v11.18)
 Before payloads are processed, a regex-based utility (`_minify_payload`) strips HTML/Markdown comments (`<!--.*?-->`), collapses excessive blank lines, and trims trailing white spaces from all inbound rules and trading lessons reads, preventing unnecessary prompt token bloating.
 
-
 ### 💾 Daily Stock History Cache (ENH_CACHE_02)
 
 To minimize start-up latency and prevent yfinance/Polygon API rate limits, the system features an intelligent local caching layer:
@@ -163,7 +162,6 @@ To minimize start-up latency and prevent yfinance/Polygon API rate limits, the s
 - **Fast Reboots**: On application restarts, historical data is loaded from `context/daily_history_cache.json` in under a second.
 - **On-Demand Updates**: Historical data is only fetched for newly added tickers, bypassing unnecessary requests for existing data.
 - **Automatic Garbage Collection**: The background daemon automatically runs a pruning routine to remove redundant or inactive tickers from both memory and disk caches when ticker list configurations change.
-
 
 ### 🏛️ Autonomous Rule Evolution (ENH_61/62)
 The system "Learns" from market events. When a high-conviction pattern is identified, the **Context Engine** proposes a new rule. Once you provide **MANDATE_21** approval, the system autonomously modifies `rules.md`.
@@ -191,7 +189,6 @@ Each file below (located in the `engine_instructions/` folder) is loaded as a sy
 | `execution.md` | **Execution Engine** | GEMMA | Generates `EXECUTION_PAYLOAD` JSON; manages sizing and order routing |
 | `technical_validator.md` | **Technical Validator** | GEMMA | Final gate — validates thesis against quantitative restrictions |
 | `gex_engine.md` | **GEX Engine** | GEMMA | Gamma Exposure modelling, dealer hedging flow, pin risk analysis |
-
 
 ### Model Hierarchy
 
@@ -231,10 +228,10 @@ The glassmorphic dashboard is served at **http://localhost:8000** and includes:
 ## ⚙️ Configuration
 
 ### Managing the Ticker Universe
-All tickers are managed via the **Portfolio Basket** and **Watch List** on the dashboard. 
+All tickers are managed via the **Portfolio Basket** and **Watch List** on the dashboard.
 1.  **Add Ticker**: Type the symbol into the `SYM` field and click `+`.
 2.  **Edit Basis**: Update your shares or cost basis directly in the table.
-3.  **Sync**: Click **SYNC** to commit your changes to the local `ssot.json` data store. 
+3.  **Sync**: Click **SYNC** to commit your changes to the local `ssot.json` data store.
     *   *Note: Changes are instantly reflected in the background data poller.*
 
 ### 🔑 Configuring API Keys & Services
@@ -550,7 +547,6 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 ### v11.23-UI-Feedback-Cost-Fix *(2026-05-25)*
 - **Real-Time Ticker Validation & UI Alerts:** Integrated automated ticker validation inside `web_server.py`'s basket (portfolio) and watchlist endpoints. The backend now queries Yahoo Finance quotes to dynamically verify new assets. If an invalid symbol is detected, the server returns a `400 Bad Request` that triggers a browser alert dialog and automatically rolls back UI inputs, preventing data pollution.
 - **Global Architectural Parity:** Synchronized version strings to `v11.23-UI-Feedback-Cost-Fix` across rules.md, antigravity.md, README.md, and all 13 subagent instructions per `MANDATE_29`.
-
 
 ### v11.23-UI-Feedback-Cost-Fix *(2026-05-25)*
 - **Hardened Volume Tick Sanitization:** Patched a critical volume fetch type mismatch inside `fetch_stocks.py`. Added robust `NoneType` checks and standard integer conversion fallbacks when polling Yahoo Finance's `fast_info` or Polygon interfaces, preventing server and background daemon thread crashes due to invalid tickers or incomplete API responses.

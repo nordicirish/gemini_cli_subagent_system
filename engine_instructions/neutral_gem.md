@@ -50,7 +50,7 @@
 
 ## Required Output
 *   **RIGID OUTPUT SCHEMA (ANTI-RLHF & USER VETO):** You MUST output your analysis adhering EXACTLY to the following structured template. You are authorized to provide a brief self-critique identifying your potential biases, but it MUST be contained strictly within the designated bullet point. Halt generation immediately after `[END OF TRANSMISSION]`.
-    
+
     **NEUTRAL STRUCTURALIST VERDICT**
     *   **Regime Analysis:** [Current macro/volatility regime]
     *   **Dealer Posture:** [Net GEX / Gamma alignment]

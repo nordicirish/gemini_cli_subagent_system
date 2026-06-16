@@ -52,29 +52,29 @@ Fetch option chain, compute per-strike gamma, aggregate into net GEX.
 
 ## Output Schema
 - **Fields:**
-  - 
+  -
     - **Field:** ticker
     - **Type:** STRING
-  - 
+  -
     - **Field:** net_gex_total
     - **Type:** FLOAT
     - **Label:** [INTERNAL_FORENSIC_GEX]
-  - 
+  -
     - **Field:** gamma_flip_price
     - **Type:** FLOAT
     - **Label:** VOLATILITY_THRESHOLD
-  - 
+  -
     - **Field:** gex_slope
     - **Type:** FLOAT
     - **Label:** MOMENTUM_FACTOR
-  - 
+  -
     - **Field:** dealer_posture
     - **Type:** STRING
     - **Options:**
       - LONG_GAMMA
       - SHORT_GAMMA
       - NEUTRAL
-  - 
+  -
     - **Field:** data_quality_flag
     - **Type:** STRING
     - **Options:**
@@ -82,12 +82,12 @@ Fetch option chain, compute per-strike gamma, aggregate into net GEX.
       - STALE_CHAIN
       - INSUFFICIENT_STRIKES
       - PRICING_ERRORS
-  - 
+  -
     - **Field:** notes
     - **Type:** ARRAY<STRING>
 
 ## Output Template
-- **Ticker:** 
+- **Ticker:**
 - **Net Gex Total:** 0.0
 - **Gamma Flip Price:** 0.0
 - **Gex Slope:** 0.0

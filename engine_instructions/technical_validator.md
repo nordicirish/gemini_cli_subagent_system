@@ -60,7 +60,6 @@ VALIDATE:
 - **MANDATE_40_validation**: Enforce a mandatory 25-50% risk trim in the final 15 minutes of RTH if an asset finishes the RTH session with an RSI > 85 and is > 3% above its daily VWAP, overriding passive HOLD mandates.
 - **MANDATE_41_validation**: Enforce a mandatory minimum 15% tactical sweep trim if an asset exceeds a +12.0% extension from its daily VWAP anchor alongside an RSI > 85, regardless of SSR, LONG_GAMMA, or user manual overrides.
 
-
 ## Final Output Template
 - **header**: 🛠️ Technical Validator | {timestamp} EST
 - **validation_id**: VAL-{uuid}
