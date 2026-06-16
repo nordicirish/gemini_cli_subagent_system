@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.21-JIT-Cache-Config-Fix
+- **version**: v11.22-Diagnostics-Cost-Fix
 
 ## Tone
 institutional, narrative, concise

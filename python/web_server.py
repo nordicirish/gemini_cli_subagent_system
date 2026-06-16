@@ -733,9 +733,14 @@ def chat_endpoint(req: ChatRequest):
                 raw_prompt_tokens = response.usage_metadata.prompt_token_count or 0
                 cached_tokens = getattr(response.usage_metadata, 'cached_content_token_count', 0) or 0
                 p_tokens = raw_prompt_tokens - cached_tokens
+                c_tokens = response.usage_metadata.candidates_token_count or 0
                 framework.turn_usage['prompt_tokens'] += p_tokens
-                framework.turn_usage['candidates_tokens'] += (response.usage_metadata.candidates_token_count or 0)
+                framework.turn_usage['candidates_tokens'] += c_tokens
                 framework.turn_usage['cached_tokens'] += cached_tokens
+                
+                call_cost = framework._calculate_call_cost(ORCHESTRATOR_MODEL, "Primary Key", p_tokens, c_tokens, cached_tokens)
+                framework.turn_usage['estimated_cost'] += call_cost
+                framework.session_cost += call_cost
             
             if cancel_event.is_set():
                 framework.log("[Orchestrator] Interrupted after model response.")
@@ -944,6 +949,12 @@ def chat_endpoint(req: ChatRequest):
 
         global active_model_warning
         active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
+        
+        # Log diagnostics to console/queue
+        turn_cost = framework.turn_usage['estimated_cost']
+        session_cost = framework.session_cost
+        framework.log(f"[Diagnostics] Turn Cost: ${turn_cost:.4f} | Total Session Cost: ${session_cost:.4f}")
+
         return {
             "status": "success", 
             "response": full_response.strip(),

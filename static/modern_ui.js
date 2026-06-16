@@ -1130,7 +1130,9 @@ const ModernChat = {
             if (data.status === 'success') {
                 this.showModelWarning(data.warning);
                 let cost = 0.0;
-                if (data.usage && data.model) {
+                if (data.usage && typeof data.usage.estimated_cost === 'number') {
+                    cost = data.usage.estimated_cost;
+                } else if (data.usage && data.model) {
                     cost = this.calculateCost(data.usage, data.model);
                 }
                 this.appendMessage('ai', data.response, true, cost, data.usage, data.model);

@@ -149,7 +149,7 @@ def main():
     # ---------------------------------------------------------------------------
     print("\n" + "=" * 60)
     print("💎 GEM CLI ORCHESTRATOR READY 💎")
-    print(f"   Version : v11.21-JIT-Cache-Config-Fix")
+    print(f"   Version : v11.22-Diagnostics-Cost-Fix")
     print(f"   Agents  : {len(sub_agent_configs)} loaded")
     print(f"   Rules   : {'✅ Attached' if os.path.exists(rules_path) else '⚠️  Missing'}")
     antigravity_path = os.path.join(".agents", "rules", "antigravity.md")
@@ -237,11 +237,16 @@ def main():
                     raise exc
 
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                p_tokens = response.usage_metadata.prompt_token_count or 0
+                raw_prompt_tokens = response.usage_metadata.prompt_token_count or 0
+                cached_tokens = getattr(response.usage_metadata, 'cached_content_token_count', 0) or 0
+                p_tokens = raw_prompt_tokens - cached_tokens
                 c_tokens = response.usage_metadata.candidates_token_count or 0
+                
                 framework.turn_usage['prompt_tokens'] += p_tokens
                 framework.turn_usage['candidates_tokens'] += c_tokens
-                call_cost = framework._calculate_call_cost(orchestrator_model, "Primary Key", p_tokens, c_tokens)
+                framework.turn_usage['cached_tokens'] += cached_tokens
+                
+                call_cost = framework._calculate_call_cost(orchestrator_model, "Primary Key", p_tokens, c_tokens, cached_tokens)
                 framework.turn_usage['estimated_cost'] += call_cost
                 framework.session_cost += call_cost
 

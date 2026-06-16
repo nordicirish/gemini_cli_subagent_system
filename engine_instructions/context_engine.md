@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.21-JIT-Cache-Config-Fix
+- **version**: v11.22-Diagnostics-Cost-Fix
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.21-JIT-Cache-Config-Fix
+- **version**: v11.22-Diagnostics-Cost-Fix
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

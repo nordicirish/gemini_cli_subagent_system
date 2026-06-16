@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.21-JIT-Cache-Config-Fix
+**Version:** v11.22-Diagnostics-Cost-Fix
 **Tone:** neutral, reflective, concise
 
 ---
