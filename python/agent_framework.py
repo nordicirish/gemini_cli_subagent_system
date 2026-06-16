@@ -102,7 +102,7 @@ class AgentFramework:
     def _resolve_orchestrator(self) -> str:
         """
         Dynamically probe available models, filter for 'antigravity',
-        and return the latest version alphabetically.
+        and return the latest version alphabetically that supports function calling.
         Falls back to 'gemini-3.5-flash' on failure or empty match.
         """
         try:
@@ -114,11 +114,48 @@ class AgentFramework:
             antigravity_models = [name for name in available_models if "antigravity" in name.lower()]
             if antigravity_models:
                 antigravity_models.sort()
-                resolved = antigravity_models[-1]
-                self.log(f"[Dynamic Discovery] Resolved primary orchestrator: {resolved}")
-                return resolved
+                
+                # Verify each starting from the latest (alphabetically)
+                for resolved in reversed(antigravity_models):
+                    if not hasattr(self, "_model_capability_cache"):
+                        self._model_capability_cache = {}
+                    
+                    if resolved not in self._model_capability_cache:
+                        self.log(f"[Dynamic Discovery] Probing {resolved} for tool/function calling support...")
+                        def dummy_tool() -> str:
+                            """A dummy tool to test tool support."""
+                            return "ok"
+                        try:
+                            # Use a tiny prompt and minimal output to verify function calling
+                            cfg = types.GenerateContentConfig(
+                                tools=[dummy_tool],
+                                max_output_tokens=1,
+                                temperature=0.0,
+                            )
+                            self.client.models.generate_content(
+                                model=resolved,
+                                contents="test",
+                                config=cfg
+                            )
+                            self._model_capability_cache[resolved] = True
+                            self.log(f"[Dynamic Discovery] Verified {resolved} supports function calling.")
+                        except Exception as e:
+                            err_str = str(e).lower()
+                            if "function calling" in err_str or "tool" in err_str or "invalid" in err_str:
+                                self.log(f"[Dynamic Discovery] Model {resolved} does not support function calling: {e}")
+                                self._model_capability_cache[resolved] = False
+                            else:
+                                self.log(f"[Dynamic Discovery] Verification call for {resolved} failed with unexpected error: {e}")
+                                # Do not cache as False permanently for transient connection errors, but skip for this resolution
+                                continue
+
+                    if self._model_capability_cache.get(resolved):
+                        self.log(f"[Dynamic Discovery] Resolved primary orchestrator: {resolved}")
+                        return resolved
+                    else:
+                        self.log(f"[Dynamic Discovery] Skipping {resolved} due to lack of tool/function calling support.")
         except Exception as e:
-            self.log(f"[Dynamic Discovery Warning] Failed to dynamically list models: {e}")
+            self.log(f"[Dynamic Discovery Warning] Failed to dynamically list/probe models: {e}")
         
         self.log("[Dynamic Discovery] Defaulting primary orchestrator to gemini-3.5-flash")
         return "gemini-3.5-flash"
@@ -206,18 +243,18 @@ class AgentFramework:
 
     def reset_turn_usage(self):
         """Clear token counters for a new chat session turn."""
-        self.turn_usage = {'prompt_tokens': 0, 'candidates_tokens': 0, 'estimated_cost': 0.0}
+        self.turn_usage = {'prompt_tokens': 0, 'candidates_tokens': 0, 'cached_tokens': 0, 'estimated_cost': 0.0}
 
-    def _calculate_call_cost(self, model_name, client_label, input_tokens, output_tokens) -> float:
+    def _calculate_call_cost(self, model_name, client_label, input_tokens, output_tokens, cached_tokens=0) -> float:
         norm_model = model_name.replace("models/", "")
         if "antigravity" in norm_model.lower():
             return 0.0
         if norm_model == "gemini-3.5-flash":
-            return (input_tokens / 1_000_000.0) * 1.50 + (output_tokens / 1_000_000.0) * 9.00
+            return (input_tokens / 1_000_000.0) * 1.50 + (cached_tokens / 1_000_000.0) * 0.375 + (output_tokens / 1_000_000.0) * 9.00
         if norm_model == "gemini-3.1-flash-lite":
             if "free" in client_label.lower():
                 return 0.0
-            return (input_tokens / 1_000_000.0) * 0.25 + (output_tokens / 1_000_000.0) * 1.50
+            return (input_tokens / 1_000_000.0) * 0.25 + (cached_tokens / 1_000_000.0) * 0.0625 + (output_tokens / 1_000_000.0) * 1.50
         return 0.0
 
     def log(self, message: str):
@@ -344,11 +381,16 @@ class AgentFramework:
                         )
                     
                     if hasattr(res, 'usage_metadata') and res.usage_metadata:
-                        p_tokens = res.usage_metadata.prompt_token_count or 0
+                        raw_prompt_tokens = res.usage_metadata.prompt_token_count or 0
+                        cached_tokens = getattr(res.usage_metadata, 'cached_content_token_count', 0) or 0
+                        p_tokens = raw_prompt_tokens - cached_tokens
                         c_tokens = res.usage_metadata.candidates_token_count or 0
+                        
                         self.turn_usage['prompt_tokens'] += p_tokens
                         self.turn_usage['candidates_tokens'] += c_tokens
-                        call_cost = self._calculate_call_cost(model_name, client_label, p_tokens, c_tokens)
+                        self.turn_usage['cached_tokens'] += cached_tokens
+                        
+                        call_cost = self._calculate_call_cost(model_name, client_label, p_tokens, c_tokens, cached_tokens)
                         self.turn_usage['estimated_cost'] += call_cost
                         self.session_cost += call_cost
                     return res

@@ -730,8 +730,12 @@ def chat_endpoint(req: ChatRequest):
                     raise exc
             
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                framework.turn_usage['prompt_tokens'] += (response.usage_metadata.prompt_token_count or 0)
+                raw_prompt_tokens = response.usage_metadata.prompt_token_count or 0
+                cached_tokens = getattr(response.usage_metadata, 'cached_content_token_count', 0) or 0
+                p_tokens = raw_prompt_tokens - cached_tokens
+                framework.turn_usage['prompt_tokens'] += p_tokens
                 framework.turn_usage['candidates_tokens'] += (response.usage_metadata.candidates_token_count or 0)
+                framework.turn_usage['cached_tokens'] += cached_tokens
             
             if cancel_event.is_set():
                 framework.log("[Orchestrator] Interrupted after model response.")
@@ -808,36 +812,43 @@ def chat_endpoint(req: ChatRequest):
             
         if idx != -1:
             close_idx = full_response.find("```", idx + 3)
-            if close_idx != -1:
-                block_content = full_response[idx:close_idx + 3]
-                if "EXECUTION_PAYLOAD" in block_content or "thoughtSignature" in block_content or "portfolio_snapshot" in block_content:
-                    inner_json = block_content
-                    if inner_json.startswith("```json"):
-                        inner_json = inner_json[7:-3].strip()
-                    elif inner_json.startswith("```"):
-                        inner_json = inner_json[3:-3].strip()
-                        
-                    framework.log("[System] Auto-processing slice-extracted EXECUTION_PAYLOAD...")
-                    try:
-                        res = tools.update_ssot(inner_json)
-                        framework.log(f"[System] SSoT update result: {res}")
-                        payload_html = (
-                            f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
-                            f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden)</summary>'
-                            f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
-                        )
-                        cleaned_response = full_response[:idx] + payload_html + full_response[close_idx + 3:]
-                        payload_processed = True
-                    except Exception as pe:
-                        framework.log(f"[System Error] Failed to update SSoT with sliced payload: {pe}")
-                        # Even if parsing fails, hide the broken payload from the chat UI
-                        payload_html = (
-                            f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
-                            f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated)</summary>'
-                            f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
-                        )
-                        cleaned_response = full_response[:idx] + payload_html + full_response[close_idx + 3:]
-                        payload_processed = True
+            # Handle truncated code block
+            is_truncated = (close_idx == -1)
+            actual_close_idx = len(full_response) if is_truncated else close_idx
+            
+            block_content = full_response[idx:actual_close_idx + (0 if is_truncated else 3)]
+            if "EXECUTION_PAYLOAD" in block_content or "thoughtSignature" in block_content or "portfolio_snapshot" in block_content:
+                inner_json = block_content
+                if inner_json.startswith("```json"):
+                    inner_json = inner_json[7:]
+                elif inner_json.startswith("```"):
+                    inner_json = inner_json[3:]
+                
+                if not is_truncated:
+                    inner_json = inner_json[:-3]
+                inner_json = inner_json.strip()
+                    
+                framework.log("[System] Auto-processing slice-extracted EXECUTION_PAYLOAD...")
+                try:
+                    res = tools.update_ssot(inner_json)
+                    framework.log(f"[System] SSoT update result: {res}")
+                    payload_html = (
+                        f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
+                        f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden)</summary>'
+                        f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
+                    )
+                    cleaned_response = full_response[:idx] + payload_html + full_response[actual_close_idx + (0 if is_truncated else 3):]
+                    payload_processed = True
+                except Exception as pe:
+                    framework.log(f"[System Error] Failed to update SSoT with sliced payload: {pe}")
+                    # Even if parsing fails, hide the broken payload from the chat UI
+                    payload_html = (
+                        f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
+                        f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated)</summary>'
+                        f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
+                    )
+                    cleaned_response = full_response[:idx] + payload_html + full_response[actual_close_idx + (0 if is_truncated else 3):]
+                    payload_processed = True
                         
         if not payload_processed:
             # Fallback to direct curly brace extraction
@@ -846,6 +857,21 @@ def chat_endpoint(req: ChatRequest):
             if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
                 candidate = full_response[start_idx:end_idx+1]
                 if "EXECUTION_PAYLOAD" in candidate or "thoughtSignature" in candidate or "portfolio_snapshot" in candidate:
+                    # Clean up code blocks surrounding braces
+                    prefix = full_response[:start_idx].strip()
+                    clean_start_idx = start_idx
+                    if prefix.endswith("```json"):
+                        clean_start_idx = full_response[:start_idx].rfind("```json")
+                    elif prefix.endswith("```"):
+                        clean_start_idx = full_response[:start_idx].rfind("```")
+                        
+                    suffix = full_response[end_idx+1:].strip()
+                    clean_end_idx = end_idx + 1
+                    if suffix.startswith("```"):
+                        rel_idx = full_response[end_idx+1:].find("```")
+                        if rel_idx != -1:
+                            clean_end_idx = end_idx + 1 + rel_idx + 3
+                            
                     try:
                         json.loads(candidate)
                         framework.log("[System] Auto-processing brace-extracted EXECUTION_PAYLOAD...")
@@ -856,7 +882,7 @@ def chat_endpoint(req: ChatRequest):
                             f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden)</summary>'
                             f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
                         )
-                        cleaned_response = full_response[:start_idx] + payload_html + full_response[end_idx+1:]
+                        cleaned_response = full_response[:clean_start_idx] + payload_html + full_response[clean_end_idx:]
                         payload_processed = True
                     except Exception as pe:
                         framework.log(f"[System Error] Failed to update SSoT with brace payload: {pe}")
@@ -866,8 +892,7 @@ def chat_endpoint(req: ChatRequest):
                             f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated)</summary>'
                             f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
                         )
-                        # We still extract it from the UI so it doesn't look like an error wall of text
-                        cleaned_response = full_response[:start_idx] + payload_html + full_response[end_idx+1:]
+                        cleaned_response = full_response[:clean_start_idx] + payload_html + full_response[clean_end_idx:]
                         payload_processed = True
                         
         if payload_processed:

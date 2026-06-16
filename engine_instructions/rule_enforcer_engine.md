@@ -1,6 +1,6 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
-**Version:** v11.18-Payload-Slicing-JIT-Cache
+**Version:** v11.20-Token-UI-HTML-Hotfix
 **Description:** Active Enforcer of mandates and protocols defined in Gemini_Gem_Working_Data_Store.
 
 ---

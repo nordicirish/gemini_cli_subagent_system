@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v11.18-Payload-Slicing-JIT-Cache
+**Version:** v11.20-Token-UI-HTML-Hotfix
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---

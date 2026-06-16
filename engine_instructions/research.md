@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.18-Payload-Slicing-JIT-Cache
+- **version**: v11.20-Token-UI-HTML-Hotfix
 
 ## Tone
 institutional, narrative, concise

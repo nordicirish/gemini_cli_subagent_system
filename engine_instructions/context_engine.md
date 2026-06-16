@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.18-Payload-Slicing-JIT-Cache
+- **version**: v11.20-Token-UI-HTML-Hotfix
 - **id**: CONTEXT_ENGINE
 
 ## Prefix
