@@ -203,6 +203,7 @@ def main():
             if not user_input.strip():
                 continue
 
+            framework.reset_turn_usage()
             print("\n[Terminal Orchestrator] Thinking...")
             active_model_str = f"[ACTIVE_MODEL]: {orchestrator_model}\n"
             current_message = f"{active_model_str}[USER_QUERY]: {user_input}"
@@ -235,8 +236,21 @@ def main():
                 else:
                     raise exc
 
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                p_tokens = response.usage_metadata.prompt_token_count or 0
+                c_tokens = response.usage_metadata.candidates_token_count or 0
+                framework.turn_usage['prompt_tokens'] += p_tokens
+                framework.turn_usage['candidates_tokens'] += c_tokens
+                call_cost = framework._calculate_call_cost(orchestrator_model, "Primary Key", p_tokens, c_tokens)
+                framework.turn_usage['estimated_cost'] += call_cost
+                framework.session_cost += call_cost
+
             print("\n[Terminal Orchestrator] Response:")
             print(response.text)
+
+            turn_cost = framework.turn_usage['estimated_cost']
+            session_cost = framework.session_cost
+            print(f"[Diagnostics] Turn Cost: ${turn_cost:.4f} | Total Session Cost: ${session_cost:.4f}")
 
         except KeyboardInterrupt:
             print("\nExiting...")

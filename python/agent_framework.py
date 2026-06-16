@@ -95,6 +95,7 @@ class AgentFramework:
         self.agents = {}
         
         # Telemetry
+        self.session_cost = 0.0
         self.reset_turn_usage()
 
     def _resolve_orchestrator(self) -> str:
@@ -193,7 +194,19 @@ class AgentFramework:
 
     def reset_turn_usage(self):
         """Clear token counters for a new chat session turn."""
-        self.turn_usage = {'prompt_tokens': 0, 'candidates_tokens': 0}
+        self.turn_usage = {'prompt_tokens': 0, 'candidates_tokens': 0, 'estimated_cost': 0.0}
+
+    def _calculate_call_cost(self, model_name, client_label, input_tokens, output_tokens) -> float:
+        norm_model = model_name.replace("models/", "")
+        if "antigravity" in norm_model.lower():
+            return 0.0
+        if norm_model == "gemini-3.5-flash":
+            return (input_tokens / 1_000_000.0) * 1.50 + (output_tokens / 1_000_000.0) * 9.00
+        if norm_model == "gemini-3.1-flash-lite":
+            if "free" in client_label.lower():
+                return 0.0
+            return (input_tokens / 1_000_000.0) * 0.25 + (output_tokens / 1_000_000.0) * 1.50
+        return 0.0
 
     def log(self, message: str):
         """Helper to print to console and send to callback if exists."""
@@ -308,8 +321,13 @@ class AgentFramework:
                         )
                     
                     if hasattr(res, 'usage_metadata') and res.usage_metadata:
-                        self.turn_usage['prompt_tokens'] += (res.usage_metadata.prompt_token_count or 0)
-                        self.turn_usage['candidates_tokens'] += (res.usage_metadata.candidates_token_count or 0)
+                        p_tokens = res.usage_metadata.prompt_token_count or 0
+                        c_tokens = res.usage_metadata.candidates_token_count or 0
+                        self.turn_usage['prompt_tokens'] += p_tokens
+                        self.turn_usage['candidates_tokens'] += c_tokens
+                        call_cost = self._calculate_call_cost(model_name, client_label, p_tokens, c_tokens)
+                        self.turn_usage['estimated_cost'] += call_cost
+                        self.session_cost += call_cost
                     return res
 
                 try:
