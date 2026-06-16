@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.20-Token-UI-HTML-Hotfix
+**Version:** v11.21-JIT-Cache-Config-Fix
 **Tone:** neutral, reflective, concise
 
 ---

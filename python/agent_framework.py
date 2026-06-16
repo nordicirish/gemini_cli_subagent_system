@@ -344,17 +344,17 @@ class AgentFramework:
                 cache_to_use = getattr(self, "active_cache_name", None)
                 cache_target_model = getattr(self, "active_cache_target_model", None)
                 
-                if cache_to_use and cache_target_model and model_name == cache_target_model:
+                if cache_to_use and cache_target_model and model_name == cache_target_model and not final_tools:
                     client_cache = cache_to_use
-                    # Standardize system instruction payload without duplicating SSoT
-                    unified_instruction = instruction if instruction else ""
+                    client_system_instruction = None
+                    if instruction:
+                        prompt = f"System Instruction:\n{instruction}\n\nUser Prompt:\n{prompt}"
                 else:
                     client_cache = None
-                    # Standardize system instruction payload by injecting rules/SSoT
-                    unified_instruction = self._get_sys_instruction(instruction) if instruction else self._get_sys_instruction("")
+                    client_system_instruction = self._get_sys_instruction(instruction) if instruction else self._get_sys_instruction("")
 
                 config = types.GenerateContentConfig(
-                    system_instruction=unified_instruction,
+                    system_instruction=client_system_instruction,
                     temperature=1.0,
                     max_output_tokens=8192,
                     tools=final_tools if final_tools else None,

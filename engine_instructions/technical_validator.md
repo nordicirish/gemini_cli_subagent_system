@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.20-Token-UI-HTML-Hotfix
+- **version**: v11.21-JIT-Cache-Config-Fix
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

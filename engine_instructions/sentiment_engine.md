@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.20-Token-UI-HTML-Hotfix
+- **version**: v11.21-JIT-Cache-Config-Fix
 - **id**: SENTIMENT_ENGINE
 
 ## Tone
