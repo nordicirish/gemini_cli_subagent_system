@@ -304,64 +304,8 @@ all_tools = terminal_tools + [tools.perform_web_forensic_search]
 
 
 
-# Find a valid model for the Orchestrator from the THINKING tier
-terminal_models = framework._get_cloud_models("THINKING")
-valid_model = None
-for model_name in terminal_models:
-    try:
-        framework.client.models.generate_content(
-            model=model_name, 
-            contents="ping",
-            config=agent_framework.types.GenerateContentConfig(
-                http_options={'timeout': 30000}
-            )
-        )
-        valid_model = model_name
-        framework.log(f"[System] Web Orchestrator verified with {model_name}")
-        break
-    except Exception as e:
-        error_str = str(e).lower()
-        if "429" in error_str or "quota" in error_str:
-            valid_model = model_name
-            framework.log(f"[System] Web Orchestrator using {model_name} (Quota limited but verified)")
-            break
-        continue
-
-# Dynamic fallback discovery: if thinking models are unsupported or unavailable, probe PRO and FLASH
-if not valid_model:
-    framework.log("[System] No valid THINKING model found. Scanning PRO and FLASH tiers for Orchestrator fallback...")
-    for fallback_mode in ["PRO", "FLASH"]:
-        for model_name in framework._get_cloud_models(fallback_mode):
-            try:
-                framework.client.models.generate_content(
-                    model=model_name, 
-                    contents="ping",
-                    config=agent_framework.types.GenerateContentConfig(
-                        http_options={'timeout': 10000}
-                    )
-                )
-                valid_model = model_name
-                framework.log(f"[System] Web Orchestrator verified with fallback {model_name}")
-                break
-            except Exception as e:
-                error_str = str(e).lower()
-                if "429" in error_str or "quota" in error_str:
-                    valid_model = model_name
-                    framework.log(f"[System] Web Orchestrator using fallback {model_name} (Quota limited)")
-                    break
-                continue
-        if valid_model:
-            break
-
-# Use the verified valid model from the THINKING tier, fallback to framework default
-ORCHESTRATOR_MODEL = valid_model or agent_framework.DEFAULT_MODEL_THINKING
-
-framework.setup_context_cache(
-    model=ORCHESTRATOR_MODEL,
-    subagent_files=subagent_instructions,
-    system_instruction=terminal_instruction,
-    tools=all_tools
-)
+# Resolve Orchestrator dynamically using _resolve_orchestrator
+ORCHESTRATOR_MODEL = framework._resolve_orchestrator()
 
 
 
@@ -406,29 +350,15 @@ if active_model_warning:
 # Initialize the global Chat object
 def create_new_session():
     global ORCHESTRATOR_MODEL
-    cache_to_use = None
-    if getattr(framework, "cached_content_name", None) and getattr(framework, "cached_content_model", None) == ORCHESTRATOR_MODEL:
-        cache_to_use = framework.cached_content_name
-        framework.log(f"[System] Binding Context Cache to Orchestrator chat: {cache_to_use}")
-    else:
-        framework.log("[System] Orchestrator session created without Context Cache.")
-
-    sys_instruction = terminal_instruction
-    if not cache_to_use:
-        rules_path = os.path.join("gem_trading_rules", "rules.md")
-        if os.path.exists(rules_path):
-            with open(rules_path, "r", encoding="utf-8") as f:
-                rules_content = f.read()
-            sys_instruction = f"{terminal_instruction}\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{rules_content}"
+    sys_instruction = framework._get_sys_instruction(terminal_instruction)
 
     return framework.client.chats.create(
         model=ORCHESTRATOR_MODEL,
         config=agent_framework.types.GenerateContentConfig(
-            system_instruction=sys_instruction if not cache_to_use else None,
+            system_instruction=sys_instruction,
             temperature=1.0,
             max_output_tokens=8192,
-            tools=terminal_tools if not cache_to_use else None,
-            cached_content=cache_to_use,
+            tools=terminal_tools,
             automatic_function_calling={"disable": True},
             safety_settings=[
                 agent_framework.types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
@@ -587,30 +517,12 @@ def set_cache_policy(data: dict):
     except Exception as ce:
         framework.log(f"[System Error] Failed to write cache policy to config.json: {ce}")
 
-    framework.cache_disabled = disable_cache
-    if disable_cache:
-        framework.log("[System] Context Caching manually disabled by user.")
-        if getattr(framework, "cached_content_name", None):
-            try:
-                framework.log(f"[System] Cleaning up cached content: {framework.cached_content_name}")
-                framework.client.caches.delete(name=framework.cached_content_name)
-            except Exception as e:
-                framework.log(f"[System] Cache delete failed: {e}")
-        framework.cached_content_name = None
-        framework.last_cache_hash = None
-    else:
-        framework.log("[System] Context Caching manually enabled by user. Re-building cache...")
-        framework.setup_context_cache(
-            model=ORCHESTRATOR_MODEL,
-            subagent_files=subagent_instructions,
-            system_instruction=terminal_instruction,
-            tools=all_tools
-        )
+    framework.log("[System] Context Caching is permanently deprecated.")
     
-    # Rebuild session to apply caching changes
+    # Rebuild session
     global_chat_session = create_new_session()
     _session_hydrated = False
-    return {"status": "success", "disable_cache": framework.cache_disabled}
+    return {"status": "success", "disable_cache": True}
 
 @app.post("/api/set_model")
 def set_model(data: dict):
@@ -646,17 +558,9 @@ def set_model(data: dict):
         framework.log(f"[System] Switching Reasoning Tier to {new_model}...")
         ORCHESTRATOR_MODEL = new_model
         
-        # Force a fresh session and cache rebuild on next chat
+        # Force a fresh session on next chat
         global_chat_session = None 
         _session_hydrated = False
-        
-        # Explicitly trigger cache setup for the new model
-        framework.setup_context_cache(
-            model=ORCHESTRATOR_MODEL, 
-            subagent_files=subagent_instructions,
-            system_instruction=terminal_instruction,
-            tools=all_tools
-        )
         
         # Re-create session
         global_chat_session = create_new_session()
@@ -809,12 +713,25 @@ def chat_endpoint(req: ChatRequest):
                 except Exception as guard_err:
                     framework.log(f"[Orchestrator] History guard check failed (non-critical): {guard_err}")
 
-            response = session.send_message(current_message)
+            try:
+                response = session.send_message(current_message)
+            except Exception as exc:
+                from google.genai.errors import APIError
+                if isinstance(exc, APIError):
+                    framework.log(f"[Emergency Failover] APIError encountered on primary orchestrator ({exc}). Redirecting request to gemini-3.5-flash...")
+                    ORCHESTRATOR_MODEL = "gemini-3.5-flash"
+                    session = create_new_session()
+                    global_chat_session = session
+                    active_model_str = f"[ACTIVE_MODEL]: {ORCHESTRATOR_MODEL}\n"
+                    if isinstance(current_message, str):
+                        current_message = f"{active_model_str}{prompt_prefix}[SYSTEM_TIME (NEW YORK / ET): {current_iso}] [USER_QUERY]: {req.message}"
+                    response = session.send_message(current_message)
+                else:
+                    raise exc
             
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 framework.turn_usage['prompt_tokens'] += (response.usage_metadata.prompt_token_count or 0)
                 framework.turn_usage['candidates_tokens'] += (response.usage_metadata.candidates_token_count or 0)
-                framework.turn_usage['cached_tokens'] += (response.usage_metadata.cached_content_token_count or 0)
             
             if cancel_event.is_set():
                 framework.log("[Orchestrator] Interrupted after model response.")
@@ -1015,6 +932,9 @@ def chat_endpoint(req: ChatRequest):
         error_msg = str(e)
         if cancel_event.is_set() or "cancelled" in error_msg.lower():
             return {"status": "success", "response": "[OFFLINE] Session terminated by user interrupt."}
+            
+
+
         framework.log(f"[Error] Chat endpoint exception: {error_msg}")
         if "429" in error_msg or "quota" in error_msg.lower() or "resource_exhausted" in error_msg.lower():
             return {

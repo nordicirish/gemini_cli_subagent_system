@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v11.15-README-Engines-Sync
+**Version:** v11.17-Dynamic-Model-Cache-Deprecation
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 
 ---
@@ -207,15 +207,6 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Action:** During state synthesis, the State & Validation Router must prune any ticker with `shares == 0`. Such tickers are classified as "Watched" and are tracked via the Strategic Watchlist in `config.json`, not the active portfolio state.
   - **Rationale:** Prevents "Phantom Exposure" and UI clutter where watchlist items are mistakenly categorized as portfolio holdings.
 
-<a name="enh_118"></a>
-- **[ENH_118 - Merton Sizing Integration & Intertemporal Hedging Demand]**
-  - **Status:** ACTIVE
-  - **Supremacy Clause:** Merton Optimization is derived from mathematical variance/covariance over a 500-day lookback. It is fundamentally unaware of intraday microstructure or structural failure. Therefore, **Structural and Risk Vetoes possess Absolute Execution Supremacy over theoretical Merton weights.** If an asset triggers a macro veto (VIX > 20), an SSR drop (>10%), or SHORT_GAMMA degradation, the Merton weight MUST be ignored and defensive trims executed.
-  - **Conviction Ceiling:** The theoretical Merton Optimal Weight acts as a mathematical ceiling for swing trades. No single swing tranche may exceed the Merton Optimal Weight by more than +25% unless explicitly overridden by a verified Phase 3 / $50M Catalyst.
-  - **Intertemporal Hedging Demand (Stable vs High Beta):** Following Merton's continuous-time models, optimal allocation incorporates a hedging component against macro state variables (e.g., interest rate shocks, VIX spikes).
-    - **Stable Stocks (Low Correlation to Macro Shocks):** Can be allocated up to 100% of their Merton weight in volatile regimes as a volatility hedge.
-    - **High Beta Swing Trades:** Must be dynamically scaled down from their baseline Merton weight using the `merton_hedging_modifier` if the underlying macro state (e.g., VIX > 15) is unstable. High Beta stocks provide zero hedging utility and act purely as myopic momentum vehicles.
-
 <a name="mandate_01_gatekeeper"></a>
 - **[MANDATE_01_GATEKEEPER]**
   - **Status:** ACTIVE
@@ -237,9 +228,10 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Logic Source:** Gemini_Gem_Working_Data_Store (Self)
   - **Action On Failure:** TERMINATE_SESSION_RETRY
 <a name="mandate_05_temporal_priority"></a>
-- **[MANDATE_05_TEMPORAL_PRIORITY - Clock Alignment & Hallucination Guard]**
+- **[MANDATE_05_TEMPORAL_PRIORITY - Clock Alignment & Live Search Override]**
   - **Status:** ACTIVE
-  - **Rule:** Hallucination of time is classified as a Grade-A System Failure. If the model's internal narrative diverges from the provided JSON timestamp by >60 seconds, the model must halt the current analytical thread, purge temporal assumptions, and re-sync to the raw data stream before proceeding.
+  - **Temporal Reality Override:** The current date and year are defined dynamically and absolutely by the timestamp inside the SSoT JSON payload (e.g., in `last_updated`, `system_time`, `ny_iso`, or other timestamp fields). The live Google Search tool accesses the real-world internet corresponding to this SSoT timestamp. You MUST NEVER hallucinate that there is a temporal dissonance or that you cannot perform web searches for dates defined by the SSoT. You are STRICTLY FORBIDDEN from performing a "SYNTHETIC SCAN ENFORCED (Offline Grounding)". You MUST execute live web searches to ingest real-time data matching the timeline defined in the SSoT.
+  - **Rule:** Hallucination of time (e.g., claiming a different current date/year than the SSoT timestamp, or claiming that the current year is 2024 if the SSoT says otherwise) is classified as a Grade-A System Failure. If the model's internal narrative diverges from the provided SSoT JSON timestamp by >60 seconds, the model must halt the current analytical thread, purge temporal assumptions, and re-sync to the live web data stream under the SSoT's temporal alignment before proceeding.
   - **Threshold:** 60s drift
 <a name="mandate_06_coordination"></a>
 - **[MANDATE_06_COORDINATION]**
@@ -810,7 +802,11 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Enforcement:** MANDATORY. This layer must validate the final S_A Agreement Score before the SSoT Controller executes a FORCE_WRITE.
 <a name="enh_41"></a>
 - **[ENH_41 - Deterministic Position Sizing]**
-  - **Instruction:** Position size MUST be calculated as: (Base_Risk_Pct * Regime_Multiplier * Agreement_Score_SA). If Liquidity_Depth == VOID, Size = 0. Before applying this formula, internally simulate Aggressive, Neutral, and Conservative sizing scenarios based on the NEUTRAL_STRUCTURALIST's current Regime classification (Tri-Profile Review).
+  - **Base Unit:** Replaced by `merton_weight` from the SSoT payload as the mathematical baseline.
+    - SSoT.merton_weight (Dynamic Conviction Ceiling / Baseline)
+  - **Final Size Formula:** min(merton_weight * 1.25, merton_weight * hedging_demand_modifier * structural_component * gex_modifier * legislative_penalty * supply_chain_penalty * slippage_penalty * calendar_shield_dampener * BASE_CURRENCY_EXCHANGE_RATE)
+  - **Hedging Demand Modifier:** Derived from ENH_118. Scale down High Beta stocks when VIX > 15; allow 100% baseline for stable low-correlation assets.
+  - **Instruction:** If Liquidity_Depth == VOID, Size = 0. Before applying this formula, internally simulate Aggressive, Neutral, and Conservative sizing scenarios based on the NEUTRAL_STRUCTURALIST's current Regime classification (Tri-Profile Review).
 <a name="enh_42"></a>
 - **[ENH_42 - Trade State Emission]**
   - **Instruction:** Every turn MUST emit an explicit 'trade_state' [LONG | NO_TRADE | EXIT]. A 'NO_TRADE' state requires a mandatory 'no_trade_reason'.
@@ -1809,6 +1805,15 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Status:** ACTIVE
 - **Content:** DILUTION_RESISTANCE_WALL - Assets with active recent equity offerings exhibit structural supply walls; avoid accumulation into these price zones without rVol > 2.0 confirmation.
 - **Justification:** Prevented premium capital erosion across repeated automated buy tests into known warrant overhang corridors.
+
+<a name="enh_118"></a>
+### [ENH_118] MERTON_SIZING_INTEGRATION_AND_HEDGING_DEMAND
+- **Status:** ACTIVE
+- **Supremacy Clause:** Merton Optimization is derived from mathematical variance/covariance over a 500-day lookback. It is fundamentally unaware of intraday microstructure or structural failure. Therefore, **Structural and Risk Vetoes possess Absolute Execution Supremacy over theoretical Merton weights.** If an asset triggers a macro veto (VIX > 20), an SSR drop (>10%), or SHORT_GAMMA degradation, the Merton weight MUST be ignored and defensive trims executed.
+- **Conviction Ceiling:** The theoretical Merton Optimal Weight acts as a mathematical ceiling for swing trades. No single swing tranche may exceed the Merton Optimal Weight by more than +25% unless explicitly overridden by a verified Phase 3 / $50M Catalyst.
+- **Intertemporal Hedging Demand (Stable vs High Beta):** Following Merton's continuous-time models, optimal allocation incorporates a hedging component against macro state variables (e.g., interest rate shocks, VIX spikes).
+  - **Stable Stocks (Low Correlation to Macro Shocks):** Can be allocated up to 100% of their Merton weight in volatile regimes as a volatility hedge.
+  - **High Beta Swing Trades:** Must be dynamically scaled down from their baseline Merton weight using the `merton_hedging_modifier` if the underlying macro state (e.g., VIX > 15) is unstable. High Beta stocks provide zero hedging utility and act purely as myopic momentum vehicles.
 
 ## Risk & Liquidity Parameters
 

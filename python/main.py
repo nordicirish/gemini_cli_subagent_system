@@ -140,11 +140,7 @@ def main():
 
     all_tools = terminal_tools + [tools.perform_web_forensic_search]
 
-    framework.setup_context_cache(
-        subagent_files=subagent_files,
-        system_instruction=terminal_instruction,
-        tools=all_tools
-    )
+
 
 
 
@@ -153,7 +149,7 @@ def main():
     # ---------------------------------------------------------------------------
     print("\n" + "=" * 60)
     print("💎 GEM CLI ORCHESTRATOR READY 💎")
-    print(f"   Version : v10.03-ESA-Deadlock-Sync")
+    print(f"   Version : v11.17-Dynamic-Model-Cache-Deprecation")
     print(f"   Agents  : {len(sub_agent_configs)} loaded")
     print(f"   Rules   : {'✅ Attached' if os.path.exists(rules_path) else '⚠️  Missing'}")
     antigravity_path = os.path.join(".agents", "rules", "antigravity.md")
@@ -162,38 +158,9 @@ def main():
     print("Type 'exit' or 'quit' to stop.\n")
 
     # ---------------------------------------------------------------------------
-    # Model probe — find first working PRO model for the Terminal Orchestrator
+    # Resolve Orchestrator dynamically using _resolve_orchestrator
     # ---------------------------------------------------------------------------
-    terminal_models = framework._get_cloud_models("PRO")
-    valid_model = None
-
-    for model_name in terminal_models:
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] Testing Terminal model {model_name}...", end="", flush=True)
-        try:
-            framework.client.models.generate_content(
-                model=model_name,
-                contents="ping",
-                config=agent_framework.types.GenerateContentConfig(
-                    http_options={"timeout": 10000}
-                ),
-            )
-            valid_model = model_name
-            print(" SUCCESS!")
-            break
-        except Exception as e:
-            error_str = str(e).lower()
-            if "429" in error_str or "quota" in error_str:
-                valid_model = model_name
-                print(" QUOTA LIMITED (but verified)")
-                break
-            print(" FAILED")
-            continue
-
-    if not valid_model:
-        print("ERROR: All fallback models failed to verify. Exiting.")
-        sys.exit(1)
+    orchestrator_model = framework._resolve_orchestrator()
 
     try:
         import fetch_stocks
@@ -210,26 +177,14 @@ def main():
     except Exception as e:
         print(f"Failed to start Cloud Sync Daemon: {e}")
 
-    cache_to_use = None
-    if getattr(framework, "cached_content_name", None) and getattr(framework, "cached_content_model", None) == valid_model:
-        cache_to_use = framework.cached_content_name
-        print(f"[System] Binding Context Cache to CLI chat session: {cache_to_use}")
-
-    sys_instruction = terminal_instruction
-    if not cache_to_use:
-        rules_path = os.path.join("gem_trading_rules", "rules.md")
-        if os.path.exists(rules_path):
-            with open(rules_path, "r", encoding="utf-8") as f:
-                rules_content = f.read()
-            sys_instruction = f"{terminal_instruction}\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{rules_content}"
+    sys_instruction = framework._get_sys_instruction(terminal_instruction)
 
     chat = framework.client.chats.create(
-        model=valid_model,
+        model=orchestrator_model,
         config=agent_framework.types.GenerateContentConfig(
-            system_instruction=sys_instruction if not cache_to_use else None,
+            system_instruction=sys_instruction,
             temperature=1.0,
-            tools=terminal_tools if not cache_to_use else None,
-            cached_content=cache_to_use,
+            tools=terminal_tools,
             automatic_function_calling={"disable": True},
             safety_settings=[
                 agent_framework.types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
@@ -249,9 +204,37 @@ def main():
                 continue
 
             print("\n[Terminal Orchestrator] Thinking...")
-            active_model_str = f"[ACTIVE_MODEL]: {valid_model}\n"
+            active_model_str = f"[ACTIVE_MODEL]: {orchestrator_model}\n"
             current_message = f"{active_model_str}[USER_QUERY]: {user_input}"
-            response = chat.send_message(current_message)
+            try:
+                response = chat.send_message(current_message)
+            except Exception as exc:
+                from google.genai.errors import APIError
+                if isinstance(exc, APIError):
+                    framework.log(f"[Emergency Failover] APIError encountered on primary orchestrator ({exc}). Redirecting request to gemini-3.5-flash...")
+                    orchestrator_model = "gemini-3.5-flash"
+                    sys_instruction = framework._get_sys_instruction(terminal_instruction)
+                    chat = framework.client.chats.create(
+                        model=orchestrator_model,
+                        config=agent_framework.types.GenerateContentConfig(
+                            system_instruction=sys_instruction,
+                            temperature=1.0,
+                            tools=terminal_tools,
+                            automatic_function_calling={"disable": True},
+                            safety_settings=[
+                                agent_framework.types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
+                                agent_framework.types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),
+                                agent_framework.types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT",  threshold="BLOCK_NONE"),
+                                agent_framework.types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT",  threshold="BLOCK_NONE"),
+                            ]
+                        ),
+                    )
+                    active_model_str = f"[ACTIVE_MODEL]: {orchestrator_model}\n"
+                    current_message = f"{active_model_str}[USER_QUERY]: {user_input}"
+                    response = chat.send_message(current_message)
+                else:
+                    raise exc
+
             print("\n[Terminal Orchestrator] Response:")
             print(response.text)
 

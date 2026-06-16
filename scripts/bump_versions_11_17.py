@@ -1,22 +1,33 @@
 import glob
 import os
-import sys
 
 def main():
-    target_version = "v11.16-Cache-Auto-Recovery"
+    target_version = "v11.17-Dynamic-Model-Cache-Deprecation"
     legacy_versions = [
+        "v11.16-Cache-Auto-Recovery",
         "v11.15-README-Engines-Sync",
         "v11.14-UI-Model-Selector-Sync",
         "v11.13-API-Gateway-Retry",
         "v11.12-Merton-JSON-Output",
         "v11.11-YF-TLS-Fix",
         "v11.10-UI-Clean-Debate-Collapse",
-        "v11.03-GDrive-Decoupling-Patch"
+        "v11.09-UI-Debate-Toggle-Sync",
+        "v11.08-UI-DeepDive-Patch",
+        "v11.03-GDrive-Decoupling-Patch",
+        "v11.03-SPY-Intraday-HUD",
+        "v11.01-L249-Cascade-Patch",
+        "v11.00-NotebookLM-Bridge",
+        "v10.80-Advanced-Oscillator-Integration",
+        "v10.70-News-Scan-Integration",
+        "v10.69-Diversified-Retrieval-Matrix",
+        "v10.50-Conflict-Resolutions",
+        "v10.70-Indices-VWAP-and-3Dec-GEX"
     ]
     
     files_to_update = [
         "gem_trading_rules/rules.md",
         "INSTRUCTIONS.md",
+        "antigravity.md",
         "README.md"
     ]
     

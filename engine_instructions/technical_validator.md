@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.15-README-Engines-Sync
+- **version**: v11.17-Dynamic-Model-Cache-Deprecation
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

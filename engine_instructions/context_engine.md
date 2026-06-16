@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.15-README-Engines-Sync
+- **version**: v11.17-Dynamic-Model-Cache-Deprecation
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

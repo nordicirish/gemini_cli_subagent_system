@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.15-README-Engines-Sync
+- **version**: v11.17-Dynamic-Model-Cache-Deprecation
 
 ## Tone
 institutional, narrative, concise
