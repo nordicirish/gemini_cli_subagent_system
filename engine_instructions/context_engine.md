@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.23-UI-Feedback-Cost-Fix
+- **version**: v11.24-High-Beta-Swing-Trading-Architecture
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

@@ -122,7 +122,7 @@ Sub-agents marked as **Research**, **Sentiment**, **Bullish Advocate**, **Red Te
 
 ## ⚡ High-Performance Features
 
-### 🧠 Hybrid Model Routing (v11.18)
+### 🧠 Hybrid Model Routing (v11.24)
 To optimize execution speed, reduce token overhead, and minimize paid API expenditures, the system utilizes a 2026 model matrix:
 - **Dynamic Orchestrator Discovery:** The framework dynamically queries active models and targets the latest version-sorted `antigravity` model (e.g., `"antigravity-preview-05-2026"`) as the Primary Orchestrator, automatically falling back to `"gemini-3.5-flash"` on failure or empty match.
 - **PRO & THINKING Tiers:** Mapped strictly to `"gemini-3.5-flash"` for high-speed, reasoning-heavy operations and sub-agent queries.
@@ -173,6 +173,8 @@ Each file below (located in the `engine_instructions/` folder) is loaded as a sy
 | File | Agent Name | Mode | Role |
 |------|-----------|------|------|
 | `terminal.md` | **Terminal Orchestrator** | THINKING | Routes user queries, delegates to sub-agents, synthesizes final decisions |
+| `regime_engine.md` | **Regime Engine** | GEMMA | Classifies broad market volatility regimes using macro indicators |
+| `strategy_engine.md` | **Strategy Engine** | GEMMA | Classifies high-beta swing setups (Momentum Breakout, High Tight Flag, Pullback, Mean-Reversion, Episodic Pivot) |
 | `macro_sentinel.md` | **Macro Sentinel** | PRO | Macro regime detection, Calendar Shield monitoring (Search Enabled) |
 | `data_analyst.md` | **Data Analyst** | PRO | Lean Actuator, Live Web Grounding Specialist, and Data Aggregator (Search Enabled) |
 | `state_validation_router.md` | **State & Validation Router** | PRO | State Synthesis, Schema Audit, and Drift Detection |
@@ -181,7 +183,7 @@ Each file below (located in the `engine_instructions/` folder) is loaded as a sy
 | `bullish_gem.md` | **Bullish Advocate** | THINKING | Constructs the strongest bull case + self-critique (Search Enabled) |
 | `red_team_gem.md` | **Red Team Pessimist** | THINKING | Constructs the strongest bear case + self-critique (Search Enabled) |
 | `post_trade_review.md` | **Review Engine** | FAST | Post-trade reflection — thesis vs. outcome, misfire detection, lesson authoring |
-| `neutral_gem.md` | **Neutral Structuralist**| GEMMA | Unbiased structural analysis; breaks ties with quantitative evidence |
+| `neutral_gem.md` | **Neutral Structuralist** | GEMMA | Unbiased structural analysis; breaks ties with quantitative evidence |
 | `sentiment_engine.md` | **Sentiment Engine** | GEMMA | Social sentiment, news velocity, dark pool order flow (Search Enabled) |
 | `structural_engine.md` | **Structural Engine** | GEMMA | GEX regime, dark pool posture, VWAP structure analysis (Search Enabled) |
 | `rule_enforcer_engine.md` | **Rule Enforcer Engine** | GEMMA | The Terminal's Supreme Legal Authority and Risk Veto (SSoT Auditor) |
@@ -313,6 +315,15 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 ---
 
 ## 📋 Changelog
+
+### v11.24-High-Beta-Swing-Trading-Architecture *(2026-06-22)*
+- **High-Beta Swing-Trading Architectural Pivot:** Specialized the entire multi-agent system for high-beta swing trading setups.
+- **New Sub-agents:** Instantiated `regime_engine.md` (macro volatility regime classifier) and `strategy_engine.md` (high-beta setup classifier) to handle routing and trade categorization.
+- **Sub-agent Upgrades:** Updated `data_analyst.md` (integrated MTFA trend/indicator alignment and ATR/ADR metrics), `red_team_gem.md` (5-day binary catalyst event-risk vetoes), `execution.md` (position sizing formula based on ATR volatility and stop handoff telemetry), and `rule_enforcer_engine.md` (compliance checks for MTFA, 5-day event risk, and time-stop rules).
+- **Legislative Overhaul:** Codified `MANDATE_46` (Mean-Reversion 7-day time stop), `ENH_118` (Overnight Gap-Risk IV half-sizing gate), and `ENH_119` (Max stop-loss distance of 1-1.5x ADR/ATR) into `rules.md`. Revised `MANDATE_38` and `MANDATE_40` with Momentum Bypass Clauses.
+- **Orchestrator Realignment:** Updated `terminal.md` routing sequence (`Data Analyst` -> `Regime Engine` -> `Strategy Engine` -> `Council Debate` -> `Rule Enforcer` -> `Execution`) and manual execution payload structure.
+- **Core Server Registration:** Registered the new sub-agents in `python/web_server.py` and `python/main.py` so they are fully loaded into the active Council.
+- **Global Version Sync:** Synchronized and bumped the framework version string to `v11.24-High-Beta-Swing-Trading-Architecture` across all engine markdown instruction sets, rules SSoT, antigravity.md, and python configurations.
 
 ### v11.23-UI-Feedback-Cost-Fix *(2026-06-17)*
 - **Stale Logs Leakage Mitigation:** Programmed the system logs SSE endpoint `/api/system_logs` to flush the queue upon client connection. This prevents offline-generated logs (e.g. startup/deprecation warnings) from showing up inside the user's active chat thinking bubbles. Switched cache deprecation logs to stdout prints to exclude them from the log stream entirely.

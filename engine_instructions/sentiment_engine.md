@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.23-UI-Feedback-Cost-Fix
+- **version**: v11.24-High-Beta-Swing-Trading-Architecture
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

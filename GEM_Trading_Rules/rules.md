@@ -1,8 +1,8 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v11.23-UI-Feedback-Cost-Fix
+**Version:** v11.24-High-Beta-Swing-Trading-Architecture
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
-
+- **Execution:** When proposing/directing mandatory scale-outs or risk-reduction trims in the EXECUTION_PAYLOAD, the Execution Engine MUST NOT suggest monolithic block limit orders at theoretical ATR peaks if LONG_GAMMA dampening or visual chart resistance is active.
 ---
 
 ## Enh Xx Registry
@@ -102,24 +102,30 @@
 - [ENH_106](#enh_106): LONG GAMMA SSR OVERRIDE - If an asset suffers a catastrophic intraday structural failure (triggering the SEC Rule 201 Short Sale Restriction by dropping >10%), any active LONG_GAMMA shield is instantly invalidated. The Orchestrator must prioritize the SSR structural failure over GEX stabilization and permit mechanical risk trims.
 - [ENH_107](#enh_107): GEX-SSR Conflict Protocol
 - [ENH_108](#enh_108): Persistent Stop-Loss Telemetry
-- [ENH_110](#enh_110): SYMPATHY MOMENTUM SHIELD BYPASS - If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven". The LONG_GAMMA shield is bypassed, and the mandatory 25% profit-taking trim is executed.
+- [ENH_110](#enh_110): SYMPATHY MOMENTUM SHIELD BYPASS - If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven". The LONG_GAMMA shield is bypassed, and the mandatory 25% profit-taking trim directive is emitted in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim.
 - [ENH_111](#enh_111): GAMMA FLICKER PREEMPTION - If an asset with an RSI > 70 experiences a transient SHORT_GAMMA flip (even if LONG_GAMMA is subsequently restored intraday), mechanical trailing stops MUST be tightened by 50% immediately.
-- [ENH_112](#enh_112): EXTENDED_VWAP_BID_SWEEP - If an asset is >4% extended from its VWAP anchor and a passive ask-limit order fails to fill within 15 seconds, the Orchestrator MUST immediately cancel and replace with a marketable limit order sweeping the bid to guarantee extraction before parabolic mean reversion.
+- [ENH_112](#enh_112): EXTENDED_VWAP_BID_SWEEP - If an asset is >4% extended from its VWAP anchor and a passive ask-limit order fails to fill within 15 seconds, the Orchestrator MUST emit a directive in the EXECUTION_PAYLOAD to cancel and replace with a marketable limit order sweeping the bid, alerting the user to physically execute the order to guarantee extraction before parabolic mean reversion.
 - [ENH_113](#enh_113): INFORMATION_LEAKAGE_SENTRY - Tags stealth accumulation patterns (session_change > 3%, linear walk-up, rVol 0.8–1.5, no hard catalyst) and authorizes pilot tranche capped at 25% of standard sizing.
 - [ENH_114](#enh_114): PARABOLIC_VWAP_CASCADES
 - [ENH_115](#enh_115): PRE_MARKET_SHORT_GAMMA_BLEED
 - [ENH_116](#enh_116): MACRO_YIELD_CATALYST_VERIFICATION
 - [ENH_117](#enh_117): DILUTION_RESISTANCE_WALL - Assets with active recent equity offerings exhibit structural supply walls; avoid accumulation into these price zones without rVol > 2.0 confirmation.
-- [ENH_118](#enh_118): MERTON_SIZING_INTEGRATION_AND_HEDGING_DEMAND - Integration of theoretical Merton weights with tactical structural vetoes.
-- [ENH_232](#enh_232): BROKER_LATENCY_LIMIT_SWEEP - If a critical mechanical risk trim (e.g., >4% VWAP extension) fails to execute due to broker API latency or rejection, the Orchestrator MUST NOT re-queue the order at the identical or higher limit. It must instantly queue a 'Sweeping Limit Order' priced 0.5% below the current bid to guarantee extraction.
-- [ENH_245](#enh_245): INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Automated defensive tranches must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen, unless the asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration).
-- [ENH_249](#enh_249): POST-10:30 CASCADE MITIGATION - If broad index markers (SPY) enter a SHORT_GAMMA architecture and a position tracks below its daily VWAP floor past 10:30 AM EST on negative delta force, a mechanical 25% trim must execute instantly, bypassing standard gates and shields.
+- [ENH_118](#enh_118): Overnight Gap-Risk Liquidity Gate
+- [ENH_119](#enh_119): Maximum Stop Distance
+- [ENH_232](#enh_232): BROKER_LATENCY_LIMIT_SWEEP - If a critical mechanical risk trim (e.g., >4% VWAP extension) fails to execute due to broker API latency or rejection, the Orchestrator MUST NOT re-queue the order at the identical or higher limit. It must instantly emit a directive in the EXECUTION_PAYLOAD to queue a 'Sweeping Limit Order' priced 0.5% below the current bid, alerting the user to physically execute the order to guarantee extraction.
+- [ENH_245](#enh_245): INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Defensive tranches proposed in the EXECUTION_PAYLOAD must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen, unless the asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration).
+- [ENH_246](#enh_246): MECHANICAL_GAMMA_CASCADE_OVERRIDE - During a SHORT_GAMMA index regime, if an asset breaches a >2% trailing VWAP extension stop, the Orchestrator must bypass all passive holding logic and internal Council debate delays. It must instantly emit a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD. Acknowledging the Air-Gap Sandbox Bridge Protocol (ENH_49), the system designates this as a 'Code Red' sweep, alerting the user to immediately, physically execute the order to prevent catastrophic alpha bleed from downstream latency.
+- [ENH_247](#enh_247): OPENING_RANGE_WHIPSAW_SHIELD - Any structural VWAP breakdown occurring before 10:30 AM EST must require a subsequent 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. This mitigates false-positive mechanical stops during artificial market-maker liquidity flushes.
+- [ENH_248](#enh_248): CATALYST_VWAP_DECAY_PUNISHER - If an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of an unquantified PR catalyst, execution must override ENH_88 OEM Multiplier assumptions and emit a 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim to preempt short-gamma distribution.
+- [ENH_249](#enh_249): POST-10:30 CASCADE MITIGATION - If broad index markers (SPY) enter a SHORT_GAMMA architecture and a position tracks below its daily VWAP floor past 10:30 AM EST on negative delta force, the system MUST emit a mechanical 25% trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim instantly, bypassing standard gates and shields.
+
 
 ## Mandate Registry
 - [MANDATE_01](#mandate_01): GATEKEEPER (SSoT Exclusive Write Authority)
 - [MANDATE_02](#mandate_02): WRITE_AUTHORITY (Terminal State Commit)
 - [MANDATE_03](#mandate_03): VALIDATION_PROTOCOL (Risk & Regulatory Gates)
 - [MANDATE_04](#mandate_04): DRIFT_CONTROL (Forensic Handshake Enforcement)
+- [MANDATE_04_B](#mandate_04_b): OVERRIDE_PENALTY_LOCK
 - [MANDATE_05](#mandate_05): TEMPORAL_PRIORITY (User Timestamp Override)
 - [MANDATE_06](#mandate_06): COORDINATION (Technical Validator Sign-off)
 - [MANDATE_07](#mandate_07): MODEL_TRANSPARENCY (Diagnostic Compute Visibility)
@@ -134,6 +140,7 @@
 - [MANDATE_16](#mandate_16): STRUCTURAL_NEUTRALITY (Liquidity Lens)
 - [MANDATE_17](#mandate_17): REGIME_SYNC (Dynamic Weighting & Meta-Arbiter)
 - [MANDATE_18](#mandate_18): RESTRICTED_EXECUTION (Institutional ESA / Retail Constraints)
+- [MANDATE_18_B](#mandate_18_b): Expansion of Restricted Execution (ABSOLUTE_PARABOLIC_GRAVITY)
 - [MANDATE_19](#mandate_19): SCHEMA_MIRRORING (Context vs. SSoT Parity)
 - [MANDATE_20](#mandate_20): MACRO_VETO_POWER (Binary Risk-Off Override & Sovereign Hedge Exemption)
 - [MANDATE_21](#mandate_21): USER_CONFIRMATION (Provisional Trade State)
@@ -151,14 +158,14 @@
 - [MANDATE_33](#mandate_33): SHORT_GAMMA_DEGRADATION_TRIMS (VWAP Degradation Protocol)
 - [MANDATE_34](#mandate_34): INSTITUTIONAL PEG & AH GRAVITY
 - [MANDATE_36_ENH_104](#mandate_36_enh_104): PERSISTENT STOP-LOSS TELEMETRY - The Execution Payload must persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP.
-- [MANDATE_37](#mandate_37): SYMPATHY MOMENTUM SHIELD BYPASS - If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven". The LONG_GAMMA shield is subsequently bypassed, and the mandatory 25% profit-taking trim is executed.
-- [MANDATE_38](#mandate_38): STRICT_ENFORCEMENT_TIMER - The Orchestrator MUST instantiate an explicit 'Time in Overbought Zone' timer for any asset crossing 72 RSI. Trailing VWAP anchors DO NOT supersede time-based overbought exhaustion mandates. A 15% alpha-harvest trim is absolute after 4 consecutive hours.
-- [MANDATE_39](#mandate_39): OVERNIGHT_EXHAUSTION_TRIM - If an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, a mandatory 25-50% risk trim must be executed in the final 15 minutes of RTH to mitigate overnight gap-down exposure, overriding all passive HOLD mandates.
-- [MANDATE_40](#mandate_40): ABSOLUTE_PARABOLIC_GRAVITY - Regardless of active SSR status or LONG_GAMMA shielding, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST forcefully execute a minimum 15% tactical sweep trim. **User Override Supremacy:** If the human operator explicitly provides an off-chain contextual override via prompt (e.g., Tier-1 buyout, M&A), this automated trim is bypassed.
+- [MANDATE_37](#mandate_37): SYMPATHY MOMENTUM SHIELD BYPASS - If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven". The LONG_GAMMA shield is subsequently bypassed, and the mandatory 25% profit-taking trim directive is emitted in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim.
+- [MANDATE_38](#mandate_38): MANDATE_38_STRICT_ENFORCEMENT_TIMER - The Orchestrator MUST instantiate an explicit 'Time in Overbought Zone' timer for any asset crossing 72 RSI. A 15% alpha-harvest trim directive is absolute in the EXECUTION_PAYLOAD after 4 hours, regardless of trailing VWAP anchors. **Momentum Bypass Clause:** The absolute gravity trim MUST be bypassed if the Strategy Engine tags the setup as an "Episodic Pivot" or a "High Tight Flag" breakout.
+- [MANDATE_39](#mandate_39): OVERNIGHT_EXHAUSTION_TRIM - If an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, the system MUST emit a mandatory 25-50% risk trim directive in the EXECUTION_PAYLOAD in the final 15 minutes of RTH, alerting the user to physically execute the trim to mitigate overnight gap-down exposure, overriding all passive HOLD mandates.
+- [MANDATE_40](#mandate_40): ABSOLUTE_PARABOLIC_GRAVITY - Regardless of active SSR status or LONG_GAMMA shielding, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST emit a mandatory 15% tactical sweep trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the order. **User Override Supremacy:** If the human operator explicitly provides an off-chain contextual override via prompt (e.g., Tier-1 buyout, M&A), this directive is bypassed. **Momentum Bypass Clause:** The absolute gravity trim MUST be bypassed if the Strategy Engine tags the setup as an "Episodic Pivot" or a "High Tight Flag" breakout.
 - [MANDATE_41](#mandate_41): OVERRIDE_PENALTY_LOCK
 - [MANDATE_42](#mandate_42): STRICT_ATTRIBUTION_INTEGRITY
-- [MANDATE_43](#mandate_43): FRICTION_OVERRIDE_ON_STRUCTURAL_FAILURE - If an asset exhibits structural failure (defined as losing its daily VWAP floor accompanied by rising distribution volume or negative pre-market gap metrics), the Orchestrator MUST override standard FX/commission friction hurdles (such as the 0.6% EUR round-trip constraint) and execute an immediate defensive exit. Capital preservation supersedes transactional friction optimization.
-- NOTE: MANDATE_46 (LONG GAMMA SHIELD OVERRIDE) was REJECTED — content is fully covered by ENH_16_D, MANDATE_34, and MANDATE_35. MANDATE_34 has been augmented with the precision language from the proposed patch.
+- [MANDATE_43](#mandate_43): FRICTION_OVERRIDE_ON_STRUCTURAL_FAILURE - If an asset exhibits structural failure (defined as losing its daily VWAP floor accompanied by rising distribution volume or negative pre-market gap metrics), the Orchestrator MUST override standard FX/commission friction hurdles (such as the 0.6% EUR round-trip constraint) and emit an immediate defensive exit directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. Capital preservation supersedes transactional friction optimization.
+- [MANDATE_46](#mandate_46): MEAN-REVERSION TIME STOP - Implement a strict 7-trading-day time stop for all Mean-Reversion trades. If the asset fails to revert to the 20-SMA mean within this window, force a liquidation directive.
 
 ## Engine Registry
 This registry serves as the system-wide directory mapping all active sub-agent components to their role, version, primary mandate ownership, and veto capabilities (Reference ENH_98 / MANDATE_04).
@@ -169,7 +176,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 | `BULLISH_ADVOCATE` | Momentum & Alpha Specialist, Upside Driver | MANDATE_14, ENH_37, ENH_115 | No (Advocacy Only) |
 | `RED_TEAM_PESSIMIST` | Adversarial Risk, Tail-Risk Quantitative Auditor | MANDATE_15, ENH_38, ENH_68 | Yes (Fatal Flaw Override) |
 | `NEUTRAL_STRUCTURALIST` | Market Architecture, GEX & Liquidity Specialist | MANDATE_16, ENH_39, MANDATE_34 | Yes (Structural Veto) |
-| `RULE_ENFORCER_ENGINE` | Supreme Legal Authority, Risk & Drift Auditor | MANDATE_04, MANDATE_20, PROC_01-11 | **Absolute Veto Power** |
+| `RULE_ENFORCER_ENGINE` | Supreme Legal Authority, Risk & Drift Auditor | MANDATE_04, MANDATE_04_B, MANDATE_20, PROC_01-11 | **Absolute Veto Power** |
 | `TECHNICAL_VALIDATOR` | Technical indicator auditor, math proof validator | MANDATE_06, ENH_55, ENH_86 | Yes (Technical Rejection) |
 | `DATA_ANALYST` | Lean Actuator, Live Web Grounding Specialist | ENH_77, ENH_77_B | No (Data Provider) |
 | `CONTEXT_ENGINE` | SSoT State Merger, Drift & Chronology Manager | MANDATE_19, ENH_44, ENH_76 | Yes (Drift Reject) |
@@ -185,7 +192,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 ## Tool Supremacy Hierarchy
 - **Google Search:** Primary Numeric Arbiter (Prices, Rates, Statutory text).
 - **Google Finance Extension:** Spatial/Visual Verification (Charts, Trends) only.
-*   **Consumer AI Sandbox (ANTI-RECURSION MANDATE):** All agents are STRICTLY FORBIDDEN from utilizing Google Finance's consumer AI features (AI Overview, Spark Overlays, AI Earnings Summaries). The Council MUST ingest RAW data.
+*   **Consumer AI Sandbox (ANTI-RECURSION MANDATE):** All agents are STRICTLY FORBIDDEN from utilizing Google Finance's consumer AI features (AI Overview, Spark Overlays, AI Earnings Summaries). The Council MUST ingest RAW data. 
     *   **TOOL DISAMBIGUATION:** The "Google Search" tool is MANDATORY for SEC and Macro verification (per ENH_77). However, agents must not use the internal "Gemini Research Tool" to summarize that data. You must extract the raw numbers from the Google Search results and perform the synthesis manually.
 
 ## Behavioral Guardrails
@@ -226,6 +233,13 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Instruction:** Prevents behavioral or data drift by mandating forensic handshake validation. The RULE_ENFORCER is explicitly authorized to overrule an agent's high-conviction thesis if objective math or rule conditions (e.g., MANDATE_20 Macro Veto) are violated, completely bypassing the agent's subjective 'Self Critique'. Strictly decline any output failing forensic handshake or showing divergence from the SSOT Knowledge Base.
   - **Logic Source:** Gemini_Gem_Working_Data_Store (Self)
   - **Action On Failure:** TERMINATE_SESSION_RETRY
+
+<a name="mandate_04_b"></a>
+- **[MANDATE_04_B - Expansion of Drift Control]**
+  - **Status:** ACTIVE
+  - **Directive:** OVERRIDE_PENALTY_LOCK - If a user manually overrides a recommended MANDATE_38 or parabolic liquidation within the final 30 minutes of RTH, the system must automatically widen the Day-2 pre-market trailing stop calculation by 2%.
+  - **Justification:** Mathematically absorbs the guaranteed exhaustion gap-down caused by discretionary user greed.
+
 <a name="mandate_05_temporal_priority"></a>
 - **[MANDATE_05_TEMPORAL_PRIORITY - Clock Alignment & Live Search Override]**
   - **Status:** ACTIVE
@@ -341,17 +355,17 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Tax Regime:** DEFERRED_UNTIL_WITHDRAWAL
   - **Description:** Hard-codes platform limitations and Alpha-Friction logic for high-fee accounts. Factoring tax-deferred status for FIFO neutralization.
   - **Logic Gates:**
-    -
+    - 
       - **Gate Id:** TAX_01
       - **Name:** Tax-Neutral Capital Velocity
       - **Instruction:** Individual trades do NOT trigger taxable events. Wash-Sale tax friction is neutralized for intraday rebalancing. Operational decisions (Adds/Trims) are dictated by VWAP geometry and VIX regimes rather than tax-preservation inertia.
       - **Effect:** Treat all shares of a ticker as a single liquidity block. Churn is permitted to maximize cash generation on sector volatility.
-    -
+    - 
       - **Gate Id:** ROM_01
       - **Name:** Restricted Order Mapping
       - **Instruction:** Strictly prohibit MOC/LOC suggestions. Default to 'Auction Hunter' (Marketable Limit at 15:59:45 EST).
       - **Limit Buffer Pct:** system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE
-    -
+    - 
       - **Gate Id:** ENH_FIN_02
       - **Name:** Alpha-Friction / Nordea ESA Protocol
       - **Status:** ACTIVE
@@ -361,19 +375,19 @@ This registry serves as the system-wide directory mapping all active sub-agent c
       - **Volatility Override:**
         - **Description:** Protective Exit Override — bypasses friction gate during active breakdowns or macro stress to prevent holding through avoidable losses.
         - **Conditions:**
-          -
+          - 
             - **Field:** atr_percent
             - **Operator:** >
             - **Threshold:** PROTECTIVE_EXIT_ATR
-          -
+          - 
             - **Field:** session_change_pct
             - **Operator:** <
             - **Threshold:** PROTECTIVE_EXIT_SESSION_DROP (Dynamic: -2.0% Normal | -1.0% Stressed)
-          -
+          - 
             - **Field:** rvol
             - **Operator:** >
             - **Threshold:** RVOL_CONFIRMATION
-          -
+          - 
             - **Field:** macro_shock_intensity
             - **Operator:** >=
             - **Threshold:** SHOCK_CAUTION_THRESHOLD
@@ -385,7 +399,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
           - **Instruction:** During confirmed `MID_QUARTER_REVIEW_WINDOWS` (per `temporal_events`), the Alpha-Friction Protocol is suspended for TRIM orders ONLY.
           - **Conditions:** This override requires BOTH (1) `rvol > 1.5` AND (2) `Distance from VWAP > 2.0%` for the position being harvested.
           - **Authority:** ENH_FIN_02 friction gate is explicitly bypassed by ENH_46. This creates the formal authority chain: ENH_46 > Mid-Quarter Review > Harvest Efficiency clause → ENH_FIN_02 Bypass → Execution. This override does NOT permit new entries.
-    -
+    - 
       - **Gate Id:** NDS_01
       - **Name:** Narrative Divergence Sentry
       - **Instruction:** Auto-trigger 'Grok Flash' if Social Score drops >0.4 OR RS Rating > 90.
@@ -393,11 +407,18 @@ This registry serves as the system-wide directory mapping all active sub-agent c
         - X_Velocity
         - SEC_EDGAR
         - DoD_Portals
-    -
+    - 
       - **Gate Id:** ATR_01
       - **Name:** Volatility Buffer Calibration
       - **Formula:** VWAP + (0.25 * Current_ATR)
       - **Goal:** Ensuring >80% fill probability on manual limits.
+
+<a name="mandate_18_b"></a>
+- **[MANDATE_18_B - Expansion of Restricted Execution]**
+  - **Status:** ACTIVE
+  - **Directive:** ABSOLUTE_PARABOLIC_GRAVITY - Regardless of active SSR status, LONG_GAMMA shielding, or user manual overrides, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST emit a mandatory 15% tactical sweep trim directive.
+  - **Justification:** Mechanically front-runs extreme opening-range distribution cascades (e.g., DFTX Phase 3 +64% gap).
+
 <a name="mandate_19_schema_mirroring"></a>
 - **[MANDATE_19_SCHEMA_MIRRORING]**
   - **Status:** ACTIVE
@@ -405,7 +426,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="mandate_20_macro_veto"></a>
 - **[MANDATE_20_MACRO_VETO]**
   - **Status:** ACTIVE
-  - **Instruction:** The MACRO_SENTINEL possesses absolute veto authority. Macro Veto applies exclusively to New Risk Exposure. The SSoT Controller is authorized to emit EXIT or TRIM states during a Veto event if forensic indicators (HV BREAKOUT) suggest an imminent blow-off top or liquidity exhaustion. Macro Veto is triggered by Absolute Regime (VIX > 20) OR Intraday Velocity (VIXY gap > +5.0%).
+  - **Instruction:** The MACRO_SENTINEL possesses absolute veto authority. Macro Veto applies exclusively to New Risk Exposure. The SSoT Controller is authorized to emit EXIT or TRIM states during a Veto event if forensic indicators (HV BREAKOUT) suggest an imminent blow-off top or liquidity exhaustion. Macro Veto is triggered by Absolute Regime (VIX > 20) OR Intraday Velocity (VIXY gap > +5.0%). 
   - **Sovereign Hedge Exemption:** Capital rotation into clinical-stage biotechs explicitly triggered by ENH_57 is EXEMPT from the MANDATE_20 New Risk Exposure Veto.
   - **Catalyst Override Quality Gates (MANDATE_20_VOID):** Veto is VOID for tickers with verified 8-K catalysts or ENH_31 clinical acceleration, subject to the following mandatory criteria:
     - **8-K Override Gate:** The 8-K event must represent a verifiable contract, revenue event, or regulatory decision with a stated or implied value **>= $50M**. Recency must be **<= 72 hours** from evaluation.
@@ -514,7 +535,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="mandate_33_short_gamma_degradation_trims"></a>
 *   **[MANDATE_33_SHORT_GAMMA_DEGRADATION_TRIMS]**
     *   **Status:** ACTIVE
-    *   **Directive:** When an active portfolio position transitions from LONG_GAMMA to SHORT_GAMMA and falls >2% below its intraday VWAP, the system MUST execute a mandatory 25% risk-reduction trim, overriding generic HOLD inertia.
+    *   **Directive:** When an active portfolio position transitions from LONG_GAMMA to SHORT_GAMMA and falls >2% below its intraday VWAP, the system MUST emit a mandatory 25% risk-reduction trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim, overriding generic HOLD inertia.
     *   **Rationale:** Forensic audit (17:12:19) proved the system bled alpha by passively holding MU and UMAC during structural breakdowns.
 
 <a name="mandate_34_institutional_peg_and_ah_gravity"></a>
@@ -527,32 +548,32 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 *   **[MANDATE_36_ENH_104_PERSISTENT_STOP-LOSS_TELEMETRY]**
     *   **Status:** ACTIVE
     *   **Directive:** PERSISTENT STOP-LOSS TELEMETRY - The Execution Payload must persistently emit a 'trailing_stop_audit' block detailing exact anchor prices and percentage distances for any active holding displaying an RSI > 65 or trading > 2% above its daily VWAP. To ensure transparency, the system MUST print these recommendations in the Markdown report under the heading `### 📊 Active Telemetry & Suggested Sell Quantities` formatted as follows:
-        - **Active Ticker (Holding: X shares):** `* Anchor (VWAP Stop Price): $Y \n Current Price: $Z (+W% above Anchor) \n Status: ACTIVE (Trigger: RSI R > 65 | VWAP_DIST > 2% | BOTH) \n Trim Recommendation: If price breaches $Y, execute a [size]% mechanical risk trim ([shares] shares) [rationale].`
+        - **Active Ticker (Holding: X shares):** `* Anchor (VWAP Stop Price): $Y \n Current Price: $Z (+W% above Anchor) \n Status: ACTIVE (Trigger: RSI R > 65 | VWAP_DIST > 2% | BOTH) \n Trim Recommendation: If price breaches $Y, physically execute a [size]% mechanical risk trim ([shares] shares) [rationale].`
         - **Inactive Ticker (Holding: X shares):** `Current Price: $Z | VWAP: $Y | Status: INACTIVE (RSI R < 65)`
     *   **Rationale:** Flawlessly protected capital during the 2026-05-26 09:32 CMPS/DELL gamma flush by anchoring defense parameters directly to intraday liquidity metrics.
 
 <a name="mandate_37_sympathy_momentum_shield_bypass"></a>
 *   **[MANDATE_37_SYMPATHY_MOMENTUM_SHIELD_BYPASS]**
     *   **Status:** ACTIVE
-    *   **Directive:** SYMPATHY MOMENTUM SHIELD BYPASS: If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven". The LONG_GAMMA shield is subsequently bypassed, and the mandatory 25% profit-taking trim is executed.
+    *   **Directive:** SYMPATHY MOMENTUM SHIELD BYPASS: If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven". The LONG_GAMMA shield is subsequently bypassed, and the mandatory 25% profit-taking trim directive is emitted in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim.
     *   **Rationale:** Converts L-222 to a permanent mandate to prevent the portfolio from holding transient alpha into algorithmic mean-reversion. Tied to diversified_retrieval_queries.
 
 <a name="mandate_38_strict_enforcement_timer"></a>
 *   **[MANDATE_38_STRICT_ENFORCEMENT_TIMER]**
     *   **Status:** ACTIVE
-    *   **Directive:** STRICT_ENFORCEMENT_TIMER — The Orchestrator MUST instantiate an explicit 'Time in Overbought Zone' timer for any asset crossing 72 RSI. Trailing VWAP anchors DO NOT supersede time-based overbought exhaustion mandates. A 15% alpha-harvest trim is absolute after 4 consecutive hours.
-    *   **Rationale:** Validated successfully on 06-01; assets fading predictably after prolonged >72 RSI exposure. Promoted from L-234.
+    *   **Directive:** MANDATE_38_STRICT_ENFORCEMENT_TIMER - The Orchestrator MUST instantiate an explicit 'Time in Overbought Zone' timer for any asset crossing 72 RSI. A 15% alpha-harvest trim directive is absolute in the EXECUTION_PAYLOAD after 4 hours, regardless of trailing VWAP anchors. **Momentum Bypass Clause:** The absolute gravity trim MUST be bypassed if the Strategy Engine tags the setup as an "Episodic Pivot" or a "High Tight Flag" breakout.
+    *   **Rationale:** Prevents Council "hold paralysis" during prolonged but fading momentum squeezes.
 
 <a name="mandate_40_absolute_parabolic_gravity"></a>
 *   **[MANDATE_40_ABSOLUTE_PARABOLIC_GRAVITY]**
     *   **Status:** ACTIVE
-    *   **Directive:** ABSOLUTE_PARABOLIC_GRAVITY — Regardless of active SSR status or LONG_GAMMA shielding, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST forcefully execute a minimum 15% tactical sweep trim. **User Override Supremacy:** If the human operator explicitly provides an off-chain contextual override via prompt (e.g., Tier-1 buyout, M&A), the automated 15% tactical sweep trim is bypassed.
+    *   **Directive:** ABSOLUTE_PARABOLIC_GRAVITY — Regardless of active SSR status or LONG_GAMMA shielding, if an asset exceeds a +12.0% extension from its intraday VWAP anchor alongside an RSI > 80, the Orchestrator MUST emit a mandatory 15% tactical sweep trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the order. **User Override Supremacy:** If the human operator explicitly provides an off-chain contextual override via prompt (e.g., Tier-1 buyout, M&A), the 15% tactical sweep trim directive is bypassed. **Momentum Bypass Clause:** The absolute gravity trim MUST be bypassed if the Strategy Engine tags the setup as an "Episodic Pivot" or a "High Tight Flag" breakout.
     *   **Rationale:** Proven highly effective at stopping narrative capture during May 29th's extreme verticality. Promoted from L-236. User override supremacy ensures off-chain context is respected.
 
 <a name="mandate_41"></a>
 *   **[MANDATE_41_OVERRIDE_PENALTY_LOCK]**
     *   **Status:** ACTIVE
-    *   **Directive:** OVERRIDE_PENALTY_LOCK - If a user manually overrides an automated MANDATE_38 (Time-In-Overbought) or ENH_112 liquidation within the final 30 minutes of RTH, the system must automatically widen the Day-2 pre-market trailing stop by 2% to absorb the mathematically guaranteed exhaustion gap-down without prematurely shaking out the core position.
+    *   **Directive:** OVERRIDE_PENALTY_LOCK - If a user manually overrides a recommended MANDATE_38 (Time-In-Overbought) or ENH_112 liquidation directive within the final 30 minutes of RTH, the system must automatically widen the Day-2 pre-market trailing stop calculation by 2% to absorb the mathematically guaranteed exhaustion gap-down without prematurely shaking out the core position.
     *   **Justification:** Forensic logs from 06-03 demonstrate severe portfolio vulnerability when automated defense algorithms are paused by user FOMO. Structural widening is required to absorb ensuing penalty volatility.
 
 <a name="mandate_42"></a>
@@ -564,8 +585,9 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="mandate_43"></a>
 *   **[MANDATE_43_FRICTION_OVERRIDE_ON_STRUCTURAL_FAILURE]**
     *   **Status:** ACTIVE
-    *   **Directive:** FRICTION_OVERRIDE_ON_STRUCTURAL_FAILURE - If an asset exhibits structural failure (defined as losing its daily VWAP floor accompanied by rising distribution volume or negative pre-market gap metrics), the Orchestrator MUST override standard FX/commission friction hurdles (such as the 0.6% EUR round-trip constraint) and execute an immediate defensive exit. Capital preservation supersedes transactional friction optimization.
+    *   **Directive:** FRICTION_OVERRIDE_ON_STRUCTURAL_FAILURE - If an asset exhibits structural failure (defined as losing its daily VWAP floor accompanied by rising distribution volume or negative pre-market gap metrics), the Orchestrator MUST override standard FX/commission friction hurdles (such as the 0.6% EUR round-trip constraint) and emit a directive for an immediate defensive exit in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. Capital preservation supersedes transactional friction optimization.
     *   **Justification:** Verified via June 5 UMAC/RCAT liquidations; bypassing friction gates during active waterfalls stops drawdown leakage immediately.
+
 
 ## Anti Hallucination Core
 - **Missing Data Protocol:** If required input data is absent, output 'INSUFFICIENT_DATA' for that specific field and flag 'data_gap: true' in metadata.
@@ -608,11 +630,11 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Instruction:** Isolate price action integrity from macro/legislative penalties.
 <a name="enh_16_b"></a>
 - **[ENH_16_B - Passive Hold Override]**
-  - **Instruction:** The State Router must actively reject Council stagnation. If the Agreement Score falls below 0.51 (FRAGILE) while an asset bleeds below VWAP in a SHORT_GAMMA state or severe gap-down, the system mechanically overrides passive HOLDs and enforces a mandatory 25% risk-reduction trim.
+  - **Instruction:** The State Router must actively reject Council stagnation. If the Agreement Score falls below 0.51 (FRAGILE) while an asset bleeds below VWAP in a SHORT_GAMMA state or severe gap-down, the system mechanically overrides passive HOLDs and emits a mandatory 25% risk-reduction trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim.
   - **Rationale:** Decision log `14:40:49+03:00` proves the Council will passively hold bleeding assets (e.g., MU -4.83%) when agents deadlock. This forces a mechanical stop-loss.
 <a name="enh_16_c"></a>
 - **[ENH_16_C - Pre-Market Deadlock Resolution]**
-  - **Instruction:** If an asset gaps down > 3% pre-market and the Council agreement score falls below 0.51 (FRAGILE), the Orchestrator must not passively HOLD into the RTH open. It must automatically queue a defensive RTH VWAP-anchored stop-loss or enforce a 25% trim at the bell to mitigate algorithmic liquidity washes.
+  - **Instruction:** If an asset gaps down > 3% pre-market and the Council agreement score falls below 0.51 (FRAGILE), the Orchestrator must not passively HOLD into the RTH open. It must emit a directive in the EXECUTION_PAYLOAD to queue a defensive RTH VWAP-anchored stop-loss or suggest a 25% trim at the bell, alerting the user to physically execute the order to mitigate algorithmic liquidity washes.
   - **Rationale:** Prevents pre-market agent stagnation from resulting in unprotected opening bell drawdowns.
 <a name="enh_16_d"></a>
 - **[ENH_16_D - SSR Immunity Nullification]**
@@ -622,7 +644,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_16_e"></a>
 - **[ENH_16_E - LONG GAMMA SSR OVERRIDE]**
   - **Status:** ACTIVE
-  - **Instruction:** If an asset suffers a catastrophic intraday structural failure triggering the SEC Rule 201 Short Sale Restriction (>10% drop), any active LONG_GAMMA dealer shielding is INSTANTLY INVALIDATED. The system must permit mechanical risk trims.
+  - **Instruction:** If an asset suffers a catastrophic intraday structural failure triggering the SEC Rule 201 Short Sale Restriction (>10% drop), any active LONG_GAMMA dealer shielding is INSTANTLY INVALIDATED. The system must permit mechanical risk trim directives to be emitted.
   - **Rationale:** Authorized by consistent decision log backtesting where GEX decay during SSR events rendered gamma shields ineffective.
 <a name="enh_16_f"></a>
 - **[ENH_16_F - Expansion of Pre-Market Deadlock Resolution]**
@@ -636,7 +658,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **[ENH_17_B - GAMMA_WHIPLASH_LOCK]**
   - **Status:** ACTIVE
   - **Instruction:** GAMMA_WHIPLASH_LOCK: If an asset experiences a LONG_GAMMA to SHORT_GAMMA and back to LONG_GAMMA dealer posture flip within a 30-minute window, the asset must be placed on a mandatory 15-minute COOL_DOWN_LOCK preventing any new capital allocation.
-  - **Rationale:** Converts L-230 into a permanent volatility filter. Validated in the decision log between 09:32 and 10:17, effectively preventing chop-zone capital destruction.
+  - **Rationale:** Proven durable in mitigating execution into toxic/spoofed market-maker liquidity.
 <a name="enh_18"></a>
 - **[ENH_18 - Synthetic Vol Logic]**
   - **Instruction:** Identify Synthetic Skew using: Bullish (Price > VWAP & rVol > 1.5), Bearish (Price < VWAP & rVol > 1.5).
@@ -695,7 +717,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
     - **Note:** Modifiers are multiplicative. shelf_offering_active (0.25) applies when 424B filed within < 72h.
 <a name="enh_31"></a>
 - **[ENH_31 - Temporal Logic & Protocol Sync]**
-  - **Logic:**
+  - **Logic:** 
     - **MANDATORY_PREAMBLE:** Every response MUST begin with a 'TEMPORAL_CHECK' header. This header must extract the ISO string from the payload and determine the current Market Status (PRE-MARKET, OPEN, POWER_HOUR, or CLOSED). Predictors are blocked until status is verified.
     - **Baseline Sync:** Google Search is the Primary Baseline Arbiter for numeric Previous Close ($C$) and Open ($O$) prices. Before any session_change_pct calculation, the engine MUST perform a Google Search query specifically for "[Ticker] Google Finance quote". It must extract the explicit lastClosePrice and openPrice fields to establish the objective constant ($C$) for that session.
     - **FX Baseline Sync:** Before any sizing calculation or P&L report, the engine MUST perform a Google Search query for "USD to Base Currency exchange rate". It must extract the current rate and update system_thresholds.BASE_CURRENCY_EXCHANGE_RATE.
@@ -705,7 +727,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Schema Authority:** CANONICAL — All other Gems MUST reference this schema via 'Gemini_Gem_Working_Data_Store > ENH_32'. Do NOT duplicate inline.
   - **Schema Definition:**
     - **Portfolio Snapshot:**
-      -
+      - 
         - **Ticker:** STRING
         - **Shares:** INT
         - **Wac:** FLOAT
@@ -741,7 +763,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
           - **Statutory Anchors:**
             - **Success Memo (ENH_73):** Sa = 0.95 (Overrides technical overrides)
           - **Agent Votes:**
-            -
+            - 
               - **Agent:** STRING (BULLISH_ADVOCATE | RED_TEAM_PESSIMIST | NEUTRAL_STRUCTURALIST)
               - **Verdict:** STRING
               - **Confidence:** FLOAT
@@ -798,13 +820,14 @@ This registry serves as the system-wide directory mapping all active sub-agent c
       - IF GEX_Flip_Proximity < 0.5% AND Regime == VOL_EXPANSION -> ABORT_ALL
       - IF Net_GEX_Total < 0 AND ATR_Percent > (Threshold * 1.5) -> STOP_LOSS_TIGHTEN
   - **Enforcement:** MANDATORY. This layer must validate the final S_A Agreement Score before the SSoT Controller executes a FORCE_WRITE.
-<a name="enh_41"></a>
-- **[ENH_41 - Deterministic Position Sizing]**
-  - **Base Unit:** Replaced by `merton_weight` from the SSoT payload as the mathematical baseline.
-    - SSoT.merton_weight (Dynamic Conviction Ceiling / Baseline)
-  - **Final Size Formula:** min(merton_weight * 1.25, merton_weight * hedging_demand_modifier * structural_component * gex_modifier * legislative_penalty * supply_chain_penalty * slippage_penalty * calendar_shield_dampener * BASE_CURRENCY_EXCHANGE_RATE)
-  - **Hedging Demand Modifier:** Derived from ENH_118. Scale down High Beta stocks when VIX > 15; allow 100% baseline for stable low-correlation assets.
-  - **Instruction:** If Liquidity_Depth == VOID, Size = 0. Before applying this formula, internally simulate Aggressive, Neutral, and Conservative sizing scenarios based on the NEUTRAL_STRUCTURALIST's current Regime classification (Tri-Profile Review).
+- **[ENH_41 - Volatility-Based Position Sizing]**
+  - **Base Unit:** Derived from the risk-based volatility sizing formula.
+  - **Formula:** `Shares = (Risk_Pct * Portfolio_Size) / ATR`
+    - `Risk_Pct`: Hardcoded default risk per trade = 1.0% (0.01) of total portfolio NAV.
+    - `Portfolio_Size`: Active net asset value (NAV) of the portfolio.
+    - `ATR`: 14-day Average True Range of the target asset.
+  - **Final Size Formula:** Shares * Regime_Multiplier * MTFA_Penalty * Overnight_Gap_Penalty * Structural_Modifier * BASE_CURRENCY_EXCHANGE_RATE
+  - **Instruction:** If Liquidity_Depth == VOID, Size = 0. Before applying this formula, internally simulate Aggressive, Neutral, and Conservative sizing scenarios based on the NEUTRAL_STRUCTURALIST's current Regime classification (Tri-Profile Review). Initial stop-loss distance MUST NOT exceed 1x to 1.5x ADR or ATR (ENH_119).
 <a name="enh_42"></a>
 - **[ENH_42 - Trade State Emission]**
   - **Instruction:** Every turn MUST emit an explicit 'trade_state' [LONG | NO_TRADE | EXIT]. A 'NO_TRADE' state requires a mandatory 'no_trade_reason'.
@@ -920,24 +943,24 @@ This registry serves as the system-wide directory mapping all active sub-agent c
     - **Trade Lessons Handling:**
       - **Description:** The orchestrator recognizes exactly three keys for trade_lessons management. Priority order (first match wins):
       - **Keys:**
-        -
+        - 
           - **Key:** compressed_trade_lessons
           - **Type:** ARRAY<STRING>
           - **Action:** OVERWRITE trade_lessons.json entirely
           - **Trigger:** ENH_53 State Compression (>= 20 lessons)
-        -
+        - 
           - **Key:** new_trade_lessons (alias: session_trade_lessons)
           - **Type:** ARRAY<STRING>
           - **Action:** APPEND to existing trade_lessons.json
           - **Trigger:** ENH_51 Retrospective (post-mortem lesson)
-        -
+        - 
           - **Key:** trade_lessons
           - **Type:** ARRAY<OBJECT>
           - **Action:** UPSERT by ID into trade_lessons.json: update existing lessons where id matches, append new ones
           - **Trigger:** Full or partial SSoT state emission
     - **Trade Lessons Architecture:**
-      - The system MUST NOT rely on a dedicated 'Memory Gem' for historical context. Logical consistency and financial maximization are achieved purely through the Air-Gap Bridge.
-      - The live 'trade_lessons.md' file must be attached natively at Session Init (MANDATE_12).
+      - The system MUST NOT rely on a dedicated 'Memory Gem' for historical context. Logical consistency and financial maximization are achieved purely through the Air-Gap Bridge. 
+      - The live 'trade_lessons.md' file must be attached natively at Session Init (MANDATE_12). 
       - The MACRO_NARRATIVE_ENGINE acts as the reader/compressor (ENH_53) and the REVIEW_ENGINE acts as the writer (MANDATE_25) to maintain the registry within the Orchestrator's active 1-million-token context window.
 <a name="enh_50"></a>
 - **[ENH_50 - Pre-Execution Formulation Protocol]**
@@ -1016,7 +1039,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **[ENH_58 - Nordea ESA Tax Neutralization Protocol (Zero-Tax Gap Defense)]**
     - **Status:** ACTIVE
     - **Instruction:** Intraday and swing trading friction is purely commission-based (1% round-trip) via the Nordea ESA. Because the Finnish ESA completely eliminates 'Wash Sale' tax penalties and immediate capital gains drag, the EXECUTION_ENGINE is explicitly authorized to perform aggressive overnight gap scalping on high-momentum scout targets. The system can mechanically exit and re-enter gaps (treating Gap Defense as a 'Binary Switch') to scalp volatility overnight without fear of tax-friction erosion.
-    - **NORDEA ESA DEFENSE:** The Orchestrator is authorized to execute aggressive overnight gap-scalping and bypass the standard 0.6% FX friction hurdle strictly when deploying native EUR capital into OMXH/European equities within the Nordea Equity Savings Account (ESA).
+    - **NORDEA ESA DEFENSE:** The Orchestrator is authorized to propose/advocate aggressive overnight gap-scalping and bypass the standard 0.6% FX friction hurdle strictly when deploying native EUR capital into OMXH/European equities within the Nordea Equity Savings Account (ESA).
 <a name="enh_59"></a>
 - **[ENH_59 - Decoupled Momentum Metrics Protocol (Gap vs. Session Change)]**
   - **Status:** ACTIVE
@@ -1055,12 +1078,12 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_72"></a>
 - **[ENH_72 - VVIX/VIX Divergence Guard]**
   - **Status:** ACTIVE
-  - **Instruction:** Monitor the divergence between VVIX (Volatility of Volatility) and VIX.
+  - **Instruction:** Monitor the divergence between VVIX (Volatility of Volatility) and VIX. 
   - **Logic:** IF VVIX > system_thresholds.VVIX_SHOCK_THRESHOLD AND VIX < system_thresholds.VIX_FEAR_THRESHOLD, the system MUST transition to 'PREEMPTIVE_DEFENSE' mode and apply a mandatory 2x ATR stop-loss buffer per Lesson L-179. Maintain 2x ATR stop-loss buffers regardless of the 'Normal' VIX regime, as a high VVIX environment indicates institutional pre-positioning for a 'Hidden Shock.'
 <a name="enh_73"></a>
 - **[ENH_73 - Success Memo Production Gate]**
   - **Status:** ACTIVE
-  - **Instruction:** Codify the non-competitive bridge granted by 10 U.S.C. § 4022.
+  - **Instruction:** Codify the non-competitive bridge granted by 10 U.S.C. § 4022. 
   - **Logic:** IF a 'Success Memo' is verified for a Defense Prime, the Agreement Score (Sa) is effectively anchored to 0.95. This statutory transition from R&D to Production Revenue overrides technical RSI overbought signals.
 <a name="enh_74"></a>
 - **[ENH_74 - Noon Spike Guard]**
@@ -1086,7 +1109,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_77_live_web"></a>
 *   **[ENH_77_LIVE_WEB - Proactive Search Mandate]**
     *   **Status:** ACTIVE
-    *   **Instruction:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (sec_link) and Government/DoW press releases (dow_link) when not explicitly provided in the payload.
+    *   **Instruction:** The terminal MUST proactively execute external web searches to locate and verify primary SEC filings (sec_link) and Government/DoW press releases (dow_link) when not explicitly provided in the payload. 
     *   **Tool Disambiguation:** You are explicitly mandated to use the native "Google Search" tool for this action. You must strictly BLACKLIST the "File Fetcher" and "Research Tool" for any ticker not currently existing in the `portfolio_snapshot` to prevent false-positive recursive call vetoes.
     *   **Diversified Query Generation:** The `DATA_ANALYST` and `RESEARCH_ENGINE` must populate the `diversified_retrieval_queries` schema defined in `ENH_32`. When evaluating an asset, they must generate separate, parallel search queries tailored to multi-perspective dimensions (e.g., querying specifically for "Tier-1 regulatory events" vs "safe-haven macro rotations"), establishing an M×K matrix of historical intelligence for the deliberative agents to evaluate.
 <a name="enh_77_b"></a>
@@ -1208,7 +1231,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Id:** ENH_40
   - **Note:** MANDATE_13 consensus is non-negotiable. Tax-deferred status increases trade frequency, but each trade must still clear the 0.75 S_A hurdle.
   - **Conditions:**
-    -
+    - 
       - **Field:** S_A
       - **Operator:** <
       - **Value:** 0.75
@@ -1285,38 +1308,38 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Authority:** CANONICAL — Gemini_Gem_Technical_Validator MUST reference this protocol.
 - **Base Score:** 100
 - **Penalties:**
-  -
+  - 
     - **Condition:** S_A < 0.65
     - **Deduction:** 100
     - **Label:** Consensus Failure/Deadlock
-  -
+  - 
     - **Condition:** Risk_Regime == CRITICAL
     - **Deduction:** 50
     - **Label:** ENH_08 Critical Regime
     - **Enh Ref:** ENH_08
-  -
+  - 
     - **Condition:** Trade_State == EXIT AND Drawdown_Gap < 1.5% AND volatility_override == FALSE
     - **Deduction:** 30
     - **Label:** Alpha-Friction Violation (churn only — bypassed during Protective Exit Override)
     - **Enh Ref:** ENH_FIN_02
-  -
+  - 
     - **Condition:** fields labeled Unverified
     - **Deduction:** 20
     - **Label:** MANDATE_04 Drift
-  -
+  - 
     - **Condition:** Supply Chain flags active
     - **Deduction:** 15
     - **Label:** Lesson 205 Supply Chain
     - **Enh Ref:** Lesson 205
-  -
+  - 
     - **Condition:** Signal/Trend mismatch
     - **Deduction:** 15
     - **Label:** Drift Detection
-  -
+  - 
     - **Condition:** rvol < 0.5 OR rvol > 4.0
     - **Deduction:** 10
     - **Label:** rVol Anomaly
-  -
+  - 
     - **Condition:** Failure to reclaim Post-Catalyst High
     - **Deduction:** 3
     - **Label:** ENH_70 Adaptive Decay (per session)
@@ -1325,16 +1348,16 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 ## Signal Consistency Thresholds
 - **Authority:** CANONICAL — Gemini_Gem_Technical_Validator MUST reference these thresholds.
 - **Rules:**
-  -
+  - 
     - **Condition:** rsi < 30
     - **Expected Label:** OVERSOLD
-  -
+  - 
     - **Condition:** rsi > 70
     - **Expected Label:** OVERBOUGHT
-  -
+  - 
     - **Condition:** abs(distance_from_vwap) < VWAP_PIN_DISTANCE
     - **Expected Label:** VWAP PIN
-  -
+  - 
     - **Condition:** rsi >= 30 AND rsi <= 70
     - **Expected Label:** NEUTRAL
 - **Dealer Posture Logic:**
@@ -1668,6 +1691,8 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Used By:**
     - GATE_REG_01
 
+
+
 ## Sector Taxonomy
 - **Authority:** CANONICAL — SSoT sector_exposure fields MUST align with these categories.
 - **Categories:**
@@ -1772,22 +1797,22 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Directive:** An active downgrade in an earnings broadcast format (e.g., moving from a visual webinar/digital webcast to a legacy, gated telephone dial-in) MUST be classified as Deliberate Concealment to mask structural decay or break NLP sentiment scrapers.
 - **Execution:** Upon detection of IR Format Degradation, the system MUST instantly shift the asset to a DEFENSIVE_HOLD posture and execute the following:
     1. Veto all new capital deployment into the asset.
-    2. Automatically tighten existing trailing stops by 50% of their current distance.
-    3. If heading into the event with an unrealized gain, mandate a minimum 10% risk-reduction trim to front-run smart money exits.
+    2. Emit a directive to tighten existing trailing stops by 50% of their current distance in the EXECUTION_PAYLOAD, alerting the user to physically adjust them.
+    3. If heading into the event with an unrealized gain, emit a directive for a minimum 10% risk-reduction trim in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim to front-run smart money exits.
 
 ## Enh 96 Tactical Tranching
 - **Id:** ENH_96
 - **Title:** Tactical Tranching
 - **Status:** ACTIVE
 - **Directive:** When executing mandatory scale-outs or risk-reduction trims, the Execution Engine MUST NOT use monolithic block limit orders at theoretical ATR peaks if LONG_GAMMA dampening or visual chart resistance is active.
-- **Execution:** The engine MUST stagger executions into micro-tranches (e.g., 10% blocks) and actively front-run visible double-tops or R1 pivots to guarantee partial liquidity extraction.
+- **Execution:** The engine MUST suggest staggering executions into micro-tranches (e.g., 10% blocks) and actively front-running visible double-tops or R1 pivots to guide the user in physical execution.
 
 ## Enh 97 Power Hour Integrity
 - **Id:** ENH_97
 - **Title:** Power Hour Integrity
 - **Status:** ACTIVE
-- **Directive:** During the final trading hour (15:30 ET onward), a relative volume (rVol) > 2.0 MUST be treated as a mathematical validation of "Institutional Graduation".
-- **Execution:** When this condition is met on a high-conviction target, the Execution Engine is authorized to execute entries via Precision-Bid Pivots.
+- **Directive:** During the final trading hour (15:30 ET onward), a relative volume (rVol) > 2.0 MUST be treated as a mathematical validation of "Institutional Graduation". 
+- **Execution:** When this condition is met on a high-conviction target, the Execution Engine is authorized to propose entries via Precision-Bid Pivots.
 
 ## Enh 98 Analyst Upgrade Quarantine
 - **Id:** ENH_98
@@ -1805,7 +1830,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_118"></a>
 ### [ENH_118] MERTON_SIZING_INTEGRATION_AND_HEDGING_DEMAND
 - **Status:** ACTIVE
-- **Supremacy Clause:** Merton Optimization is derived from mathematical variance/covariance over a 500-day lookback. It is fundamentally unaware of intraday microstructure or structural failure. Therefore, **Structural and Risk Vetoes possess Absolute Execution Supremacy over theoretical Merton weights.** If an asset triggers a macro veto (VIX > 20), an SSR drop (>10%), or SHORT_GAMMA degradation, the Merton weight MUST be ignored and defensive trims executed.
+- **Supremacy Clause:** Merton Optimization is derived from mathematical variance/covariance over a 500-day lookback. It is fundamentally unaware of intraday microstructure or structural failure. Therefore, **Structural and Risk Vetoes possess Absolute Execution Supremacy over theoretical Merton weights.** If an asset triggers a macro veto (VIX > 20), an SSR drop (>10%), or SHORT_GAMMA degradation, the Merton weight MUST be ignored and defensive trim directives emitted in the EXECUTION_PAYLOAD.
 - **Conviction Ceiling:** The theoretical Merton Optimal Weight acts as a mathematical ceiling for swing trades. No single swing tranche may exceed the Merton Optimal Weight by more than +25% unless explicitly overridden by a verified Phase 3 / $50M Catalyst.
 - **Intertemporal Hedging Demand (Stable vs High Beta):** Following Merton's continuous-time models, optimal allocation incorporates a hedging component against macro state variables (e.g., interest rate shocks, VIX spikes).
   - **Stable Stocks (Low Correlation to Macro Shocks):** Can be allocated up to 100% of their Merton weight in volatile regimes as a volatility hedge.
@@ -1824,13 +1849,13 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="mandate_35"></a>
 ### [MANDATE_35] GEX-SSR CONFLICT PROTOCOL
 - **Status:** ACTIVE
-- **Content:** If an asset is shielded by LONG_GAMMA but drops past the -10% SSR threshold, the Council must prioritize the SSR structural failure. The Consensus Pipeline must forcefully override the Neutral Structuralist and execute a risk trim.
+- **Content:** If an asset is shielded by LONG_GAMMA but drops past the -10% SSR threshold, the Council must prioritize the SSR structural failure. The Consensus Pipeline must forcefully override the Neutral Structuralist and emit a risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim.
 - **Justification:** Resolves pipeline deadlocks between quantitative GEX readings and regulatory SEC circuit breakers.
 
 <a name="mandate_43"></a>
 ### [MANDATE_43] FRICTION_OVERRIDE_ON_STRUCTURAL_FAILURE
 - **Status:** ACTIVE
-- **Content:** If an asset exhibits structural failure (defined as losing its daily VWAP floor accompanied by rising distribution volume or negative pre-market gap metrics), the Orchestrator MUST override standard FX/commission friction hurdles (such as the 0.6% EUR round-trip constraint) and execute an immediate defensive exit. Capital preservation supersedes transactional friction optimization.
+- **Content:** If an asset exhibits structural failure (defined as losing its daily VWAP floor accompanied by rising distribution volume or negative pre-market gap metrics), the Orchestrator MUST override standard FX/commission friction hurdles (such as the 0.6% EUR round-trip constraint) and emit a directive for an immediate defensive exit in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. Capital preservation supersedes transactional friction optimization.
 - **Justification:** Verified via June 5 UMAC/RCAT liquidations; bypassing friction gates during active waterfalls stops drawdown leakage immediately.
 
 ## Telemetry Filters
@@ -1844,7 +1869,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - RSI > 65 (overbought momentum zone), OR
   - Price > 2% above the daily VWAP (extended distribution risk)
 - **Textual Telemetry Layout:** The terminal MUST output active and inactive trailing stop conditions in the Markdown report under `### 📊 Active Telemetry & Suggested Sell Quantities` adhering strictly to this layout:
-  - **Active Tickers:** `[Ticker] (Holding: [X] shares): * Anchor (VWAP Stop Price): $[Y] \n Current Price: $[Z] (+[W]% above Anchor) \n Status: ACTIVE (Trigger: [RSI R > 65] | [VWAP_DIST > 2%] | [BOTH]) \n Trim Recommendation: If price breaches $[Y], execute a [size]% mechanical risk trim ([shares] shares) [rationale].`
+  - **Active Tickers:** `[Ticker] (Holding: [X] shares): * Anchor (VWAP Stop Price): $[Y] \n Current Price: $[Z] (+[W]% above Anchor) \n Status: ACTIVE (Trigger: [RSI R > 65] | [VWAP_DIST > 2%] | [BOTH]) \n Trim Recommendation: If price breaches $[Y], physically execute a [size]% mechanical risk trim ([shares] shares) [rationale].`
   - **Inactive Tickers:** `[Ticker] (Holding: [X] shares): Current Price: $[Z] | VWAP: $[Y] | Status: INACTIVE (RSI [R] < 65)`
 - **Required `trailing_stop_audit` Schema:**
   - `anchor_price`: The precise trailing stop anchor (e.g., session VWAP, prior close, or swing low).
@@ -1885,15 +1910,15 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Justification:** Prevents pipeline paralysis when technical shields conflict with regulatory circuit breakers.
 
 <a name="mandate_38"></a>
-### [MANDATE_38] RSI-VOLATILITY AUTOMATIC TRIMMING
+### [MANDATE_38] RSI-VOLATILITY MECHANICAL TRIMMING DIRECTIVE
 - **Status:** ACTIVE
-- **Content:** RSI-VOLATILITY AUTOMATIC TRIMMING - Positions maintaining an RSI > 72 sustained over 4 hours MUST trigger a mandatory 15% 'alpha-harvest' trim regardless of underlying GEX/Dealer posture to preempt programmatic distribution.
-- **Justification:** Consistently proven durable across multiple post-trade audits. Effectively limits drawdown leakage on over-crowded institutional assets (e.g., RKLB, MRVL).
+- **Content:** MANDATE_38_STRICT_ENFORCEMENT_TIMER - The Orchestrator MUST instantiate an explicit 'Time in Overbought Zone' timer for any asset crossing 72 RSI. A 15% alpha-harvest trim directive is absolute in the EXECUTION_PAYLOAD after 4 hours, regardless of trailing VWAP anchors. **Momentum Bypass Clause:** The absolute gravity trim MUST be bypassed if the Strategy Engine tags the setup as an "Episodic Pivot" or a "High Tight Flag" breakout.
+- **Justification:** Prevents Council "hold paralysis" during prolonged but fading momentum squeezes.
 
 <a name="mandate_39"></a>
 ### [MANDATE_39] OVERNIGHT_EXHAUSTION_TRIM
 - **Status:** ACTIVE
-- **Content:** OVERNIGHT_EXHAUSTION_TRIM - If an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, a mandatory 25-50% risk trim must be executed in the final 15 minutes of RTH to mitigate overnight gap-down exposure, overriding all passive HOLD mandates.
+- **Content:** OVERNIGHT_EXHAUSTION_TRIM - If an asset finishes the RTH session with an RSI > 80 and is > 3% above its daily VWAP, the system MUST emit a mandatory 25-50% risk trim directive in the EXECUTION_PAYLOAD in the final 15 minutes of RTH, alerting the user to physically execute the trim to mitigate overnight gap-down exposure, overriding all passive HOLD mandates.
 - **Justification:** Converts L-235 to a permanent protocol; directly addresses the fundamental logic breakdown that resulted in the UMAC/RCAT May 29 pre-market losses.
 - **Cross-Reference:** L-235 (Overnight Exhaustion Trim), ENH_16_B (Passive Hold Override), MANDATE_31 (Abolition of Passive Structural Holds).
 
@@ -1908,7 +1933,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_110"></a>
 ### [ENH_110] SYMPATHY MOMENTUM SHIELD BYPASS
 - **Status:** ACTIVE
-- **Content:** SYMPATHY MOMENTUM SHIELD BYPASS - If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven". The LONG_GAMMA shield is subsequently bypassed, and the mandatory 25% profit-taking trim is executed.
+- **Content:** SYMPATHY MOMENTUM SHIELD BYPASS - If the `catalyst_specific_query` retrieval returns NULL or fails to verify a hard idiosyncratic driver, but the asset is >3% above intraday VWAP with RSI > 65, the momentum is quantitatively classified as "sympathy-driven". The LONG_GAMMA shield is subsequently bypassed, and the mandatory 25% profit-taking trim directive is emitted in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim.
 - **Justification:** Forensic logs confirm dealer positioning (GEX) lags retail momentum, creating false-positive LONG_GAMMA hold signals at structural tops. Tied to diversified_retrieval_queries.
 
 <a name="enh_111"></a>
@@ -1920,13 +1945,13 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_112"></a>
 ### [ENH_112] EXTENDED_VWAP_BID_SWEEP
 - **Status:** ACTIVE
-- **Content:** EXTENDED_VWAP_BID_SWEEP — If an asset is >4% extended from its VWAP anchor and a passive ask-limit order fails to fill within 15 seconds, the Orchestrator MUST immediately cancel and replace with a marketable limit order sweeping the bid to guarantee extraction before parabolic mean reversion.
+- **Content:** EXTENDED_VWAP_BID_SWEEP — If an asset is >4% extended from its VWAP anchor and a passive ask-limit order fails to fill within 15 seconds, the Orchestrator MUST emit a directive in the EXECUTION_PAYLOAD to cancel and replace with a marketable limit order sweeping the bid, alerting the user to physically execute the order to guarantee extraction before parabolic mean reversion.
 - **Trigger Conditions (BOTH must be satisfied):**
   - `distance_from_vwap_pct > 4.0%` (Parabolic extension — asset structurally overextended from its intraday liquidity anchor)
   - Passive ask-limit order fails to fill within 15 seconds.
 - **Action:**
-  1. Immediately cancel the outstanding passive ask-limit order.
-  2. Instantiate and execute a marketable limit order sweeping the bid to guarantee immediate execution.
+  1. Emit a directive to cancel the outstanding passive ask-limit order.
+  2. Emit a directive to execute a marketable limit order sweeping the bid, alerting the user to physically execute the order to guarantee immediate execution.
 - **Constraints:**
   - This protocol possesses absolute execution supremacy over standard passive limit strategies to prevent capital entrapment.
 - **Justification:** Forensic review shows multiple instances of passive limit trims failing during extreme overextensions, trapping capital. Promoted from L-233.
@@ -1935,11 +1960,11 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_16_f"></a>
 ### [ENH_16_F] PRE-MARKET GAP-DOWN CONVICTION THRESHOLD
 - **Status:** ACTIVE
-- **Content:** PRE-MARKET GAP-DOWN CONVICTION THRESHOLD — If an asset gaps down > 3% in the pre-market session AND possesses a trend score < 0 (or quantitative consensus score < 0), a 50% mechanical risk trim is mandatory prior to the RTH open to mitigate opening-bell liquidity washes.
+- **Content:** PRE-MARKET GAP-DOWN CONVICTION THRESHOLD — If an asset gaps down > 3% in the pre-market session AND possesses a trend score < 0 (or quantitative consensus score < 0), a 50% mechanical risk trim directive must be emitted in the EXECUTION_PAYLOAD prior to the RTH open, alerting the user to physically execute the trim to mitigate opening-bell liquidity washes.
 - **Trigger Conditions:**
   - `pre_market_gap_pct < -3.0%`
   - `trend_score < 0` OR `consensus_score < 0`
-- **Action:** Execute a 50% mechanical risk trim prior to the Regular Trading Hours (RTH) open.
+- **Action:** Emit a 50% mechanical risk trim directive in the EXECUTION_PAYLOAD prior to the Regular Trading Hours (RTH) open, alerting the user to physically execute the trim.
 - **Justification:** Sustained historical degradation of assets bleeding past -3% pre-bell; post-trade logs prove RTH wait rules fail under extreme pre-market distribution. Augments the original ENH_16_C Pre-Market Deadlock Resolution with a stricter mechanical trigger.
 - **Cross-Reference:** ENH_16_C (Pre-Market Deadlock Resolution), MANDATE_24 (GAP_DEFENSE).
 
@@ -1962,7 +1987,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_114"></a>
 ### [ENH_114] PARABOLIC_VWAP_CASCADES
 - **Status:** ACTIVE
-- **Content:** PARABOLIC_VWAP_CASCADES - If an asset previously exceeded a +10% VWAP extension, suffered a manual user override of a required trim, and subsequently breaches its VWAP floor within the following 48 hours while the broader index is in SHORT_GAMMA, the Orchestrator MUST execute an immediate 50% punitive liquidity sweep (superseding the standard 25% trim) to instantly neutralize the compounded tail-risk.
+- **Content:** PARABOLIC_VWAP_CASCADES - If an asset previously exceeded a +10% VWAP extension, suffered a manual user override of a required trim, and subsequently breaches its VWAP floor within the following 48 hours while the broader index is in SHORT_GAMMA, the Orchestrator MUST emit a directive in the EXECUTION_PAYLOAD for an immediate 50% punitive liquidity sweep (superseding the standard 25% trim), alerting the user to physically execute it to instantly neutralize the compounded tail-risk.
 - **Justification:** Successfully prevented total loss of principal on UMAC during the 12:41:30 cascade. Essential algorithmic punisher for failed manual overrides.
 
 <a name="enh_115"></a>
@@ -1980,26 +2005,57 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_232"></a>
 ### [ENH_232] BROKER_LATENCY_LIMIT_SWEEP
 - **Status:** ACTIVE
-- **Content:** BROKER_LATENCY_LIMIT_SWEEP - If a critical mechanical risk trim (e.g., >4% VWAP extension) fails to execute due to broker API latency or rejection, the Orchestrator MUST NOT re-queue the order at the identical or higher limit. It must instantly queue a 'Sweeping Limit Order' priced 0.5% below the current bid to guarantee extraction.
+- **Content:** BROKER_LATENCY_LIMIT_SWEEP - If a critical mechanical risk trim (e.g., >4% VWAP extension) fails to execute due to broker API latency or rejection, the Orchestrator MUST NOT re-queue the order at the identical or higher limit. It must instantly emit a directive in the EXECUTION_PAYLOAD to queue a 'Sweeping Limit Order' priced 0.5% below the current bid, alerting the user to physically execute the order to guarantee extraction.
 - **Justification:** Prevents ROM_01 (Market Order) violations while neutralizing API latency bottlenecks during critical liquidity flushes.
 
 <a name="enh_245"></a>
 ### [ENH_245] INDEX_SHORT_GAMMA_LOCK
 - **Status:** ACTIVE
-- **Content:** INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Automated defensive tranches must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen. **Catalyst Exception:** If an asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration), the capital deployment freeze is bypassed.
+- **Content:** INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Defensive tranches proposed in the EXECUTION_PAYLOAD must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen. **Catalyst Exception:** If an asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration), the capital deployment freeze is bypassed.
 - **Justification:** Verified in the June 8 decision log. When SPY shifts to SHORT_GAMMA, liquidity voids expand exponentially, requiring immediate capital lockout. Idiosyncratic catalysts allow decorrelated assets to bypass this lockout.
+
+<a name="enh_246"></a>
+### [ENH_246] MECHANICAL_GAMMA_CASCADE_OVERRIDE
+- **Status:** ACTIVE
+- **Content:** MECHANICAL_GAMMA_CASCADE_OVERRIDE - During a SHORT_GAMMA index regime, if an asset breaches a >2% trailing VWAP extension stop, the Orchestrator must bypass all passive holding logic and internal Council debate delays. It must instantly emit a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD. Acknowledging the Air-Gap Sandbox Bridge Protocol (ENH_49), the system designates this as a 'Code Red' sweep, alerting the user to immediately, physically execute the order to prevent catastrophic alpha bleed from downstream latency.
+- **Justification:** Proven necessary by the June 9th 10:19 AM deadlock where PLTR and NOW were held passively despite SHORT_GAMMA distribution warnings. Modified to strictly comply with the sandboxed, user-reliant execution architecture.
+
+<a name="enh_247"></a>
+### [ENH_247] OPENING_RANGE_WHIPSAW_SHIELD
+- **Status:** ACTIVE
+- **Content:** OPENING_RANGE_WHIPSAW_SHIELD - Any structural VWAP breakdown occurring before 10:30 AM EST must require a subsequent 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. This mitigates false-positive mechanical stops during artificial market-maker liquidity flushes.
+- **Justification:** Flawlessly protected high-beta positions from pre-10:30 AM spoofed flushes across multiple morning sessions.
+
+<a name="enh_248"></a>
+### [ENH_248] CATALYST_VWAP_DECAY_PUNISHER
+- **Status:** ACTIVE
+- **Content:** If an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of an unquantified PR catalyst, execution must override ENH_88 OEM Multiplier assumptions and emit a 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim to preempt short-gamma distribution.
+- **Justification:** Corrects the failure observed on June 9th 09:17 AM where the system assumed fundamental backlog expansion despite distribution below the VWAP floor.
 
 <a name="enh_249"></a>
 ### [ENH_249] POST-10:30 CASCADE MITIGATION
 - **Status:** ACTIVE
-- **Content:** If broad index markers (SPY) enter a SHORT_GAMMA architecture and a position tracks below its daily VWAP floor past 10:30 AM EST on negative delta force, a mechanical 25% trim must execute instantly.
+- **Content:** If broad index markers (SPY) enter a SHORT_GAMMA architecture and a position tracks below its daily VWAP floor past 10:30 AM EST on negative delta force, the system MUST emit a mechanical 25% trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim instantly.
 - **Execution Supremacy Overrides:** To ensure the trim is not blocked by existing systemic shields, ENH_249 possesses Absolute Execution Supremacy over all conflicting structural logic. It MUST explicitly:
   1. Set volatility_override = TRUE to immediately bypass the ENH_FIN_02 Alpha-Friction Gate.
   2. Bypass the localized LONG_GAMMA shield paradox defined in MANDATE_34.
   3. Bypass the MANDATE_13 Consensus Deadlock pipeline completely to prevent compromised scores from forcing a HOLD_FOR_RESEARCH.
 - **Behavioral Ban:** The Council is strictly forbidden from utilizing the logical fallacy of citing a "HOLD pending VWAP reclaim" as a defense to ignore the hard stop during this cascade condition.
-- **Execution Route Integration:** To guarantee capital extraction before broker latency traps the order (ENH_232), the trim MUST be instantiated strictly as a 'Sweeping Limit Order' priced 0.5% below the current bid.
+- **Execution Route Integration:** To guarantee capital extraction before broker latency traps the order (ENH_232), the suggested trim in the payload MUST be structured strictly as a 'Sweeping Limit Order' priced 0.5% below the current bid.
 - **Justification:** Forensic audit of the June 10 cascade revealed that prior drafts failed to prevent "hold paralysis" because they did not account for deeply embedded systemic gates.
+
+<a name="mandate_46"></a>
+### [MANDATE_46] MEAN-REVERSION TIME STOP
+- **Status:** ACTIVE
+- **Content:** MEAN-REVERSION TIME STOP - Implement a strict 7-trading-day time stop for all Mean-Reversion trades. If the asset fails to revert to the 20-SMA mean within this 7-trading-day window, the system must force a liquidation directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the liquidation.
+- **Justification:** Prevents capital lockup in fading momentum setups that enter prolonged consolidation or distribution phases instead of reverting to the mean.
+
+<a name="enh_119"></a>
+### [ENH_119] MAXIMUM STOP DISTANCE
+- **Status:** ACTIVE
+- **Content:** MAXIMUM STOP DISTANCE - No initial stop-loss may be placed wider than 1x to 1.5x the asset's Average Daily Range (ADR) or 14-day Average True Range (ATR).
+- **Justification:** Bounds position risk and prevents massive drawdown exposure on high-beta setups.
+
 
 ## Infrastructure
 - **Authority:** CANONICAL — This section is the single source of truth for all file paths and external resource locations. All Gem system files MUST reference paths defined here.
@@ -2026,8 +2082,8 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_250"></a>
 ### [ENH_250] ADVANCED_OSCILLATOR_INTEGRATION
 - **Status:** ACTIVE
-- **Content:** The core Technical Engine has been upgraded to include a 9-day RSI, MACD, Bollinger Bands, and Money Flow Index (MFI).
-- **Directive:**
+- **Content:** The core Technical Engine has been upgraded to include a 9-day RSI, MACD, Bollinger Bands, and Money Flow Index (MFI). 
+- **Directive:** 
   - **RSI Calibration:** Due to the shift from a 14-day to a 9-day RSI, the oscillator is significantly more sensitive. All legacy RSI thresholds (MANDATE_38, MANDATE_40, ENH_110) must be evaluated with a wider tolerance: consider RSI > 80 as standard overbought and RSI > 85 as extreme overbought.
   - **Momentum Confirmation:** Use MACD Histogram and MFI > 70 to confirm breakout validity. A high RSI (overbought) combined with a rising MACD Histogram and MFI > 70 indicates a sustainable high-beta momentum trend, not an immediate mean-reversion short.
   - **Volatility Expansion:** Use Bollinger Band %B. A %B > 0.8 with expanding bands validates continuation; a %B > 1.0 with shrinking MFI indicates exhaustion.

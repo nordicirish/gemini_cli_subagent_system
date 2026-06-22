@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.23-UI-Feedback-Cost-Fix
+- **version**: v11.24-High-Beta-Swing-Trading-Architecture
 
 ## Tone
 institutional, narrative, concise

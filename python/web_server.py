@@ -132,7 +132,8 @@ subagent_instructions = [
     "engine_instructions/bullish_gem.md", "engine_instructions/red_team_gem.md", "engine_instructions/neutral_gem.md", "engine_instructions/terminal.md",
     "engine_instructions/post_trade_review.md", "engine_instructions/macro_narrative_engine.md",
     "engine_instructions/data_analyst.md", "engine_instructions/state_validation_router.md", "engine_instructions/rule_enforcer_engine.md",
-    "engine_instructions/execution.md", "engine_instructions/gex_engine.md"
+    "engine_instructions/execution.md", "engine_instructions/gex_engine.md",
+    "engine_instructions/regime_engine.md", "engine_instructions/strategy_engine.md"
 ]
 
 # 1. Define the Sub-Agents with their instructions and specific tools
@@ -188,6 +189,20 @@ execution = framework.create_agent_tool(
 gex_engine = framework.create_agent_tool(
     name="GEX Engine",
     file_path="engine_instructions/gex_engine.md",
+    mode="GEMMA",
+    agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
+)
+
+regime_engine = framework.create_agent_tool(
+    name="Regime Engine",
+    file_path="engine_instructions/regime_engine.md",
+    mode="GEMMA",
+    agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
+)
+
+strategy_engine = framework.create_agent_tool(
+    name="Strategy Engine",
+    file_path="engine_instructions/strategy_engine.md",
     mode="GEMMA",
     agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
 )
@@ -266,7 +281,9 @@ council_members = {
     "ask_bullish_advocate": bullish_advocate,
     "ask_red_team_pessimist": red_team_pessimist,
     "ask_neutral_structuralist": neutral_structuralist,
-    "ask_technical_validator": technical_validator
+    "ask_technical_validator": technical_validator,
+    "ask_regime_engine": regime_engine,
+    "ask_strategy_engine": strategy_engine
 }
 ask_council = framework.create_parallel_council_tool(council_members)
 
@@ -294,6 +311,8 @@ terminal_tools = [
     bullish_advocate,
     red_team_pessimist,
     neutral_structuralist,
+    regime_engine,
+    strategy_engine,
     ask_council
 ]
 
