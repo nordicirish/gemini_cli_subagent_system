@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.24-High-Beta-Swing-Trading-Architecture
+**Version:** v11.12-High-Beta-Swing-Trading-Architecture
 **Tone:** neutral, reflective, concise
 
 ---
