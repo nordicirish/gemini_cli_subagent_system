@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v11.12-High-Beta-Swing-Trading-Architecture
+**Version:** v11.13-Catalyst-Override-and-Short-Gamma-Liquidation
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 - **Execution:** When proposing/directing mandatory scale-outs or risk-reduction trims in the EXECUTION_PAYLOAD, the Execution Engine MUST NOT suggest monolithic block limit orders at theoretical ATR peaks if LONG_GAMMA dampening or visual chart resistance is active.
 ---
@@ -36,7 +36,7 @@
 - [ENH_27](#enh_27): Speculative Logic Thresholds
 - [ENH_28](#enh_28): Drift Control Protocol
 - [ENH_29](#enh_29): ATR-Adjusted Sizing & Execution Protocol
-- [ENH_30](#enh_30): Forensic Structural Filtering
+- [ENH_30](#enh_30): Forensic Structural Filtering / CATALYST_OVERRIDE_ON_DILUTION (Merge & Update)
 - [ENH_31](#enh_31): Temporal Logic & Catalyst Verification
 - [ENH_32](#enh_32): Data Schema & GEX Calculation Protocol
 - [MANDATE_11](#mandate_11): [MIGRATED FROM ENH_33] Research Sync Protocol
@@ -118,6 +118,7 @@
 - [ENH_247](#enh_247): OPENING_RANGE_WHIPSAW_SHIELD - Any structural VWAP breakdown occurring before 10:30 AM EST must require a subsequent 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. This mitigates false-positive mechanical stops during artificial market-maker liquidity flushes.
 - [ENH_248](#enh_248): CATALYST_VWAP_DECAY_PUNISHER - If an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of an unquantified PR catalyst, execution must override ENH_88 OEM Multiplier assumptions and emit a 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim to preempt short-gamma distribution.
 - [ENH_249](#enh_249): POST-10:30 CASCADE MITIGATION - If broad index markers (SPY) enter a SHORT_GAMMA architecture and a position tracks below its daily VWAP floor past 10:30 AM EST on negative delta force, the system MUST emit a mechanical 25% trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim instantly, bypassing standard gates and shields.
+- [L-251](#l-251): SHORT_GAMMA_RTH_LIQUIDATION_EXPEDITER
 
 
 ## Mandate Registry
@@ -703,8 +704,9 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **[ENH_29 - ATR & Order Execution Logic]**
   - **Instruction:** Position size MUST be derived from ATR-adjusted volatility.
 <a name="enh_30"></a>
-- **[ENH_30 - Forensic Structural Filter]**
+- **[ENH_30 / L-228 - Forensic Structural Filter & Catalyst Override on Dilution]**
   - **Instruction:** Forensic flags (Dilution/Warrants) trigger sizing reduction per the structural_modifier_table below.
+  - **CATALYST_OVERRIDE_ON_DILUTION:** If an asset announces a secondary offering or shelf registration (Dilution), but simultaneously drops a Torque 10 binary catalyst (e.g., FDA Approval, Phase 3 Clinical success, Tier-1 DoD Contract), the system MUST NOT automatically trigger a 100% distress liquidation. If the asset maintains an intraday price above its daily VWAP with an rVol > 3.0, the clinical/binary momentum supersedes the dilution overhang. The asset must be shifted to a 'HOLD' status with tight trailing VWAP stops rather than blindly liquidated.
   - **Structural Modifier Table:**
     - **Authority:** CANONICAL — Gemini_Gem_Structural_Engine MUST reference this table.
     - **Base:** 1.0
@@ -2055,6 +2057,15 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **Status:** ACTIVE
 - **Content:** MAXIMUM STOP DISTANCE - No initial stop-loss may be placed wider than 1x to 1.5x the asset's Average Daily Range (ADR) or 14-day Average True Range (ATR).
 - **Justification:** Bounds position risk and prevents massive drawdown exposure on high-beta setups.
+
+
+## Execution Protocols
+
+<a name="l-251"></a>
+### [L-251] SHORT_GAMMA_RTH_LIQUIDATION_EXPEDITER
+- **Status:** ACTIVE
+- **Content:** SHORT_GAMMA_RTH_LIQUIDATION_EXPEDITER: If the broad market (SPY) is confirmed in a SHORT_GAMMA dealer posture (Net GEX < 0), and active portfolio components execute pre-market L-219 trims (Gap down > 3%), the system MUST NOT wait for late-session (PM) structural failure to liquidate the remaining 50%. The residual exposure must be liquidated immediately if the asset closes its first 15-minute RTH candle below its VWAP anchor. Capital preservation velocity is paramount in short-gamma regimes.
+- **Justification:** On 2026-06-23, the system correctly trimmed 50% of RCAT, UMAC, and RKLB pre-market, but wastefully held the remaining exposure until 15:41 EST despite persistent VWAP failures and a toxic SPY gamma environment, resulting in unnecessary alpha bleed.
 
 
 ## Infrastructure

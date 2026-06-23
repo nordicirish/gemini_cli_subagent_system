@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.24-High-Beta-Swing-Trading-Architecture
+- **version**: v11.25-Catalyst-Override-and-Short-Gamma-Liquidation
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

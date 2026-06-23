@@ -1,6 +1,6 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
-**Version:** v11.12-High-Beta-Swing-Trading-Architecture
+**Version:** v11.13-Catalyst-Override-and-Short-Gamma-Liquidation
 **Description:** Active Enforcer of mandates and protocols defined in Gemini_Gem_Working_Data_Store.
 
 ---
@@ -28,6 +28,8 @@
 - **ENH_246 Enforce:** Ensure that during broad SPY SHORT_GAMMA regimes, if an asset breaches a >2% trailing VWAP extension stop, the Orchestrator bypasses all passive holding logic and internal Council debate delays, instantly emitting a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD. Acknowledging the Air-Gap Sandbox Bridge Protocol (ENH_49), this is designated as a 'Code Red' sweep to alert the user to immediately, physically execute the order (Reference ENH_246).
 - **ENH_247 Enforce:** Ensure that structural VWAP breakdowns occurring before 10:30 AM EST require a 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit (Reference ENH_247).
 - **ENH_248 Enforce:** Emit a 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim, if an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of an unquantified PR catalyst, overriding ENH_88 (Reference ENH_248).
+- **CATALYST_OVERRIDE_ON_DILUTION (ENH_30 / L-228) Veto Exemption:** The Rule Enforcer must not automatically trigger a distress liquidation of a position on secondary offering or shelf registration (Dilution) news if a Torque 10 binary catalyst is present, the asset maintains an intraday price above its daily VWAP, and rVol > 3.0. The asset is instead shifted to 'HOLD' with trailing VWAP stops.
+- **L-251 Short Gamma Liquidation Expediter Enforce:** Under SPY SHORT_GAMMA regimes (Net GEX < 0) where active portfolio components execute pre-market L-219 trims (Gap down > 3%), the system must not wait for PM structural failure and must enforce immediate liquidation of the remaining 50% exposure if the asset closes its first 15-minute RTH candle below its daily VWAP anchor (Reference L-251).
 - **MANDATE_36 / ENH_104 / ENH_108 Trailing Stop Telemetry Enforcement:** Flag CRITICAL_SCHEMA_VIOLATION if any active holding with RSI > 75 OR trading > 2% above daily VWAP is missing a `trailing_stop_audit` block in the EXECUTION_PAYLOAD. Reference MANDATE_36, ENH_104, and ENH_108 in rules.md.
 - **MTFA Scoring & Invalidation Enforcer (ENH_251):** VETO any setup where Point 1 (Weekly Chart/Trend Bias) fails to align with trade direction (automatic invalidation). For 2/3 MTFA alignment, ensure the proposed position size has a mandatory **50% size reduction**. Standard execution is only authorized for 3/3 alignment.
 - **5-Day Event Risk Veto (Red Team Veto):** VETO any Pullback or Mean-Reversion setup if a scheduled event catalyst (earnings, FDA decisions, macro data releases) is within the next 5 trading days.
@@ -134,6 +136,12 @@
 - **Maximum Stop Distance Gate:**
   - **Id:** ENH_119
   - **Action:** Reject any trade recommendation where the initial stop-loss exceeds 1x to 1.5x of the asset's ADR or 14-day ATR.
+- **Dilution Catalyst Override:**
+  - **Id:** ENH_30_L-228
+  - **Action:** Exempt assets from automatic distress liquidations on dilution if a Torque 10 catalyst is active, price > daily VWAP, and rVol > 3.0 (Reference ENH_30 / L-228).
+- **Short Gamma RTH Liquidation Expediter:**
+  - **Id:** L-251
+  - **Action:** Force immediate exit of remaining 50% position in SPY SHORT_GAMMA regimes if pre-market trims (>3% gap down) occurred and the asset closes its first 15-minute RTH candle below daily VWAP (Reference L-251).
 
 ## Output Enforcement
 - **[PROC_04 - MANDATE_09 Compliance]**

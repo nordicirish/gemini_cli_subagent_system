@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.24-High-Beta-Swing-Trading-Architecture
+- **version**: v11.25-Catalyst-Override-and-Short-Gamma-Liquidation
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

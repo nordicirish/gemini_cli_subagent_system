@@ -122,7 +122,7 @@ Sub-agents marked as **Research**, **Sentiment**, **Bullish Advocate**, **Red Te
 
 ## ⚡ High-Performance Features
 
-### 🧠 Hybrid Model Routing (v11.24)
+### 🧠 Hybrid Model Routing (v11.25)
 To optimize execution speed, reduce token overhead, and minimize paid API expenditures, the system utilizes a 2026 model matrix:
 - **Dynamic Orchestrator Discovery:** The framework dynamically queries active models and targets the latest version-sorted `antigravity` model (e.g., `"antigravity-preview-05-2026"`) as the Primary Orchestrator, automatically falling back to `"gemini-3.5-flash"` on failure or empty match.
 - **PRO & THINKING Tiers:** Mapped strictly to `"gemini-3.5-flash"` for high-speed, reasoning-heavy operations and sub-agent queries.
@@ -315,6 +315,11 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 ---
 
 ## 📋 Changelog
+
+### v11.25-Catalyst-Override-and-Short-Gamma-Liquidation *(2026-06-23)*
+- **Catalyst Override on Dilution (ENH_30 / L-228):** Merged and updated ENH_30 to establish the catalyst override on dilution rule. The system must not automatically liquidate 100% of a position on dilution news (offerings/shelf registration) if a Torque 10 binary catalyst (e.g. FDA approval, Tier-1 contract) is present, the asset trades above daily VWAP, and rVol > 3.0. The asset is instead transitioned to 'HOLD' with trailing VWAP stops.
+- **Short Gamma RTH Liquidation Expediter (L-251):** Codified L-251 to execute immediate liquidations of remaining 50% exposure in short-gamma SPY regimes if pre-market trims (>3% gap down) occurred, if the asset closes its first 15-minute RTH candle below its VWAP anchor.
+- **Global Parity Sync:** Synchronized and bumped the version string to `v11.25-Catalyst-Override-and-Short-Gamma-Liquidation` across the rules SSoT, root `antigravity.md`, the system `README.md`, and all Council subagent instruction sets.
 
 ### v11.24-High-Beta-Swing-Trading-Architecture *(2026-06-22)*
 - **High-Beta Swing-Trading Architectural Pivot:** Specialized the entire multi-agent system for high-beta swing trading setups.

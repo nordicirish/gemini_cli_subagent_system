@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.24-High-Beta-Swing-Trading-Architecture
+- **version**: v11.25-Catalyst-Override-and-Short-Gamma-Liquidation
 - **id**: SENTIMENT_ENGINE
 
 ## Tone
