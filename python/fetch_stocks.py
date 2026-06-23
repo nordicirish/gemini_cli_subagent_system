@@ -300,6 +300,66 @@ def _get_dynamic_scout_tickers(category: str) -> list:
         scout_prompt = load_scout_prompt()
         prompt = scout_prompt.replace("{category}", category)
         
+        # Load SSOT and rules dynamically to satisfy MANDATE_11 and Anti-Hallucination Core
+        ssot_content = "{}"
+        try:
+            ssot_path = "context/ssot.json"
+            if os.path.exists(ssot_path):
+                with open(ssot_path, "r", encoding="utf-8") as sf:
+                    ssot_content = json.dumps(json.load(sf), indent=2)
+        except Exception as e:
+            print(f"[Warning] Failed to load SSoT for scout prompt: {e}")
+            
+        rules_content = ""
+        try:
+            rules_path = "gem_trading_rules/rules.md"
+            if os.path.exists(rules_path):
+                with open(rules_path, "r", encoding="utf-8") as rf:
+                    rules_text = rf.read()
+                    subset = []
+                    # Extract MANDATE_11
+                    m11_start = rules_text.find("MANDATE_11_RESEARCH_SYNC")
+                    if m11_start == -1:
+                        m11_start = rules_text.find("MANDATE_11")
+                    if m11_start != -1:
+                        line_start = rules_text.rfind("\n", 0, m11_start)
+                        if line_start == -1: line_start = 0
+                        next_header = len(rules_text)
+                        for pattern in ["<a name=", "\n- **[MANDATE_", "\n## ", "\n### "]:
+                            pos = rules_text.find(pattern, m11_start)
+                            if pos != -1 and pos < next_header:
+                                next_header = pos
+                        subset.append(rules_text[line_start:next_header].strip())
+                    
+                    # Extract Anti-Hallucination Core
+                    anti_start = rules_text.lower().find("anti hallucination core")
+                    if anti_start == -1:
+                        anti_start = rules_text.lower().find("anti-hallucination core")
+                    if anti_start != -1:
+                        line_start = rules_text.rfind("\n", 0, anti_start)
+                        if line_start == -1: line_start = 0
+                        next_header = len(rules_text)
+                        for pattern in ["<a name=", "\n- **[MANDATE_", "\n## ", "\n### "]:
+                            pos = rules_text.lower().find(pattern, anti_start)
+                            if pos != -1 and pos < next_header:
+                                next_header = pos
+                        subset.append(rules_text[line_start:next_header].strip())
+                    
+                    if subset:
+                        rules_content = "\n\n".join(subset)
+                    else:
+                        rules_content = "\n".join(rules_text.splitlines()[:200])
+        except Exception as e:
+            print(f"[Warning] Failed to load rules.md for scout prompt: {e}")
+            
+        prompt = (
+            f"{prompt}\n\n"
+            f"### ATTACHED SSOT JSON BLOCK:\n"
+            f"```json\n{ssot_content}\n```\n\n"
+            f"### RELEVANT SYSTEM RULES & MANDATES (rules.md):\n"
+            f"```markdown\n{rules_content}\n```"
+        )
+        
         response = client.models.generate_content(
             model=flash_model,
             contents=prompt,
