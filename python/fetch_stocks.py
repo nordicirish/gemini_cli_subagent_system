@@ -52,9 +52,24 @@ def load_scout_prompt() -> str:
             
     # Hardcoded safety fallback if files are completely deleted/missing
     return (
-        "ROLE: Market-structure signal scout.\n"
-        "TASK: Perform a live web search to identify top trending equities showing technical breakout conditions in the '{category}' sector.\n"
-        "RETURN FORMAT: Return ONLY a valid JSON list of uppercase ticker symbols, e.g. [\"SYM1\", \"SYM2\"]."
+        "ROLE: Market-structure signal scout.\n\n"
+        "TASK: Perform a live web search to identify top trending equities in the '{category}' sector of the US stock market (NASDAQ/NYSE) that are being flagged today by market commentators, screener reports, and technical analysis data providers for breakout conditions.\n\n"
+        "CONTEXT & TEMPORAL INTEGRITY:\n"
+        "Verify your current context using the attached SSOT JSON block. Ensure your logic adheres strictly to MANDATE_11 and the Anti-Hallucination Core.\n\n"
+        "TEMPORAL REALITY OVERRIDE: The current date and year are defined dynamically by the timestamp inside the SSoT JSON payload (e.g., in the last_updated, system_time, or ny_iso fields). The live Google Search tool accesses the real-world internet corresponding to this SSoT timestamp. You MUST NOT hallucinate a temporal dissonance or claim you cannot perform web searches for the SSoT date. DO NOT perform \"SYNTHETIC SCAN ENFORCED\" or simulated searches. Use the live search tool and natively ingest the real-time web data matching the timeline defined in the SSoT.\n\n"
+        "SCAN REQUIREMENTS (WEB AGGREGATION):\n"
+        "Because you cannot execute raw market data calculations, you must construct targeted search queries to find equities in the '{category}' sector matching the qualitative descriptions of our structural filters in today's news flow:\n\n"
+        "Search for Price-Action Mentions: Query for tickers associated with terms like \"High-Volume Breakout,\" \"Relative Volume surge,\" \"Range Expansion,\" \"ATR breakout,\" \"Multi-Day Momentum,\" and \"Gap-and-Hold.\"\n\n"
+        "Search for Structural Momentum Mentions: Look for analysis citing stocks trading \"above the 20 EMA and 50 EMA,\" displaying \"RSI in the momentum zone,\" \"MACD histogram rising,\" or experiencing \"positive volume delta / institutional accumulation.\"\n\n"
+        "Liquidity Context: Cross-reference the mentions to classify the breakout type (e.g., low-float momentum, mid-cap trend, or large-cap continuation).\n\n"
+        "RESTRICTION: Do not give investment advice, price targets, or buy/sell language. Focus strictly on pattern recognition, market-structure signals, and aggregating the technical data found in your search.\n\n"
+        "OUTPUT FORMAT:\n"
+        "1. Your final output MUST begin with a strict markdown summary explaining the qualitative logic behind your top picks based on the technical reports you aggregated.\n"
+        "2. Follow the summary immediately with a valid JSON list of their uppercase ticker symbols enclosed inside standard json code fences. For example:\n"
+        "```json\n"
+        "[\"SYM1\", \"SYM2\", \"SYM3\"]\n"
+        "```\n"
+        "3. Do not include any other markdown text, formatting, or conversational boilerplate after the JSON block."
     )
 
 def compile_master_document():
@@ -107,9 +122,24 @@ def initialize_context_files():
         os.makedirs("prompts")
         
     scout_prompt_content = (
-        "ROLE: Market-structure signal scout.\n"
-        "TASK: Perform a live web search to identify top trending equities showing technical breakout conditions in the '{category}' sector.\n"
-        "RETURN FORMAT: Return ONLY a valid JSON list of uppercase ticker symbols, e.g. [\"SYM1\", \"SYM2\"]."
+        "ROLE: Market-structure signal scout.\n\n"
+        "TASK: Perform a live web search to identify top trending equities in the '{category}' sector of the US stock market (NASDAQ/NYSE) that are being flagged today by market commentators, screener reports, and technical analysis data providers for breakout conditions.\n\n"
+        "CONTEXT & TEMPORAL INTEGRITY:\n"
+        "Verify your current context using the attached SSOT JSON block. Ensure your logic adheres strictly to MANDATE_11 and the Anti-Hallucination Core.\n\n"
+        "TEMPORAL REALITY OVERRIDE: The current date and year are defined dynamically by the timestamp inside the SSoT JSON payload (e.g., in the last_updated, system_time, or ny_iso fields). The live Google Search tool accesses the real-world internet corresponding to this SSoT timestamp. You MUST NOT hallucinate a temporal dissonance or claim you cannot perform web searches for the SSoT date. DO NOT perform \"SYNTHETIC SCAN ENFORCED\" or simulated searches. Use the live search tool and natively ingest the real-time web data matching the timeline defined in the SSoT.\n\n"
+        "SCAN REQUIREMENTS (WEB AGGREGATION):\n"
+        "Because you cannot execute raw market data calculations, you must construct targeted search queries to find equities in the '{category}' sector matching the qualitative descriptions of our structural filters in today's news flow:\n\n"
+        "Search for Price-Action Mentions: Query for tickers associated with terms like \"High-Volume Breakout,\" \"Relative Volume surge,\" \"Range Expansion,\" \"ATR breakout,\" \"Multi-Day Momentum,\" and \"Gap-and-Hold.\"\n\n"
+        "Search for Structural Momentum Mentions: Look for analysis citing stocks trading \"above the 20 EMA and 50 EMA,\" displaying \"RSI in the momentum zone,\" \"MACD histogram rising,\" or experiencing \"positive volume delta / institutional accumulation.\"\n\n"
+        "Liquidity Context: Cross-reference the mentions to classify the breakout type (e.g., low-float momentum, mid-cap trend, or large-cap continuation).\n\n"
+        "RESTRICTION: Do not give investment advice, price targets, or buy/sell language. Focus strictly on pattern recognition, market-structure signals, and aggregating the technical data found in your search.\n\n"
+        "OUTPUT FORMAT:\n"
+        "1. Your final output MUST begin with a strict markdown summary explaining the qualitative logic behind your top picks based on the technical reports you aggregated.\n"
+        "2. Follow the summary immediately with a valid JSON list of their uppercase ticker symbols enclosed inside standard json code fences. For example:\n"
+        "```json\n"
+        "[\"SYM1\", \"SYM2\", \"SYM3\"]\n"
+        "```\n"
+        "3. Do not include any other markdown text, formatting, or conversational boilerplate after the JSON block."
     )
     
     market_snapshot_content = (
