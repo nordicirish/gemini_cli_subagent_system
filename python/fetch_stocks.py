@@ -72,6 +72,22 @@ def load_scout_prompt() -> str:
         "3. Do not include any other markdown text, formatting, or conversational boilerplate after the JSON block."
     )
 
+def load_news_scan_prompt() -> str:
+    """Loads the news scan prompt template from prompts/news_scan_prompt.txt."""
+    prompt_path = os.path.join(BASE_DIR, "prompts/news_scan_prompt.txt")
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except Exception as e:
+            print(f"[Warning] Failed to read news scan prompt from {prompt_path}: {e}")
+    return (
+        "SYSTEM DIRECTIVE: MACRO & STOCK NEWS SCAN\n"
+        "Perform a live Google Search and provide a concise, high-signal catalyst summary for stock ticker '{symbol}'.\n"
+        "Identify: (1) Main catalyst or news driver today, (2) Earnings/SEC/analyst updates, (3) Market sentiment score (-1.0 Bearish to +1.0 Bullish).\n"
+        "Return ONLY a clean JSON object with keys: \"headline\", \"summary\", \"catalyst_type\", \"sentiment_score\"."
+    )
+
 def compile_master_document():
     """Aggregates gem_trading_rules/rules.md and all engine instruction markdown files
     into a single master document at scratch/master_trading_knowledge.md to optimize cloud uploads.
@@ -517,6 +533,96 @@ async def update_scout_config(req: Request):
         SCOUT_MAX_RSI = max(30, min(100, int(new_max_rsi)))
     save_config()
     return JSONResponse({"status": "success", "scout_limit": SCOUT_LIMIT, "scout_max_rsi": SCOUT_MAX_RSI})
+
+def query_gemini_news_grounding(api_key: str, symbol: str) -> dict:
+    """
+    Executes a real-time Google Search Grounding query via Google AI Studio (Gemini Flash)
+    to retrieve qualitative news, catalyst explanations, and sentiment ground truth for a ticker.
+    """
+    if not api_key or not symbol:
+        return {}
+        
+    symbol_clean = symbol.strip().upper()
+    template = load_news_scan_prompt()
+    if "{symbol}" in template:
+        prompt = template.format(symbol=symbol_clean)
+    else:
+        prompt = (
+            f"{template}\n\n"
+            f"TARGET SYMBOL FOR SEARCH: {symbol_clean}\n"
+            f"Return ONLY a clean JSON object with keys: \"headline\", \"summary\", \"catalyst_type\", \"sentiment_score\"."
+        )
+    
+    text = ""
+    # 1. Attempt using google-genai SDK
+    try:
+        from google import genai
+        from google.genai import types
+        
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+                safety_settings=[
+                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE")
+                ]
+            )
+        )
+        if response and response.text:
+            text = response.text.strip()
+    except Exception as e:
+        # 2. REST API Fallback
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "tools": [{"googleSearch": {}}],
+                "safetySettings": [
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+                ]
+            }
+            res = requests.post(url, json=payload, headers=headers, timeout=12)
+            if res.status_code == 200:
+                data = res.json()
+                text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except Exception as ex:
+            print(f"[Grounding REST Error] {symbol_clean}: {ex}")
+            return {}
+
+    if not text:
+        return {}
+
+    try:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group(0))
+            parsed["timestamp"] = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+            parsed["symbol"] = symbol_clean
+            cache.qualitative_grounding[symbol_clean] = parsed
+            return parsed
+    except Exception as parse_err:
+        print(f"[Grounding Parse Error] {symbol_clean}: {parse_err}")
+        
+    return {}
+
+@app.get("/api/grounding")
+async def get_grounding(symbol: str = "UMAC"):
+    api_key = config.get("GEMINI_FREE_TIER_API_KEY") or config.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return JSONResponse({"status": "error", "message": "Gemini API key is missing."}, status_code=400)
+        
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, query_gemini_news_grounding, api_key, symbol.upper())
+    return JSONResponse({"status": "success", "symbol": symbol.upper(), "grounding": result})
 
 @app.get("/api/get_basket")
 
@@ -1222,6 +1328,7 @@ class MarketDataCache:
         self.premarket_vol_cache: dict[str, int] = {}
         self.last_gex_fetch: dict[str, float] = {}
         self.gex_cache: dict[str, dict] = {}
+        self.qualitative_grounding: dict[str, dict] = {} # Google Search Grounding Cache
         # Date tracker for daily history updates
         self.last_history_fetch_date: dict[str, str] = {}
 
@@ -1533,51 +1640,89 @@ def get_true_intraday_vwap(symbol, status):
         ts_now = int(now.timestamp())
 
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={ts_open}&period2={ts_now}&interval=1m&includePrePost={include_pre}"
-        # Use safe_yf_get to fallback if curl_cffi fails
         r = safe_yf_get(url, timeout=3)
         data = r.json()
         result = data['chart']['result'][0]
+        timestamps = result.get('timestamp', [])
         indicators = result['indicators']['quote'][0]
         closes = indicators.get('close', [])
         highs = indicators.get('high', [])
         lows = indicators.get('low', [])
         volumes = indicators.get('volume', [])
 
-        valid = [(h, l, c, v) for h, l, c, v in zip(highs, lows, closes, volumes)
-                 if c is not None and h is not None and l is not None and v is not None and v > 0]
+        valid = []
+        if timestamps:
+            for ts, h, l, c, v in zip(timestamps, highs, lows, closes, volumes):
+                if c is not None and h is not None and l is not None and v is not None and v > 0:
+                    dt = datetime.fromtimestamp(ts, tz=ny_tz)
+                    if dt.date() == now.date():
+                        valid.append((h, l, c, v))
+        else:
+            valid = [(h, l, c, v) for h, l, c, v in zip(highs, lows, closes, volumes)
+                     if c is not None and h is not None and l is not None and v is not None and v > 0]
+
         if not valid:
-            return 0.0
+            return fallback_vwap(symbol)
 
         total_vp = sum(((h + l + c) / 3) * v for h, l, c, v in valid)
         total_v = sum(v for _, _, _, v in valid)
         if total_v > 0:
             return total_vp / total_v
-        return 0.0
-    except:
-        return 0.0
+        return fallback_vwap(symbol)
+    except Exception as e:
+        return fallback_vwap(symbol)
 
 def fallback_vwap(symbol):
     try:
+        ny_tz = ZoneInfo("America/New_York")
+        now = datetime.now(ny_tz)
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=1m"
-        # Use safe_yf_get to fallback if curl_cffi fails
         r = safe_yf_get(url, timeout=2)
         data = r.json()
         result = data['chart']['result'][0]
+        timestamps = result.get('timestamp', [])
         q = result['indicators']['quote'][0]
         closes = q.get('close', [])
         highs = q.get('high', [])
         lows = q.get('low', [])
         volumes = q.get('volume', [])
-        vp = 0.0
-        tv = 0.0
-        for h, l, c, v in zip(highs, lows, closes, volumes):
-            if c is None or h is None or l is None or v is None or v <= 0:
-                continue
-            typical_price = (h + l + c) / 3
-            vp += typical_price * v
-            tv += v
-        if tv > 0:
-            return vp / tv
+
+        is_today = False
+        if timestamps:
+            latest_dt = datetime.fromtimestamp(timestamps[-1], tz=ny_tz)
+            if latest_dt.date() == now.date():
+                is_today = True
+
+        if is_today:
+            vp = 0.0
+            tv = 0.0
+            for ts, h, l, c, v in zip(timestamps, highs, lows, closes, volumes):
+                if c is None or h is None or l is None or v is None or v <= 0:
+                    continue
+                dt = datetime.fromtimestamp(ts, tz=ny_tz)
+                if dt.date() == now.date():
+                    typical_price = (h + l + c) / 3
+                    vp += typical_price * v
+                    tv += v
+            if tv > 0:
+                return vp / tv
+
+        # Finnhub OHLC live session proxy fallback
+        if USE_FINNHUB and FINNHUB_API_KEY:
+            try:
+                f_url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_API_KEY}"
+                res = session.get(f_url, timeout=2)
+                if res.status_code == 200:
+                    f_data = res.json()
+                    c = f_data.get('c')
+                    h = f_data.get('h')
+                    l = f_data.get('l')
+                    o = f_data.get('o')
+                    if c and h and l and o and float(c) > 0:
+                        return float((o + h + l + (2 * c)) / 5.0)
+            except Exception as fe:
+                pass
+
         return 0.0
     except:
         return 0.0
@@ -1730,26 +1875,32 @@ def get_gex_profile(ticker_obj, spot_price):
 
                 if chain.calls is not None and not chain.calls.empty:
                     for _, row in chain.calls.iterrows():
-                        if pd.isna(row.get('openInterest')) or row.get('openInterest') <= 0: continue
+                        oi_val = row.get('openInterest')
+                        if pd.isna(oi_val) or oi_val <= 0:
+                            oi_val = row.get('volume')
+                        if pd.isna(oi_val) or oi_val <= 0: continue
                         if pd.isna(row.get('impliedVolatility')) or row.get('impliedVolatility') <= 0: continue
                         k = float(row['strike'])
-                        oi = float(row['openInterest'])
+                        oi = float(oi_val)
                         strike_oi_map[k] = strike_oi_map.get(k, 0.0) + oi
                         option_inventory.append({
                             'K': float(row['strike']), 'T': T, 'sigma': float(row['impliedVolatility']),
-                            'oi': float(row['openInterest']), 'type': 'call'
+                            'oi': oi, 'type': 'call'
                         })
 
                 if chain.puts is not None and not chain.puts.empty:
                     for _, row in chain.puts.iterrows():
-                        if pd.isna(row.get('openInterest')) or row.get('openInterest') <= 0: continue
+                        oi_val = row.get('openInterest')
+                        if pd.isna(oi_val) or oi_val <= 0:
+                            oi_val = row.get('volume')
+                        if pd.isna(oi_val) or oi_val <= 0: continue
                         if pd.isna(row.get('impliedVolatility')) or row.get('impliedVolatility') <= 0: continue
                         k = float(row['strike'])
-                        oi = float(row['openInterest'])
+                        oi = float(oi_val)
                         strike_oi_map[k] = strike_oi_map.get(k, 0.0) + oi
                         option_inventory.append({
                             'K': float(row['strike']), 'T': T, 'sigma': float(row['impliedVolatility']),
-                            'oi': float(row['openInterest']), 'type': 'put'
+                            'oi': oi, 'type': 'put'
                         })
             except:
                 continue
@@ -2202,11 +2353,25 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         elif status in ("AFTER-HOURS", "CLOSED") and (post_price is None or post_price == 0):
             post_price = price
 
-        techs = cache.technicals.get(symbol, {})
-        reg_close = techs.get("Last_Reg_Close", 0.0)
+        # Override with Finnhub real-time quote if available (eliminates Yahoo delayed pricing)
+        if USE_FINNHUB and FINNHUB_API_KEY:
+            try:
+                f_url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_API_KEY}"
+                res = session.get(f_url, timeout=2)
+                if res.status_code == 200:
+                    f_data = res.json()
+                    f_c = f_data.get('c')
+                    f_o = f_data.get('o')
+                    f_pc = f_data.get('pc')
+                    if f_c and float(f_c) > 0:
+                        price = float(f_c)
+                    if f_o and float(f_o) > 0:
+                        reg_open = float(f_o)
+                    if f_pc and float(f_pc) > 0:
+                        batch_prev_close = float(f_pc)
+            except Exception as fe:
+                pass
 
-        # Prefer batch quote's regularMarketPreviousClose (most authoritative source)
-        # fast_info.previous_close can be stale/inconsistent for small-cap stocks
         if batch_prev_close and float(batch_prev_close) > 0:
             reg_close = float(batch_prev_close)
 
@@ -2226,12 +2391,8 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
             # Sanity check: if gap diverges wildly from session_change,
             # the regularMarketOpen is likely stale (Yahoo data quality issue
             # common with small-cap stocks early in the session).
-            # A genuine gap should not be more than 2x the magnitude of session
-            # change in the OPPOSITE direction when the market has been open.
             if status == "OPEN" and reg_open and abs(raw_gap) > 3.0:
-                # If gap is negative but price is UP (or vice versa), open is suspect
                 if (raw_gap < -3.0 and session_chg > 0) or (raw_gap > 3.0 and session_chg < 0):
-                    # Stale open detected — try to get true open from chart API
                     chart_open = _get_chart_open(symbol)
                     if chart_open and chart_open > 0:
                         true_gap_price = chart_open
@@ -2487,7 +2648,7 @@ def calculate_score(symbol):
 def compute_merton_allocation(gamma=3.0, r=0.04):
     try:
         prices_dict = {}
-        for sym in TICKERS:
+        for sym in ALL_TICKERS:
             sym_upper = sym.upper()
             if sym_upper in cache.history and not cache.history[sym_upper].empty:
                 df = cache.history[sym_upper]
@@ -2686,7 +2847,14 @@ def run_daemon():
             # Immediately notify frontend that heavy fetching has begun
             if is_heavy and GLOBAL_STATE.get("tickers"):
                 GLOBAL_STATE["is_heavy_refresh"] = True
-                GLOBAL_STATE["is_heavy_refresh"] = True
+                try:
+                    g_api_key = config.get("GEMINI_FREE_TIER_API_KEY") or config.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+                    if g_api_key:
+                        for p_sym in WATCHLIST:
+                            if p_sym not in cache.qualitative_grounding:
+                                query_gemini_news_grounding(g_api_key, p_sym)
+                except Exception as g_err:
+                    print(f"[Daemon Grounding Warning]: {g_err}")
 
             BATCH_SIZE = 2
 
@@ -3144,6 +3312,7 @@ def run_daemon():
                 "is_heavy_refresh": False,
                 "tickers": final_tickers,
                 "scout_categories_loaded": list(PROCESSED_SCOUT_CATEGORIES),
+                "qualitative_grounding": cache.qualitative_grounding,
                 "local_storage_state": supplemental_ssot,
                 "trade_lessons": supplemental_lessons,
                 "merton_optimal_allocation": merton_alloc
