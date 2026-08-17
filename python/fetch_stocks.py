@@ -2353,8 +2353,11 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         elif status in ("AFTER-HOURS", "CLOSED") and (post_price is None or post_price == 0):
             post_price = price
 
-        # Override with Finnhub real-time quote if available (eliminates Yahoo delayed pricing)
-        if USE_FINNHUB and FINNHUB_API_KEY:
+        # Override with Finnhub real-time quote if available (eliminates Yahoo delayed pricing).
+        # Guard: skip during PRE-MARKET — Finnhub /quote returns the regular-session close price
+        # (field 'c'), not the pre-market price. Overwriting here would clobber the session-aware
+        # pre_price already set by Yahoo batch/chart data above.
+        if USE_FINNHUB and FINNHUB_API_KEY and status != 'PRE-MARKET':
             try:
                 f_url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_API_KEY}"
                 res = session.get(f_url, timeout=2)
