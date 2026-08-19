@@ -1304,6 +1304,7 @@ class MarketDataCache:
         self.history: dict[str, pd.DataFrame] = {}
         self.technicals: dict[str, dict] = {}
         self.prices: dict[str, float] = {}
+        self.regular_close: dict[str, float] = {}
         self.gaps: dict[str, float] = {}
         self.session_change: dict[str, float] = {}
         self.vwaps: dict[str, float] = {}
@@ -2157,22 +2158,43 @@ def update_history_and_technicals(symbol, t_obj):
 
             # --- Previous Regular Close ---
             last_reg_close = 0.0
-            if hasattr(t_obj, 'fast_info'):
-                try:
-                    last_reg_close = float(t_obj.fast_info.previous_close)
-                except:
-                    pass
+            ny_tz = ZoneInfo("America/New_York")
+            now_ny = datetime.now(ny_tz)
+            today_date = now_ny.date()
+            is_pre_market = (now_ny.time() < time(9, 30))
 
-            if last_reg_close == 0.0 and len(close) >= 2:
-                if isinstance(close, (int, float, np.floating, np.integer)):
-                    last_reg_close = float(close)
-                else:
-                    last_reg_close = to_float(close.iloc[-2])
+            if is_pre_market:
+                if len(close) >= 1:
+                    valid_closes = [to_float(c) for c in close if c is not None and to_float(c) > 0]
+                    if valid_closes:
+                        last_reg_close = valid_closes[-1]
+                if last_reg_close == 0.0 and hasattr(t_obj, 'fast_info'):
+                    try:
+                        fi_last = float(getattr(t_obj.fast_info, 'last_price', 0.0) or 0.0)
+                        if fi_last > 0:
+                            last_reg_close = fi_last
+                    except:
+                        pass
+            else:
+                if hasattr(t_obj, 'fast_info'):
+                    try:
+                        last_reg_close = float(getattr(t_obj.fast_info, 'regular_market_previous_close', None) or getattr(t_obj.fast_info, 'previous_close', 0.0))
+                    except:
+                        pass
+
+                if last_reg_close == 0.0 and len(close) >= 1:
+                    valid_closes = [to_float(c) for c in close if c is not None and to_float(c) > 0]
+                    if valid_closes:
+                        last_bar_date = hist.index[-1].date()
+                        if last_bar_date == today_date and len(valid_closes) >= 2:
+                            last_reg_close = valid_closes[-2]
+                        else:
+                            last_reg_close = valid_closes[-1]
 
             if last_reg_close == 0.0:
                 alt_pc = get_previous_close(symbol)
                 if alt_pc:
-                    last_reg_close = alt_pc
+                    last_reg_close = float(alt_pc)
 
             # --- Trend Score (Weighted — SMA200 cross is ±2) ---
             trend_score = 0
@@ -2199,6 +2221,8 @@ def update_history_and_technicals(symbol, t_obj):
                 "Trend_Score": int(trend_score),
                 "Last_Reg_Close": last_reg_close
             }
+            if last_reg_close > 0:
+                cache.regular_close[symbol] = last_reg_close
 
         except Exception as e:
             print("Tech error:", e)
@@ -2375,33 +2399,76 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
             except Exception as fe:
                 pass
 
-        if batch_prev_close and float(batch_prev_close) > 0:
-            reg_close = float(batch_prev_close)
+        reg_close = 0.0
+        if status == "PRE-MARKET":
+            # In PRE-MARKET, quote_data['regularMarketPrice'] is the prior session's official close (yesterday).
+            # quote_data['regularMarketPreviousClose'] is the session BEFORE that (2 days ago).
+            if reg_price and float(reg_price) > 0:
+                reg_close = float(reg_price)
+            elif techs.get("Last_Reg_Close", 0.0) > 0:
+                reg_close = float(techs.get("Last_Reg_Close", 0.0))
+            elif hasattr(t_obj, 'fast_info') and getattr(t_obj.fast_info, 'last_price', None):
+                try:
+                    fi_last = float(t_obj.fast_info.last_price)
+                    if fi_last > 0:
+                        reg_close = fi_last
+                except:
+                    pass
+            elif batch_prev_close and float(batch_prev_close) > 0:
+                reg_close = float(batch_prev_close)
+        else:
+            if batch_prev_close and float(batch_prev_close) > 0:
+                reg_close = float(batch_prev_close)
+            elif techs.get("Last_Reg_Close", 0.0) > 0:
+                reg_close = float(techs.get("Last_Reg_Close", 0.0))
+            elif hasattr(t_obj, 'fast_info'):
+                try:
+                    reg_close = float(getattr(t_obj.fast_info, 'regular_market_previous_close', None) or getattr(t_obj.fast_info, 'previous_close', 0.0))
+                except:
+                    pass
+
+        if reg_close > 0:
+            cache.regular_close[symbol] = reg_close
+
+        # --- Pre-Market Price Resolution ---
+        if pre_price is not None and float(pre_price) > 0:
+            cache.pre_market_price[symbol] = float(pre_price)
+        elif status == "PRE-MARKET":
+            cache.pre_market_price[symbol] = reg_close if reg_close > 0 else price
 
         # --- Session-aware returns ---
         if reg_close > 0:
-            cache.session_change[symbol] = ((price - reg_close) / reg_close) * 100
-            
-            true_gap_price = price
-            if status in ("OPEN", "CLOSED") and reg_open:
-                true_gap_price = float(reg_open)
-            elif status == "PRE-MARKET" and pre_price:
-                true_gap_price = float(pre_price)
+            if status == "PRE-MARKET":
+                effective_pre = float(cache.pre_market_price.get(symbol, price))
+                pre_chg_pct_feed = quote_data.get('preMarketChangePercent') if quote_data else None
+                if pre_chg_pct_feed is not None and abs(float(pre_chg_pct_feed)) < 500:
+                    pre_chg = float(pre_chg_pct_feed)
+                else:
+                    pre_chg = ((effective_pre - reg_close) / reg_close) * 100 if effective_pre > 0 else 0.0
+                cache.session_change[symbol] = pre_chg
+                cache.gaps[symbol] = pre_chg
+                cache.pre_market_change[symbol] = pre_chg
+            else:
+                cache.session_change[symbol] = ((price - reg_close) / reg_close) * 100
+                
+                true_gap_price = price
+                if status in ("OPEN", "CLOSED") and reg_open:
+                    true_gap_price = float(reg_open)
 
-            raw_gap = ((true_gap_price - reg_close) / reg_close) * 100
-            session_chg = cache.session_change[symbol]
+                raw_gap = ((true_gap_price - reg_close) / reg_close) * 100
+                session_chg = cache.session_change[symbol]
 
-            # Sanity check: if gap diverges wildly from session_change,
-            # the regularMarketOpen is likely stale (Yahoo data quality issue
-            # common with small-cap stocks early in the session).
-            if status == "OPEN" and reg_open and abs(raw_gap) > 3.0:
-                if (raw_gap < -3.0 and session_chg > 0) or (raw_gap > 3.0 and session_chg < 0):
-                    chart_open = _get_chart_open(symbol)
-                    if chart_open and chart_open > 0:
-                        true_gap_price = chart_open
-                        raw_gap = ((true_gap_price - reg_close) / reg_close) * 100
-                    
-            cache.gaps[symbol] = raw_gap
+                # Sanity check: if gap diverges wildly from session_change,
+                # the regularMarketOpen is likely stale (Yahoo data quality issue
+                # common with small-cap stocks early in the session).
+                if status == "OPEN" and reg_open and abs(raw_gap) > 3.0:
+                    if (raw_gap < -3.0 and session_chg > 0) or (raw_gap > 3.0 and session_chg < 0):
+                        chart_open = _get_chart_open(symbol)
+                        if chart_open and chart_open > 0:
+                            true_gap_price = chart_open
+                            raw_gap = ((true_gap_price - reg_close) / reg_close) * 100
+                        
+                cache.gaps[symbol] = raw_gap
 
             # --- SSR TRIGGER CHECK (Rules > ENH_65) ---
             # Triggered if low is <= 10% below previous close
@@ -2413,11 +2480,6 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
                     # Note: Once triggered, SSR usually lasts today + tomorrow.
                     # For this real-time tracker, we flag if the day's low hit the threshold.
                     cache.ssr_active[symbol] = cache.ssr_active.get(symbol, False)
-
-        if pre_price is not None:
-            cache.pre_market_price[symbol] = pre_price
-            if reg_close > 0:
-                cache.pre_market_change[symbol] = ((pre_price - reg_close) / reg_close) * 100
 
         if post_price is not None:
             cache.after_hours_price[symbol] = post_price
@@ -3156,6 +3218,8 @@ def run_daemon():
                     _dealer_posture = "NEUTRAL"
 
                 is_scout = sym in ACTIVE_SCOUT_TICKERS and sym not in held_and_watched
+                effective_reg_close = float(cache.regular_close.get(sym) or techs.get("Last_Reg_Close", 0.0))
+                effective_pre_price = float(cache.pre_market_price.get(sym, 0.0))
                 item_dict = {
                     "ticker": sym,
                     "session": cache.session.get(sym),
@@ -3165,17 +3229,17 @@ def run_daemon():
                     
                     # Prices
                     "price": float(p),
-                    "regular_close": float(techs.get("Last_Reg_Close", 0.0)),
-                    "pre_market_price": float(cache.pre_market_price.get(sym, 0)),
-                    "after_hours_price": float(cache.after_hours_price.get(sym, 0)),
+                    "regular_close": effective_reg_close,
+                    "pre_market_price": effective_pre_price,
+                    "after_hours_price": float(cache.after_hours_price.get(sym, 0.0)),
 
                     # Returns
                     # session_change_pct: required by ENH_FIN_02 Protective Exit Override logic
-                    "session_change_pct": float(cache.session_change.get(sym, 0)),
-                    "gap_percent": float(gap),
-                    "pre_market_change_percent": float(cache.pre_market_change.get(sym, 0)),
-                    "after_hours_change_percent": float(cache.after_hours_change.get(sym, 0)),
-                    "overnight_return_percent": float(cache.overnight_return.get(sym, 0)),
+                    "session_change_pct": round(((float(p) - effective_reg_close) / effective_reg_close) * 100, 2) if effective_reg_close > 0 else float(cache.session_change.get(sym, 0.0)),
+                    "gap_percent": round(((effective_pre_price - effective_reg_close) / effective_reg_close) * 100, 2) if (status == "PRE-MARKET" and effective_reg_close > 0 and effective_pre_price > 0) else float(gap),
+                    "pre_market_change_percent": round(((effective_pre_price - effective_reg_close) / effective_reg_close) * 100, 2) if (effective_reg_close > 0 and effective_pre_price > 0) else float(cache.pre_market_change.get(sym, 0.0)),
+                    "after_hours_change_percent": float(cache.after_hours_change.get(sym, 0.0)),
+                    "overnight_return_percent": float(cache.overnight_return.get(sym, 0.0)),
 
                     # Volume
                     "volume": int(vol),
