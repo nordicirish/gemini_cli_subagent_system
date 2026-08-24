@@ -30,7 +30,7 @@ const ModernChat = {
             label: 'Audit Portfolio',
             id: 'qp-audit-portfolio',
             tooltip: 'Deep audit of all active positions against trading rules, limits, and cash allocation.',
-            prompt: 'SYSTEM DIRECTIVE: AUDIT & PORTFOLIO REVIEW. Using the live DATA_PACKET just injected, perform a full portfolio audit: (1) Check all positions against GEM_Trading_Rules, concentration limits, and cash allocation. (2) Conduct a deep portfolio analysis and provide Trim/Hold/Add recommendations for each held ticker with supporting evidence. Output a structured, human-readable compliance and review report.'
+            prompt: 'SYSTEM DIRECTIVE: AUDIT & PORTFOLIO REVIEW. Using the live DATA_PACKET just injected, perform a full portfolio audit: (1) Check all positions against gem_trading_rules, concentration limits, and cash allocation. (2) Conduct a deep portfolio analysis and provide Trim/Hold/Add recommendations for each held ticker with supporting evidence. Output a structured, human-readable compliance and review report.'
         },
         {
             icon: '⚖️',

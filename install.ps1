@@ -25,7 +25,8 @@ if (-not (Test-Path $venvPath)) {
         Exit 1
     }
     Write-Host "Virtual environment created successfully." -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "Existing virtual environment (.venv) detected." -ForegroundColor Green
 }
 
@@ -42,11 +43,13 @@ if (Test-Path "requirements.txt") {
     & .venv\Scripts\python.exe -m pip install -r requirements.txt
     if ($?) {
         Write-Host "Dependencies successfully installed inside .venv!" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Error "Failed to install dependencies in .venv."
         Exit 1
     }
-} else {
+}
+else {
     Write-Error "requirements.txt was not found in the current directory."
     Exit 1
 }
@@ -69,7 +72,8 @@ if ($choice -eq 'y' -or $choice -eq 'Y') {
     & python -m pip install -r requirements.txt
     if ($?) {
         Write-Host "Dependencies successfully installed globally!" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Warning "Global dependency installation failed or partially succeeded."
     }
 }

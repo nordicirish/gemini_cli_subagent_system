@@ -470,7 +470,6 @@ def list_models_endpoint():
 
         # Ensure key canonical modern models are ALWAYS present
         guaranteed_models = [
-            {"name": "gemini-3.7-flash-extended", "label": "GEMINI-3.7-FLASH-EXTENDED (FLASH)"},
             {"name": "gemini-3.7-flash", "label": "GEMINI-3.7-FLASH (FLASH)"},
             {"name": "gemini-3.5-flash", "label": "GEMINI-3.5-FLASH (FLASH)"},
             {"name": "gemini-3.1-pro-preview", "label": "GEMINI-3.1-PRO-PREVIEW (PRO)"},
@@ -739,8 +738,8 @@ def chat_endpoint(req: ChatRequest):
             except Exception as exc:
                 from google.genai.errors import APIError
                 if isinstance(exc, APIError):
-                    framework.log(f"[Emergency Failover] APIError encountered on primary orchestrator ({exc}). Redirecting request to gemini-3.7-flash-extended...")
-                    ORCHESTRATOR_MODEL = "gemini-3.7-flash-extended"
+                    framework.log(f"[Emergency Failover] APIError encountered on primary orchestrator ({exc}). Redirecting request to gemini-3.7-flash...")
+                    ORCHESTRATOR_MODEL = "gemini-3.7-flash"
                     session = create_new_session()
                     global_chat_session = session
                     active_model_str = f"[ACTIVE_MODEL]: {ORCHESTRATOR_MODEL}\n"
@@ -1050,10 +1049,33 @@ def clear_decision_log():
 @app.get("/api/tickers")
 @app.get("/api/get_settings")
 def get_settings():
+    labels = {
+        "^VIX": "VOLATILITY",
+        "^VVIX": "^VVIX",
+        "VIXY": "SHORT-TERM VIX",
+        "IEF": "TREASURY BOND",
+        "UUP": "US DOLLAR",
+        "SPY": "S&P 500",
+        "QQQ": "NASDAQ 100",
+        "GDX": "GOLD MINERS"
+    }
     if os.path.exists("context/user_config.json"):
-        with open("context/user_config.json", "r") as f:
-            return json.load(f)
-    return {"tickers": [], "macro": []}
+        try:
+            with open("context/user_config.json", "r") as f:
+                data = json.load(f)
+                if not data.get("macro"):
+                    data["macro"] = [
+                        "^VIX", "^VVIX", "VIXY", "IEF", "UUP", "SPY", "GDX"
+                    ]
+                data["macro_labels"] = labels
+                return data
+        except:
+            pass
+    return {
+        "tickers": [], 
+        "macro": ["^VIX", "^VVIX", "VIXY", "IEF", "UUP", "SPY", "GDX"],
+        "macro_labels": labels
+    }
 
 class SettingsRequest(BaseModel):
     tickers: list

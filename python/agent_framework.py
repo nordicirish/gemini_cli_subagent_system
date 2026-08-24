@@ -42,16 +42,16 @@ llm_logger.propagate = False
 # Per terminal.md > Mode Selection Matrix (Canonical)
 
 # ---------------------------------------------------------------------------
-DEFAULT_MODEL_PRO = "gemini-3.7-flash-extended"
-DEFAULT_MODEL_FLASH = "gemini-3.7-flash-extended"
+DEFAULT_MODEL_PRO = "gemini-3.7-flash"
+DEFAULT_MODEL_FLASH = "gemini-3.7-flash"
 DEFAULT_MODEL_GEMMA = "gemini-3.7-flash"
-DEFAULT_MODEL_THINKING = "gemini-3.7-flash-extended"
+DEFAULT_MODEL_THINKING = "gemini-3.7-flash"
 
 MODEL_MAPPING = {
-    "PRO":      ["gemini-3.7-flash-extended", "gemini-3.7-flash", "gemini-3.5-flash"],
-    "FLASH":    ["gemini-3.7-flash-extended", "gemini-3.7-flash", "gemini-3.5-flash"],
+    "PRO":      ["gemini-3.7-flash", "gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-3.5-flash"],
+    "FLASH":    ["gemini-3.7-flash", "gemini-3.5-flash", "gemini-2.5-flash"],
     "GEMMA":    ["gemini-3.7-flash", "gemini-3.1-flash-lite"],
-    "THINKING": ["gemini-3.7-flash-extended", "gemini-3.7-flash", "gemini-3.5-flash"],
+    "THINKING": ["gemini-3.7-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash"],
     "FAST":     ["gemini-3.7-flash", "gemini-3.1-flash-lite"],
 }
 
@@ -157,8 +157,8 @@ class AgentFramework:
         except Exception as e:
             self.log(f"[Dynamic Discovery Warning] Failed to dynamically list/probe models: {e}")
         
-        self.log("[Dynamic Discovery] Defaulting primary orchestrator to gemini-3.7-flash-extended")
-        return "gemini-3.7-flash-extended"
+        self.log("[Dynamic Discovery] Defaulting primary orchestrator to gemini-3.7-flash")
+        return "gemini-3.7-flash"
 
     def _minify_payload(self, text: str) -> str:
         # Strip HTML/Markdown comments

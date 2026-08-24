@@ -1,10 +1,11 @@
 import os
 import sys
+import json
 from agent_framework import AgentFramework
 import agent_framework
 import tools
 import threading
-import cloud_sync
+# cloud_sync removed — GDrive Decoupling Guardrail (ANTIGRAVITY v11.03)
 
 def initialize_context_files():
     """Bootstraps missing context files for fresh repository clones."""
@@ -13,11 +14,17 @@ def initialize_context_files():
     if not os.path.exists("logs"):
         os.makedirs("logs")
         
+    user_config_default_content = json.dumps({
+        "macro": [
+            "^VIX", "^VVIX", "VIXY", "IEF", "UUP", "SPY", "GDX"
+        ]
+    }, indent=2)
+
     defaults = {
         "context/ssot.json": "{}",
         "context/trade_lessons.json": "[]",
         "context/decision_log.json": "[]",
-        "context/user_config.json": "{}",
+        "context/user_config.json": user_config_default_content,
         "context/config.json": '{\n  "GEMINI_API_KEY": "",\n  "GEMINI_FREE_TIER_API_KEY": "",\n  "FINNHUB_API_KEY": ""\n}',
         "logs/gem_handshakes.log": ""
     }
@@ -30,6 +37,20 @@ def initialize_context_files():
                 print(f"[System] Initialized missing file: {filepath}")
             except Exception as e:
                 print(f"[Warning] Could not initialize {filepath}: {e}")
+
+    # Ensure user_config.json contains default macro list if empty
+    if os.path.exists("context/user_config.json"):
+        try:
+            with open("context/user_config.json", "r", encoding="utf-8") as f:
+                uc_data = json.load(f)
+            if not uc_data.get("macro"):
+                uc_data["macro"] = [
+                    "^VIX", "^VVIX", "VIXY", "IEF", "UUP", "SPY", "GDX"
+                ]
+                with open("context/user_config.json", "w", encoding="utf-8") as f:
+                    json.dump(uc_data, f, indent=2)
+        except Exception as e:
+            pass
 
 def main():
     print("Initializing GEM Trading CLI Subagent System...")
@@ -214,8 +235,8 @@ def main():
             except Exception as exc:
                 from google.genai.errors import APIError
                 if isinstance(exc, APIError):
-                    framework.log(f"[Emergency Failover] APIError encountered on primary orchestrator ({exc}). Redirecting request to gemini-3.7-flash-extended...")
-                    orchestrator_model = "gemini-3.7-flash-extended"
+                    framework.log(f"[Emergency Failover] APIError encountered on primary orchestrator ({exc}). Redirecting request to gemini-3.7-flash...")
+                    orchestrator_model = "gemini-3.7-flash"
                     sys_instruction = framework._get_sys_instruction(terminal_instruction)
                     chat = framework.client.chats.create(
                         model=orchestrator_model,

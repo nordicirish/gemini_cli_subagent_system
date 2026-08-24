@@ -28,7 +28,7 @@ def compile_master_doc_content(files_dict):
     lines = ["# Master Trading Knowledge Document\n\n", "This document contains the Single Source of Truth (SSoT) rules and all engine instructions.\n\n"]
     
     # Append rules.md
-    rules_path = "GEM_Trading_Rules/rules.md"
+    rules_path = "gem_trading_rules/rules.md"
     if rules_path in files_dict and files_dict[rules_path]:
         lines.append("## 1. TRADING RULES (SSoT)\n\n")
         content = files_dict[rules_path]
@@ -65,7 +65,7 @@ def main():
     model = "gemini-3.5-flash"
     
     # 1. Identify target files
-    target_files = ["GEM_Trading_Rules/rules.md"]
+    target_files = ["gem_trading_rules/rules.md"]
     engine_files = sorted(glob.glob("engine_instructions/*.md"))
     # Normalize paths to use forward slashes for git matching
     target_files.extend([f.replace("\\", "/") for f in engine_files])

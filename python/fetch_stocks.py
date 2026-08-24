@@ -210,11 +210,17 @@ def initialize_context_files():
         "Search and summarize the following for financial forensic audit: {query}"
     )
 
+    user_config_default_content = json.dumps({
+        "macro": [
+            "^VIX", "^VVIX", "VIXY", "IEF", "UUP", "SPY", "GDX"
+        ]
+    }, indent=2)
+
     defaults = {
         "context/ssot.json": "{}",
         "context/trade_lessons.json": "[]",
         "context/decision_log.json": "[]",
-        "context/user_config.json": "{}",
+        "context/user_config.json": user_config_default_content,
         "context/config.json": '{\n  "GEMINI_API_KEY": "",\n  "GEMINI_FREE_TIER_API_KEY": "",\n  "FINNHUB_API_KEY": ""\n}',
         "logs/gem_handshakes.log": "",
         "prompts/scout_prompt.txt": scout_prompt_content,
@@ -235,6 +241,20 @@ def initialize_context_files():
                 print(f"[System] Initialized missing file: {filepath}")
             except Exception as e:
                 print(f"[Warning] Could not initialize {filepath}: {e}")
+
+    # Ensure user_config.json contains default macro list if empty
+    if os.path.exists("context/user_config.json"):
+        try:
+            with open("context/user_config.json", "r", encoding="utf-8") as f:
+                uc_data = json.load(f)
+            if not uc_data.get("macro"):
+                uc_data["macro"] = [
+                    "^VIX", "^VVIX", "VIXY", "IEF", "UUP", "SPY", "GDX"
+                ]
+                with open("context/user_config.json", "w", encoding="utf-8") as f:
+                    json.dump(uc_data, f, indent=2)
+        except Exception as e:
+            pass
 
 initialize_context_files()
 compile_master_document()
@@ -309,7 +329,7 @@ def _get_dynamic_scout_tickers(category: str) -> list:
         from google.genai import types
         
         api_key = config.get("GEMINI_API_KEY")
-        flash_model = config.get("MODEL_FLASH", "gemini-3.7-flash-extended")
+        flash_model = config.get("MODEL_FLASH", "gemini-3.7-flash")
         
         client = genai.Client(api_key=api_key) if api_key else genai.Client()
         
@@ -460,7 +480,9 @@ def _load_macro_tickers():
                     return [t.upper() for t in user_cfg['macro']]
     except Exception as e:
         print(f"[Config] Load failed: {e}")
-    return config.get("DEFAULT_MACRO_TICKERS", [])
+    return config.get("DEFAULT_MACRO_TICKERS", [
+        "^VIX", "^VVIX", "VIXY", "IEF", "UUP", "SPY", "GDX"
+    ])
 
 # Clear active scout categories on startup to defer yahoo finance queries
 try:
@@ -487,14 +509,23 @@ except Exception as e:
 
 TICKERS = _load_ssot_tickers()
 MACRO_TICKERS = _load_macro_tickers()
-ALL_TICKERS = TICKERS + MACRO_TICKERS
+ALL_TICKERS = list(dict.fromkeys(TICKERS + MACRO_TICKERS))
 if not ALL_TICKERS:
     TICKERS = ["AAPL", "MSFT", "GOOGL", "NVDA"]
-    MACRO_TICKERS = ["SPY", "QQQ"]
-    ALL_TICKERS = TICKERS + MACRO_TICKERS
-INVERSE_MACRO = config.get("INVERSE_MACRO", [])
+    MACRO_TICKERS = ["^VIX", "^VVIX", "VIXY", "IEF", "UUP", "SPY", "GDX"]
+    ALL_TICKERS = list(dict.fromkeys(TICKERS + MACRO_TICKERS))
+INVERSE_MACRO = config.get("INVERSE_MACRO", ['^VIX', '^VVIX', 'VIXY', 'UUP', 'IEF'])
 
-MACRO_LABELS = config.get("MACRO_LABELS", {})
+MACRO_LABELS = config.get("MACRO_LABELS", {
+    '^VIX': 'VOLATILITY',
+    '^VVIX': '^VVIX',
+    'VIXY': 'SHORT-TERM VIX',
+    'IEF': 'TREASURY BOND',
+    'UUP': 'US DOLLAR',
+    'SPY': 'S&P 500',
+    'QQQ': 'NASDAQ 100',
+    'GDX': 'GOLD MINERS'
+})
 
 REFRESH_RATE_SECONDS = config.get("REFRESH_RATE_SECONDS", 30)
 HISTORY_REFRESH_CYCLES = config.get("HISTORY_REFRESH_CYCLES", 10)
@@ -561,7 +592,7 @@ def query_gemini_news_grounding(api_key: str, symbol: str) -> dict:
         
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-3.7-flash-extended",
+            model="gemini-3.7-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())],
@@ -578,7 +609,7 @@ def query_gemini_news_grounding(api_key: str, symbol: str) -> dict:
     except Exception as e:
         # 2. REST API Fallback
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash-extended:generateContent?key={api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key={api_key}"
             headers = {"Content-Type": "application/json"}
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],

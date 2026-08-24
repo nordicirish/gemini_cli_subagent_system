@@ -6,6 +6,15 @@ const dStatus = document.getElementById('market-status');
 const dUpdated = document.getElementById('last-updated');
 const dIndicator = document.getElementById('live-indicator');
 
+// Progress Bar DOM Elements
+const dProgressContainer = document.getElementById('initial-fetch-progress-container');
+const dProgressPhase = document.getElementById('progress-phase-title');
+const dProgressStatus = document.getElementById('progress-status-text');
+const dProgressBar = document.getElementById('initial-fetch-progress-bar');
+const dProgressPercent = document.getElementById('progress-bar-percent');
+const dProgressDetails = document.getElementById('progress-ticker-details');
+const dTableContainer = document.getElementById('main-data-table-container');
+
 
 const dIndicesInput = document.getElementById('indices-input');
 const dUpdateIndicesBtn = document.getElementById('update-indices-btn');
@@ -13,8 +22,18 @@ const dIStatus = document.getElementById('indices-status');
 const dDynamicMacroCards = document.getElementById('dynamic-macro-cards');
 
 let currentMacroTickers = [];
-let MACRO_LABELS = {};
+let MACRO_LABELS = {
+    '^VIX': 'VOLATILITY',
+    '^VVIX': '^VVIX',
+    'VIXY': 'SHORT-TERM VIX',
+    'IEF': 'TREASURY BOND',
+    'UUP': 'US DOLLAR',
+    'SPY': 'S&P 500',
+    'QQQ': 'NASDAQ 100',
+    'GDX': 'GOLD MINERS'
+};
 let currentEurUsdRate = 1.08; // Store EURUSD rate globally for real-time conversion
+let latestTickersMap = {};
 
 const dCopyBtn = document.getElementById('copy-json-btn');
 const dCopySessionBtn = document.getElementById('copy-session-btn');
@@ -30,9 +49,6 @@ const dAddToPortfolioBtn = document.getElementById('add-to-portfolio-btn');
 const dSavePortfolioBtn = document.getElementById('save-portfolio-btn');
 const dAddWatchlistTicker = document.getElementById('add-watchlist-ticker');
 const dAddToWatchlistBtn = document.getElementById('add-to-watchlist-btn');
-const dPortfolioStatus = document.getElementById('portfolio-status');
-const dWatchlistStatus = document.getElementById('watchlist-status');
-const dDataStatus = dPortfolioStatus; // Safe fallback alias
 
 // Scout Elements
 const dScoutContainer = document.getElementById('scout-categories-container');
@@ -90,7 +106,8 @@ function closeModal(overlay) { overlay.classList.remove('active'); }
 
 
 // Indices Modal
-dOpenIndicesBtn.addEventListener('click', () => {
+dOpenIndicesBtn.addEventListener('click', async () => {
+    await fetchTickers();
     renderIndicesModal();
     openModal(dIndicesModalOverlay);
 });
@@ -108,39 +125,31 @@ document.addEventListener('keydown', (e) => {
 
 // Render Indices Modal content
 function renderIndicesModal() {
+    if (!currentMacroTickers || currentMacroTickers.length === 0) {
+        currentMacroTickers = ['^VIX', '^VVIX', 'VIXY', 'IEF', 'UUP', 'SPY', 'GDX'];
+    }
     const html = currentMacroTickers.map(ticker => {
-        const d = latestMacroData[ticker];
+        const d = latestMacroData[ticker] || latestTickersMap[ticker.toUpperCase()] || (latestMacroData && latestMacroData[ticker.replace('^', '')]);
         const label = MACRO_LABELS[ticker] || ticker;
+        const title = `${label} (${ticker})`;
         
         if (!d) return `
             <div class="index-card">
-                <div class="index-name">${label}</div>
+                <div class="index-name">${title}</div>
                 <div class="index-price text-muted">—</div>
                 <div class="index-gap text-muted">Awaiting data</div>
             </div>`;
 
-        const changeVal = d.session_change_pct || 0;
+        const changeVal = d.session_change_pct || d.gap_percent || 0;
         const changeStr = (changeVal > 0 ? '+' : '') + changeVal.toFixed(2) + '%';
-        const changeColor = changeVal > 0 ? 'text-green' : (changeVal < 0 ? 'text-red' : 'text-white');
+        const changeColor = changeVal >= 0 ? 'text-green' : 'text-red';
 
-        let details = '';
-        if (d.rsi) details += `RSI ${d.rsi.toFixed(1)}`;
-        if (d.atr_percent) details += ` · ATR ${d.atr_percent.toFixed(2)}%`;
-        if (d.volume) details += ` · Vol ${formatVol(d.volume)}`;
-        if (d.vwap && d.vwap > 0) details += ` · VWAP ${d.vwap.toFixed(2)}`;
-        if (d.net_gex_total !== undefined && d.net_gex_total !== 0) {
-            const gexVal = d.net_gex_total.toFixed(3);
-            
-            const diff = d.gex_diff || 0;
-            let chevron = '';
-            if (diff > 0.005) {
-                chevron = `<span class="text-green" style="margin-left: 2px; font-weight: bold;">▲</span>`;
-            } else if (diff < -0.005) {
-                chevron = `<span class="text-red" style="margin-left: 2px; font-weight: bold;">▼</span>`;
-            }
-            
-            details += ` · GEX ${gexVal}${chevron}`;
-        }
+        let detailsArr = [];
+        if (d.rsi !== undefined && d.rsi !== null) detailsArr.push(`RSI ${d.rsi.toFixed(1)}`);
+        if (d.atr_percent !== undefined && d.atr_percent !== null && d.atr_percent > 0) detailsArr.push(`ATR ${d.atr_percent.toFixed(2)}%`);
+        if (d.volume && d.volume > 0) detailsArr.push(`Vol ${formatVol(d.volume)}`);
+        if (d.vwap && d.vwap > 0) detailsArr.push(`VWAP ${d.vwap.toFixed(2)}`);
+        if (d.net_gex_total !== undefined && d.net_gex_total !== 0 && !isNaN(d.net_gex_total)) detailsArr.push(`GEX ${d.net_gex_total.toFixed(3)}`);
 
         let trendStr = '';
         if (d.trend === 'UP') trendStr = ' · ▲ Up';
@@ -149,10 +158,10 @@ function renderIndicesModal() {
 
         return `
             <div class="index-card">
-                <div class="index-name">${label} (${ticker})</div>
-                <div class="index-price">${d.price.toFixed(2)}</div>
+                <div class="index-name">${title}</div>
+                <div class="index-price">${(d.price || 0).toFixed(2)}</div>
                 <div class="index-gap ${changeColor}">${changeStr}${trendStr}</div>
-                <div class="index-details">${details}</div>
+                <div class="index-details">${detailsArr.join(' · ')}</div>
             </div>`;
     }).join('');
 
@@ -170,7 +179,7 @@ async function init() {
     await fetchWatchlist();
     await fetchScoutCategories();
     await fetchScoutConfig();
-    await fetchGDriveConfig();
+    // Google Drive sync disabled in this repo
     pollData();
     setInterval(pollData, 3000); // 3 sec polling
 }
@@ -352,7 +361,7 @@ function renderTable(tickers, state) {
     // Get macro tickers to exclude
     const MACRO_TICKERS = currentMacroTickers && currentMacroTickers.length > 0 
         ? currentMacroTickers.map(t => t.toUpperCase())
-        : ['SPY', '^VIX', 'UUP', 'IEF', 'GLD', 'GDX'].map(t => t.toUpperCase());
+        : ['^VIX', 'VIXY', 'UUP', 'IEF', 'SPY', 'QQQ', 'GDX'].map(t => t.toUpperCase());
 
     // Group tickers
     const groups = {
@@ -502,6 +511,102 @@ async function pollData() {
         const res = await fetch(`${API_BASE}/data`);
         const state = await res.json();
 
+        // Handle initial boot/fetch progress bar
+        if (state && state.boot_phase) {
+            dIndicator.classList.add('active');
+            let displayStatus = state.status || 'INITIALIZING...';
+            dStatus.textContent = displayStatus;
+            dStatus.style.color = 'var(--yellow)';
+
+            // Disable Consult AI Council button
+            const launcher = document.getElementById('launch-chat-btn');
+            if (launcher) {
+                launcher.disabled = true;
+                launcher.style.opacity = '0.4';
+                launcher.style.pointerEvents = 'none';
+                launcher.title = 'Consulting the AI Council is locked until all ticker data has loaded.';
+            }
+
+            // Show container & blur table
+            if (dProgressContainer) dProgressContainer.style.display = 'block';
+            if (dTableContainer) dTableContainer.classList.add('blurred-view');
+            
+            const phase = state.boot_phase;
+            const progress = state.boot_progress || 0;
+            const total = state.boot_total || 100;
+            const ticker = state.boot_ticker || '';
+
+            let overallPercent = 0;
+            let phaseTitle = 'Initializing System';
+            let phaseDesc = 'Setting up real-time stock scanners...';
+
+            if (phase === 'STARTING_UP') {
+                overallPercent = 5;
+                phaseTitle = 'Starting Daemon...';
+                phaseDesc = 'Preparing historical data structures';
+            } else if (phase === 'TECHNICAL_ANALYSIS') {
+                // Phase 1 maps to 5% to 50%
+                overallPercent = Math.round(5 + (progress / total) * 45);
+                phaseTitle = 'Phase 1: Loading Technical History';
+                phaseDesc = `Downloading 200-day daily charts to calculate SMAs and ATR%`;
+            } else if (phase === 'GEX_PROFILES') {
+                if (ticker === 'COMPLETE') {
+                    // Hold window at 100% before dismissal
+                    overallPercent = 100;
+                    phaseTitle = '✅ System Ready';
+                    phaseDesc = `All market data loaded. Launching dashboard...`;
+                } else {
+                    // Phase 2 maps to 50% to 95%
+                    overallPercent = Math.round(50 + (progress / total) * 45);
+                    phaseTitle = 'Phase 2: Compiling Option GEX Profiles';
+                    phaseDesc = `Fetching option chains & computing synthetic Gamma curves`;
+                }
+            }
+
+            // Ensure constraints
+            overallPercent = Math.max(0, Math.min(100, overallPercent));
+            
+            // Prevent backward jumps due to async race conditions (persists across refreshes)
+            let maxBoot = parseInt(sessionStorage.getItem('max_boot_percent') || '0');
+            if (overallPercent > maxBoot) {
+                sessionStorage.setItem('max_boot_percent', overallPercent);
+            } else {
+                overallPercent = maxBoot;
+            }
+
+            if (dProgressPhase) dProgressPhase.textContent = phaseTitle;
+            if (dProgressStatus) dProgressStatus.textContent = phaseDesc;
+            if (dProgressBar) dProgressBar.style.width = `${overallPercent}%`;
+            if (dProgressPercent) dProgressPercent.textContent = `${overallPercent}%`;
+            
+            if (dProgressDetails) {
+                if (ticker === 'COMPLETE') {
+                    dProgressDetails.innerHTML = `<span class="loading-ticker">All systems ready — initializing live data stream</span>`;
+                } else if (ticker && ticker !== 'SYSTEM') {
+                    dProgressDetails.innerHTML = `Loading ticker data: <span class="loading-ticker">${ticker}</span> [${progress}/${total}]`;
+                } else {
+                    dProgressDetails.innerHTML = `Synchronizing state with SSoT database...`;
+                }
+            }
+
+            // Do not render table data yet
+            return;
+        } else {
+            // Enable Consult AI Council button
+            const launcher = document.getElementById('launch-chat-btn');
+            if (launcher) {
+                launcher.disabled = false;
+                launcher.style.opacity = '1';
+                launcher.style.pointerEvents = 'auto';
+                launcher.title = 'Consult AI Council';
+            }
+
+            // Initialization is complete, hide container & remove blur
+            if (dProgressContainer) dProgressContainer.style.display = 'none';
+            if (dTableContainer) dTableContainer.classList.remove('blurred-view');
+            sessionStorage.removeItem('max_boot_percent');
+        }
+
         // Calculate GEX deltas for the current poll cycle
         if (state && state.tickers) {
             const newGexCache = {};
@@ -546,6 +651,14 @@ async function pollData() {
             
             // Render Macro HUD dynamic cards
             if (state.tickers) {
+                state.tickers.forEach(t => {
+                    if (t && t.ticker) {
+                        latestTickersMap[t.ticker.toUpperCase()] = t;
+                    }
+                });
+                if (!document.activeElement || !document.activeElement.closest('.manager-table')) {
+                    updatePortfolioTotals();
+                }
                 let hudHtml = '';
                 
                 currentMacroTickers.forEach(tickerStr => {
@@ -555,14 +668,11 @@ async function pollData() {
                     
                     if (row) {
                         latestMacroData[tickerStr] = row;
-                        let changeVal = row.session_change_pct || 0;
-                        let labelSuffix = '';
-
-                        
-                        const changeStr = (changeVal > 0 ? '+' : '') + changeVal.toFixed(2) + '%' + labelSuffix;
+                        const changeVal = row.session_change_pct || 0;
+                        const changeStr = (changeVal > 0 ? '+' : '') + changeVal.toFixed(2) + '%';
                         const changeColor = changeVal > 0 ? 'text-green' : 'text-red';
                         
-                        let gapExtra = '';
+                        let gexLine = '';
                         if (row.net_gex_total !== undefined && row.net_gex_total !== 0) {
                             const gexVal = row.net_gex_total.toFixed(3);
                             let gexColor = 'text-muted';
@@ -579,14 +689,14 @@ async function pollData() {
                             } else if (diff < -0.005) {
                                 chevron = `<span class="text-red" style="margin-left: 2px; font-weight: bold;">▼</span>`;
                             }
-                            gapExtra = ` · <span class="${gexColor}" style="font-weight: 600;">GEX: ${gexVal}${chevron}</span>`;
+                            gexLine = `<div class="macro-gex ${gexColor}">GEX: ${gexVal}${chevron}</div>`;
                         }
 
                         hudHtml += `
                             <div class="macro-card glass-panel" id="macro-card-${tickerStr.replace(/[^a-zA-Z0-9]/g, '')}">
                                 <h3>${title}</h3>
                                 <div class="macro-val">${(row.price || 0).toFixed(2)}</div>
-                                <div class="macro-gap ${changeColor}">${changeStr}${gapExtra}</div>
+                                <div class="macro-gap ${changeColor}"><span>${changeStr}</span>${gexLine}</div>
                             </div>
                         `;
                     } else {
@@ -657,31 +767,67 @@ async function fetchPortfolio() {
     } catch (e) { console.error("Portfolio fetch failed", e); }
 }
 
+function updatePortfolioTotals() {
+    const portfolio = getCurrentPortfolio();
+    const cashEur = getCurrentCash();
+    const rate = currentEurUsdRate || 1.08;
+    const cashUsd = cashEur * rate;
+
+    const cashUsdEl = document.getElementById('cash-val-usd');
+    if (cashUsdEl) {
+        cashUsdEl.textContent = `$${cashUsd.toFixed(2)}`;
+    }
+
+    let totalUsd = cashUsd;
+    portfolio.forEach(item => {
+        const livePrice = (latestTickersMap[item.ticker] && latestTickersMap[item.ticker].price) || item.wac || 0;
+        totalUsd += (item.shares || 0) * livePrice;
+    });
+
+    const totalEur = totalUsd / rate;
+
+    const totalEurEl = document.getElementById('total-val-eur');
+    const totalUsdEl = document.getElementById('total-val-usd');
+
+    if (totalEurEl) totalEurEl.textContent = `€${Math.round(totalEur).toLocaleString()}`;
+    if (totalUsdEl) totalUsdEl.textContent = `$${Math.round(totalUsd).toLocaleString()}`;
+}
+
 function renderPortfolio(data) {
     if (!dPortfolioBody) return;
     let html = '';
     const portfolio = data.portfolio || [];
     const cash = data.unallocated_cash_eur || 0;
-    const rate = data.eurusd_rate || 1.08;
+    const rate = data.eurusd_rate || currentEurUsdRate || 1.08;
     currentEurUsdRate = rate; // Update global rate
-    const usd = (cash * rate).toFixed(2);
+    const cashUsd = (cash * rate).toFixed(2);
     
+    let totalUsd = cash * rate;
     portfolio.forEach((item, index) => {
+        const livePrice = (latestTickersMap[item.ticker] && latestTickersMap[item.ticker].price) || item.wac || 0;
+        totalUsd += (item.shares || 0) * livePrice;
         html += `
             <tr data-index="${index}" class="portfolio-item-row">
                 <td style="color: var(--accent); font-weight: 700; font-size: 0.8rem;">${item.ticker}</td>
-                <td><input type="number" class="portfolio-input" data-key="shares" value="${item.shares || 0}"></td>
-                <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${item.wac || 0}"></td>
+                <td><input type="number" class="portfolio-input" data-key="shares" value="${item.shares || 0}" oninput="updatePortfolioTotals()"></td>
+                <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${item.wac || 0}" oninput="updatePortfolioTotals()"></td>
                 <td><button class="delete-btn" onclick="deleteFromPortfolio(${index})">&times;</button></td>
             </tr>
         `;
     });
 
+    const totalEur = totalUsd / rate;
+
     html += `
         <tr class="cash-row" style="background: rgba(0, 255, 148, 0.05);">
             <td style="color: var(--green); font-weight: 700; font-size: 0.75rem;">CASH (€)</td>
-            <td><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cash}" style="color: var(--green);"></td>
-            <td colspan="2" style="font-size: 0.75rem; color: var(--text-dim); text-align: left; padding-left: 8px;">$${usd}</td>
+            <td><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cash}" style="color: var(--green);" oninput="updatePortfolioTotals()"></td>
+            <td colspan="2" id="cash-val-usd" style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">$${cashUsd}</td>
+        </tr>
+        <tr class="total-row" style="background: rgba(88, 166, 255, 0.08);">
+            <td style="color: var(--accent); font-weight: 700; font-size: 0.75rem;">TOTAL</td>
+            <td id="total-val-eur" style="font-size: 0.75rem; font-weight: 700; color: #fff; font-family: var(--font-mono);">€${Math.round(totalEur).toLocaleString()}</td>
+            <td colspan="2" id="total-val-usd" style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">$${Math.round(totalUsd).toLocaleString()}</td>
         </tr>
     `;
 
@@ -735,14 +881,11 @@ async function savePortfolio(portfolioArr) {
         });
         if (res.ok) {
             btn.innerHTML = "SYNC ✅";
-            showFeedback(btn, "✅ Synced!", "Portfolio successfully updated! (Table refreshing...)", false, dPortfolioStatus);
+            showFeedback(btn, "✅ Synced!", "Portfolio successfully updated! (Table refreshing...)");
             await fetchPortfolio();
             pollData(); // Force immediate refresh
         }
-    } catch (e) {
-        console.error("Portfolio update failed", e);
-        showFeedback(btn, "❌ Error", "Failed to update portfolio.", true, dPortfolioStatus);
-    }
+    } catch (e) { console.error("Portfolio update failed", e); }
     finally {
         setTimeout(() => {
             btn.innerHTML = originalText;
@@ -812,27 +955,12 @@ async function saveWatchlist(list) {
         });
         if (res.ok) {
             await fetchWatchlist();
-            if (dWatchlistStatus) {
-                dWatchlistStatus.textContent = "Watchlist updated! (Table refreshing...)";
-                dWatchlistStatus.className = "status-message inline-feedback active text-green";
-                setTimeout(() => {
-                    dWatchlistStatus.textContent = "";
-                    dWatchlistStatus.className = "status-message inline-feedback";
-                }, 3000);
-            }
+            dDataStatus.textContent = "Watchlist updated! (Table refreshing...)";
+            dDataStatus.className = "status-message text-green";
+            setTimeout(() => { dDataStatus.textContent = ""; }, 3000);
             pollData(); // Force immediate refresh
         }
-    } catch (e) {
-        console.error("Watchlist update failed", e);
-        if (dWatchlistStatus) {
-            dWatchlistStatus.textContent = "Failed to update watchlist.";
-            dWatchlistStatus.className = "status-message inline-feedback active text-red";
-            setTimeout(() => {
-                dWatchlistStatus.textContent = "";
-                dWatchlistStatus.className = "status-message inline-feedback";
-            }, 3000);
-        }
-    }
+    } catch (e) { console.error("Watchlist update failed", e); }
 }
 
 // Toggle section visibility
@@ -967,45 +1095,75 @@ window.deleteFromWatchlist = deleteFromWatchlist;
 window.toggleScoutCategory = toggleScoutCategory;
 window.toggleSection = toggleSection;
 window.copySessionReviewPayload = copySessionReviewPayload;
+window.runScout = runScout;
+window.updatePortfolioTotals = updatePortfolioTotals;
 
-dAddToPortfolioBtn.addEventListener('click', addToPortfolio);
-dSavePortfolioBtn.addEventListener('click', () => savePortfolio());
-dAddToWatchlistBtn.addEventListener('click', addToWatchlist);
-
-if (dRunAiScoutBtn) {
-    dRunAiScoutBtn.addEventListener('click', async () => {
-        dRunAiScoutBtn.disabled = true;
-        const originalHtml = dRunAiScoutBtn.innerHTML;
-        dRunAiScoutBtn.innerHTML = "🔭 Scouting Breakouts...";
-        dAiScoutStatus.textContent = "Querying Gemini API (Grounding Search)...";
-        dAiScoutStatus.className = "status-message inline-feedback active text-yellow";
-        
-        try {
-            const limit = dAiScoutLimitSelect ? dAiScoutLimitSelect.value : 2;
-            const maxRsi = dAiScoutMaxRsiSelect ? dAiScoutMaxRsiSelect.value : 75;
-            const res = await fetch(`${API_BASE}/ai_scout?limit=${limit}&max_rsi=${maxRsi}`, {
-                method: 'POST'
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                if (data.scouts && data.scouts.length > 0) {
-                    showFeedback(dRunAiScoutBtn, "🔭 Scout Complete! ✅", `Found stocks: ${data.scouts.join(', ')}`, false, dAiScoutStatus);
-                } else {
-                    showFeedback(dRunAiScoutBtn, "🔭 Scout Complete! ✅", "No new breakout stocks found matching regime.", false, dAiScoutStatus);
-                }
-                pollData(); // Force immediate refresh to pull newly scanned scouts
-            } else {
-                throw new Error(data.message);
-            }
-        } catch (e) {
-            console.error("AI Scout Error: ", e);
-            showFeedback(dRunAiScoutBtn, "❌ Scouting Failed", e.message || "Failed to query AI Scout.", true, dAiScoutStatus);
-        } finally {
-            dRunAiScoutBtn.disabled = false;
-            dRunAiScoutBtn.innerHTML = originalHtml;
-        }
+if (dAddPortfolioTicker) {
+    dAddPortfolioTicker.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') addToPortfolio();
     });
 }
+if (dAddWatchlistTicker) {
+    dAddWatchlistTicker.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') addToWatchlist();
+    });
+}
+
+if (dAddToPortfolioBtn) dAddToPortfolioBtn.addEventListener('click', addToPortfolio);
+if (dSavePortfolioBtn) dSavePortfolioBtn.addEventListener('click', () => savePortfolio());
+if (dAddToWatchlistBtn) dAddToWatchlistBtn.addEventListener('click', addToWatchlist);
+
+// Shared scout runner — mode: 'sectors' | 'watchlist'
+async function runScout(mode) {
+    const isWatchlist = mode === 'watchlist';
+    const btn = isWatchlist ? document.getElementById('scan-watchlist-btn') : dRunAiScoutBtn;
+    const statusEl = isWatchlist ? document.getElementById('scan-watchlist-status') : dAiScoutStatus;
+    
+    if (!btn) return;
+    btn.disabled = true;
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = isWatchlist ? '🎯 Scanning...' : '🔭 Scouting Sectors...';
+    if (statusEl) {
+        statusEl.textContent = isWatchlist ? 'Triggering watchlist refresh...' : 'Querying sector discovery...';
+        statusEl.className = 'status-message inline-feedback active text-yellow';
+    }
+
+    try {
+        const limit = dAiScoutLimitSelect ? parseInt(dAiScoutLimitSelect.value) : 2;
+        const maxRsi = dAiScoutMaxRsiSelect ? parseInt(dAiScoutMaxRsiSelect.value) : 75;
+        const res = await fetch(`${API_BASE}/ai_scout`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode, limit, max_rsi: maxRsi })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            const msg = data.message || (data.scouts && data.scouts.length > 0
+                ? `Found: ${data.scouts.join(', ')}`
+                : 'Scan triggered — table will update shortly.');
+            showFeedback(btn, isWatchlist ? '🎯 Done! ✅' : '🔭 Triggered! ✅', msg, false, statusEl);
+            pollData();
+        } else {
+            throw new Error(data.message);
+        }
+    } catch (e) {
+        console.error('Scout Error:', e);
+        showFeedback(btn, '❌ Failed', e.message || 'Scout request failed.', true, statusEl);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
+}
+
+if (dRunAiScoutBtn) {
+    dRunAiScoutBtn.addEventListener('click', () => runScout('sectors'));
+}
+
+const dScanWatchlistBtn = document.getElementById('scan-watchlist-btn');
+if (dScanWatchlistBtn) {
+    dScanWatchlistBtn.addEventListener('click', () => runScout('watchlist'));
+}
+
 
 // Real-time conversion feedback as user types cash value
 dPortfolioBody.addEventListener('input', (e) => {
@@ -1068,387 +1226,7 @@ if (dClearLogBtn) {
     });
 }
 
-// Google Drive Config & Sync Handlers
-const dGDriveDisplayContainer = document.getElementById('gdrive-display-container');
-const dGDriveFolderDisplay = document.getElementById('gdrive-folder-display');
-const dUnlockGDriveBtn = document.getElementById('unlock-gdrive-btn');
-
-const dGDriveEditContainer = document.getElementById('gdrive-edit-container');
-const dGDriveSelect = document.getElementById('gdrive-folder-select');
-const dGDriveInput = document.getElementById('gdrive-folder-input');
-const dSaveGDriveBtn = document.getElementById('save-gdrive-btn');
-const dCancelGDriveBtn = document.getElementById('cancel-gdrive-btn');
-const dGDriveConfigStatus = document.getElementById('gdrive-config-status');
-
-// Setup Modal Elements
-const dGDriveSetupModalOverlay = document.getElementById('gdrive-setup-modal-overlay');
-const dSetupFolderLoadingMsg = document.getElementById('setup-folder-loading-msg');
-const dSetupFolderContainer = document.getElementById('setup-folder-container');
-const dSetupFolderSelect = document.getElementById('setup-folder-select');
-const dSetupFolderInput = document.getElementById('setup-folder-input');
-const dSetupLinkBtn = document.getElementById('setup-link-btn');
-const dSetupLinkBadge = document.getElementById('setup-link-badge');
-const dSetupWizardStatus = document.getElementById('setup-wizard-status');
-const dSetupSubmitBtn = document.getElementById('setup-submit-btn');
-
-// Setup Upload Elements
-const dSetupCredsUploadContainer = document.getElementById('setup-creds-upload-container');
-const dSetupCredsFileInput = document.getElementById('setup-creds-file-input');
-const dSetupUploadBtn = document.getElementById('setup-upload-btn');
-const dSetupLinkContainer = document.getElementById('setup-link-container');
-
-let gdriveStatusPollInterval = null;
-let currentGDriveFolder = 'GeminiTradingSSoT';
-let hasLoadedFoldersInModal = false;
-
-// Dynamic Google Drive Folder Fetcher and Selector Binder
-async function populateGDriveFolderSelect(selectEl, customInputEl, preselectedValue = "") {
-    try {
-        selectEl.innerHTML = '<option value="" disabled selected>Loading folders from Drive...</option>';
-        const res = await fetch(`${API_BASE}/gdrive_folders`);
-        const data = await res.json();
-        
-        selectEl.innerHTML = '';
-        
-        const folders = data.folders || [];
-        if (folders.length > 0) {
-            folders.forEach(f => {
-                const opt = document.createElement('option');
-                opt.value = f.name;
-                opt.textContent = f.name;
-                selectEl.appendChild(opt);
-            });
-        }
-        
-        // Add option to create a new folder
-        const newOpt = document.createElement('option');
-        newOpt.value = '__NEW_FOLDER__';
-        newOpt.textContent = '➕ [Create New Folder...]';
-        selectEl.appendChild(newOpt);
-        
-        // Bind dynamic visibility trigger for custom folder input
-        selectEl.onchange = () => {
-            if (selectEl.value === '__NEW_FOLDER__') {
-                customInputEl.style.display = 'block';
-                customInputEl.value = '';
-                customInputEl.focus();
-            } else {
-                customInputEl.style.display = 'none';
-                customInputEl.value = selectEl.value;
-            }
-            
-            // Enable button if setup modal submit
-            if (selectEl.id === 'setup-folder-select' && dSetupSubmitBtn) {
-                dSetupSubmitBtn.disabled = !customInputEl.value.trim();
-            }
-        };
-        
-        // Handle preselection
-        if (preselectedValue && preselectedValue.trim()) {
-            const exists = Array.from(selectEl.options).some(o => o.value === preselectedValue);
-            if (exists) {
-                selectEl.value = preselectedValue;
-                customInputEl.style.display = 'none';
-                customInputEl.value = preselectedValue;
-            } else {
-                selectEl.value = '__NEW_FOLDER__';
-                customInputEl.style.display = 'block';
-                customInputEl.value = preselectedValue;
-            }
-        } else {
-            if (folders.length > 0) {
-                selectEl.value = folders[0].name;
-                customInputEl.value = folders[0].name;
-                customInputEl.style.display = 'none';
-            } else {
-                selectEl.value = '__NEW_FOLDER__';
-                customInputEl.style.display = 'block';
-                customInputEl.value = 'GeminiTradingSSoT';
-            }
-        }
-        
-        selectEl.dispatchEvent(new Event('change'));
-        
-    } catch (e) {
-        console.error("Failed to fetch folders", e);
-        selectEl.innerHTML = '<option value="__NEW_FOLDER__">[No existing folders - Create New]</option>';
-        selectEl.value = '__NEW_FOLDER__';
-        customInputEl.style.display = 'block';
-        customInputEl.value = preselectedValue || 'GeminiTradingSSoT';
-    }
-}
-
-// Fetch Google Drive folder name and render UI
-async function fetchGDriveConfig() {
-    try {
-        const res = await fetch(`${API_BASE}/gdrive_status`);
-        const status = await res.json();
-        
-        currentGDriveFolder = status.folder_name || 'GeminiTradingSSoT';
-        if (dGDriveFolderDisplay) {
-            dGDriveFolderDisplay.textContent = currentGDriveFolder;
-        }
-        if (dGDriveInput) {
-            dGDriveInput.value = currentGDriveFolder;
-        }
-        
-        // Trigger Setup Modal if first use / missing folder or oauth token
-        if (status.needs_setup) {
-            openGDriveSetupModal(status);
-        }
-    } catch (e) {
-        console.error("Failed to fetch Google Drive status", e);
-    }
-}
-
-// Open Google Drive onboarding modal and start polling
-function openGDriveSetupModal(status) {
-    if (!dGDriveSetupModalOverlay) return;
-    openModal(dGDriveSetupModalOverlay);
-    
-    hasLoadedFoldersInModal = false;
-    if (dSetupFolderInput) {
-        dSetupFolderInput.value = status.folder_name || 'GeminiTradingSSoT';
-    }
-    
-    updateSetupModalUI(status);
-    
-    // Start polling status to detect when user authorizes via browser
-    if (gdriveStatusPollInterval) clearInterval(gdriveStatusPollInterval);
-    gdriveStatusPollInterval = setInterval(async () => {
-        try {
-            const res = await fetch(`${API_BASE}/gdrive_status`);
-            const currentStatus = await res.json();
-            updateSetupModalUI(currentStatus);
-            
-            // If setup is now completely satisfied, highlight it
-            if (currentStatus.token_linked && dSetupFolderInput.value.trim()) {
-                dSetupSubmitBtn.disabled = false;
-            }
-        } catch (e) {
-            console.error("Setup polling failed", e);
-        }
-    }, 2000);
-}
-
-// Update modal elements based on current auth/credentials status
-function updateSetupModalUI(status) {
-    if (!dSetupLinkBadge) return;
-    
-    if (status.token_linked) {
-        dSetupLinkBadge.textContent = 'LINKED ✅';
-        dSetupLinkBadge.className = 'badge-status text-green';
-        dSetupLinkBadge.style.fontWeight = 'bold';
-        dSetupLinkBtn.disabled = true;
-        dSetupLinkBtn.textContent = '🔒 Account Linked';
-        
-        if (dSetupFolderLoadingMsg) dSetupFolderLoadingMsg.style.display = 'none';
-        if (dSetupFolderContainer) dSetupFolderContainer.style.display = 'flex';
-        
-        if (!hasLoadedFoldersInModal && dSetupFolderSelect && dSetupFolderInput) {
-            hasLoadedFoldersInModal = true;
-            populateGDriveFolderSelect(dSetupFolderSelect, dSetupFolderInput, status.folder_name || currentGDriveFolder);
-        }
-    } else {
-        dSetupLinkBadge.textContent = 'NOT LINKED ⚠️';
-        dSetupLinkBadge.className = 'badge-status text-muted';
-        dSetupLinkBtn.disabled = false;
-        dSetupLinkBtn.textContent = '🔗 Link Google Account';
-        
-        if (dSetupFolderLoadingMsg) dSetupFolderLoadingMsg.style.display = 'block';
-        if (dSetupFolderContainer) dSetupFolderContainer.style.display = 'none';
-        hasLoadedFoldersInModal = false;
-    }
-    
-    // Credentials status warning and upload container visibility
-    if (!status.credentials_uploaded) {
-        if (dSetupCredsUploadContainer) dSetupCredsUploadContainer.style.display = 'block';
-        if (dSetupLinkContainer) dSetupLinkContainer.style.display = 'none';
-        
-        dSetupWizardStatus.innerHTML = '<span style="color: var(--red); font-weight: bold;">⚠️ credentials.json is missing. Upload it below to continue.</span>';
-        dSetupLinkBtn.disabled = true;
-    } else {
-        if (dSetupCredsUploadContainer) dSetupCredsUploadContainer.style.display = 'none';
-        if (dSetupLinkContainer) dSetupLinkContainer.style.display = 'block';
-        
-        if (!status.token_linked) {
-            dSetupWizardStatus.textContent = 'credentials.json detected! Click Link Google Account to authorize Drive.';
-            dSetupWizardStatus.className = 'status-message text-yellow';
-        } else {
-            dSetupWizardStatus.textContent = 'Ready to complete setup!';
-            dSetupWizardStatus.className = 'status-message text-green';
-        }
-    }
-}
-
-// Handle Credentials file selection and upload
-if (dSetupUploadBtn && dSetupCredsFileInput) {
-    dSetupUploadBtn.addEventListener('click', () => dSetupCredsFileInput.click());
-    
-    dSetupCredsFileInput.addEventListener('change', async () => {
-        const file = dSetupCredsFileInput.files[0];
-        if (!file) return;
-        
-        if (file.name !== "credentials.json") {
-            dSetupWizardStatus.textContent = "Error: File must be named precisely 'credentials.json'";
-            dSetupWizardStatus.className = "status-message text-red";
-            return;
-        }
-        
-        dSetupUploadBtn.disabled = true;
-        dSetupUploadBtn.textContent = "Uploading...";
-        dSetupWizardStatus.textContent = "Uploading credentials.json...";
-        dSetupWizardStatus.className = "status-message text-yellow";
-        
-        try {
-            const formData = new FormData();
-            formData.append("file", file);
-            
-            const res = await fetch(`${API_BASE}/upload_credentials`, {
-                method: "POST",
-                body: formData
-            });
-            const data = await res.json();
-            if (data.status === "success") {
-                showFeedback(dSetupUploadBtn, "✅ Uploaded!", "Credentials uploaded!", false, dSetupWizardStatus);
-                // Immediately check status again to refresh UI
-                const statusRes = await fetch(`${API_BASE}/gdrive_status`);
-                const status = await statusRes.json();
-                updateSetupModalUI(status);
-            } else {
-                throw new Error(data.message);
-            }
-        } catch (e) {
-            dSetupWizardStatus.textContent = `Upload failed: ${e.message}`;
-            dSetupWizardStatus.className = "status-message text-red";
-            dSetupUploadBtn.textContent = "📂 Choose credentials.json";
-            dSetupUploadBtn.disabled = false;
-        }
-    });
-}
-
-// Setup Modal Trigger Event Link
-if (dSetupLinkBtn) {
-    dSetupLinkBtn.addEventListener('click', async () => {
-        dSetupLinkBtn.disabled = true;
-        dSetupLinkBtn.textContent = 'Launching Auth Flow...';
-        try {
-            const res = await fetch(`${API_BASE}/gdrive_link`, { method: 'POST' });
-            const data = await res.json();
-            if (data.status === 'success') {
-                dSetupWizardStatus.textContent = 'Auth flow launched! Check browser to log in and authorize Google Drive.';
-                dSetupWizardStatus.className = 'status-message text-yellow';
-            } else {
-                throw new Error(data.message);
-            }
-        } catch (e) {
-            dSetupWizardStatus.textContent = `Link Failed: ${e.message}`;
-            dSetupWizardStatus.className = 'status-message text-red';
-            dSetupLinkBtn.disabled = false;
-            dSetupLinkBtn.textContent = '🔗 Link Google Account';
-        }
-    });
-}
-
-// Complete Onboarding Setup Submission
-if (dSetupSubmitBtn) {
-    dSetupSubmitBtn.addEventListener('click', async () => {
-        const folderName = (dSetupFolderSelect.value === '__NEW_FOLDER__' ? dSetupFolderInput.value : dSetupFolderSelect.value).trim();
-        if (!folderName) {
-            dSetupWizardStatus.textContent = 'Please select or enter a valid folder name.';
-            dSetupWizardStatus.className = 'status-message text-red';
-            return;
-        }
-        
-        dSetupSubmitBtn.disabled = true;
-        dSetupSubmitBtn.textContent = 'Finalizing...';
-        try {
-            const res = await fetch(`${API_BASE}/gdrive_config`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ folder_name: folderName })
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                if (gdriveStatusPollInterval) clearInterval(gdriveStatusPollInterval);
-                closeModal(dGDriveSetupModalOverlay);
-                
-                // Refresh dashboard admin values
-                currentGDriveFolder = folderName;
-                dGDriveFolderDisplay.textContent = folderName;
-                dGDriveInput.value = folderName;
-                
-                // Show a successful toast feedback on the admin status block
-                showFeedback(dUnlockGDriveBtn, "🔒", "Google Drive SSoT Setup Completed Successfully!", false, dGDriveConfigStatus);
-            } else {
-                throw new Error(data.message);
-            }
-        } catch (e) {
-            dSetupWizardStatus.textContent = `Onboarding Failed: ${e.message}`;
-            dSetupWizardStatus.className = 'status-message text-red';
-            dSetupSubmitBtn.disabled = false;
-            dSetupSubmitBtn.textContent = 'Complete Setup';
-        }
-    });
-}
-
-// Sidebar Admin Panel Locks / Unlocks Toggles
-if (dUnlockGDriveBtn) {
-    dUnlockGDriveBtn.addEventListener('click', () => {
-        // Toggle input edit visibility
-        dGDriveDisplayContainer.style.display = 'none';
-        dGDriveEditContainer.style.display = 'flex';
-        
-        // Dynamically fetch and list folders in sidebar selector
-        if (dGDriveSelect && dGDriveInput) {
-            populateGDriveFolderSelect(dGDriveSelect, dGDriveInput, currentGDriveFolder);
-        }
-    });
-}
-
-if (dCancelGDriveBtn) {
-    dCancelGDriveBtn.addEventListener('click', () => {
-        // Revert editing mode
-        dGDriveDisplayContainer.style.display = 'flex';
-        dGDriveEditContainer.style.display = 'none';
-        dGDriveConfigStatus.textContent = '';
-    });
-}
-
-if (dSaveGDriveBtn) {
-    dSaveGDriveBtn.addEventListener('click', async () => {
-        const val = (dGDriveSelect.value === '__NEW_FOLDER__' ? dGDriveInput.value : dGDriveSelect.value).trim();
-        if (!val) {
-            showFeedback(dSaveGDriveBtn, "⚠️ Empty", "Folder name cannot be empty.", true, dGDriveConfigStatus);
-            return;
-        }
-        dSaveGDriveBtn.disabled = true;
-        try {
-            const res = await fetch(`${API_BASE}/gdrive_config`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ folder_name: val })
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                currentGDriveFolder = val;
-                dGDriveFolderDisplay.textContent = val;
-                
-                // Close edit mode
-                dGDriveDisplayContainer.style.display = 'flex';
-                dGDriveEditContainer.style.display = 'none';
-                
-                showFeedback(dUnlockGDriveBtn, "🔒", "Folder updated & syncing in background!", false, dGDriveConfigStatus);
-            } else {
-                throw new Error(data.message);
-            }
-        } catch (e) {
-            showFeedback(dSaveGDriveBtn, "❌ Error", e.message || "Failed to save.", true, dGDriveConfigStatus);
-        } finally {
-            dSaveGDriveBtn.disabled = false;
-        }
-    });
-}
+// Google Drive sync disabled in this repo
 
 
 
