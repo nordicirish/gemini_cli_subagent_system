@@ -214,8 +214,8 @@ def main():
             except Exception as exc:
                 from google.genai.errors import APIError
                 if isinstance(exc, APIError):
-                    framework.log(f"[Emergency Failover] APIError encountered on primary orchestrator ({exc}). Redirecting request to gemini-3.5-flash...")
-                    orchestrator_model = "gemini-3.5-flash"
+                    framework.log(f"[Emergency Failover] APIError encountered on primary orchestrator ({exc}). Redirecting request to gemini-3.7-flash-extended...")
+                    orchestrator_model = "gemini-3.7-flash-extended"
                     sys_instruction = framework._get_sys_instruction(terminal_instruction)
                     chat = framework.client.chats.create(
                         model=orchestrator_model,

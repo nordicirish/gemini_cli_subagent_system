@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v11.13-Catalyst-Override-and-Short-Gamma-Liquidation
+**Version:** v11.34-Gemini-3.7-Flash-Extended-Model-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 - **Execution:** When proposing/directing mandatory scale-outs or risk-reduction trims in the EXECUTION_PAYLOAD, the Execution Engine MUST NOT suggest monolithic block limit orders at theoretical ATR peaks if LONG_GAMMA dampening or visual chart resistance is active.
 ---
@@ -115,7 +115,7 @@
 - [ENH_232](#enh_232): BROKER_LATENCY_LIMIT_SWEEP - If a critical mechanical risk trim (e.g., >4% VWAP extension) fails to execute due to broker API latency or rejection, the Orchestrator MUST NOT re-queue the order at the identical or higher limit. It must instantly emit a directive in the EXECUTION_PAYLOAD to queue a 'Sweeping Limit Order' priced 0.5% below the current bid, alerting the user to physically execute the order to guarantee extraction.
 - [ENH_245](#enh_245): INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Defensive tranches proposed in the EXECUTION_PAYLOAD must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen, unless the asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration).
 - [ENH_246](#enh_246): MECHANICAL_GAMMA_CASCADE_OVERRIDE - During a SHORT_GAMMA index regime, if an asset breaches a >2% trailing VWAP extension stop, the Orchestrator must bypass all passive holding logic and internal Council debate delays. It must instantly emit a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD. Acknowledging the Air-Gap Sandbox Bridge Protocol (ENH_49), the system designates this as a 'Code Red' sweep, alerting the user to immediately, physically execute the order to prevent catastrophic alpha bleed from downstream latency.
-- [ENH_247](#enh_247): OPENING_RANGE_WHIPSAW_SHIELD - Any structural VWAP breakdown occurring before 10:30 AM EST must require a subsequent 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. This mitigates false-positive mechanical stops during artificial market-maker liquidity flushes.
+- [ENH_247](#enh_247): OPENING_RANGE_WHIPSAW_SHIELD - Any structural VWAP breakdown occurring before 10:30 AM EST must require a subsequent 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. **Volume Invalidation Override:** The opening-range time shield is instantly invalidated if an asset trades below its daily VWAP with an opening relative volume rVol >= 3.0 on negative delta force; in this state, MANDATE_43 takes absolute priority, permitting immediate mechanical 25%–50% risk trims without waiting for the 10:30 AM EST time confirmation.
 - [ENH_248](#enh_248): CATALYST_VWAP_DECAY_PUNISHER - If an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of an unquantified PR catalyst, execution must override ENH_88 OEM Multiplier assumptions and emit a 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim to preempt short-gamma distribution.
 - [ENH_249](#enh_249): POST-10:30 CASCADE MITIGATION - If broad index markers (SPY) enter a SHORT_GAMMA architecture and a position tracks below its daily VWAP floor past 10:30 AM EST on negative delta force, the system MUST emit a mechanical 25% trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim instantly, bypassing standard gates and shields.
 - [L-251](#l-251): SHORT_GAMMA_RTH_LIQUIDATION_EXPEDITER
@@ -651,7 +651,8 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 - **[ENH_16_F - Expansion of Pre-Market Deadlock Resolution]**
   - **Status:** ACTIVE
   - **Instruction:** PRE-MARKET GAP-DOWN CONVICTION THRESHOLD: If an asset gaps down > 3% pre-market and the quantitative consensus score falls below 0, a 50% mechanical risk trim is mandatory prior to the RTH open.
-  - **Rationale:** Converts L-219 into a permanent structural defense mechanism to prevent RTH liquidity washes.
+  - **Dealer Posture Refinement (SHORT_GAMMA Sensitivity):** When broad indices (SPY) exhibit a SHORT_GAMMA dealer posture, the pre-market gap-down trigger threshold is widened from -3.0% to -2.50%. If an asset meets this threshold while tracking below its pre-market VWAP, a defensive opening limit order is mandatory.
+  - **Rationale:** Converts L-219 into a permanent structural defense mechanism to prevent RTH liquidity washes, dynamically sensitive to index gamma regimes.
 <a name="enh_17"></a>
 - **[ENH_17 - Gamma Exposure (GEX) Protocol]**
   - **Instruction:** GEX > 0 = Stabilizing; GEX < 0 = Accelerating. Scale sizing modifiers accordingly.
@@ -988,9 +989,9 @@ This registry serves as the system-wide directory mapping all active sub-agent c
     - 4. PRE_FORMATTING: Pre-format the exact JSON state output to resolve the risk immediately, requiring only a MANDATE_21_USER_CONFIRMATION to execute.
 <a name="enh_53"></a>
 *   **[ENH_53 - State Compression Protocol]**
-    *   **Version:** 2.1 (Non-Destructive Distillation & Rule Promotion)
+    *   **Version:** 2.3 (Gemini 3.7 Extended Context Stability & Rule Promotion)
     *   **Status:** ACTIVE
-    *   **Instruction:** Manages Context Garbage Collection. If the `trade_lessons` array contains >= 20 entries, the RESEARCH_ENGINE MUST trigger a "High-Density Distillation" AND a "Rule Promotion Phase" prior to any data pruning.
+    *   **Instruction:** Manages Context Garbage Collection. With Gemini 3.7 Flash Extended stability spanning 1M to 2M tokens (1,000,000 to 2,000,000 tokens), context distillation is optimized to preserve long-horizon session state. If the `trade_lessons` array contains >= 100 entries (or active context exceeds 1,200,000 tokens), the RESEARCH_ENGINE MUST trigger a "High-Density Distillation" AND a "Rule Promotion Phase" prior to any data pruning.
     *   **Execution Flow:**
         1. **Behavioral Synthesis:** Distill the granular strategic behaviors into a maximum of 5 overarching "Fundamental Guardrails" (e.g., VIX Veto logic, RSI Decoupling).
         2. **Rule Promotion Phase (ENH_54 Link):** The Orchestrator MUST formally promote these 5 distilled guardrails into immutable laws. It must automatically generate a pre-formatted JSON patch under the `rule_mutations` array (per ENH_54) in the `EXECUTION_PAYLOAD` for the user to review and authorize.
@@ -1098,16 +1099,16 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Instruction:** Bridge catalysts to Clinical Vouchers and apply CPV Override for Health Tech assets with clinical vouchers.
 <a name="enh_76"></a>
 - **[ENH_76 - Token Economy Budgeting (Context Pruning)]**
-    - **Version:** 2.0 (Tactical Anchor Persistence)
+    - **Version:** 2.1 (Extended Context & Tactical Anchor Persistence)
     - **Status:** ACTIVE
-    - **Instruction:** Proactively manage the context window (128k Active Reasoning Surface) by enforcing a strict Persistence Hierarchy.
+    - **Instruction:** Proactively manage the context window (1M Active Reasoning Surface / 1,000,000 tokens) by enforcing a strict Persistence Hierarchy.
     - **Updated Persistence Hierarchy:**
         1. Ticker-Specific Tactical Anchors: (WAC, Shares, Earnings Dates, Sizing Modifiers) — IMMUTABLE.
         2. Active Forensic Flags: (SSR status, Success Memos, GEX levels) — PRIORITY.
         3. Active Thesis: The specific "Why" for currently open positions (distilled to < 100 tokens per ticker).
         4. Consensus History: Last 3 turns only.
         5. Narrative Logs: Delete prose older than 5 turns.
-    *   **Logic:** When the `TOKEN_PRUNING_TRIGGER` (>= 180,000 tokens) is met, the system MUST convert the "Narrative Logs" into the "Operational Matrix" defined in ENH_53 before purging the prose. This ensures that while the conversation is forgotten, the math and catalysts remain active in the reasoning surface.
+    *   **Logic:** When the `TOKEN_PRUNING_TRIGGER` (>= 1,500,000 tokens) is met, the system MUST convert the "Narrative Logs" into the "Operational Matrix" defined in ENH_53 before purging the prose. This ensures that while the conversation is forgotten, the math and catalysts remain active in the reasoning surface.
 <a name="enh_77_live_web"></a>
 *   **[ENH_77_LIVE_WEB - Proactive Search Mandate]**
     *   **Status:** ACTIVE
@@ -1127,7 +1128,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Category Management:** Target sectors for screening are user-curated via the Dashboard UI and synchronized through `config.json` (GICS sectors recommended).
   - **Workflow:**
     - 1. **Python Sweep:** The `fetch_stocks.py` daemon executes a broad technical sweep (SMA50/200, RVOL) via the Finnhub free-tier API.
-    - 2. **Candidate Selection:** The backend sorts passing tickers and selects a MAXIMUM of 2 "Scout Candidates" per heavy cycle to protect the Orchestrator's 160K ACTIVE_REASONING_SURFACE.
+    - 2. **Candidate Selection:** The backend sorts passing tickers and selects a MAXIMUM of 2 "Scout Candidates" per heavy cycle to protect the Orchestrator's 1M ACTIVE_REASONING_SURFACE.
     - 3. **Metadata Flagging:** Candidates are injected into the SSoT payload with `institutional_status: "Unverified Institutional Status"`.
     - 4. **Agentic Grounding:** This flag mandates the `MACRO_NARRATIVE_ENGINE` to bypass the Finnhub 13-F paywall by invoking native Google Search for SEC filings, insider buys, and institutional conviction.
     - 5. **Graduation:** If the Council Consensus (S_A) > 0.85, the Scout Candidate is "Graduated" to the active portfolio tracking queue.
@@ -1370,11 +1371,11 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 ## System Thresholds
 - **Authority:** CANONICAL — All sub-engines MUST reference named constants here instead of hardcoding values.
 - **TOKEN_PRUNING_TRIGGER:**
-  - **Value:** 180000
+  - **Value:** 1500000
   - **Usage:** Threshold at which ENH_76 context pruning is executed.
   - **Status:** MASTER_CONSTANT
 - **ACTIVE_REASONING_SURFACE:**
-  - **Value:** 160K
+  - **Value:** 1000K
   - **Usage:** Target token count for active context after ENH_76 pruning.
   - **Status:** MASTER_CONSTANT
 - **GLOBAL_ALPHA_FRICTION_HURDLE:**
@@ -1963,12 +1964,13 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 ### [ENH_16_F] PRE-MARKET GAP-DOWN CONVICTION THRESHOLD
 - **Status:** ACTIVE
 - **Content:** PRE-MARKET GAP-DOWN CONVICTION THRESHOLD — If an asset gaps down > 3% in the pre-market session AND possesses a trend score < 0 (or quantitative consensus score < 0), a 50% mechanical risk trim directive must be emitted in the EXECUTION_PAYLOAD prior to the RTH open, alerting the user to physically execute the trim to mitigate opening-bell liquidity washes.
+- **Short Gamma Index Sensitivity Amendment:** When broad indices (SPY) exhibit a SHORT_GAMMA dealer posture, the pre-market gap-down trigger threshold is widened from -3.0% to -2.50%. If an asset meets this threshold while tracking below its pre-market VWAP, a defensive opening limit order is mandatory.
 - **Trigger Conditions:**
-  - `pre_market_gap_pct < -3.0%`
-  - `trend_score < 0` OR `consensus_score < 0`
-- **Action:** Emit a 50% mechanical risk trim directive in the EXECUTION_PAYLOAD prior to the Regular Trading Hours (RTH) open, alerting the user to physically execute the trim.
-- **Justification:** Sustained historical degradation of assets bleeding past -3% pre-bell; post-trade logs prove RTH wait rules fail under extreme pre-market distribution. Augments the original ENH_16_C Pre-Market Deadlock Resolution with a stricter mechanical trigger.
-- **Cross-Reference:** ENH_16_C (Pre-Market Deadlock Resolution), MANDATE_24 (GAP_DEFENSE).
+  - Standard: `pre_market_gap_pct < -3.0%` AND (`trend_score < 0` OR `consensus_score < 0`)
+  - SPY SHORT_GAMMA: `pre_market_gap_pct < -2.50%` AND `Price < pre_market_vwap`
+- **Action:** Emit a 50% mechanical risk trim directive (or defensive opening limit order) in the EXECUTION_PAYLOAD prior to the Regular Trading Hours (RTH) open, alerting the user to physically execute the trim.
+- **Justification:** Sustained historical degradation of assets bleeding past -3% pre-bell (and -2.50% under index short gamma cascade conditions); post-trade logs prove RTH wait rules fail under extreme pre-market distribution. Augments the original ENH_16_C Pre-Market Deadlock Resolution with a stricter mechanical trigger.
+- **Cross-Reference:** ENH_16_C (Pre-Market Deadlock Resolution), MANDATE_24 (GAP_DEFENSE), ENH_245 (INDEX_SHORT_GAMMA_LOCK).
 
 <a name="enh_113"></a>
 ### [ENH_113] INFORMATION_LEAKAGE_SENTRY
@@ -2025,8 +2027,10 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="enh_247"></a>
 ### [ENH_247] OPENING_RANGE_WHIPSAW_SHIELD
 - **Status:** ACTIVE
-- **Content:** OPENING_RANGE_WHIPSAW_SHIELD - Any structural VWAP breakdown occurring before 10:30 AM EST must require a subsequent 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. This mitigates false-positive mechanical stops during artificial market-maker liquidity flushes.
-- **Justification:** Flawlessly protected high-beta positions from pre-10:30 AM spoofed flushes across multiple morning sessions.
+- **Content:** OPENING_RANGE_WHIPSAW_SHIELD — Any structural VWAP breakdown occurring before 10:30 AM EST must require a subsequent 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. This mitigates false-positive mechanical stops during artificial market-maker liquidity flushes.
+- **Volume Invalidation Override (Amendment):** The opening-range time shield is instantly invalidated if an asset trades below its daily VWAP with an opening relative volume $rVol \ge 3.0$ on negative delta force. In this state, MANDATE_43 takes absolute priority, permitting immediate mechanical 25%–50% risk trims without waiting for the 10:30 AM EST time confirmation.
+- **Justification:** Flawlessly protected high-beta positions from pre-10:30 AM spoofed flushes across multiple morning sessions, while the volume invalidation override ensures high-volume institutional distribution breaks are met with immediate risk mitigation.
+- **Cross-Reference:** MANDATE_43 (Friction Override on Structural Failure), ENH_249 (POST-10:30 CASCADE MITIGATION).
 
 <a name="enh_248"></a>
 ### [ENH_248] CATALYST_VWAP_DECAY_PUNISHER

@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.25-Catalyst-Override-and-Short-Gamma-Liquidation
+- **version**: v11.34-Gemini-3.7-Flash-Extended-Model-Sync
 
 ## Tone
 institutional, narrative, concise

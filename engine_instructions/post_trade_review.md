@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.13-Catalyst-Override-and-Short-Gamma-Liquidation
+**Version:** v11.34-Gemini-3.7-Flash-Extended-Model-Sync
 **Tone:** neutral, reflective, concise
 
 ---

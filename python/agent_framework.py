@@ -42,17 +42,17 @@ llm_logger.propagate = False
 # Per terminal.md > Mode Selection Matrix (Canonical)
 
 # ---------------------------------------------------------------------------
-DEFAULT_MODEL_PRO = "gemini-3.5-flash"
-DEFAULT_MODEL_FLASH = "gemini-3.5-flash"
-DEFAULT_MODEL_GEMMA = "gemini-3.1-flash-lite"
-DEFAULT_MODEL_THINKING = "gemini-3.5-flash"
+DEFAULT_MODEL_PRO = "gemini-3.7-flash-extended"
+DEFAULT_MODEL_FLASH = "gemini-3.7-flash-extended"
+DEFAULT_MODEL_GEMMA = "gemini-3.7-flash"
+DEFAULT_MODEL_THINKING = "gemini-3.7-flash-extended"
 
 MODEL_MAPPING = {
-    "PRO":      ["gemini-3.5-flash"],
-    "FLASH":    ["gemini-3.5-flash"],
-    "GEMMA":    ["gemini-3.1-flash-lite"],
-    "THINKING": ["gemini-3.5-flash"],
-    "FAST":     ["gemini-3.1-flash-lite"],
+    "PRO":      ["gemini-3.7-flash-extended", "gemini-3.7-flash", "gemini-3.5-flash"],
+    "FLASH":    ["gemini-3.7-flash-extended", "gemini-3.7-flash", "gemini-3.5-flash"],
+    "GEMMA":    ["gemini-3.7-flash", "gemini-3.1-flash-lite"],
+    "THINKING": ["gemini-3.7-flash-extended", "gemini-3.7-flash", "gemini-3.5-flash"],
+    "FAST":     ["gemini-3.7-flash", "gemini-3.1-flash-lite"],
 }
 
 CACHE_VERSION = "GEM_CACHE_v10.57-Editable-Scout-Prompt-Decoupling"
@@ -103,7 +103,7 @@ class AgentFramework:
         """
         Dynamically probe available models, filter for 'antigravity',
         and return the latest version alphabetically that supports function calling.
-        Falls back to 'gemini-3.5-flash' on failure or empty match.
+        Falls back to 'gemini-3.7-flash-extended' on failure or empty match.
         """
         try:
             available_models = []
@@ -157,8 +157,8 @@ class AgentFramework:
         except Exception as e:
             self.log(f"[Dynamic Discovery Warning] Failed to dynamically list/probe models: {e}")
         
-        self.log("[Dynamic Discovery] Defaulting primary orchestrator to gemini-3.5-flash")
-        return "gemini-3.5-flash"
+        self.log("[Dynamic Discovery] Defaulting primary orchestrator to gemini-3.7-flash-extended")
+        return "gemini-3.7-flash-extended"
 
     def _minify_payload(self, text: str) -> str:
         # Strip HTML/Markdown comments

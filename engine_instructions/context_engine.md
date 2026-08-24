@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.25-Catalyst-Override-and-Short-Gamma-Liquidation
+- **version**: v11.34-Gemini-3.7-Flash-Extended-Model-Sync
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

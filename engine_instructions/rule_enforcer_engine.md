@@ -1,6 +1,6 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
-**Version:** v11.13-Catalyst-Override-and-Short-Gamma-Liquidation
+**Version:** v11.34-Gemini-3.7-Flash-Extended-Model-Sync
 **Description:** Active Enforcer of mandates and protocols defined in Gemini_Gem_Working_Data_Store.
 
 ---
@@ -26,7 +26,7 @@
 - **ENH_117 Dilution Resistance Wall Veto:** VETO any accumulation recommendations in active equity offering/warrant overhang price zones unless confirming relative volume (rVol) is > 2.0 (Reference ENH_117).
 - **ENH_245 Veto:** VETO new capital deployment when broad index (SPY) is in SHORT_GAMMA, unless the asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration) (Reference ENH_245).
 - **ENH_246 Enforce:** Ensure that during broad SPY SHORT_GAMMA regimes, if an asset breaches a >2% trailing VWAP extension stop, the Orchestrator bypasses all passive holding logic and internal Council debate delays, instantly emitting a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD. Acknowledging the Air-Gap Sandbox Bridge Protocol (ENH_49), this is designated as a 'Code Red' sweep to alert the user to immediately, physically execute the order (Reference ENH_246).
-- **ENH_247 Enforce:** Ensure that structural VWAP breakdowns occurring before 10:30 AM EST require a 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit (Reference ENH_247).
+- **ENH_247 Enforce:** Ensure that structural VWAP breakdowns occurring before 10:30 AM EST require a 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. **Volume Invalidation Override:** If trading below daily VWAP with opening rVol >= 3.0 on negative delta force, enforce immediate MANDATE_43 risk trim priority (25%–50%) without waiting for 10:30 AM EST (Reference ENH_247 / MANDATE_43).
 - **ENH_248 Enforce:** Emit a 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim, if an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of an unquantified PR catalyst, overriding ENH_88 (Reference ENH_248).
 - **CATALYST_OVERRIDE_ON_DILUTION (ENH_30 / L-228) Veto Exemption:** The Rule Enforcer must not automatically trigger a distress liquidation of a position on secondary offering or shelf registration (Dilution) news if a Torque 10 binary catalyst is present, the asset maintains an intraday price above its daily VWAP, and rVol > 3.0. The asset is instead shifted to 'HOLD' with trailing VWAP stops.
 - **L-251 Short Gamma Liquidation Expediter Enforce:** Under SPY SHORT_GAMMA regimes (Net GEX < 0) where active portfolio components execute pre-market L-219 trims (Gap down > 3%), the system must not wait for PM structural failure and must enforce immediate liquidation of the remaining 50% exposure if the asset closes its first 15-minute RTH candle below its daily VWAP anchor (Reference L-251).
@@ -123,7 +123,7 @@
   - **Action:** During broad SPY SHORT_GAMMA regimes, if an asset breaches a >2% trailing VWAP extension stop, bypasses all passive holding logic and internal Council debate delays to instantly emit a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD, designating it as a 'Code Red' sweep to alert the user to immediately, physically execute the order (Reference ENH_246).
 - **Opening Range Whipsaw Shield:**
   - **Id:** ENH_247_OPENING_RANGE_WHIPSAW_SHIELD
-  - **Action:** Enforce pre-10:30 AM EST VWAP breakdowns require 15-minute confirmation or >5% distance extension (Reference ENH_247).
+  - **Action:** Enforce pre-10:30 AM EST VWAP breakdowns require 15-minute confirmation or >5% distance extension (Reference ENH_247). Enforce Volume Invalidation Override (rVol >= 3.0 on negative delta force below daily VWAP triggers immediate MANDATE_43 25%–50% risk trims).
 - **Catalyst VWAP Decay Punisher:**
   - **Id:** ENH_248_CATALYST_VWAP_DECAY_PUNISHER
   - **Action:** Emit a 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim, if an asset gaps down or fails to reclaim VWAP within 60 minutes of unquantified PR catalyst, overriding ENH_88 (Reference ENH_248).

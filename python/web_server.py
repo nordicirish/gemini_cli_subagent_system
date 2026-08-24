@@ -470,11 +470,13 @@ def list_models_endpoint():
 
         # Ensure key canonical modern models are ALWAYS present
         guaranteed_models = [
-            {"name": "gemini-2.0-flash", "label": "GEMINI-2.0-FLASH (FLASH)"},
+            {"name": "gemini-3.7-flash-extended", "label": "GEMINI-3.7-FLASH-EXTENDED (FLASH)"},
+            {"name": "gemini-3.7-flash", "label": "GEMINI-3.7-FLASH (FLASH)"},
+            {"name": "gemini-3.5-flash", "label": "GEMINI-3.5-FLASH (FLASH)"},
+            {"name": "gemini-3.1-pro-preview", "label": "GEMINI-3.1-PRO-PREVIEW (PRO)"},
             {"name": "gemini-2.5-pro", "label": "GEMINI-2.5-PRO (PRO)"},
             {"name": "gemini-2.5-flash", "label": "GEMINI-2.5-FLASH (FLASH)"},
-            {"name": "gemini-3.1-pro-preview", "label": "GEMINI-3.1-PRO-PREVIEW (PRO)"},
-            {"name": "gemini-3.5-flash", "label": "GEMINI-3.5-FLASH (FLASH)"}
+            {"name": "gemini-2.0-flash", "label": "GEMINI-2.0-FLASH (FLASH)"}
         ]
         
         existing_names = {m["name"] for m in models}
@@ -737,8 +739,8 @@ def chat_endpoint(req: ChatRequest):
             except Exception as exc:
                 from google.genai.errors import APIError
                 if isinstance(exc, APIError):
-                    framework.log(f"[Emergency Failover] APIError encountered on primary orchestrator ({exc}). Redirecting request to gemini-3.5-flash...")
-                    ORCHESTRATOR_MODEL = "gemini-3.5-flash"
+                    framework.log(f"[Emergency Failover] APIError encountered on primary orchestrator ({exc}). Redirecting request to gemini-3.7-flash-extended...")
+                    ORCHESTRATOR_MODEL = "gemini-3.7-flash-extended"
                     session = create_new_session()
                     global_chat_session = session
                     active_model_str = f"[ACTIVE_MODEL]: {ORCHESTRATOR_MODEL}\n"

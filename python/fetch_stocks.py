@@ -309,7 +309,7 @@ def _get_dynamic_scout_tickers(category: str) -> list:
         from google.genai import types
         
         api_key = config.get("GEMINI_API_KEY")
-        flash_model = config.get("MODEL_FLASH", "gemini-2.5-flash")
+        flash_model = config.get("MODEL_FLASH", "gemini-3.7-flash-extended")
         
         client = genai.Client(api_key=api_key) if api_key else genai.Client()
         
@@ -561,7 +561,7 @@ def query_gemini_news_grounding(api_key: str, symbol: str) -> dict:
         
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.7-flash-extended",
             contents=prompt,
             config=types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())],
@@ -578,7 +578,7 @@ def query_gemini_news_grounding(api_key: str, symbol: str) -> dict:
     except Exception as e:
         # 2. REST API Fallback
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash-extended:generateContent?key={api_key}"
             headers = {"Content-Type": "application/json"}
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
