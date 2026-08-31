@@ -172,10 +172,11 @@ const ModernChat = {
             // Get macro tickers from the /api/tickers config (not from /api/data which doesn't have 'macro')
             const macroTickers = (tickerConfig.macro || []).map(t => t.toUpperCase());
 
-            // Extract portfolio tickers from live state
+            // Extract portfolio tickers from live state across all SSOT schema keys
             const ssot = state.local_storage_state || {};
             const ms = ssot.mutable_state || {};
-            const portfolio = (ms.portfolio_snapshot || []).map(p => p.ticker.toUpperCase());
+            const ep = ssot.EXECUTION_PAYLOAD || {};
+            const portfolio = (ms.portfolio_snapshot || ssot.portfolio_snapshot || ep.portfolio_snapshot || []).map(p => (p.ticker || '').toUpperCase()).filter(Boolean);
 
             // Any ticker in live data that is not portfolio, not macro, not watchlist = scout intelligence
             const allTickers = (state.tickers || []).map(t => t.ticker.toUpperCase());
@@ -292,7 +293,8 @@ const ModernChat = {
                     const macroTickers = (tickerConfig.macro || []).map(t => t.toUpperCase());
                     const ssot = state.local_storage_state || {};
                     const ms = ssot.mutable_state || {};
-                    const portfolio = (ms.portfolio_snapshot || []).map(p => p.ticker.toUpperCase());
+                    const ep = ssot.EXECUTION_PAYLOAD || {};
+                    const portfolio = (ms.portfolio_snapshot || ssot.portfolio_snapshot || ep.portfolio_snapshot || []).map(p => (p.ticker || '').toUpperCase()).filter(Boolean);
                     const allTickers = (state.tickers || []).map(t => t.ticker.toUpperCase());
                     const scoutTickers = allTickers.filter(t =>
                         !portfolio.includes(t) &&

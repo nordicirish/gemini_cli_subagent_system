@@ -352,11 +352,12 @@ function formatVol(vol) {
 function renderTable(tickers, state) {
     if (!tickers || !tickers.length) return;
 
-    // Get held tickers from portfolio snapshot
+    // Get held tickers from portfolio snapshot across all SSOT schema keys
     const ssot = state.local_storage_state || {};
     const ms = ssot.mutable_state || {};
-    const portfolio = ms.portfolio_snapshot || [];
-    const heldTickers = new Set(portfolio.map(p => p.ticker.toUpperCase()));
+    const ep = ssot.EXECUTION_PAYLOAD || {};
+    const portfolio = ms.portfolio_snapshot || ssot.portfolio_snapshot || ep.portfolio_snapshot || [];
+    const heldTickers = new Set(portfolio.map(p => (p.ticker || '').toUpperCase()).filter(Boolean));
 
     // Get macro tickers to exclude
     const MACRO_TICKERS = currentMacroTickers && currentMacroTickers.length > 0 
@@ -371,10 +372,12 @@ function renderTable(tickers, state) {
     };
 
     const userWatchlist = new Set((state.watchlist || []).map(s => s.toUpperCase()));
+    const processedSyms = new Set();
 
     tickers.forEach(t => {
         const sym = t.ticker.toUpperCase();
         if (MACRO_TICKERS.includes(sym) || sym === 'EURUSD=X') return;
+        processedSyms.add(sym);
 
         if (heldTickers.has(sym)) {
             groups.held.push(t);
@@ -382,6 +385,29 @@ function renderTable(tickers, state) {
             groups.watchlist.push(t);
         } else {
             groups.scouts.push(t);
+        }
+    });
+
+    // Ensure all held portfolio items display on the dashboard even if initial background scan is still pending
+    portfolio.forEach(p => {
+        const sym = (p.ticker || '').toUpperCase();
+        if (sym && !processedSyms.has(sym) && !MACRO_TICKERS.includes(sym)) {
+            const livePrice = (latestTickersMap[sym] && latestTickersMap[sym].price) || p.wac || 0;
+            groups.held.push({
+                ticker: sym,
+                price: livePrice,
+                session_change_pct: 0,
+                gap_percent: 0,
+                volume: 0,
+                atr_percent: 0,
+                rsi: 50.0,
+                vwap: p.wac || 0,
+                trend: 'FLAT',
+                net_gex_total: 0,
+                score: 0,
+                note: 'Holding'
+            });
+            processedSyms.add(sym);
         }
     });
 

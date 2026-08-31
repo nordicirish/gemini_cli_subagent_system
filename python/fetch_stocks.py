@@ -442,17 +442,50 @@ FORCE_REFRESH = False
 def _load_ssot_tickers():
     global ACTIVE_SCOUT_TICKERS, PROCESSED_SCOUT_CATEGORIES, SCOUTED_TICKER_TO_CATEGORY_MAP
     try:
-        with open('context/ssot.json', 'r') as f:
-            ssot = json.load(f)
-            ms = ssot.get('mutable_state', ssot)
-            portfolio = [t['ticker'] for t in ms.get('portfolio_snapshot', [])]
-            watched = ms.get('watched_tickers', [])
-            scouts = ms.get('scout_categories', [])
+        if os.path.exists('context/ssot.json'):
+            with open('context/ssot.json', 'r', encoding='utf-8') as f:
+                ssot = json.load(f)
+            
+            ms = ssot.get('mutable_state', {})
+            ep = ssot.get('EXECUTION_PAYLOAD', {})
+            
+            raw_portfolio = (
+                ms.get('portfolio_snapshot') or
+                ssot.get('portfolio_snapshot') or
+                ep.get('portfolio_snapshot') or
+                []
+            )
+            portfolio = [
+                t['ticker'].strip().upper() for t in raw_portfolio 
+                if isinstance(t, dict) and t.get('ticker') and is_valid_ticker(t.get('ticker'))
+            ]
+            
+            watched = [
+                w.strip().upper() for w in (
+                    ms.get('watched_tickers') or
+                    ssot.get('watched_tickers') or
+                    ep.get('watched_tickers') or
+                    []
+                ) if isinstance(w, str) and is_valid_ticker(w)
+            ]
+            
+            # Also check config.json for user watchlist
+            if os.path.exists('context/config.json'):
+                try:
+                    with open('context/config.json', 'r', encoding='utf-8') as cf:
+                        cfg_w = json.load(cf).get('WATCHLIST', [])
+                        for w in cfg_w:
+                            if isinstance(w, str) and is_valid_ticker(w):
+                                w_clean = w.strip().upper()
+                                if w_clean not in watched:
+                                    watched.append(w_clean)
+                except: pass
+                
+            scouts = ms.get('scout_categories', ssot.get('scout_categories', []))
             
             scout_tickers = []
             SCOUTED_TICKER_TO_CATEGORY_MAP.clear()
             for cat in scouts:
-                # Take a maximum of the top 5 tickers from each category
                 cat_tickers = _get_dynamic_scout_tickers(cat)[:5]
                 for t in cat_tickers:
                     SCOUTED_TICKER_TO_CATEGORY_MAP[t.upper()] = cat
@@ -461,7 +494,6 @@ def _load_ssot_tickers():
             ACTIVE_SCOUT_TICKERS = {t.upper() for t in scout_tickers if is_valid_ticker(t)}
             PROCESSED_SCOUT_CATEGORIES = list(scouts)
                     
-            # Combine unique tickers, maintaining order where possible
             combined = []
             for t in portfolio + watched + list(ACTIVE_SCOUT_TICKERS):
                 t_upper = t.upper()
@@ -470,7 +502,7 @@ def _load_ssot_tickers():
             return combined
     except Exception as e:
         print(f"[SSOT] Load failed: {e}")
-        return config.get("DEFAULT_TICKERS", [])
+    return config.get("DEFAULT_TICKERS", ["AAPL", "MSFT", "GOOGL", "NVDA"])
 
 def _load_macro_tickers():
     try:
@@ -3025,6 +3057,14 @@ def run_daemon():
 
     try:
         while True:
+            # Dynamically reload TICKERS and MACRO_TICKERS from SSOT on every cycle
+            try:
+                TICKERS = _load_ssot_tickers()
+                MACRO_TICKERS = _load_macro_tickers()
+                ALL_TICKERS = list(dict.fromkeys(TICKERS + MACRO_TICKERS))
+            except Exception as e:
+                pass
+
             # Sync tickers_obj with ALL_TICKERS
             for sym in ALL_TICKERS:
                 if sym not in tickers_obj:

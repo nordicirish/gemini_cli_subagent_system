@@ -1272,31 +1272,35 @@ def save_basket(req: BasketSaveRequest):
             
             import fetch_stocks
             rate = fetch_stocks.cache.prices.get("EURUSD=X", 1.08)
-            usd_val = req.unallocated_cash_usd if req.unallocated_cash_usd > 0.0 else round(req.unallocated_cash_eur * rate, 2)
+            data["portfolio_snapshot"] = new_snapshot
+            data["unallocated_cash_eur"] = req.unallocated_cash_eur
+            data["unallocated_cash_usd"] = usd_val
 
-            if "mutable_state" in data:
+            if "mutable_state" in data and isinstance(data["mutable_state"], dict):
                 data["mutable_state"]["portfolio_snapshot"] = new_snapshot
                 data["mutable_state"]["unallocated_cash_eur"] = req.unallocated_cash_eur
                 data["mutable_state"]["unallocated_cash_usd"] = usd_val
-            else:
-                data["portfolio_snapshot"] = new_snapshot
-                data["unallocated_cash_eur"] = req.unallocated_cash_eur
-                data["unallocated_cash_usd"] = usd_val
+
+            if "EXECUTION_PAYLOAD" in data and isinstance(data["EXECUTION_PAYLOAD"], dict):
+                data["EXECUTION_PAYLOAD"]["portfolio_snapshot"] = new_snapshot
+                data["EXECUTION_PAYLOAD"]["unallocated_cash_eur"] = req.unallocated_cash_eur
+                data["EXECUTION_PAYLOAD"]["unallocated_cash_usd"] = usd_val
                 
-            with open("context/ssot.json", "w") as f:
+            with open("context/ssot.json", "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
-            framework.log(f"[System] SSoT Basket & Cash updated. Cash: {req.unallocated_cash_eur} EUR | {req.unallocated_cash_usd} USD")
+            framework.log(f"[System] SSoT Basket & Cash updated: {len(new_snapshot)} holding(s). Cash: {req.unallocated_cash_eur} EUR | {req.unallocated_cash_usd} USD")
             
             # Hot-reload TICKERS in fetch_stocks so the scanning daemon immediately registers changes
             try:
                 import fetch_stocks
                 fetch_stocks.TICKERS = fetch_stocks._load_ssot_tickers()
-                fetch_stocks.ALL_TICKERS = fetch_stocks.TICKERS + fetch_stocks.MACRO_TICKERS
+                fetch_stocks.MACRO_TICKERS = fetch_stocks._load_macro_tickers()
+                fetch_stocks.ALL_TICKERS = list(dict.fromkeys(fetch_stocks.TICKERS + fetch_stocks.MACRO_TICKERS))
                 fetch_stocks.FORCE_REFRESH = True
             except Exception as se:
                 framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
                 
-            return {"status": "success"}
+            return {"status": "success", "portfolio": new_snapshot}
     except HTTPException as he:
         raise he
     except Exception as e:
