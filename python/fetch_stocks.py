@@ -2973,7 +2973,7 @@ def compute_merton_allocation(gamma=3.0, r=0.04):
 # MAIN LOOP
 # -----------------------------
 def run_daemon():
-    global GLOBAL_STATE, FORCE_REFRESH
+    global GLOBAL_STATE, FORCE_REFRESH, ALL_TICKERS, TICKERS, MACRO_TICKERS
     print(f"{CYAN}Initializing GEM Dashboard v16.0 (Data Hardened + Trend)...{RESET}")
     tickers_obj = {sym: yf.Ticker(sym) for sym in ALL_TICKERS}
 
