@@ -1099,6 +1099,17 @@ const ModernChat = {
         if (statusIndicator) statusIndicator.textContent = '';
 
         try {
+            // Render & capture live 1m TradingView charts before dispatching chat to Gemini LLM
+            if (typeof window.captureTargetChartScreenshots === 'function') {
+                if (this.currentLogElement) {
+                    this.currentLogElement.textContent = 'Rendering & capturing live 1m TradingView charts...';
+                }
+                await window.captureTargetChartScreenshots();
+                if (this.currentLogElement) {
+                    this.currentLogElement.textContent = 'Live charts synchronized. Ingesting prompt...';
+                }
+            }
+
             // Get last 15 messages for session hydration
             const savedHistory = JSON.parse(localStorage.getItem('gem_chat_history') || '[]');
             const historyPayload = savedHistory.slice(-15);

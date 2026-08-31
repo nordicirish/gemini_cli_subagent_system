@@ -122,6 +122,13 @@ Sub-agents marked as **Research**, **Sentiment**, **Bullish Advocate**, **Red Te
 
 ## ⚡ High-Performance Features
 
+### 📈 TradingView Lightweight Charts & Multimodal Vision Integration (v11.38)
+The dashboard and CLI framework integrate TradingView Lightweight Charts (v4.2.0) with automated multimodal vision ingestion:
+- **Interactive 1m Candlestick Modal**: Clicking any ticker row in the dashboard opens a dedicated TradingView chart modal rendering 1-minute OHLCV candlestick bars, EMA 9 (Red), EMA 30 (Blue), EMA 200 (White), VWAP baseline with Session Standard Deviation Bands (+/- 1.25 stdev), and Volume histogram with 20 SMA overlay.
+- **Bar-1 Accurate EMA 200 Warmup**: The backend `GET /api/intraday/{symbol}` endpoint partitions 5 days of 1-minute history into today's regular session bars and prior sessions' warmup closes, guaranteeing that 200-period EMAs are seeded from the first candle.
+- **Automated Offscreen Chart Capture**: When the user launches the AI Council chat (Session Auto-Boot) or clicks any Quick Prompt button (News Scan, Market Analysis, Audit Portfolio, Risk Regime, Deep Dive Watchlist, Review Log), the system automatically renders and captures 1-minute charts offscreen for all portfolio positions, the SPY benchmark, and active watchlist tickers.
+- **Direct Multimodal LLM Ingestion**: Chart screenshots are streamed to `POST /api/save_chart_screenshots` and stored in `context/charts/chart_<TICKER>_1m.png`. During chat turns, active PNG charts are converted directly into `types.Part.from_bytes(data, mime_type="image/png")` objects and prepended to Gemini API calls (`[*chart_parts, prompt]`), enabling visual technical analysis alongside quantitative SSoT JSON payloads.
+
 ### 🧠 Hybrid Model Routing (v11.25)
 To optimize execution speed, reduce token overhead, and minimize paid API expenditures, the system utilizes a 2026 model matrix:
 - **Dynamic Orchestrator Discovery:** The framework dynamically queries active models and targets the latest version-sorted `antigravity` model (e.g., `"antigravity-preview-05-2026"`) as the Primary Orchestrator, automatically falling back to `"gemini-3.5-flash"` on failure or empty match.
@@ -315,6 +322,14 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 ---
 
 ## 📋 Changelog
+
+### v11.38-TradingView-Lightweight-Charts-Multimodal-Sync *(2026-08-31)*
+- **TradingView Lightweight Charts (v4.2.0) Integration:** Integrated interactive charting engine into the dashboard. Table rows across portfolio, watchlist, and scout categories are now interactive and open a dedicated chart modal rendering 1-minute OHLCV candlestick bars with EMA 9 (Red), EMA 30 (Blue), EMA 200 (White), VWAP session bands (+/- 1.25 stdev), and Volume histogram with 20 SMA overlay.
+- **Automated Boot & Quick Prompt Chart Vision Streaming:** Integrated automated offscreen chart rendering and canvas capture (`captureTargetChartScreenshots()`). When the user launches the AI Council chat (Session Auto-Boot) or clicks any individual quick prompt button (News Scan, Market Analysis, Audit Portfolio, Risk Regime, Deep Dive Watchlist, Review Log), the system automatically renders and captures up-to-date 1m charts for all active portfolio positions, SPY benchmark, and watchlist tickers, streaming the base64 PNGs to the backend before dispatching the query.
+- **Intraday Data & Warmup Closes Route (GET /api/intraday/{symbol}):** Added endpoint in `fetch_stocks.py` retrieving 5 days of 1m data via `yf.Ticker.history()`. Partitioned records into current session regular bars and prior sessions' warmup closes to seed EMA 200 starting from the initial session bar.
+- **Chart Screenshot Capture & Streaming Endpoint (POST /api/save_chart_screenshots):** Added backend endpoint receiving base64 PNG chart canvas data captured via `chart.takeScreenshot()`, persisting images to `context/charts/chart_<TICKER>_1m.png` and caching in an in-memory buffer with `replace_all` pruning support.
+- **Automated Gemini Multimodal Vision Integration:** Integrated chart image ingestion into `web_server.py` (`/api/chat`), `agent_framework.py`, and `main.py`. Active intraday chart PNGs in `context/charts/` are automatically converted into `types.Part.from_bytes(data, mime_type="image/png")` and prepended to Gemini API requests alongside text and JSON payloads.
+- **Global Parity Versioning (MANDATE_29):** Synchronized version string `v11.38-TradingView-Lightweight-Charts-Multimodal-Sync` across all Council engine instruction files, master rules (`rules.md`), `INSTRUCTIONS.md`, `antigravity.md`, and system `README.md`.
 
 ### v11.35-Market-Data-Cache-Baseline-Sync *(2026-08-31)*
 - **Market Data Cache & Baseline Previous Close Resolution (fetch_stocks.py):** Corrected baseline previous close extraction in `get_previous_close()` and `update_price_tick()` to prioritize official exchange `chartPreviousClose` / `previousClose` over stale Finnhub quotes. Prevented delayed Finnhub quotes from overwriting live batch prices and regular close baselines during active market sessions.

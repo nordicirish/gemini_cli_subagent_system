@@ -428,7 +428,7 @@ function renderTable(tickers, state) {
 
         const scoutIndicator = row._isScout ? `<span class="scout-dot"></span>` : '';
         return `
-            <tr>
+            <tr class="chart-clickable" onclick="openChartModal('${sym}')" title="Click to view 1m TradingView chart">
                 <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}">
                     <span class="ticker-symbol ${dayColor}">${sym}</span>
                     ${scoutIndicator}
@@ -648,6 +648,9 @@ async function pollData() {
 
             // Render table with bifurcated sections
             renderTable(state.tickers, state);
+            
+            // Auto-capture screenshot for open chart instances
+            captureAllChartScreenshots();
             
             // Render Macro HUD dynamic cards
             if (state.tickers) {
@@ -1240,3 +1243,704 @@ if (dMobileCopyBtn) dMobileCopyBtn.addEventListener('click', () => copyMarketSna
 if (dMobilePasteBtn) dMobilePasteBtn.addEventListener('click', () => ingestExecutionPayload(dMobilePasteBtn, dMobileStatus));
 if (dMobileCopySessionBtn) dMobileCopySessionBtn.addEventListener('click', () => copySessionBoot(dMobileCopySessionBtn, dMobileStatus));
 if (dMobileReviewBtn) dMobileReviewBtn.addEventListener('click', () => copySessionReviewPayload(dMobileReviewBtn, dMobileStatus));
+
+// ─── Chart Modal: TradingView Lightweight Charts Integration ───
+
+// Registry of open chart instances (symbol -> { chart, candleSeries })
+const chartInstances = {};
+
+// Registry of latest captured screenshots (symbol -> base64 PNG string, no prefix)
+const chartScreenshots = {};
+
+// DOM refs for the chart modal
+const dChartModalOverlay = document.getElementById('chart-modal-overlay');
+const dChartModalClose   = document.getElementById('chart-modal-close');
+const dChartModalTicker  = document.getElementById('chart-modal-ticker');
+const dChartModalMeta    = document.getElementById('chart-modal-meta');
+const dChartContainer    = document.getElementById('chart-container');
+
+if (dChartModalClose) {
+    dChartModalClose.addEventListener('click', closeChartModal);
+}
+if (dChartModalOverlay) {
+    dChartModalOverlay.addEventListener('click', (e) => {
+        if (e.target === dChartModalOverlay) closeChartModal();
+    });
+}
+// ESC key closes chart modal too
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && dChartModalOverlay && dChartModalOverlay.classList.contains('active')) {
+        closeChartModal();
+    }
+});
+
+/**
+ * Open the chart modal for a given symbol.
+ * Fetches 1m OHLCV bars, builds the Lightweight Charts instance,
+ * and overlays EMA 9, EMA 30, EMA 200, VWAP Session Bands, and Volume (with 20 SMA).
+ */
+async function openChartModal(symbol) {
+    if (!dChartModalOverlay || !dChartContainer || typeof LightweightCharts === 'undefined') {
+        console.warn('[Chart] Lightweight Charts library not loaded yet.');
+        return;
+    }
+
+    // Destroy any existing chart for this symbol before re-rendering
+    if (chartInstances[symbol]) {
+        try { chartInstances[symbol].chart.remove(); } catch (_) {}
+        delete chartInstances[symbol];
+    }
+
+    // Show modal with loading state
+    dChartModalTicker.textContent = symbol;
+    dChartModalMeta.textContent = 'Loading chart data...';
+    dChartContainer.innerHTML = '<div class="chart-loading">Fetching 1m bars...</div>';
+    openModal(dChartModalOverlay);
+
+    try {
+        const res = await fetch(`${API_BASE}/intraday/${encodeURIComponent(symbol)}`);
+        const data = await res.json();
+        const bars = data.bars || [];
+        const warmupCloses = data.warmup_closes || [];
+
+        if (bars.length === 0) {
+            dChartContainer.innerHTML = '<div class="chart-loading">No intraday data available.</div>';
+            dChartModalMeta.textContent = 'No data returned for this symbol.';
+            return;
+        }
+
+        // Clear loading state
+        dChartContainer.innerHTML = '';
+
+        // Build Lightweight Charts instance matching TradingView template
+        const chart = LightweightCharts.createChart(dChartContainer, {
+            width:  dChartContainer.clientWidth  || 920,
+            height: dChartContainer.clientHeight || 500,
+            layout: {
+                background: { color: '#131722' },
+                textColor:  '#9598a1',
+                fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
+                fontSize: 11
+            },
+            localization: {
+                locale: 'en-US',
+                timeFormatter: (time) => {
+                    const d = new Date(time * 1000);
+                    return d.toLocaleTimeString('en-US', {
+                        timeZone: 'America/New_York',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+                },
+                dateFormatter: (time) => {
+                    const d = new Date(time * 1000);
+                    return d.toLocaleDateString('en-US', {
+                        timeZone: 'America/New_York',
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric'
+                    });
+                }
+            },
+            grid: {
+                vertLines: { color: 'rgba(255, 255, 255, 0.04)' },
+                horzLines: { color: 'rgba(255, 255, 255, 0.04)' }
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+                vertLine: { color: '#758696', width: 1, style: 3, labelBackgroundColor: '#2a2e39' },
+                horzLine: { color: '#758696', width: 1, style: 3, labelBackgroundColor: '#2a2e39' },
+            },
+            rightPriceScale: {
+                borderColor: '#2a2e39',
+                scaleMargins: { top: 0.1, bottom: 0.25 },
+            },
+            timeScale: {
+                borderColor: '#2a2e39',
+                timeVisible: true,
+                secondsVisible: false,
+                tickMarkFormatter: (time) => {
+                    const d = new Date(time * 1000);
+                    return d.toLocaleTimeString('en-US', {
+                        timeZone: 'America/New_York',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+                }
+            }
+        });
+
+        // ─── Volume Histogram & Volume 20 SMA ───
+        const volumeSeries = chart.addHistogramSeries({
+            priceFormat: { type: 'volume' },
+            priceScaleId: 'vol',
+        });
+        chart.priceScale('vol').applyOptions({
+            scaleMargins: { top: 0.78, bottom: 0.02 },
+            borderVisible: false,
+        });
+        volumeSeries.setData(bars.map(b => ({
+            time:  b.time,
+            value: b.volume,
+            color: b.close >= b.open ? 'rgba(8, 153, 129, 0.55)' : 'rgba(242, 54, 69, 0.55)'
+        })));
+
+        // Compute Volume 20 SMA
+        const volSmaData = [];
+        for (let i = 0; i < bars.length; i++) {
+            const start = Math.max(0, i - 19);
+            const slice = bars.slice(start, i + 1);
+            const avgVol = slice.reduce((s, b) => s + b.volume, 0) / slice.length;
+            volSmaData.push({ time: bars[i].time, value: avgVol });
+        }
+        const volSmaSeries = chart.addLineSeries({
+            priceScaleId: 'vol',
+            color: '#2962ff',
+            lineWidth: 1.5,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+        });
+        volSmaSeries.setData(volSmaData);
+
+        // ─── Candlestick series ───
+        const candleSeries = chart.addCandlestickSeries({
+            upColor:          '#089981',
+            downColor:        '#f23645',
+            borderUpColor:    '#089981',
+            borderDownColor:  '#f23645',
+            wickUpColor:      '#089981',
+            wickDownColor:    '#f23645',
+            priceLineVisible: false
+        });
+        candleSeries.setData(bars);
+
+        // ─── Moving Averages (EMA 9, EMA 30, EMA 200) ───
+        const closes = bars.map(b => b.close);
+        const times  = bars.map(b => b.time);
+        const allCloses = [...warmupCloses, ...closes];
+        const warmupLen = warmupCloses.length;
+
+        function computeEMA(allC, period) {
+            if (allC.length === 0) return [];
+            const k = 2 / (period + 1);
+            const seedLen = Math.min(period, allC.length);
+            let ema = allC.slice(0, seedLen).reduce((s, v) => s + v, 0) / seedLen;
+            const result = [ema];
+            for (let i = 1; i < allC.length; i++) {
+                ema = allC[i] * k + ema * (1 - k);
+                result.push(ema);
+            }
+            return result;
+        }
+
+        function emaToSeries(emaValues, times, warmupLen) {
+            const todayEma = emaValues.slice(warmupLen);
+            const series = [];
+            for (let i = 0; i < todayEma.length && i < times.length; i++) {
+                if (todayEma[i] != null && !isNaN(todayEma[i])) {
+                    series.push({ time: times[i], value: todayEma[i] });
+                }
+            }
+            return series;
+        }
+
+        const ema9Data   = emaToSeries(computeEMA(allCloses, 9),   times, warmupLen);
+        const ema30Data  = emaToSeries(computeEMA(allCloses, 30),  times, warmupLen);
+        const ema200Data = emaToSeries(computeEMA(allCloses, 200), times, warmupLen);
+
+        // EMA 9 — Red
+        const ema9Series = chart.addLineSeries({
+            color: '#f23645',
+            lineWidth: 1.5,
+            priceLineVisible: false,
+            lastValueVisible: true,
+        });
+        ema9Series.setData(ema9Data);
+
+        // EMA 30 — Blue
+        const ema30Series = chart.addLineSeries({
+            color: '#2962ff',
+            lineWidth: 1.5,
+            priceLineVisible: false,
+            lastValueVisible: true,
+        });
+        ema30Series.setData(ema30Data);
+
+        // EMA 200 — Solid White
+        const ema200Series = chart.addLineSeries({
+            color: '#ffffff',
+            lineWidth: 2,
+            priceLineVisible: false,
+            lastValueVisible: true,
+        });
+        ema200Series.setData(ema200Data);
+
+        // ─── VWAP with Session Standard Deviation Bands ───
+        function computeVWAPBands(bars) {
+            let cumPV = 0, cumVol = 0;
+            const vwapList = [];
+            const upperList = [];
+            const lowerList = [];
+
+            // First pass: VWAP baseline
+            for (let i = 0; i < bars.length; i++) {
+                const b = bars[i];
+                const tp = (b.high + b.low + b.close) / 3;
+                cumPV += tp * b.volume;
+                cumVol += b.volume;
+                const v = cumVol > 0 ? cumPV / cumVol : tp;
+                vwapList.push(v);
+            }
+
+            // Second pass: Cumulative volume-weighted variance for standard deviation
+            let cumVar = 0;
+            let cumV = 0;
+            for (let i = 0; i < bars.length; i++) {
+                const b = bars[i];
+                const tp = (b.high + b.low + b.close) / 3;
+                const v = vwapList[i];
+                cumV += b.volume;
+                cumVar += b.volume * Math.pow(tp - v, 2);
+                const stdev = cumV > 0 ? Math.sqrt(cumVar / cumV) : 0;
+                
+                upperList.push({ time: b.time, value: v + 1.25 * stdev });
+                lowerList.push({ time: b.time, value: Math.max(0, v - 1.25 * stdev) });
+            }
+
+            const centerList = bars.map((b, i) => ({ time: b.time, value: vwapList[i] }));
+            return { centerList, upperList, lowerList };
+        }
+
+        const { centerList, upperList, lowerList } = computeVWAPBands(bars);
+
+        // Upper VWAP Band (Green #089981)
+        const vwapUpperSeries = chart.addLineSeries({
+            color: '#089981',
+            lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+        });
+        vwapUpperSeries.setData(upperList);
+
+        // Lower VWAP Band (Green #089981)
+        const vwapLowerSeries = chart.addLineSeries({
+            color: '#089981',
+            lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+        });
+        vwapLowerSeries.setData(lowerList);
+
+        // Fit view
+        chart.timeScale().fitContent();
+
+        // Store instance for screenshot capture + image copy
+        chartInstances[symbol] = { chart, candleSeries };
+
+        // Update footer with exchange time (ET)
+        const formatNY = (ts) => new Date(ts * 1000).toLocaleTimeString('en-US', {
+            timeZone: 'America/New_York',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+        const firstBar = bars[0];
+        const lastBar  = bars[bars.length - 1];
+        const firstTime = formatNY(firstBar.time);
+        const lastTime  = formatNY(lastBar.time);
+        dChartModalMeta.textContent = `${bars.length} bars · ${firstTime} – ${lastTime} ET`;
+
+        // Wire up the "📋 Copy Image" button in the modal footer
+        const dCopyChartBtn = document.getElementById('chart-copy-img-btn');
+        if (dCopyChartBtn) {
+            dCopyChartBtn.onclick = () => copyCurrentChartImage(symbol, dCopyChartBtn);
+        }
+
+        // Handle resize
+        const resizeObserver = new ResizeObserver(() => {
+            if (chartInstances[symbol]) {
+                chart.applyOptions({
+                    width:  dChartContainer.clientWidth,
+                    height: dChartContainer.clientHeight
+                });
+            }
+        });
+        resizeObserver.observe(dChartContainer);
+
+        // Immediately capture and stream screenshot for this symbol
+        setTimeout(() => captureChartScreenshot(symbol), 250);
+
+    } catch (err) {
+        console.error('[Chart] Failed to load chart data:', err);
+        dChartContainer.innerHTML = '<div class="chart-loading">Failed to load chart data.</div>';
+        dChartModalMeta.textContent = 'Error fetching data.';
+    }
+}
+
+/**
+ * Close the chart modal and clean up the active chart instance.
+ */
+function closeChartModal() {
+    closeModal(dChartModalOverlay);
+    const sym = dChartModalTicker ? dChartModalTicker.textContent : null;
+    if (sym && chartInstances[sym]) {
+        try { chartInstances[sym].chart.remove(); } catch (_) {}
+        delete chartInstances[sym];
+    }
+    if (dChartContainer) dChartContainer.innerHTML = '';
+}
+
+/**
+ * Capture a screenshot of a specific chart instance, store in chartScreenshots,
+ * and stream it to the backend endpoint /api/save_chart_screenshots.
+ * @param {string} symbol
+ */
+async function captureChartScreenshot(symbol) {
+    const instance = chartInstances[symbol];
+    if (!instance || !instance.chart) return;
+    try {
+        const canvas = instance.chart.takeScreenshot();
+        if (!canvas) return;
+        const dataUrl = canvas.toDataURL('image/png');
+        // Strip data URI prefix for clean storage
+        const rawB64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+        chartScreenshots[symbol] = rawB64;
+
+        // Stream screenshot to backend for Gemini Multimodal prompt ingestion
+        await fetch(`${API_BASE}/save_chart_screenshots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ screenshots: { [symbol]: rawB64 } })
+        });
+    } catch (e) {
+        console.warn(`[Chart] Screenshot capture/stream failed for ${symbol}:`, e);
+    }
+}
+
+/**
+ * Capture and stream screenshots for all currently open chart instances.
+ * Called automatically at end of each pollData() cycle.
+ */
+function captureAllChartScreenshots() {
+    Object.keys(chartInstances).forEach(sym => captureChartScreenshot(sym));
+}
+
+/**
+ * Copy the current chart image to clipboard as a PNG so it can be pasted
+ * directly into Gemini or external apps.
+ * @param {string} symbol
+ * @param {HTMLElement} btn
+ */
+async function copyCurrentChartImage(symbol, btn) {
+    const instance = chartInstances[symbol];
+    if (!instance || !instance.chart) {
+        console.warn('[Chart] No active chart instance for', symbol);
+        return;
+    }
+    const originalText = btn ? btn.textContent : '';
+    try {
+        if (btn) { btn.textContent = 'Copying...'; btn.disabled = true; }
+
+        const canvas = instance.chart.takeScreenshot();
+        if (!canvas) throw new Error('takeScreenshot returned null');
+
+        // Convert canvas to Blob and write to clipboard as PNG image
+        const blob = await new Promise((resolve, reject) =>
+            canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png')
+        );
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+
+        if (btn) { btn.textContent = '✅ Copied!'; }
+        setTimeout(() => { if (btn) { btn.textContent = originalText; btn.disabled = false; } }, 1800);
+    } catch (e) {
+        console.error('[Chart] Image copy failed:', e);
+        if (btn) { btn.textContent = '❌ Failed'; }
+        setTimeout(() => { if (btn) { btn.textContent = originalText; btn.disabled = false; } }, 2000);
+    }
+}
+
+/**
+ * Render and capture up-to-date TradingView 1m candlestick charts for target tickers offscreen.
+ * If targetTickers is not specified, it automatically resolves:
+ * 1. All active portfolio tickers
+ * 2. SPY benchmark
+ * 3. Active watchlist tickers (top 5)
+ * Streams all captured base64 PNGs to /api/save_chart_screenshots in one payload.
+ */
+async function captureTargetChartScreenshots(targetTickers = null) {
+    if (typeof LightweightCharts === 'undefined') {
+        console.warn('[Chart] LightweightCharts library not loaded, skipping automated capture.');
+        return;
+    }
+
+    let tickers = [];
+    if (Array.isArray(targetTickers) && targetTickers.length > 0) {
+        tickers = targetTickers.map(t => t.toUpperCase());
+    } else {
+        let pTickers = [];
+        try {
+            if (typeof getCurrentPortfolio === 'function') {
+                const port = getCurrentPortfolio();
+                if (Array.isArray(port)) {
+                    pTickers = port.map(p => (p.ticker || '').toUpperCase()).filter(Boolean);
+                }
+            }
+        } catch (_) {}
+
+        let wTickers = [];
+        try {
+            const wRes = await fetch(`${API_BASE}/watchlist`);
+            const wData = await wRes.json();
+            if (Array.isArray(wData)) {
+                wTickers = wData.map(t => (typeof t === 'string' ? t : (t.ticker || '')).toUpperCase()).filter(Boolean);
+            }
+        } catch (_) {}
+        
+        if (wTickers.length === 0) {
+            try {
+                const wItems = document.querySelectorAll('.watchlist-item span');
+                if (wItems && wItems.length > 0) {
+                    wItems.forEach(el => {
+                        const text = el.textContent.trim().toUpperCase();
+                        if (text && !text.includes('NO TICKERS') && !text.includes('LOADING')) {
+                            wTickers.push(text);
+                        }
+                    });
+                }
+            } catch (_) {}
+        }
+
+        tickers = [...new Set([...pTickers, ...wTickers, 'SPY'])];
+    }
+
+    if (tickers.length === 0) return;
+
+    let offscreenContainer = document.getElementById('offscreen-chart-container');
+    if (!offscreenContainer) {
+        offscreenContainer = document.createElement('div');
+        offscreenContainer.id = 'offscreen-chart-container';
+        offscreenContainer.style.cssText = 'position: fixed; left: -9999px; top: -9999px; width: 920px; height: 500px; opacity: 0; pointer-events: none;';
+        document.body.appendChild(offscreenContainer);
+    }
+
+    const capturedMap = {};
+
+    // Fetch intraday data in parallel
+    const fetchPromises = tickers.map(async (sym) => {
+        try {
+            const res = await fetch(`${API_BASE}/intraday/${encodeURIComponent(sym)}`);
+            const data = await res.json();
+            return { symbol: sym, data };
+        } catch (e) {
+            console.warn(`[Chart] Automated fetch failed for ${sym}:`, e);
+            return { symbol: sym, data: null };
+        }
+    });
+
+    const results = await Promise.all(fetchPromises);
+
+    for (const { symbol, data } of results) {
+        if (!data || !data.bars || data.bars.length === 0) continue;
+        const bars = data.bars;
+        const warmupCloses = data.warmup_closes || [];
+
+        try {
+            offscreenContainer.innerHTML = '';
+            const chart = LightweightCharts.createChart(offscreenContainer, {
+                width: 920,
+                height: 500,
+                layout: {
+                    background: { color: '#131722' },
+                    textColor: '#9598a1',
+                    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
+                    fontSize: 11
+                },
+                localization: {
+                    locale: 'en-US',
+                    timeFormatter: (time) => {
+                        const d = new Date(time * 1000);
+                        return d.toLocaleTimeString('en-US', {
+                            timeZone: 'America/New_York',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: false
+                        });
+                    }
+                },
+                grid: {
+                    vertLines: { color: 'rgba(255, 255, 255, 0.04)' },
+                    horzLines: { color: 'rgba(255, 255, 255, 0.04)' }
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                },
+                rightPriceScale: {
+                    borderColor: '#2a2e39',
+                    scaleMargins: { top: 0.1, bottom: 0.25 },
+                },
+                timeScale: {
+                    borderColor: '#2a2e39',
+                    timeVisible: true,
+                    secondsVisible: false
+                }
+            });
+
+            // Volume
+            const volumeSeries = chart.addHistogramSeries({
+                priceFormat: { type: 'volume' },
+                priceScaleId: 'vol',
+            });
+            chart.priceScale('vol').applyOptions({
+                scaleMargins: { top: 0.78, bottom: 0.02 },
+                borderVisible: false,
+            });
+            volumeSeries.setData(bars.map(b => ({
+                time: b.time,
+                value: b.volume,
+                color: b.close >= b.open ? 'rgba(8, 153, 129, 0.55)' : 'rgba(242, 54, 69, 0.55)'
+            })));
+
+            // Volume 20 SMA
+            const volSmaData = [];
+            for (let i = 0; i < bars.length; i++) {
+                const start = Math.max(0, i - 19);
+                const slice = bars.slice(start, i + 1);
+                const avgVol = slice.reduce((s, b) => s + b.volume, 0) / slice.length;
+                volSmaData.push({ time: bars[i].time, value: avgVol });
+            }
+            const volSmaSeries = chart.addLineSeries({
+                priceScaleId: 'vol',
+                color: '#2962ff',
+                lineWidth: 1.5,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+            });
+            volSmaSeries.setData(volSmaData);
+
+            // Candlesticks
+            const candleSeries = chart.addCandlestickSeries({
+                upColor: '#089981',
+                downColor: '#f23645',
+                borderUpColor: '#089981',
+                borderDownColor: '#f23645',
+                wickUpColor: '#089981',
+                wickDownColor: '#f23645',
+                priceLineVisible: false
+            });
+            candleSeries.setData(bars);
+
+            // EMAs (9, 30, 200)
+            const closes = bars.map(b => b.close);
+            const times = bars.map(b => b.time);
+            const allCloses = [...warmupCloses, ...closes];
+            const warmupLen = warmupCloses.length;
+
+            function computeEMA(allC, period) {
+                if (allC.length === 0) return [];
+                const k = 2 / (period + 1);
+                const seedLen = Math.min(period, allC.length);
+                let ema = allC.slice(0, seedLen).reduce((s, v) => s + v, 0) / seedLen;
+                const result = [ema];
+                for (let i = 1; i < allC.length; i++) {
+                    ema = allC[i] * k + ema * (1 - k);
+                    result.push(ema);
+                }
+                return result;
+            }
+
+            function emaToSeries(emaValues, times, warmupLen) {
+                const todayEma = emaValues.slice(warmupLen);
+                const series = [];
+                for (let i = 0; i < todayEma.length && i < times.length; i++) {
+                    if (todayEma[i] != null && !isNaN(todayEma[i])) {
+                        series.push({ time: times[i], value: todayEma[i] });
+                    }
+                }
+                return series;
+            }
+
+            const ema9Data = emaToSeries(computeEMA(allCloses, 9), times, warmupLen);
+            const ema30Data = emaToSeries(computeEMA(allCloses, 30), times, warmupLen);
+            const ema200Data = emaToSeries(computeEMA(allCloses, 200), times, warmupLen);
+
+            const ema9Series = chart.addLineSeries({ color: '#f23645', lineWidth: 1.5, priceLineVisible: false });
+            ema9Series.setData(ema9Data);
+
+            const ema30Series = chart.addLineSeries({ color: '#2962ff', lineWidth: 1.5, priceLineVisible: false });
+            ema30Series.setData(ema30Data);
+
+            const ema200Series = chart.addLineSeries({ color: '#ffffff', lineWidth: 2, priceLineVisible: false });
+            ema200Series.setData(ema200Data);
+
+            // VWAP Bands
+            let cumPV = 0, cumVol = 0;
+            const vwapList = [];
+            const upperList = [];
+            const lowerList = [];
+            for (let i = 0; i < bars.length; i++) {
+                const b = bars[i];
+                const tp = (b.high + b.low + b.close) / 3;
+                cumPV += tp * b.volume;
+                cumVol += b.volume;
+                vwapList.push(cumVol > 0 ? cumPV / cumVol : tp);
+            }
+            let cumVar = 0, cumV = 0;
+            for (let i = 0; i < bars.length; i++) {
+                const b = bars[i];
+                const tp = (b.high + b.low + b.close) / 3;
+                const v = vwapList[i];
+                cumV += b.volume;
+                cumVar += b.volume * Math.pow(tp - v, 2);
+                const stdev = cumV > 0 ? Math.sqrt(cumVar / cumV) : 0;
+                upperList.push({ time: b.time, value: v + 1.25 * stdev });
+                lowerList.push({ time: b.time, value: Math.max(0, v - 1.25 * stdev) });
+            }
+
+            const vwapUpperSeries = chart.addLineSeries({ color: '#089981', lineWidth: 1, priceLineVisible: false });
+            vwapUpperSeries.setData(upperList);
+
+            const vwapLowerSeries = chart.addLineSeries({ color: '#089981', lineWidth: 1, priceLineVisible: false });
+            vwapLowerSeries.setData(lowerList);
+
+            chart.timeScale().fitContent();
+
+            // Take canvas screenshot
+            const canvas = chart.takeScreenshot();
+            if (canvas) {
+                const rawB64 = canvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '');
+                capturedMap[symbol] = rawB64;
+                chartScreenshots[symbol] = rawB64;
+            }
+
+            chart.remove();
+        } catch (renderErr) {
+            console.warn(`[Chart] Offscreen render failed for ${symbol}:`, renderErr);
+        }
+    }
+
+    offscreenContainer.innerHTML = '';
+
+    // Stream all captured screenshots to the backend
+    if (Object.keys(capturedMap).length > 0) {
+        try {
+            await fetch(`${API_BASE}/save_chart_screenshots`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ screenshots: capturedMap, replace_all: true })
+            });
+            console.log(`[Chart] Successfully captured & streamed ${Object.keys(capturedMap).length} fresh 1m chart(s):`, Object.keys(capturedMap));
+        } catch (saveErr) {
+            console.error('[Chart] Failed to stream captured screenshots to backend:', saveErr);
+        }
+    }
+}
+
+window.captureTargetChartScreenshots = captureTargetChartScreenshots;

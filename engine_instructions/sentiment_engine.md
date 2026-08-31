@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.35-Market-Data-Cache-Baseline-Sync
+- **version**: v11.38-TradingView-Lightweight-Charts-Multimodal-Sync
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

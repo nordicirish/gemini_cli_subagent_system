@@ -230,8 +230,26 @@ def main():
             print("\n[Terminal Orchestrator] Thinking...")
             active_model_str = f"[ACTIVE_MODEL]: {orchestrator_model}\n"
             current_message = f"{active_model_str}[USER_QUERY]: {user_input}"
+            
+            # Multimodal Chart Part Loading
+            chart_parts = []
+            chart_dir = "context/charts"
+            if os.path.exists(chart_dir):
+                import glob
+                for filepath in sorted(glob.glob(os.path.join(chart_dir, "chart_*_1m.png"))):
+                    try:
+                        with open(filepath, "rb") as f:
+                            data = f.read()
+                            if data:
+                                chart_parts.append(
+                                    agent_framework.types.Part.from_bytes(data=data, mime_type="image/png")
+                                )
+                    except Exception:
+                        pass
+
+            payload_to_send = [*chart_parts, current_message] if chart_parts else current_message
             try:
-                response = chat.send_message(current_message)
+                response = chat.send_message(payload_to_send)
             except Exception as exc:
                 from google.genai.errors import APIError
                 if isinstance(exc, APIError):

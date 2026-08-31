@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, JSONResponse
 import threading
+import glob
+from google.genai import types
 
 from agent_framework import AgentFramework
 import agent_framework
@@ -16,7 +18,28 @@ import tools
 # cloud_sync removed — GDrive Decoupling Guardrail (ANTIGRAVITY v11.03)
 
 # Import the existing FastAPI app from fetch_stocks
-from fetch_stocks import app, run_daemon, GLOBAL_STATE
+from fetch_stocks import app, run_daemon, GLOBAL_STATE, CHART_SCREENSHOTS_BUFFER
+
+def get_chart_parts() -> tuple[list, list]:
+    """Load latest 1-minute chart screenshots from context/charts/ as multimodal Parts."""
+    chart_parts = []
+    chart_symbols = []
+    chart_dir = "context/charts"
+    if os.path.exists(chart_dir):
+        for filepath in sorted(glob.glob(os.path.join(chart_dir, "chart_*_1m.png"))):
+            try:
+                base = os.path.basename(filepath)
+                sym = base.replace("chart_", "").replace("_1m.png", "")
+                with open(filepath, "rb") as f:
+                    data = f.read()
+                    if data:
+                        chart_parts.append(
+                            types.Part.from_bytes(data=data, mime_type="image/png")
+                        )
+                        chart_symbols.append(sym)
+            except Exception as e:
+                pass
+    return chart_parts, chart_symbols
 
 class BasketItem(BaseModel):
     ticker: str
@@ -707,6 +730,10 @@ def chat_endpoint(req: ChatRequest):
         active_model_str = f"[ACTIVE_MODEL]: {ORCHESTRATOR_MODEL}\n"
         current_message = f"{active_model_str}{prompt_prefix}[SYSTEM_TIME (NEW YORK / ET): {current_iso}] [USER_QUERY]: {req.message}"
         
+        chart_parts, chart_symbols = get_chart_parts()
+        if chart_parts:
+            framework.log(f"[Vision] Attaching {len(chart_parts)} fresh 1m chart screenshot(s) [{', '.join(chart_symbols)}] to Gemini multimodal prompt...")
+
         all_text = []
         turn_count = 0
         
@@ -733,8 +760,10 @@ def chat_endpoint(req: ChatRequest):
                 except Exception as guard_err:
                     framework.log(f"[Orchestrator] History guard check failed (non-critical): {guard_err}")
 
+            payload_to_send = [*chart_parts, current_message] if (turn_count == 1 and chart_parts and isinstance(current_message, str)) else current_message
+
             try:
-                response = session.send_message(current_message)
+                response = session.send_message(payload_to_send)
             except Exception as exc:
                 from google.genai.errors import APIError
                 if isinstance(exc, APIError):
@@ -745,7 +774,8 @@ def chat_endpoint(req: ChatRequest):
                     active_model_str = f"[ACTIVE_MODEL]: {ORCHESTRATOR_MODEL}\n"
                     if isinstance(current_message, str):
                         current_message = f"{active_model_str}{prompt_prefix}[SYSTEM_TIME (NEW YORK / ET): {current_iso}] [USER_QUERY]: {req.message}"
-                    response = session.send_message(current_message)
+                    failover_payload = [*chart_parts, current_message] if (turn_count == 1 and chart_parts and isinstance(current_message, str)) else current_message
+                    response = session.send_message(failover_payload)
                 else:
                     raise exc
             

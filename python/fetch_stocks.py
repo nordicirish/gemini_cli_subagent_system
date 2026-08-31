@@ -17,6 +17,7 @@ import numpy as np
 import requests
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
+import base64
 import os
 import time as t_time
 import sys
@@ -799,6 +800,114 @@ def get_data():
 @app.get("/api/tickers")
 def get_tickers():
     return JSONResponse({"tickers": TICKERS, "macro": MACRO_TICKERS, "macro_labels": MACRO_LABELS})
+
+# In-memory buffer for screenshots: {symbol: bytes}
+CHART_SCREENSHOTS_BUFFER = {}
+CHARTS_DIR = os.path.join("context", "charts")
+os.makedirs(CHARTS_DIR, exist_ok=True)
+
+@app.get("/api/intraday/{symbol}")
+async def get_intraday_data(symbol: str):
+    """Return 1-minute OHLCV bars for a given symbol for use in the chart modal.
+
+    Returns:
+        bars:           Today's OHLCV bars for candlestick rendering.
+        warmup_closes:  Close prices from prior sessions (oldest first) used to
+                        seed the EMA 200 calculation on the frontend, so the EMA
+                        is valid from the first bar of the current session.
+    """
+    try:
+        sym = symbol.strip().upper()
+        ticker_obj = yf.Ticker(sym)
+        # Fetch 5 days of 1m data — yfinance max is 7 days for 1m interval
+        df = ticker_obj.history(interval="1m", period="5d", prepost=False, auto_adjust=True)
+        if df is None or df.empty:
+            return JSONResponse({"bars": [], "warmup_closes": [], "symbol": sym})
+
+        # Determine today's date in the exchange local timezone
+        last_ts = df.index[-1]
+        today_date = last_ts.date()
+
+        bars = []
+        warmup_closes = []
+
+        for ts, row in df.iterrows():
+            try:
+                t_unix = int(ts.timestamp())
+            except Exception:
+                continue
+
+            bar_date = ts.date()
+            close_val = round(float(row["Close"]), 4)
+
+            if bar_date == today_date:
+                # Today's bars: full OHLCV for candlestick rendering
+                bars.append({
+                    "time":   t_unix,
+                    "open":   round(float(row["Open"]),  4),
+                    "high":   round(float(row["High"]),  4),
+                    "low":    round(float(row["Low"]),   4),
+                    "close":  close_val,
+                    "volume": int(row["Volume"]) if not pd.isna(row["Volume"]) else 0
+                })
+            else:
+                # Prior-session bars: only the close price for EMA warmup
+                warmup_closes.append(close_val)
+
+        return JSONResponse({
+            "bars":           bars,
+            "warmup_closes":  warmup_closes,
+            "symbol":         sym
+        })
+    except Exception as e:
+        return JSONResponse({"bars": [], "warmup_closes": [], "symbol": symbol, "error": str(e)})
+
+@app.post("/api/save_chart_screenshots")
+async def save_chart_screenshots(req: Request):
+    """Receive base64 PNG screenshots from the frontend chart canvas, write to context/charts/
+    and store in CHART_SCREENSHOTS_BUFFER for Gemini multimodal prompt ingestion.
+    """
+    try:
+        data = await req.json()
+        saved = []
+        
+        # Support both {"screenshots": {"TICKER": "<base64>"}} and {"symbol": "TICKER", "screenshot": "<base64>"}
+        screenshots_map = {}
+        if "screenshots" in data and isinstance(data["screenshots"], dict):
+            screenshots_map = data["screenshots"]
+        elif "symbol" in data and "screenshot" in data:
+            screenshots_map[data["symbol"]] = data["screenshot"]
+            
+        os.makedirs(CHARTS_DIR, exist_ok=True)
+        
+        if data.get("replace_all", False):
+            import glob
+            for old_file in glob.glob(os.path.join(CHARTS_DIR, "chart_*_1m.png")):
+                try:
+                    os.remove(old_file)
+                except Exception:
+                    pass
+            CHART_SCREENSHOTS_BUFFER.clear()
+        
+        for symbol, b64_str in screenshots_map.items():
+            if not symbol or not b64_str:
+                continue
+            sym = symbol.strip().upper()
+            if "," in b64_str:
+                b64_str = b64_str.split(",", 1)[1]
+            try:
+                img_bytes = base64.b64decode(b64_str)
+                CHART_SCREENSHOTS_BUFFER[sym] = img_bytes
+                file_path = os.path.join(CHARTS_DIR, f"chart_{sym}_1m.png")
+                with open(file_path, "wb") as f:
+                    f.write(img_bytes)
+                saved.append(sym)
+            except Exception as dec_err:
+                print(f"[Warning] Failed to decode/save chart screenshot for {sym}: {dec_err}")
+                
+        return JSONResponse({"status": "success", "saved": saved})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=400)
 
 def _deep_merge(base, delta):
     merged = base.copy()

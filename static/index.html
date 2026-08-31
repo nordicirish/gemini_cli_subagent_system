@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
-    <link rel="stylesheet" href="styles.css?v=12.20">
-    <link rel="stylesheet" href="modern_ui.css?v=12.20">
+    <link rel="stylesheet" href="styles.css?v=12.30">
+    <link rel="stylesheet" href="modern_ui.css?v=12.30">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
@@ -372,7 +373,39 @@
         </div>
     </div>
 
-    <script src="app.js?v=12.20"></script>
-    <script src="modern_ui.js?v=12.20"></script>
+    <!-- ─── Chart Modal ─── -->
+    <div class="modal-overlay chart-modal-overlay" id="chart-modal-overlay">
+        <div class="modal chart-modal glass-panel">
+            <div class="modal-header chart-modal-header">
+                <div class="chart-modal-title">
+                    <span id="chart-modal-ticker" class="chart-ticker-label">—</span>
+                    <div class="chart-indicator-legend">
+                        <span class="legend-item"><span class="legend-dot" style="background:#f23645;"></span>EMA 9</span>
+                        <span class="legend-item"><span class="legend-dot" style="background:#2962ff;"></span>EMA 30</span>
+                        <span class="legend-item"><span class="legend-dot" style="background:#ffffff;"></span>EMA 200</span>
+                        <span class="legend-item"><span class="legend-dot" style="background:#089981;"></span>VWAP Bands</span>
+                        <span class="legend-item"><span class="legend-dot" style="background:#2962ff;"></span>Vol (20)</span>
+                    </div>
+                </div>
+                <button class="modal-close" id="chart-modal-close">&times;</button>
+            </div>
+            <div id="chart-container" class="chart-container"></div>
+            <div class="chart-modal-footer">
+                <span id="chart-modal-meta" class="chart-meta-label">Loading chart data...</span>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span class="chart-meta-label" style="color:var(--text-dim, #8b949e);">1m · US/Eastern (NYSE/NASDAQ)</span>
+                    <button id="chart-copy-img-btn" class="chart-copy-btn" title="Copy chart image to clipboard — paste directly into Gemini">
+                        📋 Copy Image
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Offscreen Container for Automated Chart Rendering & Capture -->
+    <div id="offscreen-chart-container" style="position: fixed; left: -9999px; top: -9999px; width: 920px; height: 500px; opacity: 0; pointer-events: none;"></div>
+
+    <script src="app.js?v=12.30"></script>
+    <script src="modern_ui.js?v=12.30"></script>
 </body>
 </html>

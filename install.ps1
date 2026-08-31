@@ -55,7 +55,7 @@ else {
 }
 
 # 5. Create required directories
-$requiredDirs = @("logs", "context", "scripts", "prompts", "engine_instructions", "gem_trading_rules", "static", "cache")
+$requiredDirs = @("logs", "context", "context/charts", "scripts", "prompts", "engine_instructions", "gem_trading_rules", "static", "cache")
 foreach ($dir in $requiredDirs) {
     $dirPath = Join-Path $PSScriptRoot $dir
     if (-not (Test-Path $dirPath)) {

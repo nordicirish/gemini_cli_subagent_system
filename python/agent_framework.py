@@ -99,6 +99,24 @@ class AgentFramework:
         self.session_cost = 0.0
         self.reset_turn_usage()
 
+    def load_chart_parts(self) -> list:
+        """Load latest 1-minute chart screenshots from context/charts/ as multimodal types.Part instances."""
+        import glob
+        chart_parts = []
+        chart_dir = "context/charts"
+        if os.path.exists(chart_dir):
+            for filepath in sorted(glob.glob(os.path.join(chart_dir, "chart_*_1m.png"))):
+                try:
+                    with open(filepath, "rb") as f:
+                        data = f.read()
+                        if data:
+                            chart_parts.append(
+                                types.Part.from_bytes(data=data, mime_type="image/png")
+                            )
+                except Exception:
+                    pass
+        return chart_parts
+
     def _resolve_orchestrator(self) -> str:
         """
         Dynamically probe available models, filter for 'antigravity',

@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.35-Market-Data-Cache-Baseline-Sync
+- **version**: v11.38-TradingView-Lightweight-Charts-Multimodal-Sync
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

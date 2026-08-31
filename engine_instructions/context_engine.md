@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.35-Market-Data-Cache-Baseline-Sync
+- **version**: v11.38-TradingView-Lightweight-Charts-Multimodal-Sync
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

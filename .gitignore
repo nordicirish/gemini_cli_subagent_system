@@ -34,6 +34,7 @@ context/debug_api.json
 context/decision_log.json
 context/trade_lessons.md
 context/user_config.json
+context/charts/
 
 # Temporary Scratchpad Scripts
 scratch/
