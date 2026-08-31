@@ -1133,7 +1133,30 @@ const ModernChat = {
             this.currentLogElement = null;
 
             if (data.status === 'success') {
-                this.showModelWarning(data.warning);
+                const activeModel = data.active_model || data.model;
+                if (activeModel && this.modelSelector) {
+                    const optionExists = Array.from(this.modelSelector.options).some(opt => opt.value === activeModel);
+                    if (!optionExists) {
+                        const opt = document.createElement('option');
+                        opt.value = activeModel;
+                        opt.textContent = `${activeModel.toUpperCase()} (AUTO-FALLBACK)`;
+                        opt.style.background = '#1a1a1a';
+                        opt.style.color = 'white';
+                        this.modelSelector.appendChild(opt);
+                    }
+                    if (this.modelSelector.value !== activeModel) {
+                        console.log(`[Model Sync] Auto-switched dropdown selection from ${this.modelSelector.value} to ${activeModel}`);
+                        this.modelSelector.value = activeModel;
+                        this.updateCachingToggleVisibility();
+                    }
+                }
+
+                if (data.fallback_occurred) {
+                    this.showModelWarning(`⚡ High server load detected on previous model. Auto-switched active reasoning tier to ${activeModel}.`);
+                } else {
+                    this.showModelWarning(data.warning);
+                }
+
                 let cost = 0.0;
                 if (data.usage && typeof data.usage.estimated_cost === 'number') {
                     cost = data.usage.estimated_cost;

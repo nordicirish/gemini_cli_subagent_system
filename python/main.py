@@ -248,32 +248,75 @@ def main():
                         pass
 
             payload_to_send = [*chart_parts, current_message] if chart_parts else current_message
+            MODEL_FALLBACK_CASCADE = [
+                "gemini-3.7-flash",
+                "gemini-3.5-flash",
+                "gemini-3.1-pro-preview",
+                "gemini-2.5-pro",
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
+                "gemini-1.5-flash"
+            ]
+
             try:
                 response = chat.send_message(payload_to_send)
             except Exception as exc:
                 from google.genai.errors import APIError
-                if isinstance(exc, APIError):
-                    framework.log(f"[Emergency Failover] APIError encountered on primary orchestrator ({exc}). Redirecting request to gemini-3.7-flash...")
-                    orchestrator_model = "gemini-3.7-flash"
-                    sys_instruction = framework._get_sys_instruction(terminal_instruction)
-                    chat = framework.client.chats.create(
-                        model=orchestrator_model,
-                        config=agent_framework.types.GenerateContentConfig(
-                            system_instruction=sys_instruction,
-                            temperature=1.0,
-                            tools=terminal_tools,
-                            automatic_function_calling={"disable": True},
-                            safety_settings=[
-                                agent_framework.types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
-                                agent_framework.types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),
-                                agent_framework.types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT",  threshold="BLOCK_NONE"),
-                                agent_framework.types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT",  threshold="BLOCK_NONE"),
-                            ]
-                        ),
-                    )
-                    active_model_str = f"[ACTIVE_MODEL]: {orchestrator_model}\n"
-                    current_message = f"{active_model_str}[USER_QUERY]: {user_input}"
-                    response = chat.send_message(current_message)
+                exc_str = str(exc).upper()
+                is_transient = (
+                    isinstance(exc, APIError) or
+                    "503" in exc_str or "UNAVAILABLE" in exc_str or
+                    "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str or
+                    "500" in exc_str or "502" in exc_str or "504" in exc_str or
+                    "404" in exc_str or "NOT_FOUND" in exc_str
+                )
+                if is_transient:
+                    current_idx = -1
+                    for idx, m_cand in enumerate(MODEL_FALLBACK_CASCADE):
+                        if m_cand == orchestrator_model:
+                            current_idx = idx
+                            break
+                    if current_idx != -1:
+                        candidates = MODEL_FALLBACK_CASCADE[current_idx + 1:] + MODEL_FALLBACK_CASCADE[:current_idx]
+                    else:
+                        candidates = [m for m in MODEL_FALLBACK_CASCADE if m != orchestrator_model]
+
+                    recovered = False
+                    last_exc = exc
+                    for fallback_model in candidates:
+                        framework.log(f"[Cascading Failover] Model {orchestrator_model} failed ({exc}). Auto-falling back to next model: {fallback_model}...")
+                        try:
+                            orchestrator_model = fallback_model
+                            sys_instruction = framework._get_sys_instruction(terminal_instruction)
+                            chat = framework.client.chats.create(
+                                model=orchestrator_model,
+                                config=agent_framework.types.GenerateContentConfig(
+                                    system_instruction=sys_instruction,
+                                    temperature=1.0,
+                                    tools=terminal_tools,
+                                    automatic_function_calling={"disable": True},
+                                    safety_settings=[
+                                        agent_framework.types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
+                                        agent_framework.types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),
+                                        agent_framework.types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT",  threshold="BLOCK_NONE"),
+                                        agent_framework.types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT",  threshold="BLOCK_NONE"),
+                                    ]
+                                ),
+                            )
+                            active_model_str = f"[ACTIVE_MODEL]: {orchestrator_model}\n"
+                            current_message = f"{active_model_str}[USER_QUERY]: {user_input}"
+                            failover_payload = [*chart_parts, current_message] if chart_parts else current_message
+                            response = chat.send_message(failover_payload)
+                            framework.log(f"[Cascading Failover] Successfully recovered on {orchestrator_model}!")
+                            recovered = True
+                            break
+                        except Exception as fb_exc:
+                            framework.log(f"[Cascading Failover] Fallback to {fallback_model} failed ({fb_exc}). Continuing cascade...")
+                            last_exc = fb_exc
+                            continue
+
+                    if not recovered:
+                        raise last_exc
                 else:
                     raise exc
 
