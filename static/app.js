@@ -891,9 +891,12 @@ function getCurrentCash() {
     return cashInput ? parseFloat(cashInput.value) || 0 : 0;
 }
 
+let isSavingPortfolio = false;
+
 async function savePortfolio(portfolioArr) {
+    if (isSavingPortfolio) return;
+    isSavingPortfolio = true;
     const btn = dSavePortfolioBtn;
-    const originalText = btn ? btn.innerHTML : "SYNC";
     if (btn) {
         btn.innerHTML = "WAIT...";
         btn.disabled = true;
@@ -920,15 +923,19 @@ async function savePortfolio(portfolioArr) {
             updatePortfolioTotals();
             // Trigger an immediate background poll to update the main dashboard table
             pollData();
+        } else {
+            if (btn) btn.innerHTML = "SYNC ❌";
         }
     } catch (e) { 
         console.error("Portfolio update failed", e); 
+        if (btn) btn.innerHTML = "SYNC ❌";
     } finally {
+        isSavingPortfolio = false;
         if (btn) {
             setTimeout(() => {
-                btn.innerHTML = originalText;
+                btn.innerHTML = "SYNC";
                 btn.disabled = false;
-            }, 1200);
+            }, 1000);
         }
     }
 }
