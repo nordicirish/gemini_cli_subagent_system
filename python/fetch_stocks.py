@@ -1819,9 +1819,13 @@ def get_previous_close(symbol):
         r = safe_yf_get(url, timeout=2)
         data = r.json()
         result = data['chart']['result'][0]
-        q = result['indicators']['quote'][0]
+        meta = result.get('meta', {})
+        prev_c = meta.get('chartPreviousClose') or meta.get('previousClose') or meta.get('regularMarketPreviousClose')
+        if prev_c and float(prev_c) > 0:
+            return float(prev_c)
+        q = result.get('indicators', {}).get('quote', [{}])[0]
         closes = q.get('close', [])
-        valid = [c for c in closes if c is not None]
+        valid = [c for c in closes if c is not None and float(c) > 0]
         if len(valid) >= 2:
             return float(valid[-2])
     except:
@@ -2408,27 +2412,11 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         elif status in ("AFTER-HOURS", "CLOSED") and (post_price is None or post_price == 0):
             post_price = price
 
-        # Override with Finnhub real-time quote if available (eliminates Yahoo delayed pricing).
-        # Guard: skip during PRE-MARKET — Finnhub /quote returns the regular-session close price
-        # (field 'c'), not the pre-market price. Overwriting here would clobber the session-aware
-        # pre_price already set by Yahoo batch/chart data above.
-        if USE_FINNHUB and FINNHUB_API_KEY and status != 'PRE-MARKET':
-            try:
-                f_url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_API_KEY}"
-                res = session.get(f_url, timeout=2)
-                if res.status_code == 200:
-                    f_data = res.json()
-                    f_c = f_data.get('c')
-                    f_o = f_data.get('o')
-                    f_pc = f_data.get('pc')
-                    if f_c and float(f_c) > 0:
-                        price = float(f_c)
-                    if f_o and float(f_o) > 0:
-                        reg_open = float(f_o)
-                    if f_pc and float(f_pc) > 0:
-                        batch_prev_close = float(f_pc)
-            except Exception as fe:
-                pass
+        # Fallback to Finnhub quote only if price is missing
+        if price == 0 and USE_FINNHUB and FINNHUB_API_KEY and status != 'PRE-MARKET':
+            fh_c, fh_pc = get_finnhub_quote(symbol)
+            if fh_c and fh_c > 0:
+                price = fh_c
 
         reg_close = 0.0
         if status == "PRE-MARKET":
@@ -2450,13 +2438,17 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         else:
             if batch_prev_close and float(batch_prev_close) > 0:
                 reg_close = float(batch_prev_close)
-            elif techs.get("Last_Reg_Close", 0.0) > 0:
-                reg_close = float(techs.get("Last_Reg_Close", 0.0))
             elif hasattr(t_obj, 'fast_info'):
                 try:
                     reg_close = float(getattr(t_obj.fast_info, 'regular_market_previous_close', None) or getattr(t_obj.fast_info, 'previous_close', 0.0))
                 except:
                     pass
+            elif techs.get("Last_Reg_Close", 0.0) > 0:
+                reg_close = float(techs.get("Last_Reg_Close", 0.0))
+            else:
+                alt_pc = get_previous_close(symbol)
+                if alt_pc and float(alt_pc) > 0:
+                    reg_close = float(alt_pc)
 
         if reg_close > 0:
             cache.regular_close[symbol] = reg_close

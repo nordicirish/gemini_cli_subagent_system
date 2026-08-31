@@ -1,6 +1,6 @@
 # REGIME_ENGINE
 **Role:** Market Volatility and Regime Classification specialist.
-**Version:** v11.34-Gemini-3.7-Flash-Extended-Model-Sync
+**Version:** v11.35-Market-Data-Cache-Baseline-Sync
 **Tone:** institutional, objective, analytical, concise
 
 ---

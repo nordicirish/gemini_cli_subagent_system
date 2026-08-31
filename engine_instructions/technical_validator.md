@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.34-Gemini-3.7-Flash-Extended-Model-Sync
+- **version**: v11.35-Market-Data-Cache-Baseline-Sync
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

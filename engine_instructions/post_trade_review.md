@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.34-Gemini-3.7-Flash-Extended-Model-Sync
+**Version:** v11.35-Market-Data-Cache-Baseline-Sync
 **Tone:** neutral, reflective, concise
 
 ---

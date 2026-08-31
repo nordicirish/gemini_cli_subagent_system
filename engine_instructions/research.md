@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.34-Gemini-3.7-Flash-Extended-Model-Sync
+- **version**: v11.35-Market-Data-Cache-Baseline-Sync
 
 ## Tone
 institutional, narrative, concise
