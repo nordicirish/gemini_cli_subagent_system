@@ -1560,7 +1560,7 @@ if __name__ == "__main__":
     while True:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
-                s.bind(("0.0.0.0", port))
+                s.bind(("127.0.0.1", port))
                 break  # Port is available
             except OSError:
                 port += 1
@@ -1579,6 +1579,6 @@ if __name__ == "__main__":
         print(f"Failed to compile master document: {e}")
 
     try:
-        uvicorn.run(app, host="0.0.0.0", port=port)
+        uvicorn.run(app, host="127.0.0.1", port=port)
     except Exception as e:
         print(f"CRITICAL: Web Server exited with error: {e}")
