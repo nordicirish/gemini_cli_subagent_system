@@ -252,6 +252,36 @@
 .modern-message.ai ul, .modern-message.ai ol { margin-bottom: 1.2em; padding-left: 1.5em; }
 .modern-message.ai li { margin-bottom: 0.4em; }
 .modern-message.ai strong { color: var(--accent-blue); font-weight: 600; }
+.modern-message.ai a,
+.modern-message a,
+a {
+    color: #58a6ff;
+    text-decoration: underline;
+    text-decoration-color: rgba(88, 166, 255, 0.5);
+    text-underline-offset: 3px;
+    font-weight: 500;
+    transition: color 0.15s ease, text-decoration-color 0.15s ease, background 0.15s ease;
+}
+.modern-message.ai a:visited,
+.modern-message a:visited,
+a:visited {
+    color: #a5d6ff;
+}
+.modern-message.ai a:hover,
+.modern-message a:hover,
+a:hover,
+a:focus {
+    color: #79c0ff;
+    text-decoration-color: #79c0ff;
+    background: rgba(88, 166, 255, 0.12);
+    border-radius: 3px;
+    text-shadow: 0 0 8px rgba(88, 166, 255, 0.35);
+}
+.modern-message.ai a:active,
+.modern-message a:active,
+a:active {
+    color: #388bfd;
+}
 .modern-message.user { 
     align-self: flex-end; 
     max-width: 85%;

@@ -47,6 +47,32 @@ body {
     line-height: 1.5;
 }
 
+/* Accessible High-Legibility Links on Dark Background */
+a, a:link {
+    color: var(--accent, #58a6ff);
+    text-decoration: underline;
+    text-decoration-color: rgba(88, 166, 255, 0.45);
+    text-underline-offset: 3px;
+    font-weight: 500;
+    transition: color 0.15s ease, text-decoration-color 0.15s ease, background 0.15s ease;
+}
+
+a:visited {
+    color: #a5d6ff;
+}
+
+a:hover, a:focus {
+    color: #79c0ff;
+    text-decoration-color: #79c0ff;
+    background: rgba(88, 166, 255, 0.12);
+    border-radius: 3px;
+    text-shadow: 0 0 8px rgba(88, 166, 255, 0.35);
+}
+
+a:active {
+    color: #388bfd;
+}
+
 /* Ambient background gradients */
 body::before {
     content: '';
