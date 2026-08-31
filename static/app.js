@@ -788,7 +788,7 @@ init();
 
 // Portfolio Logic
 async function fetchPortfolio() {
-    if (document.activeElement && document.activeElement.closest('.manager-table')) return;
+    if (document.activeElement && (document.activeElement.closest('.manager-table') || document.activeElement.classList.contains('portfolio-input'))) return;
     try {
         const res = await fetch(`${API_BASE}/basket`);
         const data = await res.json();
@@ -838,8 +838,8 @@ function renderPortfolio(data) {
         html += `
             <tr data-index="${index}" class="portfolio-item-row">
                 <td style="color: var(--accent); font-weight: 700; font-size: 0.8rem;">${item.ticker}</td>
-                <td><input type="number" class="portfolio-input" data-key="shares" value="${item.shares || 0}" oninput="updatePortfolioTotals()"></td>
-                <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${item.wac || 0}" oninput="updatePortfolioTotals()"></td>
+                <td><input type="number" class="portfolio-input" data-key="shares" value="${item.shares || 0}" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
+                <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${item.wac || 0}" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
                 <td><button class="delete-btn" onclick="deleteFromPortfolio(${index})">&times;</button></td>
             </tr>
         `;
@@ -850,7 +850,7 @@ function renderPortfolio(data) {
     html += `
         <tr class="cash-row" style="background: rgba(0, 255, 148, 0.05);">
             <td style="color: var(--green); font-weight: 700; font-size: 0.75rem;">CASH (€)</td>
-            <td><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cash}" style="color: var(--green);" oninput="updatePortfolioTotals()"></td>
+            <td><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cash}" style="color: var(--green);" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
             <td colspan="2" id="cash-val-usd" style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">$${cashUsd}</td>
         </tr>
         <tr class="total-row" style="background: rgba(88, 166, 255, 0.08);">
@@ -878,7 +878,7 @@ function getCurrentPortfolio() {
     const portfolio = [];
     rows.forEach(row => {
         portfolio.push({
-            ticker: row.cells[0].textContent,
+            ticker: (row.cells[0].textContent || '').trim().toUpperCase(),
             shares: parseFloat(row.querySelector('[data-key="shares"]').value) || 0,
             wac: parseFloat(row.querySelector('[data-key="wac"]').value) || 0
         });
@@ -890,18 +890,22 @@ function getCurrentCash() {
     const cashInput = document.getElementById('cash-input-eur');
     return cashInput ? parseFloat(cashInput.value) || 0 : 0;
 }
+
 async function savePortfolio(portfolioArr) {
     const btn = dSavePortfolioBtn;
-    const originalText = btn.innerHTML;
-    btn.innerHTML = "WAIT...";
-    btn.disabled = true;
+    const originalText = btn ? btn.innerHTML : "SYNC";
+    if (btn) {
+        btn.innerHTML = "WAIT...";
+        btn.disabled = true;
+    }
     try {
         const pArray = portfolioArr || getCurrentPortfolio();
         const cVal = getCurrentCash();
+        const rate = currentEurUsdRate || 1.08;
         const payload = {
             portfolio: pArray,
             unallocated_cash_eur: cVal,
-            unallocated_cash_usd: parseFloat((cVal * currentEurUsdRate).toFixed(2))
+            unallocated_cash_usd: parseFloat((cVal * rate).toFixed(2))
         };
         const res = await fetch(`${API_BASE}/basket`, {
             method: 'POST',
@@ -909,17 +913,23 @@ async function savePortfolio(portfolioArr) {
             body: JSON.stringify(payload)
         });
         if (res.ok) {
-            btn.innerHTML = "SYNC ✅";
-            showFeedback(btn, "✅ Synced!", "Portfolio successfully updated! (Table refreshing...)");
-            await fetchPortfolio();
-            pollData(); // Force immediate refresh
+            if (btn) {
+                btn.innerHTML = "SYNC ✅";
+                showFeedback(btn, "✅ Synced!", "Portfolio successfully updated!");
+            }
+            updatePortfolioTotals();
+            // Trigger an immediate background poll to update the main dashboard table
+            pollData();
         }
-    } catch (e) { console.error("Portfolio update failed", e); }
-    finally {
-        setTimeout(() => {
-            btn.innerHTML = originalText;
-            btn.disabled = false;
-        }, 1500);
+    } catch (e) { 
+        console.error("Portfolio update failed", e); 
+    } finally {
+        if (btn) {
+            setTimeout(() => {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }, 1200);
+        }
     }
 }
 

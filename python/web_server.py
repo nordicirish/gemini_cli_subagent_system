@@ -1230,14 +1230,34 @@ def save_macro(req: MacroRequest):
 def get_basket():
     try:
         if os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r") as f:
+            with open("context/ssot.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
-                ms = data.get("mutable_state", data)
-                state_ctx = ms.get("state_context", {})
-                raw_basket = ms.get("portfolio_snapshot", [])
-                portfolio = [{"ticker": i["ticker"], "shares": i.get("shares", 0), "wac": i.get("wac", 0)} for i in raw_basket]
-                cash = ms.get("unallocated_cash_eur", state_ctx.get("unallocated_cash_eur", 0.0))
-                cash_usd = ms.get("unallocated_cash_usd", state_ctx.get("unallocated_cash_usd", 0.0))
+                ms = data.get("mutable_state", {})
+                ep = data.get("EXECUTION_PAYLOAD", {})
+                state_ctx = ms.get("state_context", ep.get("state_context", data.get("state_context", {})))
+                
+                raw_basket = (
+                    ms.get("portfolio_snapshot") or
+                    data.get("portfolio_snapshot") or
+                    ep.get("portfolio_snapshot") or
+                    []
+                )
+                portfolio = [
+                    {"ticker": i["ticker"], "shares": float(i.get("shares", 0)), "wac": float(i.get("wac", 0))} 
+                    for i in raw_basket if isinstance(i, dict) and i.get("ticker")
+                ]
+                cash = (
+                    ms.get("unallocated_cash_eur") if ms.get("unallocated_cash_eur") is not None else
+                    data.get("unallocated_cash_eur") if data.get("unallocated_cash_eur") is not None else
+                    ep.get("unallocated_cash_eur") if ep.get("unallocated_cash_eur") is not None else
+                    state_ctx.get("unallocated_cash_eur", 0.0)
+                )
+                cash_usd = (
+                    ms.get("unallocated_cash_usd") if ms.get("unallocated_cash_usd") is not None else
+                    data.get("unallocated_cash_usd") if data.get("unallocated_cash_usd") is not None else
+                    ep.get("unallocated_cash_usd") if ep.get("unallocated_cash_usd") is not None else
+                    state_ctx.get("unallocated_cash_usd", 0.0)
+                )
                 import fetch_stocks
                 rate = fetch_stocks.cache.prices.get("EURUSD=X", 1.08)
                 return {
@@ -1263,7 +1283,7 @@ def save_basket(req: BasketSaveRequest):
             )
 
         if os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r") as f:
+            with open("context/ssot.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
             new_snapshot = []
             for item in req.portfolio:
@@ -1272,6 +1292,8 @@ def save_basket(req: BasketSaveRequest):
             
             import fetch_stocks
             rate = fetch_stocks.cache.prices.get("EURUSD=X", 1.08)
+            usd_val = req.unallocated_cash_usd if req.unallocated_cash_usd > 0.0 else round(req.unallocated_cash_eur * rate, 2)
+            
             data["portfolio_snapshot"] = new_snapshot
             data["unallocated_cash_eur"] = req.unallocated_cash_eur
             data["unallocated_cash_usd"] = usd_val
