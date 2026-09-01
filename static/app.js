@@ -1320,7 +1320,7 @@ document.addEventListener('keydown', (e) => {
 /**
  * Open the chart modal for a given symbol.
  * Fetches 1m OHLCV bars, builds the Lightweight Charts instance,
- * and overlays EMA 9, EMA 30, EMA 200, VWAP Session Bands, and Volume (with 20 SMA).
+ * and overlays EMA 9, EMA 30, EMA 200, VWAP, VWAP Session Bands, and Volume (with 20 SMA).
  */
 async function openChartModal(symbol) {
     if (!dChartModalOverlay || !dChartContainer || typeof LightweightCharts === 'undefined') {
@@ -1467,10 +1467,9 @@ async function openChartModal(symbol) {
         const warmupLen = warmupCloses.length;
 
         function computeEMA(allC, period) {
-            if (allC.length === 0) return [];
+            if (!allC || allC.length === 0) return [];
             const k = 2 / (period + 1);
-            const seedLen = Math.min(period, allC.length);
-            let ema = allC.slice(0, seedLen).reduce((s, v) => s + v, 0) / seedLen;
+            let ema = allC[0];
             const result = [ema];
             for (let i = 1; i < allC.length; i++) {
                 ema = allC[i] * k + ema * (1 - k);
@@ -1559,22 +1558,33 @@ async function openChartModal(symbol) {
 
         const { centerList, upperList, lowerList } = computeVWAPBands(bars);
 
-        // Upper VWAP Band (Green #089981)
+        // Center VWAP Baseline (Orange #ff9800)
+        const vwapCenterSeries = chart.addLineSeries({
+            color: '#ff9800',
+            lineWidth: 1.5,
+            lineStyle: LightweightCharts.LineStyle.Solid,
+            priceLineVisible: false,
+            lastValueVisible: true,
+            crosshairMarkerVisible: true,
+        });
+        vwapCenterSeries.setData(centerList);
+
+        // Upper VWAP Band (Green #089981 dashed)
         const vwapUpperSeries = chart.addLineSeries({
             color: '#089981',
             lineWidth: 1,
-            lineStyle: LightweightCharts.LineStyle.Solid,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
             priceLineVisible: false,
             lastValueVisible: false,
             crosshairMarkerVisible: false,
         });
         vwapUpperSeries.setData(upperList);
 
-        // Lower VWAP Band (Green #089981)
+        // Lower VWAP Band (Green #089981 dashed)
         const vwapLowerSeries = chart.addLineSeries({
             color: '#089981',
             lineWidth: 1,
-            lineStyle: LightweightCharts.LineStyle.Solid,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
             priceLineVisible: false,
             lastValueVisible: false,
             crosshairMarkerVisible: false,
@@ -1887,10 +1897,9 @@ async function captureTargetChartScreenshots(targetTickers = null) {
             const warmupLen = warmupCloses.length;
 
             function computeEMA(allC, period) {
-                if (allC.length === 0) return [];
+                if (!allC || allC.length === 0) return [];
                 const k = 2 / (period + 1);
-                const seedLen = Math.min(period, allC.length);
-                let ema = allC.slice(0, seedLen).reduce((s, v) => s + v, 0) / seedLen;
+                let ema = allC[0];
                 const result = [ema];
                 for (let i = 1; i < allC.length; i++) {
                     ema = allC[i] * k + ema * (1 - k);
@@ -1947,10 +1956,36 @@ async function captureTargetChartScreenshots(targetTickers = null) {
                 lowerList.push({ time: b.time, value: Math.max(0, v - 1.25 * stdev) });
             }
 
-            const vwapUpperSeries = chart.addLineSeries({ color: '#089981', lineWidth: 1, priceLineVisible: false });
+            const centerList = bars.map((b, i) => ({ time: b.time, value: vwapList[i] }));
+
+            const vwapCenterSeries = chart.addLineSeries({
+                color: '#ff9800',
+                lineWidth: 1.5,
+                lineStyle: LightweightCharts.LineStyle.Solid,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+            });
+            vwapCenterSeries.setData(centerList);
+
+            const vwapUpperSeries = chart.addLineSeries({
+                color: '#089981',
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+            });
             vwapUpperSeries.setData(upperList);
 
-            const vwapLowerSeries = chart.addLineSeries({ color: '#089981', lineWidth: 1, priceLineVisible: false });
+            const vwapLowerSeries = chart.addLineSeries({
+                color: '#089981',
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+            });
             vwapLowerSeries.setData(lowerList);
 
             chart.timeScale().fitContent();

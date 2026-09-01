@@ -851,8 +851,8 @@ async def get_intraday_data(symbol: str):
     try:
         sym = symbol.strip().upper()
         ticker_obj = yf.Ticker(sym)
-        # Fetch 5 days of 1m data — yfinance max is 7 days for 1m interval
-        df = ticker_obj.history(interval="1m", period="5d", prepost=False, auto_adjust=True)
+        # Fetch 5 days of 1m data with extended hours (pre-market and post-market)
+        df = ticker_obj.history(interval="1m", period="5d", prepost=True, auto_adjust=True)
         if df is None or df.empty:
             return JSONResponse({"bars": [], "warmup_closes": [], "symbol": sym})
 
