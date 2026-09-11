@@ -401,6 +401,11 @@ function renderTable(tickers, state) {
                 volume: 0,
                 atr_percent: 0,
                 rsi: 50.0,
+                macd: 0.0,
+                macd_signal: 0.0,
+                macd_hist: 0.0,
+                macd_slope: 'EXPANDING_POSITIVE',
+                macd_status: 'NEUTRAL',
                 vwap: p.wac || 0,
                 trend: 'FLAT',
                 net_gex_total: 0,
@@ -452,6 +457,34 @@ function renderTable(tickers, state) {
         const openColor = row.change_from_open_pct > 0 ? 'text-green' : row.change_from_open_pct < 0 ? 'text-red' : 'text-white';
         // Note: gapColor is already declared at line 378
 
+        // MACD Indicator
+        let macdHtml = '';
+        const macdHist = (row.macd_hist !== undefined && row.macd_hist !== null) ? Number(row.macd_hist) : null;
+        const macdVal = (row.macd !== undefined && row.macd !== null) ? Number(row.macd) : null;
+        const macdSig = (row.macd_signal !== undefined && row.macd_signal !== null) ? Number(row.macd_signal) : null;
+        const macdSlope = row.macd_slope || '';
+        const macdStat = (row.macd_status || '').toUpperCase();
+
+        let macdClass = 'neutral';
+        let macdLabel = '— Neutral';
+
+        if (macdStat === 'BULLISH' || (!macdStat && macdHist !== null && macdHist > 0.001)) {
+            macdClass = 'bullish';
+            macdLabel = '▲ Bull';
+        } else if (macdStat === 'BEARISH' || (!macdStat && macdHist !== null && macdHist < -0.001)) {
+            macdClass = 'bearish';
+            macdLabel = '▼ Bear';
+        } else {
+            macdClass = 'neutral';
+            macdLabel = '— Neutral';
+        }
+
+        const tooltip = (macdVal !== null && macdSig !== null && macdHist !== null)
+            ? `MACD: ${macdVal.toFixed(2)} | Signal: ${macdSig.toFixed(2)} | Hist: ${macdHist > 0 ? '+' : ''}${macdHist.toFixed(2)}${macdSlope ? ' (' + macdSlope.replace(/_/g, ' ') + ')' : ''}`
+            : 'MACD: Calculating...';
+
+        macdHtml = `<span class="macd-tag ${macdClass}" title="${tooltip}">${macdLabel}</span>`;
+
         const scoutIndicator = row._isScout ? `<span class="scout-dot"></span>` : '';
         return `
             <tr class="chart-clickable" onclick="openChartModal('${sym}')" title="Click to view 1m TradingView chart">
@@ -466,6 +499,7 @@ function renderTable(tickers, state) {
                 <td>${row.atr_percent.toFixed(2)}%</td>
                 <td class="${rsiColor}">${row.rsi.toFixed(1)}</td>
                 <td>${row.vwap > 0 ? row.vwap.toFixed(2) : '—'}</td>
+                <td>${macdHtml}</td>
                 <td>${trendHtml}</td>
                 <td>${(() => {
                     const gexVal = row.net_gex_total || 0;
@@ -492,7 +526,7 @@ function renderTable(tickers, state) {
 
     const renderHeader = (label, cls = '') => `
         <tr class="table-section-header ${cls}">
-            <td colspan="11">${label}</td>
+            <td colspan="12">${label}</td>
         </tr>
     `;
 

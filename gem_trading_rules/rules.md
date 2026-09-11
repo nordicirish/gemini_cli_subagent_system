@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v11.38-TradingView-Lightweight-Charts-Multimodal-Sync
+**Version:** v11.44-MACD-Dashboard-UI-Indicator-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 - **Execution:** When proposing/directing mandatory scale-outs or risk-reduction trims in the EXECUTION_PAYLOAD, the Execution Engine MUST NOT suggest monolithic block limit orders at theoretical ATR peaks if LONG_GAMMA dampening or visual chart resistance is active.
 ---
@@ -2102,6 +2102,13 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **RSI Calibration:** Due to the shift from a 14-day to a 9-day RSI, the oscillator is significantly more sensitive. All legacy RSI thresholds (MANDATE_38, MANDATE_40, ENH_110) must be evaluated with a wider tolerance: consider RSI > 80 as standard overbought and RSI > 85 as extreme overbought.
   - **Momentum Confirmation:** Use MACD Histogram and MFI > 70 to confirm breakout validity. A high RSI (overbought) combined with a rising MACD Histogram and MFI > 70 indicates a sustainable high-beta momentum trend, not an immediate mean-reversion short.
   - **Volatility Expansion:** Use Bollinger Band %B. A %B > 0.8 with expanding bands validates continuation; a %B > 1.0 with shrinking MFI indicates exhaustion.
+  - **MACD Telemetry Schema:** The dashboard JSON output (`tickers` array and `SSoT_JSON.tickers` payload) exposes:
+    - `macd`: FLOAT (12/26 EMA spread)
+    - `macd_signal`: FLOAT (9-period signal line)
+    - `macd_hist`: FLOAT (MACD minus Signal)
+    - `macd_slope`: STRING (`EXPANDING_POSITIVE`, `CONTRACTING_POSITIVE`, `EXPANDING_NEGATIVE`, `CONTRACTING_NEGATIVE`)
+    - `macd_status`: STRING (`BULLISH`, `BEARISH`, `NEUTRAL`)
+  - **Dashboard MACD Visual Indicator:** The dashboard table renders a dedicated `MACD` column with visual status tags (`▲ Bull`, `▼ Bear`, `— Neutral`) and detailed momentum telemetry tooltips.
 - **Justification:** High-beta momentum assets require multi-dimensional confirmation (price, volume, momentum) to prevent premature liquidation on standard RSI overbought signals.
 ---
 

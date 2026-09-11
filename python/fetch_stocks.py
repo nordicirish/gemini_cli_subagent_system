@@ -2241,6 +2241,11 @@ def update_history_and_technicals(symbol, t_obj):
             "SMA_50": None,
             "SMA_200": None,
             "RSI": 50.0,
+            "MACD": 0.0,
+            "MACD_Signal": 0.0,
+            "MACD_Hist": 0.0,
+            "MACD_Slope": "EXPANDING_POSITIVE",
+            "MACD_Status": "NEUTRAL",
             "ATR_Pct": 0.0,
             "ATR": 0.0,
             "Trend_Score": 0,
@@ -2286,7 +2291,20 @@ def update_history_and_technicals(symbol, t_obj):
             signal_line = macd_line.ewm(span=9, adjust=False).mean()
             macd_hist = macd_line - signal_line
             macd_val = _last(macd_line)
+            macd_signal_val = _last(signal_line)
             macd_hist_val = _last(macd_hist)
+
+            # Compute 4-State Histogram Slope (macd_slope)
+            if len(macd_hist) >= 2:
+                prev_hist = float(macd_hist.iloc[-2]) if not (math.isnan(float(macd_hist.iloc[-2])) or math.isinf(float(macd_hist.iloc[-2]))) else 0.0
+                if macd_hist_val >= 0:
+                    macd_slope_val = "EXPANDING_POSITIVE" if macd_hist_val >= prev_hist else "CONTRACTING_POSITIVE"
+                else:
+                    macd_slope_val = "EXPANDING_NEGATIVE" if macd_hist_val <= prev_hist else "CONTRACTING_NEGATIVE"
+            else:
+                macd_slope_val = "EXPANDING_POSITIVE" if macd_hist_val >= 0 else "EXPANDING_NEGATIVE"
+
+            macd_status_val = "BULLISH" if macd_hist_val > 0.001 else ("BEARISH" if macd_hist_val < -0.001 else "NEUTRAL")
 
             # --- Bollinger Bands (20-day, 2 std) ---
             if len(close) >= 20:
@@ -2387,7 +2405,10 @@ def update_history_and_technicals(symbol, t_obj):
                 "SMA_200": sma_200,
                 "RSI": to_float(rsi_val),
                 "MACD": to_float(macd_val),
+                "MACD_Signal": to_float(macd_signal_val),
                 "MACD_Hist": to_float(macd_hist_val),
+                "MACD_Slope": macd_slope_val,
+                "MACD_Status": ("BULLISH" if macd_hist_val > 0.001 else "BEARISH" if macd_hist_val < -0.001 else "NEUTRAL"),
                 "BB_Upper": to_float(bb_upper_val),
                 "BB_Lower": to_float(bb_lower_val),
                 "BB_Pct": to_float(bb_pct_val),
@@ -3251,6 +3272,11 @@ def run_daemon():
                         "atr_percent": 0.0,
                         "atr": 0.0,
                         "rsi": 50.0,
+                        "macd": 0.0,
+                        "macd_signal": 0.0,
+                        "macd_hist": 0.0,
+                        "macd_slope": "EXPANDING_POSITIVE",
+                        "macd_status": "NEUTRAL",
                         "vwap": 0.0,
                         "distance_from_vwap": 0.0,
                         "trend_score": 0,
@@ -3423,6 +3449,11 @@ def run_daemon():
                     "atr_percent": float(atr_val),
                     "atr": float(techs.get("ATR", 0)),
                     "rsi": float(rsi_raw),
+                    "macd": round(float(techs.get("MACD", 0.0) or 0.0), 4),
+                    "macd_signal": round(float(techs.get("MACD_Signal", 0.0) or 0.0), 4),
+                    "macd_hist": round(float(techs.get("MACD_Hist", 0.0) or 0.0), 4),
+                    "macd_slope": str(techs.get("MACD_Slope", "EXPANDING_POSITIVE")),
+                    "macd_status": str(techs.get("MACD_Status", "NEUTRAL")),
                     "vwap": float(vwap),
                     "distance_from_vwap": float(distance_from_vwap(sym)),
                     # trend_score thresholds: gem_trading_rules/rules.md > TREND_SCORE_UP_THRESHOLD (3) / TREND_SCORE_DOWN_THRESHOLD (-3)

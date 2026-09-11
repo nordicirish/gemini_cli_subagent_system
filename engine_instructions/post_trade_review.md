@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.38-TradingView-Lightweight-Charts-Multimodal-Sync
+**Version:** v11.44-MACD-Dashboard-UI-Indicator-Sync
 **Tone:** neutral, reflective, concise
 
 ---

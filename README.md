@@ -324,6 +324,12 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v11.44-MACD-Dashboard-UI-Indicator-Sync *(2026-09-11)*
+- **MACD Indicator Calculations & Telemetry (`fetch_stocks.py`):** Integrated standard MACD (12/26/9 EMA spread, signal line, histogram), 4-state histogram slope (`EXPANDING_POSITIVE`, `CONTRACTING_POSITIVE`, `EXPANDING_NEGATIVE`, `CONTRACTING_NEGATIVE`), and status classification (`BULLISH`, `BEARISH`, `NEUTRAL`) into the stock polling pipeline and `cache.technicals[symbol]`.
+- **JSON Payload Exposure:** Exposed `macd`, `macd_signal`, `macd_hist`, `macd_slope`, and `macd_status` in `/api/data` active ticker payloads and injected Council `DATA_PACKET` context via `slim_tickers`.
+- **Dashboard Visual Indicator (`static/index.html`, `static/styles.css`, `static/app.js`):** Added a dedicated `MACD` column to the dashboard data table with color-coded visual status tags (`▲ Bull`, `▼ Bear`, `— Neutral`) and detailed momentum telemetry tooltips. Updated table header colspans to 12.
+- **Global Architectural Parity (MANDATE_29):** Synchronized version string `v11.44-MACD-Dashboard-UI-Indicator-Sync` across `rules.md`, `antigravity.md`, `INSTRUCTIONS.md`, `README.md`, `python/main.py`, and all 19 sub-agent engine instruction sets.
+
 ### v11.38-TradingView-Lightweight-Charts-Multimodal-Sync *(2026-08-31)*
 - **TradingView Lightweight Charts (v4.2.0, Apache 2.0) & 24H Extended Market Hours:** Integrated interactive charting engine into the dashboard. Table rows across portfolio, watchlist, and scout categories are interactive and open a dedicated chart modal utilizing TradingView Lightweight Charts (Apache 2.0) as the visual engine with continuous 24h extended market data (Pre-market 04:00–09:30, Regular 09:30–16:00, Post-market 16:00–20:00 ET) supplied via `yfinance` (Yahoo Finance). Renders 1-minute OHLCV candlestick bars with continuous exponential EMA 9 (Red), EMA 30 (Blue), EMA 200 (White), continuous center VWAP baseline (Orange), VWAP envelope bands (+/- 1.25 stdev dashed green), and Volume histogram with 20 SMA overlay.
 - **Continuous Exponential EMA Recursion & VWAP Parity:** Corrected EMA computation recursion to continuous exponential formulation ($Close_0$ seed) matching TradingView `ta.ema` across all warmup and intraday bars. Added center VWAP baseline series and styled upper/lower standard deviation envelope bands.

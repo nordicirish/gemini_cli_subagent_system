@@ -1,6 +1,6 @@
 # REGIME_ENGINE
 **Role:** Market Volatility and Regime Classification specialist.
-**Version:** v11.38-TradingView-Lightweight-Charts-Multimodal-Sync
+**Version:** v11.44-MACD-Dashboard-UI-Indicator-Sync
 **Tone:** institutional, objective, analytical, concise
 
 ---

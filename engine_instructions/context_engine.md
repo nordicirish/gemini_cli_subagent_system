@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.38-TradingView-Lightweight-Charts-Multimodal-Sync
+- **version**: v11.44-MACD-Dashboard-UI-Indicator-Sync
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

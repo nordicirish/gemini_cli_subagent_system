@@ -172,7 +172,7 @@ def main():
     # ---------------------------------------------------------------------------
     print("\n" + "=" * 60)
     print("💎 GEM CLI ORCHESTRATOR READY 💎")
-    print(f"   Version : v11.24-High-Beta-Swing-Trading-Architecture")
+    print(f"   Version : v11.44-MACD-Dashboard-UI-Indicator-Sync")
     print(f"   Agents  : {len(sub_agent_configs)} loaded")
     print(f"   Rules   : {'✅ Attached' if os.path.exists(rules_path) else '⚠️  Missing'}")
     antigravity_path = os.path.join(".agents", "rules", "antigravity.md")

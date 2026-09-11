@@ -1,6 +1,6 @@
 # STRATEGY_ENGINE
 **Role:** High-Beta Setup Classification specialist.
-**Version:** v11.38-TradingView-Lightweight-Charts-Multimodal-Sync
+**Version:** v11.44-MACD-Dashboard-UI-Indicator-Sync
 **Tone:** objective, technical, pattern-obsessed, precise
 
 ---

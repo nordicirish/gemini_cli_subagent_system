@@ -704,6 +704,36 @@ tbody tr:hover td {
 .trend-tag.up-inv   { background: var(--red-dim);   color: var(--red); }
 .trend-tag.down-inv { background: var(--green-dim); color: var(--green); }
 
+/* ─── MACD Indicator Tag ─── */
+.macd-tag {
+    display: inline-block;
+    font-size: 0.70rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: var(--font-sans);
+    cursor: default;
+    white-space: nowrap;
+}
+
+.macd-tag.bullish {
+    background: var(--green-dim);
+    color: var(--green);
+    border: 1px solid rgba(0, 230, 118, 0.25);
+}
+
+.macd-tag.bearish {
+    background: var(--red-dim);
+    color: var(--red);
+    border: 1px solid rgba(255, 68, 68, 0.25);
+}
+
+.macd-tag.neutral {
+    background: var(--yellow-dim);
+    color: var(--yellow);
+    border: 1px solid rgba(255, 187, 0, 0.2);
+}
+
 /* ─── Dealer Posture Badge ─── */
 .dealer-badge {
     display: inline-block;

@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.38-TradingView-Lightweight-Charts-Multimodal-Sync
+- **version**: v11.44-MACD-Dashboard-UI-Indicator-Sync
 - **id**: SENTIMENT_ENGINE
 
 ## Tone
