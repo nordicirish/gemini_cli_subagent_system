@@ -1324,6 +1324,18 @@ def save_basket(req: BasketSaveRequest):
                 fetch_stocks.MACRO_TICKERS = fetch_stocks._load_macro_tickers()
                 fetch_stocks.ALL_TICKERS = list(dict.fromkeys(fetch_stocks.TICKERS + fetch_stocks.MACRO_TICKERS))
                 fetch_stocks.FORCE_REFRESH = True
+
+                # Immediately update in-memory GLOBAL_STATE so the next GET /api/data instantly reflects changes
+                if isinstance(getattr(fetch_stocks, "GLOBAL_STATE", None), dict):
+                    fetch_stocks.GLOBAL_STATE["local_storage_state"] = data
+                    held_set = {item["ticker"].upper() for item in new_snapshot}
+                    watched_set = set(fetch_stocks._load_watchlist())
+                    if "tickers" in fetch_stocks.GLOBAL_STATE and isinstance(fetch_stocks.GLOBAL_STATE["tickers"], list):
+                        valid_active = held_set.union(watched_set)
+                        fetch_stocks.GLOBAL_STATE["tickers"] = [
+                            t for t in fetch_stocks.GLOBAL_STATE["tickers"]
+                            if t.get("_isScout") or t.get("ticker", "").upper() in valid_active or t.get("ticker", "").upper() in fetch_stocks.MACRO_TICKERS
+                        ]
             except Exception as se:
                 framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
                 
@@ -1416,6 +1428,8 @@ async def save_watch_list(req: Request):
             fetch_stocks.TICKERS = fetch_stocks._load_ssot_tickers()
             fetch_stocks.ALL_TICKERS = fetch_stocks.TICKERS + fetch_stocks.MACRO_TICKERS
             fetch_stocks.FORCE_REFRESH = True
+            if isinstance(getattr(fetch_stocks, "GLOBAL_STATE", None), dict):
+                fetch_stocks.GLOBAL_STATE["local_storage_state"] = data
         except Exception as se:
             framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
             

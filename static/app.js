@@ -383,7 +383,7 @@ function renderTable(tickers, state) {
             groups.held.push(t);
         } else if (userWatchlist.has(sym)) {
             groups.watchlist.push(t);
-        } else {
+        } else if (t._isScout) {
             groups.scouts.push(t);
         }
     });
@@ -821,8 +821,8 @@ async function pollData() {
 init();
 
 // Portfolio Logic
-async function fetchPortfolio() {
-    if (document.activeElement && (document.activeElement.closest('.manager-table') || document.activeElement.classList.contains('portfolio-input'))) return;
+async function fetchPortfolio(force = false) {
+    if (!force && document.activeElement && document.activeElement.classList.contains('portfolio-input')) return;
     try {
         const res = await fetch(`${API_BASE}/basket`);
         const data = await res.json();
@@ -904,6 +904,12 @@ async function addToPortfolio() {
     if (portfolio.find(i => i.ticker === ticker)) return;
     portfolio.push({ ticker, shares: 1, wac: 0 });
     dAddPortfolioTicker.value = '';
+    renderPortfolio({
+        portfolio: portfolio,
+        unallocated_cash_eur: getCurrentCash(),
+        eurusd_rate: currentEurUsdRate
+    });
+    updatePortfolioTotals();
     await savePortfolio(portfolio);
 }
 
@@ -926,9 +932,13 @@ function getCurrentCash() {
 }
 
 let isSavingPortfolio = false;
+let pendingPortfolioSave = null;
 
 async function savePortfolio(portfolioArr) {
-    if (isSavingPortfolio) return;
+    if (isSavingPortfolio) {
+        pendingPortfolioSave = portfolioArr || getCurrentPortfolio();
+        return;
+    }
     isSavingPortfolio = true;
     const btn = dSavePortfolioBtn;
     if (btn) {
@@ -950,13 +960,21 @@ async function savePortfolio(portfolioArr) {
             body: JSON.stringify(payload)
         });
         if (res.ok) {
+            const resData = await res.json();
             if (btn) {
                 btn.innerHTML = "SYNC ✅";
                 showFeedback(btn, "✅ Synced!", "Portfolio successfully updated!");
             }
+            if (resData && resData.portfolio) {
+                renderPortfolio({
+                    portfolio: resData.portfolio,
+                    unallocated_cash_eur: cVal,
+                    eurusd_rate: rate
+                });
+            }
             updatePortfolioTotals();
             // Trigger an immediate background poll to update the main dashboard table
-            pollData();
+            await pollData();
         } else {
             if (btn) btn.innerHTML = "SYNC ❌";
         }
@@ -971,13 +989,26 @@ async function savePortfolio(portfolioArr) {
                 btn.disabled = false;
             }, 1000);
         }
+        if (pendingPortfolioSave) {
+            const next = pendingPortfolioSave;
+            pendingPortfolioSave = null;
+            savePortfolio(next);
+        }
     }
 }
 
 async function deleteFromPortfolio(index) {
     const portfolio = getCurrentPortfolio();
-    portfolio.splice(index, 1);
-    await savePortfolio(portfolio);
+    if (index >= 0 && index < portfolio.length) {
+        portfolio.splice(index, 1);
+        renderPortfolio({
+            portfolio: portfolio,
+            unallocated_cash_eur: getCurrentCash(),
+            eurusd_rate: currentEurUsdRate
+        });
+        updatePortfolioTotals();
+        await savePortfolio(portfolio);
+    }
 }
 
 // Watchlist Logic
