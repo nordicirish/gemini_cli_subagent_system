@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.48-ENH-254-Fib-Profit-Taking-Tranches-Sync
+- **version**: v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

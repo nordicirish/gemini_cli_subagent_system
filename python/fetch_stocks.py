@@ -1503,7 +1503,8 @@ class MarketDataCache:
         self.gex_cache: dict[str, dict] = {}
         self.qualitative_grounding: dict[str, dict] = {} # Google Search Grounding Cache
         self.last_history_fetch_date: dict[str, str] = {}
-        # Daily session peak and floor tracking for daily trading Fib optimization
+        # Daily session peak, floor, and open tracking for daily trading Fib optimization
+        self.day_open: dict[str, float] = {}
         self.day_high: dict[str, float] = {}
         self.day_low: dict[str, float] = {}
 
@@ -2464,6 +2465,8 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
             pre_vol = int(quote_data.get('preMarketVolume', 0) or 0)
             post_vol = int(quote_data.get('postMarketVolume', 0) or 0)
             used_batch = True
+            if reg_open and float(reg_open) > 0:
+                cache.day_open[symbol] = float(reg_open)
             if reg_high and float(reg_high) > 0:
                 cache.day_high[symbol] = float(reg_high)
             if reg_low and float(reg_low) > 0:
@@ -2478,8 +2481,11 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
             pre_price = float(fi.pre_market_price)
         if not post_price and getattr(fi, 'post_market_price', None):
             post_price = float(fi.post_market_price)
+        fi_open = getattr(fi, 'open', None) or getattr(fi, 'regular_market_open', None)
         fi_high = getattr(fi, 'day_high', None) or getattr(fi, 'regular_market_day_high', None)
         fi_low = getattr(fi, 'day_low', None) or getattr(fi, 'regular_market_day_low', None)
+        if fi_open and float(fi_open) > 0 and symbol not in cache.day_open:
+            cache.day_open[symbol] = float(fi_open)
         if fi_high and float(fi_high) > 0 and symbol not in cache.day_high:
             cache.day_high[symbol] = float(fi_high)
         if fi_low and float(fi_low) > 0 and symbol not in cache.day_low:
@@ -2908,10 +2914,11 @@ def calculate_score(symbol):
     return score, note
 
 
-def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None) -> dict:
+def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None, open_price: float = 0.0, atr: float = 0.0, rsi: float = 50.0, rvol: float = 1.0, vwap: float = 0.0) -> dict:
     """Calculates Trend-Based Fibonacci Extension & Profit-Taking targets
-    optimized for daily trading peaks. Prioritizes daily session high/low
-    (HOD/LOD) and tight intraday expansion ratios (0.236, 0.382, 0.500, 0.618, 0.786, 1.000, 1.272, 1.618).
+    optimized for daily trading peaks per ENH_254 & ENH_255.
+    Evaluates ATR volatility ceiling confluence, 0.25% front-run limit orders,
+    and daily trading peak status.
     """
     p = float(current_price) if current_price else 0.0
     if hist_df is None and symbol:
@@ -2920,14 +2927,20 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None) -> d
     # Check if we have live daily session high/low cached
     day_h = cache.day_high.get(symbol, 0.0)
     day_l = cache.day_low.get(symbol, 0.0)
+    if open_price <= 0 and symbol:
+        open_price = cache.day_open.get(symbol, 0.0)
 
     if (hist_df is None or hist_df.empty or len(hist_df) < 2) and (day_h <= 0 or day_l <= 0) and p <= 0:
         return {
             "pA": 0.0, "pB": 0.0, "pC": 0.0,
             "impulse": 0.0,
-            "t1_100": 0.0, "t1_pct": 0.0,
-            "t2_1618": 0.0, "t2_pct": 0.0,
-            "t3_2618": 0.0, "t3_pct": 0.0,
+            "t1_100": 0.0, "t1_pct": 0.0, "t1_limit": 0.0,
+            "t2_1618": 0.0, "t2_pct": 0.0, "t2_limit": 0.0,
+            "t3_2618": 0.0, "t3_pct": 0.0, "t3_limit": 0.0,
+            "daily_peak_target": 0.0,
+            "daily_peak_atr": 0.0,
+            "daily_peak_status": "NONE",
+            "atr_confluence": False,
             "next_resistance": 0.0,
             "next_resistance_label": "None",
             "distance_to_next_pct": 0.0,
@@ -2983,16 +2996,18 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None) -> d
             p_c = p_a + (impulse * 0.382)
             impulse = p_b - p_a
 
-        # Daily Trading Peak Ratios
+        # Daily Trading Peak Ratios per ENH_254 & ENH_255
         ratio_defs = [
             (0.236, "0.236 Early Trim"),
             (0.382, "0.382 Conservative Trim"),
             (0.500, "0.500 Mid Expansion"),
             (0.618, "0.618 Golden Ratio"),
             (0.786, "0.786 Extension"),
-            (1.000, "1.000 Measured Move"),
+            (1.000, "1.000 Measured Move (T1)"),
             (1.272, "1.272 Expansion Peak"),
-            (1.618, "1.618 Golden Peak Target")
+            (1.618, "1.618 Golden Peak Target (T2)"),
+            (2.000, "2.000 Momentum Target"),
+            (2.618, "2.618 Parabolic Blow-Off (T3)")
         ]
 
         levels = []
@@ -3000,7 +3015,7 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None) -> d
         next_res_label = None
         dist_next_pct = None
 
-        # If current price is below the Daily Peak (PB), PB is the immediate resistance ceiling
+        # If current price is below the Daily Session High (PB), PB is the immediate resistance ceiling
         if p > 0 and p_b > p:
             pb_dist = round(((p_b - p) / p) * 100, 2)
             levels.append({
@@ -3032,10 +3047,48 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None) -> d
             next_res_label = str(levels[-1]["label"]) + " (Exceeded)"
             dist_next_pct = levels[-1]["distance_pct"]
 
-        # T1: Daily Peak if below PB, otherwise 0.382 / 0.500 extension
-        t1_val = round(p_b, 2) if (p > 0 and p_b > p) else round(p_c + (0.382 * impulse), 2)
-        t2_val = round(p_c + (0.618 * impulse), 2)
-        t3_val = round(p_c + (1.000 * impulse), 2)
+        # Tranches per ENH_254: T1 = 1.000, T1.272 = 1.272, T2 = 1.618, T3 = 2.618
+        t1_val = round(p_c + (1.000 * impulse), 2)
+        t1272_val = round(p_c + (1.272 * impulse), 2)
+        t2_val = round(p_c + (1.618 * impulse), 2)
+        t3_val = round(p_c + (2.618 * impulse), 2)
+
+        # Front-running limit orders per ENH_254/255: 0.25% beneath the exact level
+        t1_limit = round(t1_val * 0.9975, 2)
+        t2_limit = round(t2_val * 0.9975, 2)
+        t3_limit = round(t3_val * 0.9975, 2)
+
+        # ATR Daily Volatility Ceiling Confluence per ENH_255
+        daily_peak_atr = round(float(open_price) + (1.25 * float(atr)), 2) if (open_price > 0 and atr > 0) else 0.0
+        atr_confluence = False
+        confluent_target = None
+        if daily_peak_atr > 0:
+            for cand_val, cand_lbl in [(t1_val, "T1"), (t1272_val, "T1.272"), (t2_val, "T2")]:
+                if abs(cand_val - daily_peak_atr) / daily_peak_atr <= 0.018:
+                    atr_confluence = True
+                    confluent_target = cand_val
+                    break
+
+        # Daily Peak Target Selection
+        if atr_confluence and confluent_target:
+            daily_peak_target = confluent_target
+        elif p_b > p and p_b >= t1_val:
+            daily_peak_target = p_b
+        else:
+            daily_peak_target = t2_val
+
+        # Daily Peak Exhaustion Status per ENH_255
+        # 1. Volume exhaustion: rvol < 1.5 with RSI > 70 while >= T1
+        # 2. VWAP over-extension: price >= VWAP * 1.10 with RSI > 80
+        # 3. Upper wick rejection or price touching daily_peak_target (within 0.5%)
+        daily_peak_status = "EXPANDING"
+        if p >= t1_val:
+            if (rvol < 1.5 and rsi > 70) or (vwap > 0 and p >= vwap * 1.10 and rsi > 80) or (daily_peak_target > 0 and p >= daily_peak_target * 0.995):
+                daily_peak_status = "PEAK_EXHAUSTED"
+            elif daily_peak_target > 0 and abs(p - daily_peak_target) / daily_peak_target <= 0.018:
+                daily_peak_status = "AT_PEAK_RESISTANCE"
+        elif daily_peak_target > 0 and abs(p - daily_peak_target) / daily_peak_target <= 0.018:
+            daily_peak_status = "AT_PEAK_RESISTANCE"
 
         return {
             "pA": round(p_a, 2),
@@ -3044,10 +3097,17 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None) -> d
             "impulse": round(impulse, 2),
             "t1_100": t1_val,
             "t1_pct": round(((t1_val - p) / p) * 100, 2) if p > 0 else 0.0,
+            "t1_limit": t1_limit,
             "t2_1618": t2_val,
             "t2_pct": round(((t2_val - p) / p) * 100, 2) if p > 0 else 0.0,
+            "t2_limit": t2_limit,
             "t3_2618": t3_val,
             "t3_pct": round(((t3_val - p) / p) * 100, 2) if p > 0 else 0.0,
+            "t3_limit": t3_limit,
+            "daily_peak_target": round(daily_peak_target, 2),
+            "daily_peak_atr": round(daily_peak_atr, 2),
+            "daily_peak_status": daily_peak_status,
+            "atr_confluence": atr_confluence,
             "next_resistance": next_res if next_res is not None else 0.0,
             "next_resistance_label": next_res_label if next_res_label is not None else "None",
             "distance_to_next_pct": dist_next_pct if dist_next_pct is not None else 0.0,
@@ -3057,9 +3117,13 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None) -> d
         return {
             "pA": 0.0, "pB": 0.0, "pC": 0.0,
             "impulse": 0.0,
-            "t1_100": 0.0, "t1_pct": 0.0,
-            "t2_1618": 0.0, "t2_pct": 0.0,
-            "t3_2618": 0.0, "t3_pct": 0.0,
+            "t1_100": 0.0, "t1_pct": 0.0, "t1_limit": 0.0,
+            "t2_1618": 0.0, "t2_pct": 0.0, "t2_limit": 0.0,
+            "t3_2618": 0.0, "t3_pct": 0.0, "t3_limit": 0.0,
+            "daily_peak_target": 0.0,
+            "daily_peak_atr": 0.0,
+            "daily_peak_status": "NONE",
+            "atr_confluence": False,
             "next_resistance": 0.0,
             "next_resistance_label": "Error",
             "distance_to_next_pct": 0.0,
@@ -3690,7 +3754,14 @@ def run_daemon():
                     # Phase 6 Enhancements (Already computed inline above)
 
                     "note": note.strip(),
-                    "fib_forecast": calculate_fib_forecast(sym, p, cache.history.get(sym))
+                    "fib_forecast": calculate_fib_forecast(
+                        sym, p, cache.history.get(sym),
+                        open_price=float(cache.day_open.get(sym, 0.0) or (techs.get("open") if isinstance(techs, dict) else 0.0) or 0.0),
+                        atr=float(techs.get("ATR", 0.0) or 0.0),
+                        rsi=float(rsi_raw or 50.0),
+                        rvol=float(calculate_rvol(sym) or 1.0),
+                        vwap=float(vwap or 0.0)
+                    )
                 }
                 if is_scout:
                     item_dict["_isScout"] = True

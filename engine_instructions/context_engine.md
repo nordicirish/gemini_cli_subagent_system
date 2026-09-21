@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.48-ENH-254-Fib-Profit-Taking-Tranches-Sync
+- **version**: v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

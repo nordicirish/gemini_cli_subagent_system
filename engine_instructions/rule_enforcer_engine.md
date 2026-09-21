@@ -1,6 +1,6 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
-**Version:** v11.48-ENH-254-Fib-Profit-Taking-Tranches-Sync
+**Version:** v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
 **Description:** Active Enforcer of mandates and protocols defined in Gemini_Gem_Working_Data_Store.
 
 ---
@@ -24,13 +24,15 @@
 - **ENH_74:** Enforce ENH_74 (Noon Spike) Veto on mechanistic rebalancing distributions.
 - **ENH_98 Quarantine:** VETO any capital deployment based on PT raises/upgrades IF Dealer Posture == SHORT_GAMMA and Price < VWAP.
 - **ENH_117 Dilution Resistance Wall Veto:** VETO any accumulation recommendations in active equity offering/warrant overhang price zones unless confirming relative volume (rVol) is > 2.0 (Reference ENH_117).
-- **ENH_245 Veto:** VETO new capital deployment when broad index (SPY) is in SHORT_GAMMA, unless the asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration) (Reference ENH_245).
+- **MANDATE_48 Index Short Gamma Lock Enforce:** When broad market index markers (SPY) exhibit negative Net GEX architectures (SHORT_GAMMA), all new capital deployment is immediately frozen, entry-confirmation latency on manual gates rises by 400%, and suggested defensive tranches must scale size down by 25% to accommodate downstream execution lag. Idiosyncratic Exemption: Bypassed strictly if an asset clears the catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration) (Reference MANDATE_48 / ENH_245).
 - **ENH_246 Enforce:** Ensure that during broad SPY SHORT_GAMMA regimes, if an asset breaches a >2% trailing VWAP extension stop, the Orchestrator bypasses all passive holding logic and internal Council debate delays, instantly emitting a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD. Acknowledging the Air-Gap Sandbox Bridge Protocol (ENH_49), this is designated as a 'Code Red' sweep to alert the user to immediately, physically execute the order (Reference ENH_246).
-- **ENH_247 Enforce:** Ensure that structural VWAP breakdowns occurring before 10:30 AM EST require a 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. **Volume Invalidation Override:** If trading below daily VWAP with opening rVol >= 3.0 on negative delta force, enforce immediate MANDATE_43 risk trim priority (25%–50%) without waiting for 10:30 AM EST (Reference ENH_247 / MANDATE_43).
-- **ENH_248 Enforce:** Emit a 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim, if an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of an unquantified PR catalyst, overriding ENH_88 (Reference ENH_248).
+- **MANDATE_47 Opening Range Whipsaw Shield Enforce:** Ensure that structural VWAP breakdowns occurring before 10:30 AM EST require a mandatory 15-minute time confirmation or a >5.0% price extension before the Council may emit an EXIT or defensive liquidation directive in the EXECUTION_PAYLOAD. **Volume Invalidation Override:** The time shield is instantly invalidated if the asset trades below daily VWAP with opening relative volume rVol >= 3.0 on negative delta force; in this state, MANDATE_43 takes absolute priority for immediate 25%–50% risk trims without waiting for the 10:30 AM EST checkpoint (Reference MANDATE_47 / ENH_247 / MANDATE_43).
+- **ENH_119 (Execution) Catalyst VWAP Decay Punisher Enforce:** If an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of a PR catalyst, override base momentum assumptions and emit a mandatory 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim (Reference ENH_119 (Execution) / L-248).
 - **CATALYST_OVERRIDE_ON_DILUTION (ENH_30 / L-228) Veto Exemption:** The Rule Enforcer must not automatically trigger a distress liquidation of a position on secondary offering or shelf registration (Dilution) news if a Torque 10 binary catalyst is present, the asset maintains an intraday price above its daily VWAP, and rVol > 3.0. The asset is instead shifted to 'HOLD' with trailing VWAP stops.
 - **L-251 Short Gamma Liquidation Expediter Enforce:** Under SPY SHORT_GAMMA regimes (Net GEX < 0) where active portfolio components execute pre-market L-219 trims (Gap down > 3%), the system must not wait for PM structural failure and must enforce immediate liquidation of the remaining 50% exposure if the asset closes its first 15-minute RTH candle below its daily VWAP anchor (Reference L-251).
-- **MANDATE_36 / ENH_104 / ENH_108 Trailing Stop Telemetry Enforcement:** Flag CRITICAL_SCHEMA_VIOLATION if any active holding with RSI > 75 OR trading > 2% above daily VWAP is missing a `trailing_stop_audit` block in the EXECUTION_PAYLOAD. Reference MANDATE_36, ENH_104, and ENH_108 in rules.md.
+- **MANDATE_50 Midday Basing Loop Breaker Enforce:** Strictly prohibit the Council from citing 'orderly midday consolidation', 'moving average ribbon curling', or 'localized positive dealer gamma' to justify holding an asset trading below its daily VWAP past 11:30 EST during broad index (SPY) SHORT_GAMMA regimes. If relative volume contracts below 0.80 while below VWAP, it represents lack of institutional bid; enforce emission of a mandatory 25% risk trim directive in the EXECUTION_PAYLOAD prior to 13:00 EST (Reference MANDATE_50 / L-256).
+- **ENH_253 Parabolic Volume Exhaustion Harvest Enforce:** During broad market index (SPY) SHORT_GAMMA regimes, if an active high-beta position advances >5.0% from session open to multi-day highs, but relative volume (rVol) decelerates across 3 consecutive turns (e.g., >3.0 to <1.50) while price trades >2.0% above daily VWAP, strictly VETO a 100% passive HOLD. Enforce emission of a mandatory 15% to 25% tactical alpha-harvest trim directive in the EXECUTION_PAYLOAD prior to 11:00 EST (Reference ENH_253 / L-257).
+- **MANDATE_36 / ENH_104 / ENH_108 Trailing Stop Telemetry Enforcement:** Flag CRITICAL_SCHEMA_VIOLATION if any active holding with RSI > 75 OR trading > 2% above daily VWAP is missing a `trailing_stop_audit` block in the EXECUTION_PAYLOAD. Enforce ENH_104 Short Gamma Snap (25% mechanical risk trim when an asset extended >2% breaches VWAP anchor under SPY/asset SHORT_GAMMA). Reference MANDATE_36, ENH_104, and ENH_108 in rules.md.
 - **MTFA Scoring & Invalidation Enforcer (ENH_251):** VETO any setup where Point 1 (Weekly Chart/Trend Bias) fails to align with trade direction (automatic invalidation). For 2/3 MTFA alignment, ensure the proposed position size has a mandatory **50% size reduction**. Standard execution is only authorized for 3/3 alignment.
 - **5-Day Event Risk Veto (Red Team Veto):** VETO any Pullback or Mean-Reversion setup if a scheduled event catalyst (earnings, FDA decisions, macro data releases) is within the next 5 trading days.
 - **MANDATE_46 Time Stop Enforcer:** Validate that any Mean-Reversion trade active for 7 trading days without reverting to the 20-SMA has a mandatory liquidation directive in the `EXECUTION_PAYLOAD`, alerting the user to physically execute the liquidation.
@@ -122,11 +124,17 @@
   - **Id:** ENH_246_MECHANICAL_GAMMA_CASCADE_OVERRIDE
   - **Action:** During broad SPY SHORT_GAMMA regimes, if an asset breaches a >2% trailing VWAP extension stop, bypasses all passive holding logic and internal Council debate delays to instantly emit a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD, designating it as a 'Code Red' sweep to alert the user to immediately, physically execute the order (Reference ENH_246).
 - **Opening Range Whipsaw Shield:**
-  - **Id:** ENH_247_OPENING_RANGE_WHIPSAW_SHIELD
-  - **Action:** Enforce pre-10:30 AM EST VWAP breakdowns require 15-minute confirmation or >5% distance extension (Reference ENH_247). Enforce Volume Invalidation Override (rVol >= 3.0 on negative delta force below daily VWAP triggers immediate MANDATE_43 25%–50% risk trims).
+  - **Id:** MANDATE_47_OPENING_RANGE_WHIPSAW_SHIELD
+  - **Action:** Structural VWAP breakdowns occurring before 10:30 AM EST require a mandatory 15-minute time confirmation or a >5.0% price extension before the Council may emit an EXIT or defensive liquidation directive in the EXECUTION_PAYLOAD. Volume Invalidation Override: Instantly invalidated if trading below daily VWAP with opening rVol >= 3.0 on negative delta force (Reference MANDATE_47 / ENH_247).
+- **Index Short Gamma Lock:**
+  - **Id:** MANDATE_48_INDEX_SHORT_GAMMA_LOCK
+  - **Action:** When broad market index markers (SPY) exhibit negative Net GEX architectures (SHORT_GAMMA), all new capital deployment is immediately frozen, entry-confirmation latency on manual gates rises by 400%, and suggested defensive tranches must scale size down by 25% to accommodate downstream execution lag. Idiosyncratic Exemption: Bypassed strictly if an asset clears the catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration) (Reference MANDATE_48 / ENH_245).
 - **Catalyst VWAP Decay Punisher:**
-  - **Id:** ENH_248_CATALYST_VWAP_DECAY_PUNISHER
-  - **Action:** Emit a 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim, if an asset gaps down or fails to reclaim VWAP within 60 minutes of unquantified PR catalyst, overriding ENH_88 (Reference ENH_248).
+  - **Id:** ENH_119_CATALYST_VWAP_DECAY_PUNISHER
+  - **Action:** Emit a mandatory 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim, if an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of a PR catalyst, overriding base momentum assumptions (Reference ENH_119 (Execution) / L-248).
+- **Index Short Gamma Lock:**
+  - **Id:** MANDATE_48
+  - **Action:** When broad index markers (e.g., SPY) exhibit negative Net GEX architectures, ensure new long exposure is scaled down by 25% to accommodate downstream execution lag and whipsaw risk, and gate latency is increased (Reference MANDATE_48).
 - **Mean-Reversion Time Stop:**
   - **Id:** MANDATE_46
   - **Action:** If a Mean-Reversion trade remains active for 7 trading days without reverting to the 20-SMA mean, force a liquidation directive in the EXECUTION_PAYLOAD, overriding standard holding targets (Reference MANDATE_46).
@@ -142,6 +150,12 @@
 - **Short Gamma RTH Liquidation Expediter:**
   - **Id:** L-251
   - **Action:** Force immediate exit of remaining 50% position in SPY SHORT_GAMMA regimes if pre-market trims (>3% gap down) occurred and the asset closes its first 15-minute RTH candle below daily VWAP (Reference L-251).
+- **Midday Basing Loop Breaker:**
+  - **Id:** MANDATE_50_MIDDAY_BASING_LOOP_BREAKER
+  - **Action:** Prohibit citing 'orderly midday consolidation', 'moving average ribbon curling', or 'localized positive dealer gamma' to justify holding an asset trading below its daily VWAP past 11:30 EST during broad index (SPY) SHORT_GAMMA regimes. If rVol < 0.80 while below VWAP, enforce a mandatory 25% risk trim directive in the EXECUTION_PAYLOAD prior to 13:00 EST (Reference MANDATE_50 / L-256).
+- **Parabolic Volume Exhaustion Harvest:**
+  - **Id:** ENH_253_PARABOLIC_VOLUME_EXHAUSTION_HARVEST
+  - **Action:** During broad market index (SPY) SHORT_GAMMA regimes, if an active high-beta position advances >5.0% from session open to multi-day highs on 3-turn decelerating rVol (>3.0 to <1.50) while price is >2.0% above daily VWAP, strictly veto passive holds and enforce a mandatory 15% to 25% tactical alpha-harvest trim directive in the EXECUTION_PAYLOAD prior to 11:00 EST (Reference ENH_253 / L-257).
 
 ## Output Enforcement
 - **[PROC_04 - MANDATE_09 Compliance]**

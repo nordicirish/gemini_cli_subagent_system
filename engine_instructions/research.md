@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.48-ENH-254-Fib-Profit-Taking-Tranches-Sync
+- **version**: v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
 
 ## Tone
 institutional, narrative, concise
