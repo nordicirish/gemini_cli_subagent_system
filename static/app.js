@@ -539,7 +539,7 @@ function renderTable(tickers, state) {
             const fibTooltip = `Daily Peak: ${peakTarget} (${peakStatus})${atrConf} | Limits (-0.25%): T1=${t1L}, T2=${t2L}, T3=${t3L} | Anchors: A=${pA}, B=${pB}, C=${pC} | Targets: T1=${t1}, T2=${t2}, T3=${t3}`;
             
             const peakSubtext = row.fib_forecast.daily_peak_target
-                ? `<div class="fib-peak-indicator" title="Projected Daily Trading Peak Target: ${peakTarget} (${peakStatus})${atrConf}">Peak: <strong>${peakTarget}</strong> ${atrConfBadge}</div>`
+                ? `<div class="fib-peak-indicator" title="Projected Daily Trading Peak Target: ${peakTarget} (${peakStatus})${atrConf}">Daily Peak: <strong>${peakTarget}</strong> ${atrConfBadge}</div>`
                 : '';
 
             fibTargetHtml = `

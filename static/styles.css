@@ -498,6 +498,7 @@ td {
     border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     white-space: nowrap;
     background: transparent;
+    vertical-align: middle;
 }
 
 /* Mobile Condensing */
@@ -576,9 +577,20 @@ tbody tr:hover td {
     font-weight: 700;
     color: var(--text-main);
     font-size: 0.9rem;
-    display: flex;
+    vertical-align: middle !important;
+}
+
+.ticker-cell > .ticker-symbol {
+    display: inline-flex;
     align-items: center;
     gap: 8px;
+    vertical-align: middle;
+}
+
+.ticker-cell .scout-dot {
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: 6px;
 }
 
 .ticker-symbol {
@@ -1813,10 +1825,11 @@ tr.chart-clickable:hover .ticker-symbol {
 }
 
 .fib-target-cell-wrapper {
-    display: flex;
+    display: inline-flex;
     flex-direction: column;
     gap: 3px;
     align-items: flex-start;
+    vertical-align: middle;
 }
 
 .fib-peak-indicator {
