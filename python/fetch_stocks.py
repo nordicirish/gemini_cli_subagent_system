@@ -2916,21 +2916,40 @@ def calculate_score(symbol):
 
 def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None, open_price: float = 0.0, atr: float = 0.0, rsi: float = 50.0, rvol: float = 1.0, vwap: float = 0.0) -> dict:
     """Calculates Trend-Based Fibonacci Extension & Profit-Taking targets
-    optimized for daily trading peaks per ENH_254 & ENH_255.
-    Evaluates ATR volatility ceiling confluence, 0.25% front-run limit orders,
-    and daily trading peak status.
+    strictly optimized for the active daily trading session per ENH_254 & ENH_255.
+    Anchors to today's session high/low (HOD/LOD) and daily ATR volatility ceiling,
+    preventing stale multi-week swing distortion.
     """
     p = float(current_price) if current_price else 0.0
     if hist_df is None and symbol:
         hist_df = cache.history.get(symbol)
     
-    # Check if we have live daily session high/low cached
-    day_h = cache.day_high.get(symbol, 0.0)
-    day_l = cache.day_low.get(symbol, 0.0)
-    if open_price <= 0 and symbol:
-        open_price = cache.day_open.get(symbol, 0.0)
+    # 1. Resolve today's session High (HOD), Low (LOD), and Open
+    day_h = float(cache.day_high.get(symbol, 0.0) or 0.0)
+    day_l = float(cache.day_low.get(symbol, 0.0) or 0.0)
+    open_p = float(open_price or cache.day_open.get(symbol, 0.0) or 0.0)
+    atr_val = float(atr or 0.0)
 
-    if (hist_df is None or hist_df.empty or len(hist_df) < 2) and (day_h <= 0 or day_l <= 0) and p <= 0:
+    # Fallback to latest candle in hist_df if live session cache is not populated
+    if hist_df is not None and not hist_df.empty:
+        latest_row = hist_df.iloc[-1]
+        if day_h <= 0 and 'High' in latest_row:
+            day_h = float(latest_row['High'])
+        if day_l <= 0 and 'Low' in latest_row:
+            day_l = float(latest_row['Low'])
+        if open_p <= 0 and 'Open' in latest_row:
+            open_p = float(latest_row['Open'])
+
+    # If current price exceeds day_h, update day_h
+    if p > 0:
+        if day_h <= 0 or p > day_h:
+            day_h = p
+        if day_l <= 0 or p < day_l:
+            day_l = p
+        if open_p <= 0:
+            open_p = p
+
+    if p <= 0 and day_h <= 0:
         return {
             "pA": 0.0, "pB": 0.0, "pC": 0.0,
             "impulse": 0.0,
@@ -2948,53 +2967,25 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None, open
         }
 
     try:
-        p_a, p_b, p_c = 0.0, 0.0, 0.0
+        # Anchor points strictly bounded to current session
+        p_a = day_l
+        p_b = day_h
         
-        # 1. Prioritize live daily session High/Low (HOD / LOD)
-        if day_h > 0 and day_l > 0 and day_h > day_l:
-            p_b = float(day_h)
-            p_a = float(day_l)
-            # Pullback floor PC: current price or estimated floor
-            p_c = float(p) if (p > 0 and p <= p_b) else (p_a + ((p_b - p_a) * 0.382))
-        elif hist_df is not None and not hist_df.empty and len(hist_df) >= 2:
-            # Look at recent 10 daily bars for short-cycle daily trading swings
-            df = hist_df.tail(10).copy()
-            high_col = df['High'] if 'High' in df.columns else df['Close']
-            low_col = df['Low'] if 'Low' in df.columns else df['Close']
-            highs = high_col.values
-            lows = low_col.values
-            n = len(df)
+        # Calculate session impulse
+        session_impulse = p_b - p_a
+        
+        # If session range is tight (early session), scale impulse using daily ATR
+        min_impulse = (atr_val * 0.50) if atr_val > 0 else (p * 0.02)
+        impulse = max(session_impulse, min_impulse, 0.01)
 
-            idx_b = int(np.argmax(highs))
-            if idx_b == 0 and n > 3:
-                idx_b = int(np.argmax(highs[1:])) + 1
-
-            if idx_b > 0:
-                idx_a = int(np.argmin(lows[:idx_b]))
-            else:
-                idx_a = 0
-
-            p_a = float(lows[idx_a])
-            p_b = float(highs[idx_b])
-
-            if idx_b < n - 1:
-                idx_c = idx_b + int(np.argmin(lows[idx_b:]))
-                p_c = float(lows[idx_c])
-            else:
-                p_c = min(float(lows[-1]), p) if p > 0 else float(lows[-1])
-        else:
-            p_a = p * 0.97
-            p_b = p * 1.03
+        # Pullback floor PC: current price or estimated consolidation floor
+        if p > 0 and p <= p_b:
             p_c = p
-
-        # Validation: Ensure positive impulse
-        impulse = p_b - p_a
-        if impulse <= 0:
-            impulse = max(0.01, p * 0.03)
-            p_a = p - impulse
-            p_b = p
+        elif p > p_b:
+            # Active breakout into new session highs: retest base
+            p_c = round(p_b - (impulse * 0.382), 2)
+        else:
             p_c = p_a + (impulse * 0.382)
-            impulse = p_b - p_a
 
         # Daily Trading Peak Ratios per ENH_254 & ENH_255
         ratio_defs = [
@@ -3059,7 +3050,7 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None, open
         t3_limit = round(t3_val * 0.9975, 2)
 
         # ATR Daily Volatility Ceiling Confluence per ENH_255
-        daily_peak_atr = round(float(open_price) + (1.25 * float(atr)), 2) if (open_price > 0 and atr > 0) else 0.0
+        daily_peak_atr = round(open_p + (1.25 * atr_val), 2) if (open_p > 0 and atr_val > 0) else 0.0
         atr_confluence = False
         confluent_target = None
         if daily_peak_atr > 0:
@@ -3072,15 +3063,15 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None, open
         # Daily Peak Target Selection
         if atr_confluence and confluent_target:
             daily_peak_target = confluent_target
+        elif daily_peak_atr > 0 and abs(t2_val - daily_peak_atr) / daily_peak_atr <= 0.035:
+            # High proximity to daily volatility ceiling
+            daily_peak_target = t2_val
         elif p_b > p and p_b >= t1_val:
             daily_peak_target = p_b
         else:
             daily_peak_target = t2_val
 
         # Daily Peak Exhaustion Status per ENH_255
-        # 1. Volume exhaustion: rvol < 1.5 with RSI > 70 while >= T1
-        # 2. VWAP over-extension: price >= VWAP * 1.10 with RSI > 80
-        # 3. Upper wick rejection or price touching daily_peak_target (within 0.5%)
         daily_peak_status = "EXPANDING"
         if p >= t1_val:
             if (rvol < 1.5 and rsi > 70) or (vwap > 0 and p >= vwap * 1.10 and rsi > 80) or (daily_peak_target > 0 and p >= daily_peak_target * 0.995):
