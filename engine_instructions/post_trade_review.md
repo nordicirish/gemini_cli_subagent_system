@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.44-MACD-Dashboard-UI-Indicator-Sync
+**Version:** v11.48-ENH-254-Fib-Profit-Taking-Tranches-Sync
 **Tone:** neutral, reflective, concise
 
 ---

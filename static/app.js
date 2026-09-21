@@ -485,6 +485,50 @@ function renderTable(tickers, state) {
 
         macdHtml = `<span class="macd-tag ${macdClass}" title="${tooltip}">${macdLabel}</span>`;
 
+        // Fib Target Indicator
+        let fibTargetHtml = '<span class="fib-target-tag none" title="Fib calculation pending">—</span>';
+        if (row.fib_forecast && row.fib_forecast.next_resistance > 0) {
+            const fib = row.fib_forecast;
+            const nextPrice = Number(fib.next_resistance).toFixed(2);
+            const dist = Number(fib.distance_to_next_pct || 0);
+            const distStr = `${dist >= 0 ? '+' : ''}${dist.toFixed(1)}%`;
+            const label = fib.next_resistance_label || '';
+            
+            let tagClass = 't1';
+            let tagPrefix = '🎯 T1';
+            if (label.includes('Peak')) {
+                tagClass = 'peak';
+                tagPrefix = '🎯 Peak';
+            } else if (label.includes('T3') || label.includes('2.618')) {
+                tagClass = 't3';
+                tagPrefix = '🎯 T3';
+            } else if (label.includes('T2') || label.includes('1.618')) {
+                tagClass = 't2';
+                tagPrefix = '🎯 T2';
+            } else if (label.includes('T1') || label.includes('1.000')) {
+                tagClass = 't1';
+                tagPrefix = '🎯 T1';
+            } else if (label.includes('0.236') || label.includes('Early')) {
+                tagClass = 'early';
+                tagPrefix = '🎯 0.236';
+            } else if (label.includes('0.382') || label.includes('Conservative')) {
+                tagClass = 'conservative';
+                tagPrefix = '🎯 0.382';
+            } else if (label.includes('0.500') || label.includes('Mid')) {
+                tagClass = 'mid';
+                tagPrefix = '🎯 0.500';
+            } else if (label.includes('0.618') || label.includes('Golden')) {
+                tagClass = 'golden';
+                tagPrefix = '🎯 0.618';
+            } else {
+                tagClass = 't1';
+                tagPrefix = '🎯 Fib';
+            }
+            
+            const tooltip = `Fib Anchors: A=$${fib.pA || '—'}, B=$${fib.pB || '—'}, C=$${fib.pC || '—'} | Next: ${label} $${nextPrice} (${distStr}) | T1=$${fib.t1_100 || '—'} | T2=$${fib.t2_1618 || '—'} | T3=$${fib.t3_2618 || '—'}`;
+            fibTargetHtml = `<span class="fib-target-tag ${tagClass}" title="${tooltip}">${tagPrefix} $${nextPrice} (${distStr})</span>`;
+        }
+
         const scoutIndicator = row._isScout ? `<span class="scout-dot"></span>` : '';
         return `
             <tr class="chart-clickable" onclick="openChartModal('${sym}')" title="Click to view 1m TradingView chart">
@@ -501,6 +545,7 @@ function renderTable(tickers, state) {
                 <td>${row.vwap > 0 ? row.vwap.toFixed(2) : '—'}</td>
                 <td>${macdHtml}</td>
                 <td>${trendHtml}</td>
+                <td>${fibTargetHtml}</td>
                 <td>${(() => {
                     const gexVal = row.net_gex_total || 0;
                     const diff = row.gex_diff || 0;
@@ -526,7 +571,7 @@ function renderTable(tickers, state) {
 
     const renderHeader = (label, cls = '') => `
         <tr class="table-section-header ${cls}">
-            <td colspan="12">${label}</td>
+            <td colspan="13">${label}</td>
         </tr>
     `;
 
@@ -545,7 +590,7 @@ function renderTable(tickers, state) {
         if (groups.scouts.length > 0) {
             html += `
                 <tr class="table-sub-header scout-header">
-                    <td colspan="11">Scout Intelligence Suggestions</td>
+                    <td colspan="13">Scout Intelligence Suggestions</td>
                 </tr>
             `;
             groups.scouts.forEach(t => {
@@ -1360,6 +1405,13 @@ const chartInstances = {};
 // Registry of latest captured screenshots (symbol -> base64 PNG string, no prefix)
 const chartScreenshots = {};
 
+// Fib Extension State
+let activeFibPriceLines = [];
+let activeFibMarkers = [];
+let activeFibState = null;
+let fibPickingMode = false;
+let fibPickPoints = [];
+
 // DOM refs for the chart modal
 const dChartModalOverlay = document.getElementById('chart-modal-overlay');
 const dChartModalClose   = document.getElementById('chart-modal-close');
@@ -1383,6 +1435,242 @@ document.addEventListener('keydown', (e) => {
 });
 
 /**
+ * Automatically detects intraday swing points from 1m OHLCV bars:
+ * PA: Session Low (impulse origin)
+ * PB: Impulse High
+ * PC: Pullback Floor (retracement low)
+ */
+function detectIntradaySwings(bars) {
+    if (!bars || bars.length < 5) return null;
+
+    let maxHigh = -Infinity, maxHighIdx = -1;
+    let minLow = Infinity, minLowIdx = -1;
+
+    for (let i = 0; i < bars.length; i++) {
+        if (bars[i].high > maxHigh) {
+            maxHigh = bars[i].high;
+            maxHighIdx = i;
+        }
+        if (bars[i].low < minLow) {
+            minLow = bars[i].low;
+            minLowIdx = i;
+        }
+    }
+
+    let pA = 0, pB = 0, pC = 0;
+    let idxA = 0, idxB = 0, idxC = 0;
+
+    if (minLowIdx < maxHighIdx) {
+        idxA = minLowIdx;
+        pA = bars[idxA].low;
+        idxB = maxHighIdx;
+        pB = bars[idxB].high;
+
+        if (idxB < bars.length - 1) {
+            let postLow = Infinity, postLowIdx = idxB;
+            for (let j = idxB; j < bars.length; j++) {
+                if (bars[j].low < postLow) {
+                    postLow = bars[j].low;
+                    postLowIdx = j;
+                }
+            }
+            idxC = postLowIdx;
+            pC = postLow;
+        } else {
+            idxC = bars.length - 1;
+            pC = Math.min(bars[idxC].low, bars[idxC].close);
+        }
+    } else {
+        let bestImpulse = 0;
+        let bA = 0, bB = 0;
+        let bIdxA = 0, bIdxB = 0;
+
+        for (let i = 0; i < bars.length - 2; i++) {
+            for (let j = i + 1; j < bars.length; j++) {
+                const imp = bars[j].high - bars[i].low;
+                if (imp > bestImpulse) {
+                    bestImpulse = imp;
+                    bIdxA = i;
+                    bIdxB = j;
+                    bA = bars[i].low;
+                    bB = bars[j].high;
+                }
+            }
+        }
+
+        if (bestImpulse > 0) {
+            idxA = bIdxA; pA = bA;
+            idxB = bIdxB; pB = bB;
+            if (idxB < bars.length - 1) {
+                let postLow = Infinity, postLowIdx = idxB;
+                for (let j = idxB; j < bars.length; j++) {
+                    if (bars[j].low < postLow) {
+                        postLow = bars[j].low;
+                        postLowIdx = j;
+                    }
+                }
+                idxC = postLowIdx; pC = postLow;
+            } else {
+                idxC = bars.length - 1; pC = bars[idxC].low;
+            }
+        } else {
+            idxA = minLowIdx; pA = minLow;
+            idxB = Math.min(bars.length - 1, minLowIdx + 1); pB = Math.max(pA + 0.05, bars[idxB].high);
+            idxC = bars.length - 1; pC = bars[idxC].close;
+        }
+    }
+
+    if (pB - pA <= 0) {
+        pB = pA + Math.max(0.05, pA * 0.02);
+    }
+
+    return { pA, pB, pC, idxA, idxB, idxC };
+}
+
+/**
+ * Render Trend-Based Fibonacci Extension price lines, markers, and HUD.
+ */
+function renderFibExtension(pA, pB, pC, candleSeries, bars, idxA = null, idxB = null, idxC = null) {
+    if (!candleSeries || !bars || bars.length === 0) return;
+
+    // Remove previous price lines
+    activeFibPriceLines.forEach(line => {
+        try { candleSeries.removePriceLine(line); } catch (_) {}
+    });
+    activeFibPriceLines = [];
+
+    const impulse = pB - pA;
+    if (impulse <= 0) return;
+
+    const curPrice = bars[bars.length - 1].close;
+
+    // Daily trading peak ratios (optimized for tight, realistic intraday profit taking)
+    const ratioDefs = [
+        { ratio: 0.236, label: '0.236 Trim', role: 'Early Breakout Trim', color: '#80d8ff', style: 2, width: 1 },
+        { ratio: 0.382, label: '0.382 Trim', role: 'Conservative Day Trim', color: '#ffb74d', style: 2, width: 1 },
+        { ratio: 0.500, label: '0.500 Mid', role: '50% Measured Expansion', color: '#ffd54f', style: 2, width: 1 },
+        { ratio: 0.618, label: '0.618 Golden', role: 'Golden Ratio Trim', color: '#4caf50', style: 0, width: 2 },
+        { ratio: 0.786, label: '0.786 Ext', role: '78.6% Extension', color: '#26a69a', style: 2, width: 1 },
+        { ratio: 1.000, label: '1.000 Move', role: '100% Measured Move', color: '#40c4ff', style: 0, width: 2 },
+        { ratio: 1.272, label: '1.272 Exp', role: '127.2% Expansion Peak', color: '#e040fb', style: 2, width: 1 },
+        { ratio: 1.618, label: '1.618 Max', role: 'Max Daily Momentum Target', color: '#ff5252', style: 0, width: 2 }
+    ];
+
+    const levels = [];
+    let nextRes = null;
+    let nextResIdx = -1;
+
+    // If current price is below the Daily Peak (PB), PB is the immediate resistance ceiling
+    if (pB > curPrice) {
+        const pbDist = Number((((pB - curPrice) / curPrice) * 100).toFixed(1));
+        const pbDistStr = `${pbDist >= 0 ? '+' : ''}${pbDist}%`;
+        const pLine = candleSeries.createPriceLine({
+            price: pB,
+            color: '#ff5252',
+            lineWidth: 2,
+            lineStyle: 0, // Solid
+            axisLabelVisible: true,
+            title: `Daily Peak $${pB.toFixed(2)} (${pbDistStr})`
+        });
+        activeFibPriceLines.push(pLine);
+
+        levels.push({
+            ratio: 'Peak',
+            label: 'Daily Peak',
+            role: 'Day High Retest (Peak)',
+            price: pB,
+            distPct: pbDist,
+            distStr: pbDistStr,
+            color: '#ff5252'
+        });
+        nextRes = pB;
+        nextResIdx = 0;
+    }
+
+    ratioDefs.forEach((def) => {
+        const lvlPrice = Number((pC + (def.ratio * impulse)).toFixed(2));
+        const distPct = Number((((lvlPrice - curPrice) / curPrice) * 100).toFixed(1));
+        const distStr = `${distPct >= 0 ? '+' : ''}${distPct}%`;
+
+        const pLine = candleSeries.createPriceLine({
+            price: lvlPrice,
+            color: def.color,
+            lineWidth: def.width,
+            lineStyle: def.style,
+            axisLabelVisible: true,
+            title: `${def.label} $${lvlPrice.toFixed(2)} (${distStr})`
+        });
+        activeFibPriceLines.push(pLine);
+
+        levels.push({
+            ratio: def.ratio,
+            label: def.label,
+            role: def.role,
+            price: lvlPrice,
+            distPct: distPct,
+            distStr: distStr,
+            color: def.color
+        });
+
+        if (lvlPrice > curPrice && nextRes === null) {
+            nextRes = lvlPrice;
+            nextResIdx = levels.length - 1;
+        }
+    });
+
+    // Set markers on candles
+    const markers = [];
+    if (idxA !== null && bars[idxA]) {
+        markers.push({ time: bars[idxA].time, position: 'belowBar', color: '#4caf50', shape: 'arrowUp', text: `A: Low $${pA.toFixed(2)}` });
+    }
+    if (idxB !== null && bars[idxB]) {
+        markers.push({ time: bars[idxB].time, position: 'aboveBar', color: '#ff5252', shape: 'arrowDown', text: `B: High $${pB.toFixed(2)}` });
+    }
+    if (idxC !== null && bars[idxC]) {
+        markers.push({ time: bars[idxC].time, position: 'belowBar', color: '#2962ff', shape: 'arrowUp', text: `C: Floor $${pC.toFixed(2)}` });
+    }
+    try {
+        candleSeries.setMarkers(markers);
+        activeFibMarkers = markers;
+    } catch (_) {}
+
+    // Update Status Bar & HUD
+    const dAnchorsText = document.getElementById('chart-fib-anchors-text');
+    const dImpulseText = document.getElementById('chart-fib-hud-impulse');
+    const dGrid = document.getElementById('chart-fib-levels-grid');
+
+    if (dAnchorsText) {
+        dAnchorsText.textContent = `A: $${pA.toFixed(2)} | B: $${pB.toFixed(2)} | C: $${pC.toFixed(2)} | Impulse: $${impulse.toFixed(2)}`;
+    }
+    if (dImpulseText) {
+        dImpulseText.textContent = `Impulse: $${impulse.toFixed(2)} ($${pA.toFixed(2)} → $${pB.toFixed(2)} | Floor $${pC.toFixed(2)})`;
+    }
+
+    if (dGrid) {
+        dGrid.innerHTML = levels.map((lvl, idx) => {
+            const isNext = (idx === nextResIdx);
+            const ratioStr = typeof lvl.ratio === 'number' ? lvl.ratio.toFixed(3) : lvl.ratio;
+            return `
+                <div class="fib-level-card ${isNext ? 'next-target' : ''}">
+                    <div class="fib-card-ratio">
+                        <span>${ratioStr}</span>
+                        ${isNext ? '<span class="next-tag">NEXT</span>' : ''}
+                    </div>
+                    <div class="fib-card-price" style="color:${lvl.color}">$${lvl.price.toFixed(2)}</div>
+                    <div class="fib-card-dist ${lvl.distPct >= 0 ? 'positive' : 'negative'}">${lvl.distStr}</div>
+                    <div class="fib-card-role" title="${lvl.role}">${lvl.label}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // Save active state for composite screenshot export
+    activeFibState = {
+        pA, pB, pC, impulse, levels, nextRes, nextResIdx, curPrice
+    };
+}
+
+/**
  * Open the chart modal for a given symbol.
  * Fetches 1m OHLCV bars, builds the Lightweight Charts instance,
  * and overlays EMA 9, EMA 30, EMA 200, VWAP, VWAP Session Bands, and Volume (with 20 SMA).
@@ -1398,6 +1686,13 @@ async function openChartModal(symbol) {
         try { chartInstances[symbol].chart.remove(); } catch (_) {}
         delete chartInstances[symbol];
     }
+
+    // Reset Fib state
+    activeFibPriceLines = [];
+    activeFibMarkers = [];
+    activeFibState = null;
+    fibPickingMode = false;
+    fibPickPoints = [];
 
     // Show modal with loading state
     dChartModalTicker.textContent = symbol;
@@ -1662,6 +1957,100 @@ async function openChartModal(symbol) {
         // Store instance for screenshot capture + image copy
         chartInstances[symbol] = { chart, candleSeries };
 
+        // ─── Setup Fib Toolbar & Auto Fib ───
+        const dFibAutoBtn = document.getElementById('chart-fib-auto-btn');
+        const dFibPickBtn = document.getElementById('chart-fib-pick-btn');
+        const dFibClearBtn = document.getElementById('chart-fib-clear-btn');
+        const dFibModeText = document.getElementById('chart-fib-mode-text');
+        const dFibAnchorsText = document.getElementById('chart-fib-anchors-text');
+
+        const runAutoFib = () => {
+            fibPickingMode = false;
+            fibPickPoints = [];
+            if (dFibAutoBtn) dFibAutoBtn.classList.add('active');
+            if (dFibPickBtn) dFibPickBtn.classList.remove('active');
+            if (dFibModeText) dFibModeText.textContent = 'Mode: Auto Intraday Fib Extension';
+
+            const swings = detectIntradaySwings(bars);
+            if (swings) {
+                renderFibExtension(swings.pA, swings.pB, swings.pC, candleSeries, bars, swings.idxA, swings.idxB, swings.idxC);
+            } else if (dFibAnchorsText) {
+                dFibAnchorsText.textContent = 'Insufficient bars for auto swing detection';
+            }
+        };
+
+        if (dFibAutoBtn) dFibAutoBtn.onclick = runAutoFib;
+
+        if (dFibPickBtn) {
+            dFibPickBtn.onclick = () => {
+                fibPickingMode = true;
+                fibPickPoints = [];
+                if (dFibAutoBtn) dFibAutoBtn.classList.remove('active');
+                if (dFibPickBtn) dFibPickBtn.classList.add('active');
+                if (dFibModeText) dFibModeText.textContent = 'Mode: Pick Point 1 (Swing Low A)';
+                if (dFibAnchorsText) dFibAnchorsText.textContent = 'Click on chart for Point 1 (Swing Low A)';
+            };
+        }
+
+        if (dFibClearBtn) {
+            dFibClearBtn.onclick = () => {
+                fibPickingMode = false;
+                fibPickPoints = [];
+                if (dFibAutoBtn) dFibAutoBtn.classList.remove('active');
+                if (dFibPickBtn) dFibPickBtn.classList.remove('active');
+                if (dFibModeText) dFibModeText.textContent = 'Mode: Cleared';
+                if (dFibAnchorsText) dFibAnchorsText.textContent = 'No active Fib lines';
+                const dGrid = document.getElementById('chart-fib-levels-grid');
+                if (dGrid) dGrid.innerHTML = '';
+                const dImp = document.getElementById('chart-fib-hud-impulse');
+                if (dImp) dImp.textContent = 'Impulse: —';
+                activeFibPriceLines.forEach(line => {
+                    try { candleSeries.removePriceLine(line); } catch (_) {}
+                });
+                activeFibPriceLines = [];
+                try { candleSeries.setMarkers([]); } catch (_) {}
+                activeFibState = null;
+            };
+        }
+
+        // Subscribe to chart clicks for 3-point picking
+        chart.subscribeClick((param) => {
+            if (!fibPickingMode || !param || !param.point || !param.time) return;
+            let price = null;
+            try {
+                price = candleSeries.coordinateToPrice(param.point.y);
+            } catch (_) {}
+            if (!price && param.seriesData && param.seriesData.get(candleSeries)) {
+                price = param.seriesData.get(candleSeries).close;
+            }
+            if (!price) return;
+
+            let barIdx = bars.findIndex(b => b.time === param.time);
+            if (barIdx === -1) barIdx = bars.length - 1;
+
+            fibPickPoints.push({ price: Number(price.toFixed(2)), time: param.time, idx: barIdx });
+
+            if (fibPickPoints.length === 1) {
+                if (dFibModeText) dFibModeText.textContent = 'Mode: Pick Point 2 (Impulse High B)';
+                if (dFibAnchorsText) dFibAnchorsText.textContent = `Point A: $${fibPickPoints[0].price} | Click Point 2 (Impulse High B)...`;
+            } else if (fibPickPoints.length === 2) {
+                if (dFibModeText) dFibModeText.textContent = 'Mode: Pick Point 3 (Pullback Floor C)';
+                if (dFibAnchorsText) dFibAnchorsText.textContent = `A: $${fibPickPoints[0].price} | B: $${fibPickPoints[1].price} | Click Point 3 (Floor C)...`;
+            } else if (fibPickPoints.length === 3) {
+                const ptA = fibPickPoints[0];
+                const ptB = fibPickPoints[1];
+                const ptC = fibPickPoints[2];
+
+                if (dFibModeText) dFibModeText.textContent = 'Mode: Manual 3-Point Fib';
+                renderFibExtension(ptA.price, ptB.price, ptC.price, candleSeries, bars, ptA.idx, ptB.idx, ptC.idx);
+                fibPickingMode = false;
+                fibPickPoints = [];
+            }
+        });
+
+        // Default to Auto Fib immediately on chart open
+        runAutoFib();
+
         // Update footer with exchange time (ET)
         const formatNY = (ts) => new Date(ts * 1000).toLocaleTimeString('en-US', {
             timeZone: 'America/New_York',
@@ -1712,6 +2101,11 @@ function closeChartModal() {
         try { chartInstances[sym].chart.remove(); } catch (_) {}
         delete chartInstances[sym];
     }
+    activeFibPriceLines = [];
+    activeFibMarkers = [];
+    activeFibState = null;
+    fibPickingMode = false;
+    fibPickPoints = [];
     if (dChartContainer) dChartContainer.innerHTML = '';
 }
 
@@ -1751,8 +2145,8 @@ function captureAllChartScreenshots() {
 }
 
 /**
- * Copy the current chart image to clipboard as a PNG so it can be pasted
- * directly into Gemini or external apps.
+ * Copy the current chart image to clipboard as a PNG and formatted markdown text.
+ * Composites the Resistance Targets HUD table directly onto the chart canvas.
  * @param {string} symbol
  * @param {HTMLElement} btn
  */
@@ -1766,14 +2160,115 @@ async function copyCurrentChartImage(symbol, btn) {
     try {
         if (btn) { btn.textContent = 'Copying...'; btn.disabled = true; }
 
-        const canvas = instance.chart.takeScreenshot();
-        if (!canvas) throw new Error('takeScreenshot returned null');
+        const srcCanvas = instance.chart.takeScreenshot();
+        if (!srcCanvas) throw new Error('takeScreenshot returned null');
 
-        // Convert canvas to Blob and write to clipboard as PNG image
+        // Create composite canvas matching original dimensions
+        const compCanvas = document.createElement('canvas');
+        compCanvas.width = srcCanvas.width;
+        compCanvas.height = srcCanvas.height;
+        const ctx = compCanvas.getContext('2d');
+
+        // 1. Draw base chart screenshot
+        ctx.drawImage(srcCanvas, 0, 0);
+
+        let markdownTargets = `### ${symbol} · Trend-Based Fibonacci Extension Resistance Targets\n\n`;
+
+        // 2. Draw stylized Resistance Targets HUD overlay onto canvas if activeFibState exists
+        if (activeFibState && activeFibState.levels && activeFibState.levels.length > 0) {
+            const state = activeFibState;
+            markdownTargets += `**Anchors:** A=$${state.pA.toFixed(2)} | B=$${state.pB.toFixed(2)} | C=$${state.pC.toFixed(2)} | Impulse=$${state.impulse.toFixed(2)}\n\n`;
+            markdownTargets += `| Level | Ratio | Target Price | Distance | Role |\n`;
+            markdownTargets += `| :--- | :--- | :--- | :--- | :--- |\n`;
+            state.levels.forEach(lvl => {
+                const nextMarker = (lvl.price === state.nextRes) ? ' 🎯 NEXT' : '';
+                const ratioStr = typeof lvl.ratio === 'number' ? lvl.ratio.toFixed(3) : lvl.ratio;
+                markdownTargets += `| ${lvl.label}${nextMarker} | ${ratioStr} | $${lvl.price.toFixed(2)} | ${lvl.distStr} | ${lvl.role} |\n`;
+            });
+
+            // Draw HUD overlay card at top-left
+            const hudX = 16;
+            const hudY = 16;
+            const hudW = 330;
+            const hudH = 36 + (state.levels.length * 20) + 10;
+
+            ctx.save();
+            ctx.fillStyle = 'rgba(19, 23, 34, 0.94)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
+            ctx.lineWidth = 1;
+            if (typeof ctx.roundRect === 'function') {
+                ctx.beginPath();
+                ctx.roundRect(hudX, hudY, hudW, hudH, 8);
+                ctx.fill();
+                ctx.stroke();
+            } else {
+                ctx.fillRect(hudX, hudY, hudW, hudH);
+                ctx.strokeRect(hudX, hudY, hudW, hudH);
+            }
+
+            // Title
+            ctx.fillStyle = '#58a6ff';
+            ctx.font = 'bold 12px Inter, sans-serif';
+            ctx.fillText(`🎯 ${symbol} Fib Resistance Targets`, hudX + 12, hudY + 20);
+
+            // Subtitle / Anchors
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '10px monospace';
+            ctx.fillText(`A:$${state.pA.toFixed(2)}  B:$${state.pB.toFixed(2)}  C:$${state.pC.toFixed(2)}  Imp:$${state.impulse.toFixed(2)}`, hudX + 12, hudY + 34);
+
+            // Level Rows
+            let rowY = hudY + 52;
+            state.levels.forEach((lvl, idx) => {
+                const isNext = (idx === state.nextResIdx);
+                if (isNext) {
+                    ctx.fillStyle = 'rgba(255, 215, 0, 0.15)';
+                    ctx.fillRect(hudX + 8, rowY - 12, hudW - 16, 18);
+                }
+
+                // Level Label
+                ctx.fillStyle = isNext ? '#ffd700' : '#e6edf3';
+                ctx.font = isNext ? 'bold 10px Inter, sans-serif' : '10px Inter, sans-serif';
+                ctx.fillText(lvl.label, hudX + 12, rowY);
+
+                // Price
+                ctx.fillStyle = lvl.color || '#ffffff';
+                ctx.font = 'bold 11px monospace';
+                ctx.fillText(`$${lvl.price.toFixed(2)}`, hudX + 175, rowY);
+
+                // Distance %
+                ctx.fillStyle = lvl.distPct >= 0 ? '#4caf50' : '#ff5252';
+                ctx.font = '10px monospace';
+                ctx.fillText(lvl.distStr, hudX + 245, rowY);
+
+                if (isNext) {
+                    ctx.fillStyle = '#ffd700';
+                    ctx.font = 'bold 9px sans-serif';
+                    ctx.fillText('NEXT', hudX + 295, rowY);
+                }
+
+                rowY += 20;
+            });
+            ctx.restore();
+        }
+
+        // Convert canvas to Blob
         const blob = await new Promise((resolve, reject) =>
-            canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png')
+            compCanvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/png')
         );
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+
+        // Write both image/png AND text/plain markdown to clipboard
+        try {
+            const textBlob = new Blob([markdownTargets], { type: 'text/plain' });
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    'image/png': blob,
+                    'text/plain': textBlob
+                })
+            ]);
+        } catch (clipErr) {
+            // Fallback to image-only clipboard write if text/plain dual-item is unsupported
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        }
 
         if (btn) { btn.textContent = '✅ Copied!'; }
         setTimeout(() => { if (btn) { btn.textContent = originalText; btn.disabled = false; } }, 1800);

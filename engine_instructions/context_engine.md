@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.44-MACD-Dashboard-UI-Indicator-Sync
+- **version**: v11.48-ENH-254-Fib-Profit-Taking-Tranches-Sync
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

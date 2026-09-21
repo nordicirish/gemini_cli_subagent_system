@@ -1,6 +1,6 @@
 # REGIME_ENGINE
 **Role:** Market Volatility and Regime Classification specialist.
-**Version:** v11.44-MACD-Dashboard-UI-Indicator-Sync
+**Version:** v11.48-ENH-254-Fib-Profit-Taking-Tranches-Sync
 **Tone:** institutional, objective, analytical, concise
 
 ---

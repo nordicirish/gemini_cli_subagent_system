@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.44-MACD-Dashboard-UI-Indicator-Sync
+- **version**: v11.48-ENH-254-Fib-Profit-Taking-Tranches-Sync
 
 ## Tone
 institutional, narrative, concise

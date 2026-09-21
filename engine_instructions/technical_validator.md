@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.44-MACD-Dashboard-UI-Indicator-Sync
+- **version**: v11.48-ENH-254-Fib-Profit-Taking-Tranches-Sync
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

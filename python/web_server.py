@@ -664,6 +664,7 @@ def chat_endpoint(req: ChatRequest):
                     "score": t.get("score"),
                     "dealer_posture": t.get("dealer_posture"),
                     "net_gex_total": round(t.get("net_gex_total", 0.0), 3) if t.get("net_gex_total") is not None else 0.0,
+                    "fib_forecast": t.get("fib_forecast"),
                     "note": t.get("note"),
                 }
                 for t in (live_state.get("tickers") or [])

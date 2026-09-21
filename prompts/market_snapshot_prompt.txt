@@ -1,7 +1,7 @@
 SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION
 
 You are receiving the latest Market Snapshot and Portfolio State.
-1. Parse the JSON payload and synchronize your local context.
-2. Evaluate current 'risk_regime' and 'dealer_posture' shifts.
-3. Route the data through the Consensus Pipeline (Data Analyst -> Council Debate -> Synthesis) for any required rebalancing, entries, or defensive trims.
+1. Parse the JSON payload and synchronize your local context (including 'fib_forecast' resistance targets).
+2. Evaluate current 'risk_regime', 'dealer_posture', and 'fib_forecast' profit-taking extension shifts (ENH_254).
+3. Route the data through the Consensus Pipeline (Data Analyst -> Council Debate -> Synthesis) for any required rebalancing, entries, or tactical Fibonacci scale-out trims (T1/T2/T3).
 4. Conclude your turn by outputting the final EXECUTION_PAYLOAD.

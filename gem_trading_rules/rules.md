@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v11.44-MACD-Dashboard-UI-Indicator-Sync
+**Version:** v11.48-ENH-254-Fib-Profit-Taking-Tranches-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 - **Execution:** When proposing/directing mandatory scale-outs or risk-reduction trims in the EXECUTION_PAYLOAD, the Execution Engine MUST NOT suggest monolithic block limit orders at theoretical ATR peaks if LONG_GAMMA dampening or visual chart resistance is active.
 ---
@@ -118,6 +118,7 @@
 - [ENH_247](#enh_247): OPENING_RANGE_WHIPSAW_SHIELD - Any structural VWAP breakdown occurring before 10:30 AM EST must require a subsequent 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the exit. **Volume Invalidation Override:** The opening-range time shield is instantly invalidated if an asset trades below its daily VWAP with an opening relative volume rVol >= 3.0 on negative delta force; in this state, MANDATE_43 takes absolute priority, permitting immediate mechanical 25%–50% risk trims without waiting for the 10:30 AM EST time confirmation.
 - [ENH_248](#enh_248): CATALYST_VWAP_DECAY_PUNISHER - If an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of an unquantified PR catalyst, execution must override ENH_88 OEM Multiplier assumptions and emit a 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim to preempt short-gamma distribution.
 - [ENH_249](#enh_249): POST-10:30 CASCADE MITIGATION - If broad index markers (SPY) enter a SHORT_GAMMA architecture and a position tracks below its daily VWAP floor past 10:30 AM EST on negative delta force, the system MUST emit a mechanical 25% trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim instantly, bypassing standard gates and shields.
+- [ENH_254](#enh_254): TREND_BASED_FIBONACCI_PROFIT_TAKING_TRANCHES
 - [L-251](#l-251): SHORT_GAMMA_RTH_LIQUIDATION_EXPEDITER
 
 
@@ -2116,3 +2117,18 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 ### [ENH_251_SCHEMA_ALIGNMENT_SCORE] - Deprecation of Legacy Health Score Metric
 - **Status:** ACTIVE
 - **Instruction:** The system explicitly tracks asset health natively via the score metric, which operates on a gradient scale of -6 to +6. The legacy 0-100 health_score metric is completely deprecated and structurally invalid. All engines MUST utilize the score value for quantitative health audits and decline any references to health_score to eliminate logic-translation friction.
+---
+
+<a name="enh_254"></a>
+### [ENH_254] TREND_BASED_FIBONACCI_PROFIT_TAKING_TRANCHES
+- **Status:** ACTIVE
+- **Directive:** 
+  - **Daily Trading Peak Calibration:** The Fibonacci forecast is optimized for daily trading peaks, prioritizing intraday session High/Low (HOD $P_B$ / LOD $P_A$) and short-cycle swings over multi-month macro swings.
+  - **Tranche 1 ($T_1$ / Daily Peak & Conservative Trim):** When price is below the Daily Peak ($P_B$), the immediate HOD retest serves as $T_1$. On breakout past $P_B$, $T_1$ transitions to the 0.382 / 0.500 extension level (`fib_forecast.t1_100`). When price approaches $T_1$ and relative volume (rVol) decelerates or momentum stalls, the Orchestrator MUST emit a 20% to 25% tactical alpha-harvest trim directive in the `EXECUTION_PAYLOAD`.
+  - **Tranche 2 ($T_2$ / 0.618 Golden Ratio Expansion):** Primary institutional resistance target (`fib_forecast.t2_1618`). Mandates a cumulative scale-out trim targeting 50% total position reduction.
+  - **Tranche 3 ($T_3$ / 1.000 Measured Move Target):** 100% impulse equality runner target (`fib_forecast.t3_2618`).
+  - **Daily Peak Expansion Ratios:** Incorporates calibrated intraday levels: 0.236 (Early Trim), 0.382 (Conservative Trim), 0.500 (Mid Expansion), 0.618 (Golden Ratio), 0.786 (Extension), 1.000 (Measured Move), 1.272 (Expansion Peak), 1.618 (Golden Peak Target).
+  - **Front-Running Execution Mandate:** Take-profit limit orders MUST be priced 0.20% to 0.30% beneath the exact Fibonacci level to guarantee fills ahead of institutional supply walls.
+  - **Alpha Headroom Veto (Bullish Gem Integration):** Prohibits entry advocacy if `(Abs(fib_forecast.next_resistance - Current_Price) / Current_Price < system_thresholds.GLOBAL_ALPHA_FRICTION_HURDLE)`, capping confidence at 0.40 with `Low_Alpha_Headroom`.
+- **Justification:** Optimizing Trend-Based Fibonacci Extensions for daily trading peaks prevents target detachment, ensuring actionable profit-taking at the high of day and tight intraday expansion targets rather than unreachable multi-week swing projections.
+---

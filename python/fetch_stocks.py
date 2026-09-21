@@ -1502,8 +1502,10 @@ class MarketDataCache:
         self.last_gex_fetch: dict[str, float] = {}
         self.gex_cache: dict[str, dict] = {}
         self.qualitative_grounding: dict[str, dict] = {} # Google Search Grounding Cache
-        # Date tracker for daily history updates
         self.last_history_fetch_date: dict[str, str] = {}
+        # Daily session peak and floor tracking for daily trading Fib optimization
+        self.day_high: dict[str, float] = {}
+        self.day_low: dict[str, float] = {}
 
     def clear(self):
         self.__init__()
@@ -2455,22 +2457,33 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
             post_price = quote_data.get('postMarketPrice')
             reg_price = quote_data.get('regularMarketPrice')
             reg_open = quote_data.get('regularMarketOpen')
+            reg_high = quote_data.get('regularMarketDayHigh')
             reg_low = quote_data.get('regularMarketDayLow') # For SSR trigger check
             batch_prev_close = quote_data.get('regularMarketPreviousClose')
             vol = int(quote_data.get('regularMarketVolume', 0) or 0)
             pre_vol = int(quote_data.get('preMarketVolume', 0) or 0)
             post_vol = int(quote_data.get('postMarketVolume', 0) or 0)
             used_batch = True
+            if reg_high and float(reg_high) > 0:
+                cache.day_high[symbol] = float(reg_high)
+            if reg_low and float(reg_low) > 0:
+                cache.day_low[symbol] = float(reg_low)
         except:
             pass
 
-    # Attempt to fetch missing pre/post prices from fast_info as a first-line fallback
+    # Attempt to fetch missing pre/post prices and day high/low from fast_info as a first-line fallback
     try:
         fi = t_obj.fast_info
         if not pre_price and getattr(fi, 'pre_market_price', None):
             pre_price = float(fi.pre_market_price)
         if not post_price and getattr(fi, 'post_market_price', None):
             post_price = float(fi.post_market_price)
+        fi_high = getattr(fi, 'day_high', None) or getattr(fi, 'regular_market_day_high', None)
+        fi_low = getattr(fi, 'day_low', None) or getattr(fi, 'regular_market_day_low', None)
+        if fi_high and float(fi_high) > 0 and symbol not in cache.day_high:
+            cache.day_high[symbol] = float(fi_high)
+        if fi_low and float(fi_low) > 0 and symbol not in cache.day_low:
+            cache.day_low[symbol] = float(fi_low)
     except:
         pass
 
@@ -2895,6 +2908,196 @@ def calculate_score(symbol):
     return score, note
 
 
+def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None) -> dict:
+    """Calculates Trend-Based Fibonacci Extension & Profit-Taking targets
+    optimized for daily trading peaks. Prioritizes daily session high/low
+    (HOD/LOD) and tight intraday expansion ratios (0.236, 0.382, 0.500, 0.618, 0.786, 1.000, 1.272, 1.618).
+    """
+    p = float(current_price) if current_price else 0.0
+    if hist_df is None and symbol:
+        hist_df = cache.history.get(symbol)
+    
+    # Check if we have live daily session high/low cached
+    day_h = cache.day_high.get(symbol, 0.0)
+    day_l = cache.day_low.get(symbol, 0.0)
+
+    if (hist_df is None or hist_df.empty or len(hist_df) < 2) and (day_h <= 0 or day_l <= 0) and p <= 0:
+        return {
+            "pA": 0.0, "pB": 0.0, "pC": 0.0,
+            "impulse": 0.0,
+            "t1_100": 0.0, "t1_pct": 0.0,
+            "t2_1618": 0.0, "t2_pct": 0.0,
+            "t3_2618": 0.0, "t3_pct": 0.0,
+            "next_resistance": 0.0,
+            "next_resistance_label": "None",
+            "distance_to_next_pct": 0.0,
+            "levels": []
+        }
+
+    try:
+        p_a, p_b, p_c = 0.0, 0.0, 0.0
+        
+        # 1. Prioritize live daily session High/Low (HOD / LOD)
+        if day_h > 0 and day_l > 0 and day_h > day_l:
+            p_b = float(day_h)
+            p_a = float(day_l)
+            # Pullback floor PC: current price or estimated floor
+            p_c = float(p) if (p > 0 and p <= p_b) else (p_a + ((p_b - p_a) * 0.382))
+        elif hist_df is not None and not hist_df.empty and len(hist_df) >= 2:
+            # Look at recent 10 daily bars for short-cycle daily trading swings
+            df = hist_df.tail(10).copy()
+            high_col = df['High'] if 'High' in df.columns else df['Close']
+            low_col = df['Low'] if 'Low' in df.columns else df['Close']
+            highs = high_col.values
+            lows = low_col.values
+            n = len(df)
+
+            idx_b = int(np.argmax(highs))
+            if idx_b == 0 and n > 3:
+                idx_b = int(np.argmax(highs[1:])) + 1
+
+            if idx_b > 0:
+                idx_a = int(np.argmin(lows[:idx_b]))
+            else:
+                idx_a = 0
+
+            p_a = float(lows[idx_a])
+            p_b = float(highs[idx_b])
+
+            if idx_b < n - 1:
+                idx_c = idx_b + int(np.argmin(lows[idx_b:]))
+                p_c = float(lows[idx_c])
+            else:
+                p_c = min(float(lows[-1]), p) if p > 0 else float(lows[-1])
+        else:
+            p_a = p * 0.97
+            p_b = p * 1.03
+            p_c = p
+
+        # Validation: Ensure positive impulse
+        impulse = p_b - p_a
+        if impulse <= 0:
+            impulse = max(0.01, p * 0.03)
+            p_a = p - impulse
+            p_b = p
+            p_c = p_a + (impulse * 0.382)
+            impulse = p_b - p_a
+
+        # Daily Trading Peak Ratios
+        ratio_defs = [
+            (0.236, "0.236 Early Trim"),
+            (0.382, "0.382 Conservative Trim"),
+            (0.500, "0.500 Mid Expansion"),
+            (0.618, "0.618 Golden Ratio"),
+            (0.786, "0.786 Extension"),
+            (1.000, "1.000 Measured Move"),
+            (1.272, "1.272 Expansion Peak"),
+            (1.618, "1.618 Golden Peak Target")
+        ]
+
+        levels = []
+        next_res = None
+        next_res_label = None
+        dist_next_pct = None
+
+        # If current price is below the Daily Peak (PB), PB is the immediate resistance ceiling
+        if p > 0 and p_b > p:
+            pb_dist = round(((p_b - p) / p) * 100, 2)
+            levels.append({
+                "ratio": "Peak",
+                "label": "Daily Peak",
+                "price": round(p_b, 2),
+                "distance_pct": pb_dist
+            })
+            next_res = round(p_b, 2)
+            next_res_label = "Daily Peak"
+            dist_next_pct = pb_dist
+
+        for ratio, label in ratio_defs:
+            lvl_price = round(p_c + (ratio * impulse), 2)
+            lvl_dist = round(((lvl_price - p) / p) * 100, 2) if p > 0 else 0.0
+            levels.append({
+                "ratio": ratio,
+                "label": label,
+                "price": lvl_price,
+                "distance_pct": lvl_dist
+            })
+            if p > 0 and lvl_price > p and next_res is None:
+                next_res = lvl_price
+                next_res_label = label
+                dist_next_pct = lvl_dist
+
+        if next_res is None and levels:
+            next_res = levels[-1]["price"]
+            next_res_label = str(levels[-1]["label"]) + " (Exceeded)"
+            dist_next_pct = levels[-1]["distance_pct"]
+
+        # T1: Daily Peak if below PB, otherwise 0.382 / 0.500 extension
+        t1_val = round(p_b, 2) if (p > 0 and p_b > p) else round(p_c + (0.382 * impulse), 2)
+        t2_val = round(p_c + (0.618 * impulse), 2)
+        t3_val = round(p_c + (1.000 * impulse), 2)
+
+        return {
+            "pA": round(p_a, 2),
+            "pB": round(p_b, 2),
+            "pC": round(p_c, 2),
+            "impulse": round(impulse, 2),
+            "t1_100": t1_val,
+            "t1_pct": round(((t1_val - p) / p) * 100, 2) if p > 0 else 0.0,
+            "t2_1618": t2_val,
+            "t2_pct": round(((t2_val - p) / p) * 100, 2) if p > 0 else 0.0,
+            "t3_2618": t3_val,
+            "t3_pct": round(((t3_val - p) / p) * 100, 2) if p > 0 else 0.0,
+            "next_resistance": next_res if next_res is not None else 0.0,
+            "next_resistance_label": next_res_label if next_res_label is not None else "None",
+            "distance_to_next_pct": dist_next_pct if dist_next_pct is not None else 0.0,
+            "levels": levels
+        }
+    except Exception as e:
+        return {
+            "pA": 0.0, "pB": 0.0, "pC": 0.0,
+            "impulse": 0.0,
+            "t1_100": 0.0, "t1_pct": 0.0,
+            "t2_1618": 0.0, "t2_pct": 0.0,
+            "t3_2618": 0.0, "t3_pct": 0.0,
+            "next_resistance": 0.0,
+            "next_resistance_label": "Error",
+            "distance_to_next_pct": 0.0,
+            "levels": []
+        }
+
+
+def fetch_stocks(state=None):
+    """Returns compact ticker dictionaries with fib_forecast for API and Council consumption."""
+    if state is None:
+        state = GLOBAL_STATE
+    compact_tickers = []
+    for t in state.get("tickers", []):
+        compact_tickers.append({
+            "ticker": t.get("ticker"),
+            "price": t.get("price"),
+            "session_change_pct": t.get("session_change_pct"),
+            "gap_percent": t.get("gap_percent"),
+            "rsi": t.get("rsi"),
+            "macd": t.get("macd"),
+            "macd_status": t.get("macd_status"),
+            "atr_percent": t.get("atr_percent"),
+            "vwap": t.get("vwap"),
+            "trend": t.get("trend"),
+            "signal": t.get("signal"),
+            "score": t.get("score"),
+            "dealer_posture": t.get("dealer_posture"),
+            "net_gex_total": t.get("net_gex_total"),
+            "fib_forecast": t.get("fib_forecast")
+        })
+    return compact_tickers
+
+
+def get_ssot_json_payload():
+    """Returns the sanitized SSoT JSON payload with live tickers and fib_forecast."""
+    return sanitize_json_payload(GLOBAL_STATE)
+
+
 def compute_merton_allocation(gamma=3.0, r=0.04):
     try:
         prices_dict = {}
@@ -3297,7 +3500,8 @@ def run_daemon():
                         "score": 0,
                         "signal": "NEUTRAL",
                         "trend": "FLAT",
-                        "note": "NO DATA"
+                        "note": "NO DATA",
+                        "fib_forecast": calculate_fib_forecast(sym, 0.0, None)
                     })
                     continue
 
@@ -3485,7 +3689,8 @@ def run_daemon():
                     
                     # Phase 6 Enhancements (Already computed inline above)
 
-                    "note": note.strip()
+                    "note": note.strip(),
+                    "fib_forecast": calculate_fib_forecast(sym, p, cache.history.get(sym))
                 }
                 if is_scout:
                     item_dict["_isScout"] = True

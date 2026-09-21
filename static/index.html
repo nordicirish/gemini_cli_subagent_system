@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
-    <link rel="stylesheet" href="styles.css?v=12.40">
-    <link rel="stylesheet" href="modern_ui.css?v=12.40">
+    <link rel="stylesheet" href="styles.css?v=12.59">
+    <link rel="stylesheet" href="modern_ui.css?v=12.59">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -93,6 +93,7 @@
                                 <th>VWAP</th>
                                 <th>MACD</th>
                                 <th>Trend</th>
+                                <th>Fib Target</th>
                                 <th>Dealer</th>
                                 <th class="score-col">Score</th>
                             </tr>
@@ -389,9 +390,27 @@
                         <span class="legend-item"><span class="legend-dot" style="background:#2962ff;"></span>Vol (20)</span>
                     </div>
                 </div>
+                <div class="chart-fib-toolbar" id="chart-fib-toolbar">
+                    <button id="chart-fib-auto-btn" class="chart-tool-btn active" title="Auto Fib">🎯 Auto Fib</button>
+                    <button id="chart-fib-pick-btn" class="chart-tool-btn" title="Pick 3 Points">✏️ Pick 3 Points</button>
+                    <button id="chart-fib-clear-btn" class="chart-tool-btn btn-clear" title="Clear">✕ Clear</button>
+                </div>
                 <button class="modal-close" id="chart-modal-close">&times;</button>
             </div>
+            <div id="chart-fib-status-bar" class="chart-fib-status-bar">
+                <span id="chart-fib-mode-text">Mode: Auto Intraday Fib Extension</span>
+                <span id="chart-fib-anchors-text">—</span>
+            </div>
             <div id="chart-container" class="chart-container"></div>
+            <div id="chart-fib-hud" class="chart-fib-hud">
+                <div class="chart-fib-hud-header">
+                    <span class="fib-hud-title">🎯 Trend-Based Fibonacci Extension Resistance Targets</span>
+                    <span id="chart-fib-hud-impulse" class="fib-hud-impulse">Impulse: —</span>
+                </div>
+                <div id="chart-fib-levels-grid" class="chart-fib-levels-grid">
+                    <!-- Dynamic HUD cards injected by JS -->
+                </div>
+            </div>
             <div class="chart-modal-footer">
                 <span id="chart-modal-meta" class="chart-meta-label">Loading chart data...</span>
                 <div style="display:flex;align-items:center;gap:10px;">
@@ -407,7 +426,7 @@
     <!-- Hidden Offscreen Container for Automated Chart Rendering & Capture -->
     <div id="offscreen-chart-container" style="position: fixed; left: -9999px; top: -9999px; width: 920px; height: 500px; opacity: 0; pointer-events: none;"></div>
 
-    <script src="app.js?v=12.57"></script>
-    <script src="modern_ui.js?v=12.57"></script>
+    <script src="app.js?v=12.59"></script>
+    <script src="modern_ui.js?v=12.59"></script>
 </body>
 </html>
