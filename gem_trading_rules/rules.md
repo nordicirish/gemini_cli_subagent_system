@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
+**Version:** v11.51-Design-Principles-Architecture-Harness
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 - **Execution:** When proposing/directing mandatory scale-outs or risk-reduction trims in the EXECUTION_PAYLOAD, the Execution Engine MUST NOT suggest monolithic block limit orders at theoretical ATR peaks if LONG_GAMMA dampening or visual chart resistance is active.
 ---
@@ -125,6 +125,7 @@
 - [ENH_253](#enh_253): PARABOLIC_VOLUME_EXHAUSTION_HARVEST - During broad market index (SPY) SHORT_GAMMA regimes, if an active high-beta position advances >5.0% from the session open to reach multi-day highs, but relative volume (rVol) decelerates across 3 consecutive turns (e.g., dropping from >3.0 to <1.50) while price trades >2.0% above its daily VWAP, the Council is STRICTLY FORBIDDEN from maintaining a 100% passive HOLD under the justification of 'orderly ribbon consolidation' or 'localized long gamma'. The Orchestrator MUST emit a mandatory 15% to 25% tactical alpha-harvest trim directive in the EXECUTION_PAYLOAD prior to 11:00 EST. Capitalizing on morning institutional liquidity supersedes all narrative hold theses.
 - [ENH_254](#enh_254): TREND_BASED_FIBONACCI_PROFIT_TAKING_TRANCHES - Anchors scale-out limit orders to quantitative Fibonacci expansion targets (T1 1.000, T2 1.618, T3 2.618) with a 0.20%-0.30% front-running requirement, and enforces the Alpha Headroom Veto for entries.
 - [ENH_255](#enh_255): DAILY_TRADING_PEAK_FIBONACCI_AND_TRIM_OPTIMIZATION - Optimizes swing impulse detection for active daily breakouts/peaks, integrates ATR daily volatility ceiling confluence, codifies 0.25% front-running limit execution across micro-tranches (T1 20%-25%, T2 50% cumulative, T3 runner liquidation), and mandates dual telemetry (downside stops + upside daily peak profit-taking).
+- [ENH_256](#enh_256): ARCHITECTURAL_DESIGN_PATTERNS_AND_SYSTEM_INVARIANTS - Codifies Fail-Fast Data Invariants, Hub-and-Spoke Single-Pass Consolidation, Uniform Strategy Interface Specification, Sequential Circuit Breaker Pipeline, and State Machine Idempotency.
 - [L-251](#l-251): SHORT_GAMMA_RTH_LIQUIDATION_EXPEDITER
 
 
@@ -178,6 +179,7 @@
 - [MANDATE_48](#mandate_48): INDEX_SHORT_GAMMA_LOCK - When broad market index markers (SPY) exhibit negative Net GEX architectures (SHORT_GAMMA), all new capital deployment is immediately frozen, entry-confirmation latency on manual gates rises by 400%, and suggested defensive tranches must scale size down by 25% to accommodate downstream execution lag. Idiosyncratic Exemption: Bypassed strictly if an asset clears the catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration).
 - [MANDATE_49](#mandate_49): POST_BREAKTHROUGH_TECHNICAL_CEILING_HARVEST - When an asset trapped beneath intermediate resistance (Price < MA50) gaps up or spikes >2% on a Tier-1 regulatory milestone (e.g., FDA Breakthrough Therapy Designation), but subsequent price action fails to hold above its daily VWAP anchor past 14:00 EST on declining relative volume, the Council is strictly forbidden from sitting in passive stasis. The Orchestrator MUST emit a mandatory 15% to 25% tactical alpha-harvest trim directive in the EXECUTION_PAYLOAD prior to Power Hour to lock in speculative momentum before algorithmic mean reversion drags price back into the primary downtrend.
 - [MANDATE_50](#mandate_50): MIDDAY_BASING_LOOP_BREAKER - The Council is strictly prohibited from citing 'orderly midday consolidation', 'moving average ribbon curling', or 'localized positive dealer gamma' to justify holding an asset trading below its daily VWAP past 11:30 EST during broad index (SPY) SHORT_GAMMA regimes. If relative volume contracts below 0.80 while below VWAP, it represents lack of institutional bid. A mandatory 25% risk trim directive must be emitted in the EXECUTION_PAYLOAD prior to 13:00 EST (Promoted from L-256 / ENH_252; proposed as MANDATE_49).
+- [MANDATE_51](#mandate_51): ARCHITECTURAL_DESIGN_PATTERNS_AND_SYSTEM_INVARIANTS - Formalizes systemic software engineering principles: Fail-Fast Data Invariants, Hub-and-Spoke Output Consolidation, Uniform Strategy Pattern Interface, and Sequential Circuit Breaker Risk Pipeline.
 
 ## Engine Registry
 This registry serves as the system-wide directory mapping all active sub-agent components to their role, version, primary mandate ownership, and veto capabilities (Reference ENH_98 / MANDATE_04).
@@ -2213,3 +2215,32 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   6. **Dual Telemetry Mandate:** The Orchestrator MUST report both downside trailing stops AND upside Fibonacci daily peak trims in `### 📊 Active Telemetry & Suggested Sell Quantities`.
 - **Justification:** Eliminates subjective guesswork at daily peaks, aligns mathematical limit orders with institutional liquidity walls, and guarantees disciplined alpha extraction before algorithmic mean reversion.
 - **Cross-Reference:** `execution.md` (ENH_96 / ENH_254 / ENH_255), `terminal.md` (Dual Telemetry), `data_analyst.md` (DATA_PACKET Technicals), `bullish_gem.md` (ENH_FIN_02_ADVOCACY).
+
+---
+
+<a name="mandate_51"></a>
+<a name="enh_256"></a>
+### [MANDATE_51 / ENH_256] ARCHITECTURAL_DESIGN_PATTERNS_AND_SYSTEM_INVARIANTS
+- **Status:** ACTIVE
+- **Rule ID:** MANDATE_51 / ENH_256
+- **Classification:** SYSTEMIC_ARCHITECTURAL_MANDATE
+- **Content:** Establishes and codifies the four non-negotiable software design principles and multi-agent architectural patterns governing all systems, tools, engines, and automated/manual workflows across the Council:
+  1. **Fail-Fast Invariant Enforcement (Data Integrity):**
+     - Silent defaults and speculative fallbacks (e.g., defaulting missing ticker quotes, prices, or volume to `0.0`, swallowing parser exceptions, or fabricating data) are strictly prohibited.
+     - When any required input field, price anchor, math proof (MANDATE_06), or schema structure is corrupted or missing, the system and engines MUST fail fast: trigger an explicit `CRITICAL_SCHEMA_VIOLATION`, `DATA_CORRUPTION_VETO`, or `HARD_HALT`. No speculative inference or downstream trade formulation is permitted on corrupted data.
+  2. **Hub-and-Spoke Output Consolidation (Systemic Single-Pass / MANDATE_22):**
+     - Sub-agents (`bullish_gem`, `red_team_gem`, `neutral_gem`, `data_analyst`, `macro_sentinel`, `regime_engine`, `strategy_engine`, `rule_enforcer_engine`, `execution`) operate strictly as internal, isolated spokes in the deliberation pipeline emitting structured JSON assessments.
+     - The Terminal Orchestrator (`terminal.md`) is the sole authorized Hub permitted to emit user-facing Markdown synthesis and the unified `EXECUTION_PAYLOAD`. Sub-engines are strictly barred from emitting external JSON streams or free-form execution commands.
+  3. **Uniform Strategy Interface Specification (Strategy Pattern):**
+     - Every trading setup and quantitative strategy (e.g., Momentum Breakouts, High Tight Flags, Pullback Continuations, Mean-Reversion, Episodic Pivots, Parabolic Shorts) must implement a uniform algorithmic contract:
+       - *Standard Inputs:* `(Price, EMA20, EMA50, VWAP, ATR, rVol, Net_GEX, Market_Regime)`
+       - *Standard Output Telemetry:* `(Setup_Tag, Permissibility_Gate, Risk_Unit_R, Stop_Distance_ATR, Target_Ladder, Forensic_Math_Proof)`
+     - Strategies are modular plug-ins: strategy permissibility is exclusively governed by the `regime_engine` routing matrix without mutating underlying execution pipelines.
+  4. **Sequential Circuit Breaker Pipeline (Chain of Responsibility):**
+     - The validation and risk review pipeline follows a strict priority chain:
+       `Macro Sentinel (MVP / Macro Shield)` $\to$ `Regime & Strategy Router` $\to$ `Adversarial Red Team (5-Day Event Risk / Flaw Score)` $\to$ `Rule Enforcer (Hard Invariant Veto)` $\to$ `Execution Fiduciary`.
+     - Any individual circuit breaker in the chain possesses absolute, un-bypassable veto power. Downstream execution formulation immediately halts upon a triggered circuit breaker.
+  5. **State Machine Idempotency (Atomic Persistence / ENH_31-S / ENH_31-P):**
+     - State mutations resulting from `EXECUTION_PAYLOAD` directives must be idempotent: executing state synchronization multiple times against identical payloads must result in identical state without duplicate allocations, orphaned positions, or corrupted cash ledgers.
+- **Justification:** Eliminates architectural entropy, prevents speculative model drift, and guarantees that multi-agent consensus adheres to predictable, deterministic engineering contracts.
+- **Cross-Reference:** `antigravity.md` (Section -1.1), `terminal.md` (Hub-and-Spoke), `rule_enforcer_engine.md` (Circuit Breaker), `regime_engine.md` (Strategy Router), `strategy_engine.md` (Strategy Interface), `state_validation_router.md` (State Idempotency).

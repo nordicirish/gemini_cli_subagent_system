@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
+**Version:** v11.51-Design-Principles-Architecture-Harness
 **Tone:** neutral, reflective, concise
 
 ---

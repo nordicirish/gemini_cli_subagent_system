@@ -324,6 +324,31 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v11.51-Design-Principles-Architecture-Harness *(2026-09-22)*
+- **Architectural Principles & Design Patterns Integration (ntigravity.md):** Codified Section -1.1 (Core Architectural Principles & Agentic Design Patterns) into the Custodian harness:
+  - *KISS & YAGNI Principle:* Mandatory rejection of speculative abstractions, premature inheritance, unnecessary factories, and configurability flags without 3 distinct call sites.
+  - *Separation of Concerns (SoC) & Decoupling:* Strict boundary isolation between Data Ingestion, Legislative Laws, Agent Deliberation, and Local Persistence.
+  - *Fail-Fast Invariants:* Banned silent fallbacks and speculative defaults; missing prices, corrupted schemas, or unverified math proofs trigger immediate hard halts/vetoes.
+  - *Hub-and-Spoke Consolidation Pattern (MANDATE_22 / MANDATE_51):* Sub-engines reason internally; Orchestrator consolidates; state reconciliation layer mutates persistent storage.
+  - *Chain of Responsibility / Circuit Breaker Pattern:* Sequenced risk filters (
+ule_enforcer_engine, macro_sentinel, 
+ed_team_gem) hold individual veto power.
+  - *Strategy Pattern & Regimes:* Strategy setup logic decoupled from core execution; routed dynamically based on 
+egime_engine.md volatility matrix.
+  - *State Machine Idempotency (ENH_31-S / ENH_31-P):* Execution directives promoted atomically without duplicate state allocations or shadow state drift.
+- **Rule Codification (MANDATE_51 / ENH_256 in 
+ules.md):** Formally codified MANDATE_51 / ENH_256 establishing Fail-Fast Invariants, Hub-and-Spoke Single-Pass Consolidation, Uniform Strategy Interface Specification, Sequential Circuit Breakers, and State Machine Idempotency as binding legislative standards.
+- **Engine Mirroring & Contextual Bonding (ENH_98):** Mirrored MANDATE_51 principles across key Council engine instructions:
+  - 	erminal.md: Reaffirmed sole Hub authority for consolidated markdown and EXECUTION_PAYLOAD emission.
+  - 
+ule_enforcer_engine.md: Codified sequential circuit breaker role and fail-fast invariant enforcement.
+  - 
+egime_engine.md: Established the Strategy Router pattern for dynamic regime gating.
+  - strategy_engine.md: Standardized setup classification against the Uniform Strategy Interface contract.
+  - state_validation_router.md: Codified State Machine Idempotency and atomic state promotion.
+- **Global Parity Versioning (MANDATE_29):** Synchronized version string 11.51-Design-Principles-Architecture-Harness across all 15 Council engine instructions, master rules (
+ules.md), and ntigravity.md.
+
 ### v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync *(2026-09-21)*
 - **Daily Peak Fibonacci Target Engine & Confluence (`fetch_stocks.py`):** Upgraded `calculate_fib_forecast()` to compute quantitative Fibonacci expansion tranches aligned to ENH_254/255 ($T_1$ 1.000, $T_{1.272}$ 1.272, $T_2$ 1.618 Golden Ratio, $T_3$ 2.618 Blow-Off). Integrated ATR daily volatility ceiling calculation (`daily_peak_atr = open_price + (1.25 * atr)`), $\pm 1.8\%$ ATR confluence detection (`atr_confluence`), session daily peak target selection (`daily_peak_target`), 0.25% front-run limit order pricing (`t1_limit`, `t2_limit`, `t3_limit`), and session peak exhaustion status (`daily_peak_status`).
 - **Data Pipeline & Open Price Tracking (`fetch_stocks.py`):** Added `day_open` dictionary to `MarketDataCache` populated from batch quotes and `fast_info`. Wired `open_price`, `atr`, `rsi`, `rvol`, and `vwap` into `calculate_fib_forecast()` calls in the stock polling loop.
