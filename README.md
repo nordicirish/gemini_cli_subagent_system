@@ -324,6 +324,22 @@ The Terminal Orchestrator synthesises all three positions into a final `HOLD / B
 
 ## 📋 Changelog
 
+### v11.52-Gamma-Cascade-Alpha-Rotation-Sentinel-Sync *(2026-09-24)*
+- **Legislative Rule Codification (rules.md):**
+  - *MANDATE_52 (Mechanical Gamma Cascade Override):* Codified mandatory, non-negotiable risk-reduction 'TRIM' directives (minimum 25%) structured as sweeping limit orders 0.5% below bid whenever an active portfolio asset breaches a >2.0% trailing VWAP extension stop during confirmed index SHORT_GAMMA regimes (SPY Net GEX < 0), strictly prohibiting Council debate latency or holding (promoted from L-246).
+  - *MANDATE_53 (Opportunity Cost Alpha Rotation):* Codified Pairwise Opportunity Cost Audits when active portfolio cash is zero (€0.00 EUR), strictly prohibiting passive stasis on lagging or sub-VWAP assets if a strategic watchlist asset clears a verified Tier-1 catalyst with Relative Strength > 4.0% and rVol > 1.50 in a LONG_GAMMA posture; emits immediate capital rotation tranches (selling 25-50% of the laggard to fund the leader) when yield delta exceeds GLOBAL_ALPHA_FRICTION_HURDLE (0.85%) (promoted from Lesson 19).
+  - *ENH_259 (Pre-Event GEX Degradation Sentinel):* Codified automatic 50% tightening of all active trailing VWAP stops (e.g., from 2.0% to 1.0%) within 24 to 48 hours of confirmed Tier-1 or Tier-2 Macro Calendar events (CPI, PCE, FOMC) to mitigate position entrapment as institutional dealer bid depth evaporates (promoted from Lesson 18).
+  - *ENH_246 Status Promotion:* Updated status of ENH_246 to `PROMOTED_TO_MANDATE (See MANDATE_52)`.
+- **Proactive Engine Logic Mirroring (ENH_98):**
+  - `terminal.md`: Mirrored MANDATE_52 (immediate 0.5% below-bid sweeping limit trim in EXECUTION_PAYLOAD), MANDATE_53 (zero-cash Pairwise Opportunity Cost Audit and 25-50% rotation tranche emission), and ENH_259 (pre-macro event stop tightening display).
+  - `rule_enforcer_engine.md`: Codified circuit breaker validation gates for MANDATE_52 (veto debate/hold delays under SPY Net GEX < 0), MANDATE_53 (veto zero-cash passive stasis), and ENH_259 (enforce 50% stop tightening within 24-48h of macro events).
+  - `execution.md`: Codified execution parameters for sweeping limit orders 0.5% below bid (MANDATE_52), capital rotation tranche sizing (MANDATE_53), and automated 50% trailing VWAP stop reductions (ENH_259).
+  - `macro_sentinel.md`: Wired 24-48h calendar proximity sentry to signal pre-event dealer shielding degradation (ENH_259).
+  - `gex_engine.md`: Integrated SPY Net GEX < 0 cascade triggers (MANDATE_52) and pre-event single-stock dealer shielding decay alerts (ENH_259).
+  - `bullish_gem.md` & `neutral_gem.md`: Integrated Relative Strength > 4.0% watchlist candidate screening and zero-cash portfolio laggard identification for pairwise rotation (MANDATE_53).
+- **Trade Lessons Synchronization (ENH_53-GC):** Synchronized dynamic trade lesson registries in `context/trade_lessons.json` and `context/trade_lessons.md` by annotating L-246, Lesson 18, and Lesson 19 with their codified rule IDs (`MANDATE_52`, `ENH_259`, and `MANDATE_53`).
+- **Global Parity Versioning (MANDATE_29):** Synchronized version string `v11.52-Gamma-Cascade-Alpha-Rotation-Sentinel-Sync` across all 15 Council engine instructions, master rules (`rules.md`), `INSTRUCTIONS.md`, `antigravity.md`, `python/main.py`, and `README.md`.
+
 ### v11.51-Design-Principles-Architecture-Harness *(2026-09-22)*
 - **Architectural Principles & Design Patterns Integration (ntigravity.md):** Codified Section -1.1 (Core Architectural Principles & Agentic Design Patterns) into the Custodian harness:
   - *KISS & YAGNI Principle:* Mandatory rejection of speculative abstractions, premature inheritance, unnecessary factories, and configurability flags without 3 distinct call sites.

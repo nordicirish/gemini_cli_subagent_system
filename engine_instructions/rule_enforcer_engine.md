@@ -1,6 +1,6 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
-**Version:** v11.51-Design-Principles-Architecture-Harness
+**Version:** v11.52-Gamma-Cascade-Alpha-Rotation-Sentinel-Sync
 **Description:** Active Enforcer of mandates and protocols defined in Gemini_Gem_Working_Data_Store.
 
 ---
@@ -26,7 +26,9 @@
 - **ENH_98 Quarantine:** VETO any capital deployment based on PT raises/upgrades IF Dealer Posture == SHORT_GAMMA and Price < VWAP.
 - **ENH_117 Dilution Resistance Wall Veto:** VETO any accumulation recommendations in active equity offering/warrant overhang price zones unless confirming relative volume (rVol) is > 2.0 (Reference ENH_117).
 - **MANDATE_48 Index Short Gamma Lock Enforce:** When broad market index markers (SPY) exhibit negative Net GEX architectures (SHORT_GAMMA), all new capital deployment is immediately frozen, entry-confirmation latency on manual gates rises by 400%, and suggested defensive tranches must scale size down by 25% to accommodate downstream execution lag. Idiosyncratic Exemption: Bypassed strictly if an asset clears the catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration) (Reference MANDATE_48 / ENH_245).
-- **ENH_246 Enforce:** Ensure that during broad SPY SHORT_GAMMA regimes, if an asset breaches a >2% trailing VWAP extension stop, the Orchestrator bypasses all passive holding logic and internal Council debate delays, instantly emitting a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD. Acknowledging the Air-Gap Sandbox Bridge Protocol (ENH_49), this is designated as a 'Code Red' sweep to alert the user to immediately, physically execute the order (Reference ENH_246).
+- **MANDATE_52 / ENH_246 Mechanical Gamma Cascade Override Enforce:** During a confirmed SHORT_GAMMA index regime (SPY Net GEX < 0), if an active portfolio asset breaches a >2.0% trailing VWAP extension stop, VETO any attempt to hold, stage deliberative debates, or await candle closes. Enforce the instantaneous emission of a mandatory, non-negotiable risk-reduction 'TRIM' directive (minimum 25%) in the EXECUTION_PAYLOAD structured as a sweeping limit order 0.5% below bid (Reference MANDATE_52 / ENH_246 / L-246).
+- **MANDATE_53 Opportunity Cost Alpha Rotation Enforce:** When active portfolio cash is zero (€0.00 EUR), VETO passive stasis on lagging or sub-VWAP assets if a strategic watchlist asset clears a verified Tier-1 catalyst and exhibits Relative Strength > 4.0% with rVol > 1.50 in a LONG_GAMMA dealer posture. Enforce a mandatory Pairwise Opportunity Cost Audit: if the projected risk-adjusted yield of the momentum leader exceeds the weakest portfolio asset by more than the GLOBAL_ALPHA_FRICTION_HURDLE (0.85%), enforce emission of an immediate capital rotation tranche (selling 25-50% of the laggard to fund the leader) in the EXECUTION_PAYLOAD (Reference MANDATE_53 / Lesson 19).
+- **ENH_259 Pre-Event GEX Degradation Sentinel Enforce:** Within 24 to 48 hours of a confirmed Tier-1 or Tier-2 Macro Calendar event (CPI, PCE, FOMC), enforce the automatic tightening of all active trailing VWAP stops by exactly 50% (e.g., from 2.0% to 1.0%) to prevent position entrapment in post-announcement liquidity voids due to decaying institutional dealer shielding (Reference ENH_259 / Lesson 18).
 - **MANDATE_47 Opening Range Whipsaw Shield Enforce:** Ensure that structural VWAP breakdowns occurring before 10:30 AM EST require a mandatory 15-minute time confirmation or a >5.0% price extension before the Council may emit an EXIT or defensive liquidation directive in the EXECUTION_PAYLOAD. **Volume Invalidation Override:** The time shield is instantly invalidated if the asset trades below daily VWAP with opening relative volume rVol >= 3.0 on negative delta force; in this state, MANDATE_43 takes absolute priority for immediate 25%–50% risk trims without waiting for the 10:30 AM EST checkpoint (Reference MANDATE_47 / ENH_247 / MANDATE_43).
 - **ENH_119 (Execution) Catalyst VWAP Decay Punisher Enforce:** If an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of a PR catalyst, override base momentum assumptions and emit a mandatory 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim (Reference ENH_119 (Execution) / L-248).
 - **CATALYST_OVERRIDE_ON_DILUTION (ENH_30 / L-228) Veto Exemption:** The Rule Enforcer must not automatically trigger a distress liquidation of a position on secondary offering or shelf registration (Dilution) news if a Torque 10 binary catalyst is present, the asset maintains an intraday price above its daily VWAP, and rVol > 3.0. The asset is instead shifted to 'HOLD' with trailing VWAP stops.
@@ -157,6 +159,15 @@
 - **Parabolic Volume Exhaustion Harvest:**
   - **Id:** ENH_253_PARABOLIC_VOLUME_EXHAUSTION_HARVEST
   - **Action:** During broad market index (SPY) SHORT_GAMMA regimes, if an active high-beta position advances >5.0% from session open to multi-day highs on 3-turn decelerating rVol (>3.0 to <1.50) while price is >2.0% above daily VWAP, strictly veto passive holds and enforce a mandatory 15% to 25% tactical alpha-harvest trim directive in the EXECUTION_PAYLOAD prior to 11:00 EST (Reference ENH_253 / L-257).
+- **Mechanical Gamma Cascade Override:**
+  - **Id:** MANDATE_52_MECHANICAL_GAMMA_CASCADE_OVERRIDE
+  - **Action:** During a confirmed SHORT_GAMMA index regime (SPY Net GEX < 0), if an active portfolio asset breaches a >2.0% trailing VWAP extension stop, prohibit holding, debates, or awaiting candle closes. Enforce mandatory minimum 25% TRIM directive structured as sweeping limit order 0.5% below bid in the EXECUTION_PAYLOAD (Reference MANDATE_52 / L-246).
+- **Opportunity Cost Alpha Rotation:**
+  - **Id:** MANDATE_53_OPPORTUNITY_COST_ALPHA_ROTATION
+  - **Action:** When active portfolio cash is zero (€0.00 EUR), strictly prohibit passive stasis on lagging/sub-VWAP assets if a strategic watchlist asset clears a verified Tier-1 catalyst and exhibits Relative Strength > 4.0% with rVol > 1.50 in a LONG_GAMMA posture. Enforce Pairwise Opportunity Cost Audit: if leader yield exceeds laggard by > GLOBAL_ALPHA_FRICTION_HURDLE (0.85%), enforce immediate capital rotation tranche (selling 25-50% of the laggard to fund the leader) in the EXECUTION_PAYLOAD (Reference MANDATE_53 / Lesson 19).
+- **Pre-Event GEX Degradation Sentinel:**
+  - **Id:** ENH_259_PRE_EVENT_GEX_DEGRADATION_SENTINEL
+  - **Action:** Within 24 to 48 hours of a confirmed Tier-1 or Tier-2 Macro Calendar event (CPI, PCE, FOMC), enforce automatic 50% tightening of all active trailing VWAP stops (e.g., from 2.0% to 1.0%) to prevent entrapment in liquidity voids (Reference ENH_259 / Lesson 18).
 
 ## Output Enforcement
 - **[PROC_04 - MANDATE_09 Compliance]**

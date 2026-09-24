@@ -1,6 +1,6 @@
 # Gemini_Gem_Working_Data_Store
 **Role:** Master Legislative SSoT (Protocols, Mandates, & Logic)
-**Version:** v11.51-Design-Principles-Architecture-Harness
+**Version:** v11.52-Gamma-Cascade-Alpha-Rotation-Sentinel-Sync
 **Description:** Static Source of Truth for Mandates, Protocols, and Thresholds. Enforced by Gemini_Gem_Rule_Enforcer_Engine.
 - **Execution:** When proposing/directing mandatory scale-outs or risk-reduction trims in the EXECUTION_PAYLOAD, the Execution Engine MUST NOT suggest monolithic block limit orders at theoretical ATR peaks if LONG_GAMMA dampening or visual chart resistance is active.
 ---
@@ -115,7 +115,7 @@
 - [ENH_119 (Execution)](#enh_119_decay): [CODIFIED: L-248] CATALYST_VWAP_DECAY_PUNISHER - If an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of a PR catalyst, execution must override base momentum assumptions and emit a mandatory 25% risk trim directive to preempt short-gamma distribution.
 - [ENH_232](#enh_232): BROKER_LATENCY_LIMIT_SWEEP - If a critical mechanical risk trim (e.g., >4% VWAP extension) fails to execute due to broker API latency or rejection, the Orchestrator MUST NOT re-queue the order at the identical or higher limit. It must instantly emit a directive in the EXECUTION_PAYLOAD to queue a 'Sweeping Limit Order' priced 0.5% below the current bid, alerting the user to physically execute the order to guarantee extraction.
 - [ENH_245](#enh_245): INDEX_SHORT_GAMMA_LOCK - When broad index markers (SPY) exhibit SHORT_GAMMA architectures, entry-confirmation latency on manual gates rises by 400%. Defensive tranches proposed in the EXECUTION_PAYLOAD must scale size down by 25% to accommodate downstream execution lag, and new capital deployment is immediately frozen, unless the asset clears the idiosyncratic catalyst quality gates defined in MANDATE_20_VOID (Verified 8-K >= $50M or Phase 3 clinical acceleration).
-- [ENH_246](#enh_246): MECHANICAL_GAMMA_CASCADE_OVERRIDE - During a SHORT_GAMMA index regime, if an asset breaches a >2% trailing VWAP extension stop, the Orchestrator must bypass all passive holding logic and internal Council debate delays. It must instantly emit a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD. Acknowledging the Air-Gap Sandbox Bridge Protocol (ENH_49), the system designates this as a 'Code Red' sweep, alerting the user to immediately, physically execute the order to prevent catastrophic alpha bleed from downstream latency.
+- [ENH_246](#enh_246): [PROMOTED_TO_MANDATE: MANDATE_52] MECHANICAL_GAMMA_CASCADE_OVERRIDE - During a SHORT_GAMMA index regime, if an asset breaches a >2% trailing VWAP extension stop, the Orchestrator must bypass all passive holding logic and internal Council debate delays. It must instantly emit a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD. Acknowledging the Air-Gap Sandbox Bridge Protocol (ENH_49), the system designates this as a 'Code Red' sweep, alerting the user to immediately, physically execute the order to prevent catastrophic alpha bleed from downstream latency.
 - [ENH_247](#enh_247): OPENING_RANGE_WHIPSAW_SHIELD (ENH_247_AMENDMENT_V2) - Any structural VWAP breakdown occurring before 10:30 AM EST requires a subsequent 15-minute time confirmation or a >5% distance extension before recommending a hard EXIT directive. **Volume Invalidation Override:** The opening-range time shield is instantly invalidated if an asset trades below its daily VWAP with opening relative volume rVol >= 3.0 on negative delta force; in this state, MANDATE_43 takes absolute priority for immediate 25%-50% risk trims without waiting for the 10:30 AM EST checkpoint.
 - [ENH_248](#enh_248): CATALYST_VWAP_DECAY_PUNISHER - If an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of an unquantified PR catalyst, execution must override ENH_88 OEM Multiplier assumptions and emit a 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim to preempt short-gamma distribution.
 - [ENH_249](#enh_249): POST-10:30 CASCADE MITIGATION - If broad index markers (SPY) enter a SHORT_GAMMA architecture and a position tracks below its daily VWAP floor past 10:30 AM EST on negative delta force, the system MUST emit a mechanical 25% trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim instantly, bypassing standard gates and shields.
@@ -126,6 +126,7 @@
 - [ENH_254](#enh_254): TREND_BASED_FIBONACCI_PROFIT_TAKING_TRANCHES - Anchors scale-out limit orders to quantitative Fibonacci expansion targets (T1 1.000, T2 1.618, T3 2.618) with a 0.20%-0.30% front-running requirement, and enforces the Alpha Headroom Veto for entries.
 - [ENH_255](#enh_255): DAILY_TRADING_PEAK_FIBONACCI_AND_TRIM_OPTIMIZATION - Optimizes swing impulse detection for active daily breakouts/peaks, integrates ATR daily volatility ceiling confluence, codifies 0.25% front-running limit execution across micro-tranches (T1 20%-25%, T2 50% cumulative, T3 runner liquidation), and mandates dual telemetry (downside stops + upside daily peak profit-taking).
 - [ENH_256](#enh_256): ARCHITECTURAL_DESIGN_PATTERNS_AND_SYSTEM_INVARIANTS - Codifies Fail-Fast Data Invariants, Hub-and-Spoke Single-Pass Consolidation, Uniform Strategy Interface Specification, Sequential Circuit Breaker Pipeline, and State Machine Idempotency.
+- [ENH_259](#enh_259): PRE_EVENT_GEX_DEGRADATION_SENTINEL - Within 24 to 48 hours of a confirmed Tier-1 or Tier-2 Macro Calendar event (CPI, PCE, FOMC), the systemic reliability of single-stock LONG_GAMMA dealer shielding decays toward zero as institutional market makers pull resting bid depth. The Execution Engine must automatically tighten all active trailing VWAP stops by exactly 50% (e.g., from 2.0% to 1.0%) to prevent position entrapment in post-announcement liquidity voids.
 - [L-251](#l-251): SHORT_GAMMA_RTH_LIQUIDATION_EXPEDITER
 
 
@@ -180,6 +181,8 @@
 - [MANDATE_49](#mandate_49): POST_BREAKTHROUGH_TECHNICAL_CEILING_HARVEST - When an asset trapped beneath intermediate resistance (Price < MA50) gaps up or spikes >2% on a Tier-1 regulatory milestone (e.g., FDA Breakthrough Therapy Designation), but subsequent price action fails to hold above its daily VWAP anchor past 14:00 EST on declining relative volume, the Council is strictly forbidden from sitting in passive stasis. The Orchestrator MUST emit a mandatory 15% to 25% tactical alpha-harvest trim directive in the EXECUTION_PAYLOAD prior to Power Hour to lock in speculative momentum before algorithmic mean reversion drags price back into the primary downtrend.
 - [MANDATE_50](#mandate_50): MIDDAY_BASING_LOOP_BREAKER - The Council is strictly prohibited from citing 'orderly midday consolidation', 'moving average ribbon curling', or 'localized positive dealer gamma' to justify holding an asset trading below its daily VWAP past 11:30 EST during broad index (SPY) SHORT_GAMMA regimes. If relative volume contracts below 0.80 while below VWAP, it represents lack of institutional bid. A mandatory 25% risk trim directive must be emitted in the EXECUTION_PAYLOAD prior to 13:00 EST (Promoted from L-256 / ENH_252; proposed as MANDATE_49).
 - [MANDATE_51](#mandate_51): ARCHITECTURAL_DESIGN_PATTERNS_AND_SYSTEM_INVARIANTS - Formalizes systemic software engineering principles: Fail-Fast Data Invariants, Hub-and-Spoke Output Consolidation, Uniform Strategy Pattern Interface, and Sequential Circuit Breaker Risk Pipeline.
+- [MANDATE_52](#mandate_52): MECHANICAL_GAMMA_CASCADE_OVERRIDE - During a confirmed SHORT_GAMMA index regime (SPY Net GEX < 0), if an active portfolio asset breaches a >2.0% trailing VWAP extension stop, the Orchestrator is strictly prohibited from holding, staging deliberative debates, or awaiting candle closes. The Orchestrator must instantly emit a mandatory, non-negotiable risk-reduction 'TRIM' directive (minimum 25%) in the EXECUTION_PAYLOAD structured as a sweeping limit order 0.5% below bid.
+- [MANDATE_53](#mandate_53): OPPORTUNITY_COST_ALPHA_ROTATION - When active portfolio cash is zero (€0.00 EUR), the Council is strictly forbidden from sitting in passive stasis on lagging or sub-VWAP assets if a strategic watchlist asset clears a verified Tier-1 catalyst and exhibits Relative Strength > 4.0% with rVol > 1.50 in a LONG_GAMMA dealer posture. The Orchestrator must force a Pairwise Opportunity Cost Audit: if the projected risk-adjusted yield of the momentum leader exceeds the weakest portfolio asset by more than the GLOBAL_ALPHA_FRICTION_HURDLE (0.85%), an immediate capital rotation tranche (selling 25-50% of the laggard to fund the leader) must be emitted in the EXECUTION_PAYLOAD.
 
 ## Engine Registry
 This registry serves as the system-wide directory mapping all active sub-agent components to their role, version, primary mandate ownership, and veto capabilities (Reference ENH_98 / MANDATE_04).
@@ -2060,8 +2063,8 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 
 <a name="enh_246"></a>
 ### [ENH_246] MECHANICAL_GAMMA_CASCADE_OVERRIDE
-- **Status:** ACTIVE
-- **Content:** MECHANICAL_GAMMA_CASCADE_OVERRIDE - During a SHORT_GAMMA index regime, if an asset breaches a >2% trailing VWAP extension stop, the Orchestrator must bypass all passive holding logic and internal Council debate delays. It must instantly emit a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD. Acknowledging the Air-Gap Sandbox Bridge Protocol (ENH_49), the system designates this as a 'Code Red' sweep, alerting the user to immediately, physically execute the order to prevent catastrophic alpha bleed from downstream latency.
+- **Status:** PROMOTED_TO_MANDATE (See MANDATE_52)
+- **Content:** MECHANICAL_GAMMA_CASCADE_OVERRIDE - During a SHORT_GAMMA index regime, if an asset breaches a >2% trailing VWAP extension stop, the Orchestrator must bypass all passive holding logic and internal Council debate delays. It must instantly emit a mandatory, non-negotiable risk-reduction 'TRIM' directive in the EXECUTION_PAYLOAD. Acknowledging the Air-Gap Sandbox Bridge Protocol (ENH_49), the system designates this as a 'Code Red' sweep, alerting the user to immediately, physically execute the order to prevent catastrophic alpha bleed from downstream latency. Formally promoted to MANDATE_52.
 - **Justification:** Proven necessary by the June 9th 10:19 AM deadlock where PLTR and NOW were held passively despite SHORT_GAMMA distribution warnings. Modified to strictly comply with the sandboxed, user-reliant execution architecture.
 
 <a name="enh_247"></a>
@@ -2244,3 +2247,36 @@ This registry serves as the system-wide directory mapping all active sub-agent c
      - State mutations resulting from `EXECUTION_PAYLOAD` directives must be idempotent: executing state synchronization multiple times against identical payloads must result in identical state without duplicate allocations, orphaned positions, or corrupted cash ledgers.
 - **Justification:** Eliminates architectural entropy, prevents speculative model drift, and guarantees that multi-agent consensus adheres to predictable, deterministic engineering contracts.
 - **Cross-Reference:** `antigravity.md` (Section -1.1), `terminal.md` (Hub-and-Spoke), `rule_enforcer_engine.md` (Circuit Breaker), `regime_engine.md` (Strategy Router), `strategy_engine.md` (Strategy Interface), `state_validation_router.md` (State Idempotency).
+
+---
+
+<a name="mandate_52"></a>
+### [MANDATE_52] MECHANICAL_GAMMA_CASCADE_OVERRIDE
+- **Status:** ACTIVE
+- **Rule ID:** MANDATE_52_MECHANICAL_GAMMA_CASCADE_OVERRIDE
+- **Classification:** SYSTEMIC_RISK_MANDATE
+- **Content:** [MANDATE_52] MECHANICAL_GAMMA_CASCADE_OVERRIDE - During a confirmed SHORT_GAMMA index regime (SPY Net GEX < 0), if an active portfolio asset breaches a >2.0% trailing VWAP extension stop, the Orchestrator is strictly prohibited from holding, staging deliberative debates, or awaiting candle closes. The Orchestrator must instantly emit a mandatory, non-negotiable risk-reduction 'TRIM' directive (minimum 25%) in the EXECUTION_PAYLOAD structured as a sweeping limit order 0.5% below bid.
+- **Justification:** Promoted from L-246. Eliminates Council debate latency during index short-gamma cascades where order book liquidity voids expand exponentially.
+- **Cross-Reference:** `terminal.md` (Execution Payload Sweeping Limit Trim), `rule_enforcer_engine.md` (Mandatory Short Gamma Cascade Veto), `execution.md` (Sweeping Limit Order 0.5% Below Bid), `gex_engine.md` (SPY Net GEX < 0 Trigger).
+
+---
+
+<a name="mandate_53"></a>
+### [MANDATE_53] OPPORTUNITY_COST_ALPHA_ROTATION
+- **Status:** ACTIVE
+- **Rule ID:** MANDATE_53_OPPORTUNITY_COST_ALPHA_ROTATION
+- **Classification:** CAPITAL_ALLOCATION_MANDATE
+- **Content:** [MANDATE_53] OPPORTUNITY_COST_ALPHA_ROTATION - When active portfolio cash is zero (€0.00 EUR), the Council is strictly forbidden from sitting in passive stasis on lagging or sub-VWAP assets if a strategic watchlist asset clears a verified Tier-1 catalyst and exhibits Relative Strength > 4.0% with rVol > 1.50 in a LONG_GAMMA dealer posture. The Orchestrator must force a Pairwise Opportunity Cost Audit: if the projected risk-adjusted yield of the momentum leader exceeds the weakest portfolio asset by more than the GLOBAL_ALPHA_FRICTION_HURDLE (0.85%), an immediate capital rotation tranche (selling 25-50% of the laggard to fund the leader) must be emitted in the EXECUTION_PAYLOAD.
+- **Justification:** Promoted from Lesson 19. Validated by 2026-09-24 session where Council remained trapped in 0% cash while META (+4.40%) and RKLB (+5.25%) expanded alpha uncaptured.
+- **Cross-Reference:** `terminal.md` (Pairwise Opportunity Cost Audit & Rotation Tranche), `rule_enforcer_engine.md` (Zero Cash Passive Stasis Veto), `bullish_gem.md` (Relative Strength & Tier-1 Catalyst Identification), `neutral_gem.md` (Weakest Portfolio Laggard Audit), `execution.md` (25-50% Rotation Tranche Sizing).
+
+---
+
+<a name="enh_259"></a>
+### [ENH_259] PRE_EVENT_GEX_DEGRADATION_SENTINEL
+- **Status:** ACTIVE
+- **Rule ID:** ENH_259_PRE_EVENT_GEX_DEGRADATION_SENTINEL
+- **Classification:** EXECUTION_RISK_PROTOCOL
+- **Content:** [ENH_259] PRE_EVENT_GEX_DEGRADATION_SENTINEL - Within 24 to 48 hours of a confirmed Tier-1 or Tier-2 Macro Calendar event (CPI, PCE, FOMC), the systemic reliability of single-stock LONG_GAMMA dealer shielding decays toward zero as institutional market makers pull resting bid depth. The Execution Engine must automatically tighten all active trailing VWAP stops by exactly 50% (e.g., from 2.0% to 1.0%) to prevent position entrapment in post-announcement liquidity voids.
+- **Justification:** Promoted from Lesson 18. Prevents false confidence in localized options gamma ahead of systemic macroeconomic repricing shocks.
+- **Cross-Reference:** `macro_sentinel.md` (Pre-Event 24-48h Calendar Sentry), `execution.md` (50% Trailing VWAP Stop Tightening), `gex_engine.md` (Dealer Shielding Decay), `terminal.md` (Active Telemetry Tightened Stops), `rule_enforcer_engine.md` (Pre-Event Stop Verification).

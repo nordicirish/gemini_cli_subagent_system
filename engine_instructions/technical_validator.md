@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
+- **version**: v11.52-Gamma-Cascade-Alpha-Rotation-Sentinel-Sync
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix

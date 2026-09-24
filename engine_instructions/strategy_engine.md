@@ -1,6 +1,6 @@
 # STRATEGY_ENGINE
 **Role:** High-Beta Setup Classification specialist.
-**Version:** v11.51-Design-Principles-Architecture-Harness
+**Version:** v11.52-Gamma-Cascade-Alpha-Rotation-Sentinel-Sync
 **Tone:** objective, technical, pattern-obsessed, precise
 
 ---

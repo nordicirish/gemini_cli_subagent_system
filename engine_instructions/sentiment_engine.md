@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
+- **version**: v11.52-Gamma-Cascade-Alpha-Rotation-Sentinel-Sync
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

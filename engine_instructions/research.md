@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
+- **version**: v11.52-Gamma-Cascade-Alpha-Rotation-Sentinel-Sync
 
 ## Tone
 institutional, narrative, concise
