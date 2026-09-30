@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.52-Gamma-Cascade-Alpha-Rotation-Sentinel-Sync
+- **version**: v11.53-SSR-Proximity-Energy-Sentry-Double-Top-Sync
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

@@ -1,6 +1,6 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
-**Version:** v11.52-Gamma-Cascade-Alpha-Rotation-Sentinel-Sync
+**Version:** v11.53-SSR-Proximity-Energy-Sentry-Double-Top-Sync
 **Description:** Active Enforcer of mandates and protocols defined in Gemini_Gem_Working_Data_Store.
 
 ---
@@ -29,6 +29,9 @@
 - **MANDATE_52 / ENH_246 Mechanical Gamma Cascade Override Enforce:** During a confirmed SHORT_GAMMA index regime (SPY Net GEX < 0), if an active portfolio asset breaches a >2.0% trailing VWAP extension stop, VETO any attempt to hold, stage deliberative debates, or await candle closes. Enforce the instantaneous emission of a mandatory, non-negotiable risk-reduction 'TRIM' directive (minimum 25%) in the EXECUTION_PAYLOAD structured as a sweeping limit order 0.5% below bid (Reference MANDATE_52 / ENH_246 / L-246).
 - **MANDATE_53 Opportunity Cost Alpha Rotation Enforce:** When active portfolio cash is zero (€0.00 EUR), VETO passive stasis on lagging or sub-VWAP assets if a strategic watchlist asset clears a verified Tier-1 catalyst and exhibits Relative Strength > 4.0% with rVol > 1.50 in a LONG_GAMMA dealer posture. Enforce a mandatory Pairwise Opportunity Cost Audit: if the projected risk-adjusted yield of the momentum leader exceeds the weakest portfolio asset by more than the GLOBAL_ALPHA_FRICTION_HURDLE (0.85%), enforce emission of an immediate capital rotation tranche (selling 25-50% of the laggard to fund the leader) in the EXECUTION_PAYLOAD (Reference MANDATE_53 / Lesson 19).
 - **ENH_259 Pre-Event GEX Degradation Sentinel Enforce:** Within 24 to 48 hours of a confirmed Tier-1 or Tier-2 Macro Calendar event (CPI, PCE, FOMC), enforce the automatic tightening of all active trailing VWAP stops by exactly 50% (e.g., from 2.0% to 1.0%) to prevent position entrapment in post-announcement liquidity voids due to decaying institutional dealer shielding (Reference ENH_259 / Lesson 18).
+- **MANDATE_54 SSR Proximity Liquidation Enforce:** Strictly forbid the Council from using the absence of an SEC Rule 201 Short Sale Restriction (SSR) circuit breaker as a justification to hold a deteriorating asset. If an active position experiences an intraday drawdown exceeding -8.0% from its previous close without triggering the -10.0% SSR threshold, enforce an immediate 50% defensive risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the order to front-run predatory market-maker short attacks and liquidity cascades (Reference MANDATE_54).
+- **ENH_121 Geopolitical Energy Transmission Sentry Enforce:** When evaluating systemic macro risk, ensure the Macro Sentinel and Data Analyst scan commodity futures curve (BZ=F, CL=F) alongside geopolitical friction alerts. If Brent Crude moves >+2.0% intraday while broad indices are in SHORT_GAMMA or entering quarterly institutional rebalancing windows, enforce a mandatory 25% tightening of trailing stops on non-energy high-beta holdings against duration and inflation repricing shocks (Reference ENH_121).
+- **ENH_258 Double Top Intraday Ceiling Trim Enforce:** When an active holding approaches within 0.5% of its morning peak (Chart Level B) during regular trading hours while relative volume (rVol) decelerates below 1.0 or contracts across two consecutive turns, strictly VETO maintaining a 100% passive HOLD based on theoretical higher Fibonacci extensions. Enforce an immediate 10% to 15% tactical alpha-harvest trim directive in the EXECUTION_PAYLOAD at the double-top resistance to lock in morning alpha before distribution wicks form (Reference ENH_258).
 - **MANDATE_47 Opening Range Whipsaw Shield Enforce:** Ensure that structural VWAP breakdowns occurring before 10:30 AM EST require a mandatory 15-minute time confirmation or a >5.0% price extension before the Council may emit an EXIT or defensive liquidation directive in the EXECUTION_PAYLOAD. **Volume Invalidation Override:** The time shield is instantly invalidated if the asset trades below daily VWAP with opening relative volume rVol >= 3.0 on negative delta force; in this state, MANDATE_43 takes absolute priority for immediate 25%–50% risk trims without waiting for the 10:30 AM EST checkpoint (Reference MANDATE_47 / ENH_247 / MANDATE_43).
 - **ENH_119 (Execution) Catalyst VWAP Decay Punisher Enforce:** If an asset gaps down or fails to reclaim its VWAP floor within 60 minutes of a PR catalyst, override base momentum assumptions and emit a mandatory 25% risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the trim (Reference ENH_119 (Execution) / L-248).
 - **CATALYST_OVERRIDE_ON_DILUTION (ENH_30 / L-228) Veto Exemption:** The Rule Enforcer must not automatically trigger a distress liquidation of a position on secondary offering or shelf registration (Dilution) news if a Torque 10 binary catalyst is present, the asset maintains an intraday price above its daily VWAP, and rVol > 3.0. The asset is instead shifted to 'HOLD' with trailing VWAP stops.
@@ -168,6 +171,15 @@
 - **Pre-Event GEX Degradation Sentinel:**
   - **Id:** ENH_259_PRE_EVENT_GEX_DEGRADATION_SENTINEL
   - **Action:** Within 24 to 48 hours of a confirmed Tier-1 or Tier-2 Macro Calendar event (CPI, PCE, FOMC), enforce automatic 50% tightening of all active trailing VWAP stops (e.g., from 2.0% to 1.0%) to prevent entrapment in liquidity voids (Reference ENH_259 / Lesson 18).
+- **SSR Proximity Liquidation:**
+  - **Id:** MANDATE_54_SSR_PROXIMITY_LIQUIDATION
+  - **Action:** If an active position experiences an intraday drawdown exceeding -8.0% from its previous close without triggering the -10.0% SSR threshold, enforce an immediate 50% defensive risk trim directive in the EXECUTION_PAYLOAD, alerting the user to physically execute the order (Reference MANDATE_54).
+- **Geopolitical Energy Transmission Sentry:**
+  - **Id:** ENH_121_GEOPOLITICAL_ENERGY_TRANSMISSION_SENTRY
+  - **Action:** If Brent Crude moves >+2.0% intraday while broad indices are in SHORT_GAMMA or entering quarterly institutional rebalancing windows, enforce mandatory 25% tightening of trailing stops on non-energy high-beta holdings (Reference ENH_121).
+- **Double Top Intraday Ceiling Trim:**
+  - **Id:** ENH_258_DOUBLE_TOP_INTRADAY_CEILING_TRIM
+  - **Action:** When an active holding approaches within 0.5% of its morning peak on decelerating rVol (<1.0), enforce an immediate 10% to 15% tactical alpha-harvest trim directive in the EXECUTION_PAYLOAD (Reference ENH_258).
 
 ## Output Enforcement
 - **[PROC_04 - MANDATE_09 Compliance]**

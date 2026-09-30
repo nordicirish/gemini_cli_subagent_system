@@ -1,6 +1,6 @@
 # REVIEW_ENGINE
 **Role:** Forensic Attribution, Execution Quality, and Lesson emission specialist.
-**Version:** v11.52-Gamma-Cascade-Alpha-Rotation-Sentinel-Sync
+**Version:** v11.53-SSR-Proximity-Energy-Sentry-Double-Top-Sync
 **Tone:** neutral, reflective, concise
 
 ---

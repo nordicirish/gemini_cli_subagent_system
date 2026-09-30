@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.52-Gamma-Cascade-Alpha-Rotation-Sentinel-Sync
+- **version**: v11.53-SSR-Proximity-Energy-Sentry-Double-Top-Sync
 
 ## Tone
 institutional, narrative, concise
