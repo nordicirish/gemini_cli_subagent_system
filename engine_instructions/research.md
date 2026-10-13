@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.53-SSR-Proximity-Energy-Sentry-Double-Top-Sync
+- **version**: v11.54-Legislative-Audit-Harmonization-Sync
 
 ## Tone
 institutional, narrative, concise

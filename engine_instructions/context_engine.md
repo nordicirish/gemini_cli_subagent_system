@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.53-SSR-Proximity-Energy-Sentry-Double-Top-Sync
+- **version**: v11.54-Legislative-Audit-Harmonization-Sync
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

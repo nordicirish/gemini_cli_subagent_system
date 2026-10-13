@@ -414,6 +414,15 @@ Located in the project root:
 
 ## 📋 Changelog
 
+### v11.54-Legislative-Audit-Harmonization-Sync *(2026-10-14)*
+- **Harmonized 9-Day RSI Triggers (AG-01):** Calibrated all 9-day oscillator triggers across SSoT Section 1 and Section 2 engines. Aligned `MANDATE_36 / ENH_104` trailing stop telemetry to `RSI > 70` (or VWAP extension > 2.0% or active holding), `MANDATE_37 / ENH_110` sympathy bypass to `RSI > 75`, `MANDATE_38` overbought timer to crossing `75 RSI`, `ENH_111` gamma flicker preemption to `RSI > 75`, and `MANDATE_40` parabolic gravity to `RSI > 85`.
+- **Re-Indexed Collided Primary Key IDs (AG-02):** Re-assigned Dynamic Thinking Level Optimization to `MANDATE_22_B` (reserving `MANDATE_22` strictly for `SSOT_EMISSION_PROTOCOL`). Re-assigned Abolition of Passive Structural Holds to `MANDATE_31_B` (reserving `MANDATE_31` for `CASH_RECONCILIATION`). Consolidated Long Gamma SSR Override under `MANDATE_35` (ENH_106/ENH_107), keeping `MANDATE_34` exclusively as `INSTITUTIONAL_PEG_AND_AH_GRAVITY` and `MANDATE_36` exclusively as `PERSISTENT_STOP-LOSS_TELEMETRY`. Re-assigned Merton Portfolio Sizing to `ENH_118_B` (preserving `ENH_118` for Overnight Gap-Risk IV Gate) and removed duplicate `ENH_119 (Execution)` in favor of canonical `ENH_248`.
+- **Scrubbed Deprecated Health Score Remnants (AG-03):** Replaced legacy `health_score: FLOAT` (0-100) in `ENH_32` data schema with canonical `score: INT (-6 to +6)` per `ENH_251`. Updated System Thresholds from legacy `Health Score Minimum: 40` to `Score Minimum: 0` (enforcing long entry blockage under `GATE_REG_01` when `score < 0`).
+- **Codified RTH Session Gate for Gamma Cascades (AG-04 / ENH_261):** Codified `ENH_261` to strictly gate `MANDATE_52` mechanical cascade trims to regular trading hours (`status == 'OPEN'`) with verified session volume, preventing pre-market stale-VWAP misfires. Governed pre-market trims exclusively via `ENH_16_F` and `ENH_115`.
+- **Codified Gamma-Flip Interpolation Bound Guard (AG-05 / ENH_262):** Codified mathematical outlier quarantine for option chain gamma flip interpolation. If `abs(gamma_flip_price - price) / price > 0.15` (equities) or `> 0.05` (indices), flags `DATA_QUALITY_FLAG = INTERPOLATION_OUTLIER`, quarantines `gamma_flip_price` to `0.0`, and falls back to `net_gex_total` sign and `ENH_20` Synthetic GEX.
+- **Harmonized User Override Supremacy (AG-06):** Resolved the legislative contradiction between `MANDATE_18_B` and `MANDATE_40`/`MANDATE_30`. Codified explicit User Override Supremacy across parabolic gravity triggers while maintaining the Day-2 `OVERRIDE_PENALTY_LOCK` (`MANDATE_41`) widening protocol.
+
+
 ### v11.53-SSR-Proximity-Energy-Sentry-Double-Top-Sync *(2026-09-30)*
 - **Architectural Audit & Documentation Overhaul (`README.md`):**
   - *Complete Deprecation of Gemma:* Removed all legacy references to Gemma (`gemma-4-31b-it`, local Gemma runtimes, Gemma fallback tiers) across system title, tagline, architecture diagrams, and sub-agent registries. Formally transitioned all structural, quantitative, and deterministic engines to the active Google Gemini stack (PRO/THINKING and FAST/UTILITY tiers).

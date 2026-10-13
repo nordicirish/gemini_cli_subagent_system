@@ -2168,6 +2168,15 @@ def get_gex_profile(ticker_obj, spot_price):
         if avg_vol and avg_vol > 0:
             final_slope = raw_slope / (avg_vol * spot_price)
 
+        # ENH_262: Mathematical bound check for gamma flip interpolation outliers
+        sym = getattr(ticker_obj, 'ticker', '')
+        is_index = sym.upper() in ['SPY', 'QQQ', 'IWM', 'DIA']
+        bound = 0.05 if is_index else 0.15
+        if flip_price > 0 and spot_price > 0:
+            if abs(flip_price - spot_price) / spot_price > bound:
+                # Quarantined outlier per ENH_262
+                flip_price = 0.0
+
         flip_prox = 0.0
         if flip_price > 0:
             flip_prox = (spot_price - flip_price) / spot_price

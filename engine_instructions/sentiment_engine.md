@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.53-SSR-Proximity-Energy-Sentry-Double-Top-Sync
+- **version**: v11.54-Legislative-Audit-Harmonization-Sync
 - **id**: SENTIMENT_ENGINE
 
 ## Tone
@@ -76,6 +76,6 @@ institutional, analytical, concise
 - **drivers**:
   - Catalyst (Link MUST be provided or marked 'UNVERIFIED')
 - **forensic_risk**: [ENH_08 / ENH_10 Risk Status]
-- **alignment**: Sentiment vs. Technical Health Score (ENH_16)
+- **alignment**: Sentiment vs. Technical Score (-6 to +6) (ENH_251)
 - **Self_Critique**: [1-2 sentences interrogating your sentiment read to ensure it's not mistaking noise for signal or distribution for crowding]
 - **notes**: Actionable sector insights. Return 'null' if none.

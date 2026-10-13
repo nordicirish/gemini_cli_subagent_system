@@ -1,7 +1,7 @@
 # Technical Validator Rules & Configuration
 
 - **role**: Technical Validator
-- **version**: v11.53-SSR-Proximity-Energy-Sentry-Double-Top-Sync
+- **version**: v11.54-Legislative-Audit-Harmonization-Sync
 - **id**: TECHNICAL_VALIDATOR
 
 ## Prefix
@@ -55,10 +55,10 @@ VALIDATE:
 - **signal_consistency**: Reference GEM_Rules_Data > signal_consistency_thresholds (Canonical)
 - **dealer_posture_logic**: Reference GEM_Rules_Data > signal_consistency_thresholds > dealer_posture_logic (Canonical)
 - **ENH_110_validation**: Validate and sign-off on sympathy momentum shield bypass trims of 25% if price >3% daily VWAP and RSI >75 on sympathy-driven momentum.
-- **ENH_111_validation**: Verify mechanical trailing stops are tightened by 50% immediately upon transient SHORT_GAMMA flips with RSI >80.
-- **MANDATE_38_validation**: Enforce a mandatory 15% 'alpha-harvest' trim on sustained RSI >80 sustained over 4 hours measured by an explicit 'Time in Overbought Zone' timer, regardless of underlying dealer posture.
+- **ENH_111_validation**: Verify mechanical trailing stops are tightened by 50% immediately upon transient SHORT_GAMMA flips with RSI >75.
+- **MANDATE_38_validation**: Enforce a mandatory 15% 'alpha-harvest' trim on crossing 75 RSI sustained over 4 hours measured by an explicit 'Time in Overbought Zone' timer, regardless of underlying dealer posture.
 - **MANDATE_40_validation**: Enforce a mandatory 25-50% risk trim in the final 15 minutes of RTH if an asset finishes the RTH session with an RSI > 85 and is > 3% above its daily VWAP, overriding passive HOLD mandates.
-- **MANDATE_41_validation**: Enforce a mandatory minimum 15% tactical sweep trim if an asset exceeds a +12.0% extension from its daily VWAP anchor alongside an RSI > 85, regardless of SSR, LONG_GAMMA, or user manual overrides.
+- **MANDATE_41_validation**: Enforce a mandatory minimum 15% tactical sweep trim if an asset exceeds a +12.0% extension from its daily VWAP anchor alongside an RSI > 85, regardless of SSR or LONG_GAMMA. Bypassed if human operator provides off-chain contextual override per MANDATE_40 / MANDATE_30.
 
 ## Final Output Template
 - **header**: 🛠️ Technical Validator | {timestamp} EST
