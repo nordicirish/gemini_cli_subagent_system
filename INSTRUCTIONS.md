@@ -134,6 +134,14 @@ Maintain "Zero-Drift" across the Gemini Gem Stock Market Council ecosystem. Ensu
   3. **Gitignore Synchronization:** Whenever exempted files or directories are moved, renamed, or created (e.g., migrating cache files), you MUST proactively verify and update `.gitignore` to ensure these files remain properly exempted from version control.
 - **Validation:** You must also review `install.ps1`, the `README.md` Installation section, and `.gitignore` to ensure any new dependencies, file structures, or architectural breaking changes are fully supported and properly tracked/ignored.
 
+### 20. Session Security & Vulnerability Auditing Protocol
+- **Once-Per-Session Audit:** On the first turn of a session or when altering dependencies, execute a passive dependency vulnerability and integrity scan (`pip check` across the virtual environment and review pinned versions in `requirements.txt`).
+- **User Authorization Required:** Never run automated fixing commands (`pip install --upgrade`, package updates, or unreviewed dependency patches) without first presenting:
+  1. Affected package(s) and severity rating (Low, Moderate, High, Critical).
+  2. The patch or upgrade path proposed.
+  3. Explicit request for user approval before making file changes.
+- **Breaking-Change Verification:** Immediately after applying approved security updates, execute the full verification suite (`pip check`, python syntax compilation via `python -m py_compile python/fetch_stocks.py python/main.py python/web_server.py`, and runtime sanity checks on `scripts/`) to confirm zero regressions in background telemetry polling, Gemini subagent dispatch, or FastAPI routes.
+
 ## 🔄 Refactoring Workflow
 When commanded to update or "Sync" the terminal:
 1. **Baseline Check:** Ingest `Gemini_Gem_Working_Data_Store` (rules.md, v7.8+) first to identify the current Master Constants.
@@ -162,6 +170,7 @@ Antigravity must REJECT an update if:
 - It fails to enforce the `MANDATE_43` Friction Override, which requires overriding standard FX/commission friction hurdles (such as the 0.6% round-trip constraint) for an immediate defensive exit during confirmed structural failures (losing daily VWAP floor accompanied by rising distribution volume or negative pre-market gap metrics).
 - It copies the manual Outbound/Inbound clipboard operations (Export/Import sections) to the `gemini_cli_subagent_system` dashboard UI, or deletes the interactive Gemini AI Council chat modal and launcher button (`launch-chat-btn`) from the subagent dashboard UI, as that repository must exclusively use direct FastAPI background database payload ingestion and local streaming (UI Decoupling Guardrail).
 - It attempts to execute or reintroduce Google Drive synchronization, scripts (`sync_to_gdrive.py`), or Google Drive API calls within `gemini_cli_subagent_system` (MANDATE_31-NO-GDRIVE).
+- It applies dependency updates or security patches without explicit user permission or without passing the breaking-change verification suite.
 
 ---
 **Status:** ACTIVE

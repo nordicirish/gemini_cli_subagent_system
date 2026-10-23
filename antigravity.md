@@ -152,6 +152,14 @@ Maintain "Zero-Drift" across the Gemini Gem Stock Market Council ecosystem. Ensu
 - **Constraint:** Remote instruction sets and master rules must match local files to prevent rule-drift.
 - **Action:** On every turn where you apply rules or engine instruction changes (.md files inside `gem_trading_rules/` or `engine_instructions/`), you MUST automatically execute `python python/sync_to_gdrive.py` in the workspace to synchronize the rules and engine instructions to Google Drive.
 
+### 19. Session Security & Vulnerability Auditing Protocol
+- **Once-Per-Session Audit:** On the first turn of a session or when altering dependencies, execute a passive dependency vulnerability and integrity scan (`pip check` across the virtual environment and review pinned versions in `requirements.txt`).
+- **User Authorization Required:** Never run automated fixing commands (`pip install --upgrade`, package updates, or unreviewed dependency patches) without first presenting:
+  1. Affected package(s) and severity rating (Low, Moderate, High, Critical).
+  2. The patch or upgrade path proposed.
+  3. Explicit request for user approval before making file changes.
+- **Breaking-Change Verification:** Immediately after applying approved security updates, execute the full verification suite (`pip check`, python syntax compilation via `python -m py_compile python/fetch_stocks.py python/main.py python/web_server.py`, and runtime sanity checks on `scripts/`) to confirm zero regressions in background telemetry polling, Gemini subagent dispatch, or FastAPI routes.
+
 ## 🔄 Refactoring Workflow
 When commanded to update or "Sync" the terminal:
 1. **Baseline Check:** Ingest `Gemini_Gem_Working_Data_Store` (rules.md, v7.8+) first to identify the current Master Constants.
@@ -182,6 +190,7 @@ Antigravity must REJECT an update if:
 - It introduces speculative object-oriented hierarchies, abstract base classes, or factory patterns where simple functions or flat structures suffice (KISS & YAGNI Violation).
 - It permits sub-engines to emit direct user-facing markdown streams or external payloads, violating the Hub-and-Spoke Consolidation pattern (MANDATE_22 / MANDATE_51 Violation).
 - It introduces silent fallback defaults (such as defaulting missing prices to 0.0 or bypassing math verification proofs) instead of triggering immediate Fail-Fast invalidation (MANDATE_51 Violation).
+- It applies dependency updates or security patches without explicit user permission or without passing the breaking-change verification suite.
 
 ---
 **Status:** ACTIVE
