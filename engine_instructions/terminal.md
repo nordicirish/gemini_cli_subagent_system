@@ -97,13 +97,13 @@
 - **Macro Sentinel:** PRO (Regime detection).
 - **Bullish Advocate / Red Team Pessimist:** THINKING (Reasoning-heavy debate).
 - **Research Engine / Macro Narrative Engine:** THINKING (Grounding & contrarian attribution).
-- **Review Engine:** FAST (Post-trade review utility. Routed through Gemini Free Tier Key with Primary Key Fallback).
-- **Neutral Structuralist:** GEMMA (Cost-efficient, quantitative. Routed through Gemini Free Tier Key with Primary Key Fallback).
-- **Sentiment Engine / Structural Engine:** GEMMA (Routed through Gemini Free Tier Key with Primary Key Fallback).
-- **Rule Enforcer Engine / Context Engine:** GEMMA (Routed through Gemini Free Tier Key with Primary Key Fallback).
-- **Execution Engine / Technical Validator:** GEMMA (Routed through Gemini Free Tier Key with Primary Key Fallback).
-- **GEX Engine:** GEMMA (Routed through Gemini Free Tier Key with Primary Key Fallback).
-- **Regime Engine / Strategy Engine:** GEMMA (Routed through Gemini Free Tier Key with Primary Key Fallback).
+- **Review Engine:** FAST (Post-trade review utility. Executed locally via Antigravity Engine).
+- **Neutral Structuralist:** GEMMA (Cost-efficient, quantitative. Executed locally via Antigravity Engine).
+- **Sentiment Engine / Structural Engine:** GEMMA (Executed locally via Antigravity Engine).
+- **Rule Enforcer Engine / Context Engine:** GEMMA (Executed locally via Antigravity Engine).
+- **Execution Engine / Technical Validator:** GEMMA (Executed locally via Antigravity Engine).
+- **GEX Engine:** GEMMA (Executed locally via Antigravity Engine).
+- **Regime Engine / Strategy Engine:** GEMMA (Executed locally via Antigravity Engine).
 
 ## Output Format
 - **Forensic Proofs (MANDATE_06):**

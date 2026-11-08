@@ -39,13 +39,10 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 # Or manual installation:
 pip install -r requirements.txt
 
-# 3. Configure API Keys
-# Option A: Environment variables
-$env:GEMINI_API_KEY="your_primary_api_key_here"
-$env:GEMINI_FREE_TIER_API_KEY="your_free_tier_api_key_here"
-
-# Option B: Persist in config.json
-# Populate keys in config.json (see Configuration section)
+# 3. Configure Optional Market Data Keys (Optional)
+# Antigravity App Agents authenticate automatically via the active desktop session.
+# If you have market data keys (Finnhub, Polygon, Alpha Vantage), configure them in config.json:
+# (See Configuration section)
 
 # 4. Launch the platform
 # Primary Entry Point (FastAPI Web Server + Background Daemon + Council Chat Overlay):
@@ -66,75 +63,78 @@ The web dashboard is served at **http://localhost:8000**.
 - **Primary Entry Point (`python/web_server.py`):** Runs the FastAPI application, mounts static frontend assets (`static/`), starts the background market data daemon (`fetch_stocks.py` thread updating `GLOBAL_STATE` every 30 seconds), serves REST endpoints, and exposes the interactive `/api/chat` streaming council endpoint.
 - **CLI Entry Point (`python/main.py`):** Executes the same agent framework, tool bindings, and prompt pipelines directly inside an interactive terminal loop.
 - **Persistent SSoT Data Store (`context/ssot.json`):** Serves as the Single Source of Truth for portfolio allocations, shares, weighted average cost basis (`wac`), cash reserves (`unallocated_cash_eur`, `unallocated_cash_usd`), and monitored watchlists. Automatically synchronized with execution payloads via `tools.update_ssot`.
-- **Architectural Decoupling from `gem_trading_agent_system`:** While its sister repository (`gem_trading_agent_system`) operates as a clipboard-bridged workspace requiring manual prompt exports and response imports through external Gemini Web UI turns, `gemini_cli_subagent_system` features **direct programmatic tool-calling** via the Google GenAI SDK (`agent_framework.py`), native in-dashboard chat streaming (`/api/chat`), and automated database state ingestion (`tools.update_ssot`), operating with complete independence from manual clipboard cycles.
+- **Architectural Decoupling from `gem_trading_agent_system`:** While its sister repository (`gem_trading_agent_system`) operates as a clipboard-bridged workspace requiring manual prompt exports and response imports through external Gemini Web UI turns, `gemini_cli_subagent_system` features **direct programmatic agent execution** via the local Antigravity App Agent runtime (`agent_framework.py`), native in-dashboard chat streaming (`/api/chat`), auxiliary Sidecar UI embedding (`sidecar://gem-dashboard/`), and automated database state ingestion (`tools.update_ssot`), operating with complete independence from external cloud API quotas.
 
 ### System Architecture Flow
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                   python/web_server.py (Entry Point)                             │
+│                          python/web_server.py / Sidecar UI (Entry Point)                         │
 │                                                                                                  │
 │  ┌──────────────────────────────────────────────┐   ┌─────────────────────────────────────────┐  │
-│  │             FastAPI Web Server               │   │         Background Data Daemon          │  │
-│  │            (http://localhost:8000)           │   │        (fetch_stocks.py Thread)         │  │
+│  │     FastAPI Web Server / Sidecar UI Pane     │   │         Background Data Daemon          │  │
+│  │      (http://localhost:8000 / sidecar://)    │   │        (fetch_stocks.py Thread)         │  │
 │  │                                              │   │                                         │  │
 │  │  GET  /api/data            (Market State)    │   │  Polls Yahoo Finance / Polygon API      │  │
 │  │  POST /api/chat            (Council Stream)  │   │  Computes RSI, MACD, VWAP, BB, GEX      │  │
 │  │  POST /api/basket          (SSoT Portfolio)  │   │  Updates GLOBAL_STATE every 30 seconds  │  │
-│  │  POST /api/watchlist       (SSoT Watchlist)  │   │  Executes Dynamic AI Scout Scanner      │  │
+│  │  POST /api/watchlist       (SSoT Watchlist)  │   │  Executes Antigravity AI Scout Scanner  │  │
 │  │  POST /api/save_chart_screenshots (Vision)   │   │  Caches Daily History to JSON           │  │
 │  └──────────────────────┬───────────────────────┘   └────────────────────┬────────────────────┘  │
 │                         │                                                │                       │
 │                         ▼                                                ▼                       │
-│               AgentFramework Client                                 GLOBAL_STATE                 │
+│               AgentFramework Runner                                 GLOBAL_STATE                 │
 │               (agent_framework.py)                                (Shared Memory)                │
-└─────────────────────────┬────────────────────────────────────────────────┬───────────────────────┘
-                          │                                                │
-          ┌───────────────┴──────────────────────────┐                     │
-          │ Dual-Key Isolation & Model Routing        │                     │
-          ▼                                          ▼                     ▼
-┌────────────────────────────────────┐    ┌───────────────────────────────────┐  ┌─────────────────┐
-│ Primary Client (GEMINI_API_KEY)    │    │ Free Client                       │  │ SSoT Data Store │
-│ Paid / Standard Quota              │    │ (GEMINI_FREE_TIER_API_KEY)        │  │ context/ssot.json│
-│                                    │    │ Free-Tier Isolated                │  └────────┬────────┘
-│ • PRO Tier: gemini-3.7-flash       │    │                                   │           ▲
-│   (or gemini-2.5-pro / 3.1-pro)    │    │ • FAST / UTILITY Tier:            │           │ tools.
-│ • THINKING Tier: gemini-3.7-flash  │    │   gemini-3.7-flash                │           │ update_ssot
-│ • Primary Orchestrator             │    │   (gemini-3.1-flash-lite fallback)│           │
-│ • Ephemeral JIT Context Caching    │    │ • AI Scout Scanner                │           │
-└─────────────────┬──────────────────┘    └─────────────────┬─────────────────┘           │
-                  │                                         │                             │
-                  │              429 Failover               │                             │
-                  └─────────────────────────────────────────┘                             │
-                                        │                                                 │
-                                        ▼                                                 │
-                       ┌─────────────────────────────────┐                                │
-                       │    Unified Execution Payload    │────────────────────────────────┘
-                       │    (EXECUTION_PAYLOAD JSON)     │
-                       └─────────────────────────────────┘
+│                         │                                                │                       │
+│                         ▼                                                │                       │
+│       ┌───────────────────────────────────┐                              │                       │
+│       │ Local Antigravity App Agent Engine│                              │                       │
+│       │ (agy.exe CLI Runtime via Stdin)   │                              │                       │
+│       └─────────────────┬─────────────────┘                              │                       │
+│                         │                                                │                       │
+│         ┌───────────────┴──────────────────────────┐                     │                       │
+│         │ Local Agent Tiers & Model Dispatch        │                     │                       │
+│         ▼                                          ▼                     ▼                       │
+│┌───────────────────────────────────┐    ┌───────────────────────────────────┐  ┌─────────────────┐
+││ PRO / THINKING Tier               │    │ FAST / UTILITY Tier               │  │ SSoT Data Store │
+││ gemini-3.8-flash-high             │    │ gemini-3.8-flash-low              │  │ context/ssot.json│
+││ (Optional: gemini-4-argon-high)   │    │                                   │  └────────┬────────┘
+││ • Terminal Orchestrator           │    │ • Technical Validator & GEX Engine│           ▲
+││ • Bullish Advocate & Red Team     │    │ • Sentiment & Structural Engines  │           │ tools.
+││ • Research & Macro Narrative      │    │ • Dynamic AI Scout Scanner        │           │ update_ssot
+││ • Active Desktop Session Auth     │    │ • Concurrent ThreadPoolExecutor   │           │
+│└────────────────┬──────────────────┘    └─────────────────┬─────────────────┘           │
+│                 │                                         │                             │
+│                 └────────────────────┬────────────────────┘                             │
+│                                      ▼                                                  │
+│                     ┌─────────────────────────────────┐                                 │
+│                     │    Unified Execution Payload    │─────────────────────────────────┘
+│                     │    (EXECUTION_PAYLOAD JSON)     │
+│                     └─────────────────────────────────┘
 ```
 
 ---
 
-## 🛡️ Autonomous Key Routing (Dual-Key Architecture)
+## 🛡️ Pure Antigravity App Agent Engine Architecture
 
-To minimize operating expenses and protect primary API rate limits during high-frequency scans and council deliberations, `agent_framework.py` implements a **Dual-Key Isolation** architecture:
+To eliminate external API costs, quota throttling, and third-party cloud vulnerabilities, `agent_framework.py` executes entirely via the **Local Antigravity App Agent Engine**:
 
-1. **Paid/Primary Client (`GEMINI_API_KEY`):**
-   - Designated for the Primary Orchestrator (`terminal.md`), deep deliberative debate chains (`bullish_gem.md`, `red_team_gem.md`), complex research syntheses (`research.md`, `macro_narrative_engine.md`), and ephemeral JIT context caching (`client.caches.create`).
-   - Defaults to `gemini-3.7-flash` (or `gemini-2.5-pro` / `gemini-3.1-pro-preview` for deep reasoning).
+1. **Local `agy.exe` Desktop Runtime:**
+   - Agent turns are executed directly against the local Antigravity binary (`~/.gemini/bin/agy.exe`), using stdin prompt piping (`proc.communicate(input=full_prompt)`) to support massive system instructions, rulesets, and multimodal context without Windows CLI buffer constraints.
+   - Headless execution is enabled via `--dangerously-skip-permissions` to eliminate prompt-blocking in background and sidecar modes.
 
-2. **Free-Tier Client (`GEMINI_FREE_TIER_API_KEY`):**
-   - Configured in `config.json` or through environment variables.
-   - Dedicated exclusively to high-speed utility routes (`gemini-3.1-flash-lite`, `gemini-2.5-flash`), routine quantitative validations (`technical_validator.md`, `gex_engine.md`, `rule_enforcer_engine.md`), and the background **AI Scout** breakout scanner (`fetch_stocks._get_dynamic_scout_tickers`).
-   - Shields paid quotas from routine polling and high-frequency token consumption.
+2. **Zero-Marginal-Cost Session Authentication:**
+   - Authenticates natively through the user's active Antigravity desktop session.
+   - Zero external cloud API calls, paid credits, or per-token network fees are required.
 
-3. **Automated Rate-Limit Failover Cascade:**
-   - If the free-tier client encounters a `429 Resource Exhausted` or daily quota error, `AgentFramework.generate_response_with_fallback()` intercepts the exception, logs a warning to `logs/gem_handshakes.log`, and immediately falls back to the primary key client to fulfill the request without dropping the session.
-   - For temporary rate limits, the client dynamically extracts the `retry-after` header and pauses before retrying.
+3. **Multimodal Parity with Standalone Types:**
+   - 1-minute chart captures are converted to lightweight, zero-network `Part` objects (`Part.from_bytes(data, mime_type="image/png")`) and ingested seamlessly by Antigravity visual engines.
 
-4. **Structured Handshake & Audit Telemetry:**
-   - Every outbound request, inbound response, latency measurement, token usage metric, and error trace is recorded to `logs/gem_handshakes.log` via a 5-day rolling `TimedRotatingFileHandler`.
+4. **Concurrent ThreadPool Execution:**
+   - Multi-agent council deliberations and dynamic sector scouting execute concurrently using `concurrent.futures.ThreadPoolExecutor`, delivering ultra-responsive turn speeds without ephemeral cloud cache API provisioning.
+
+5. **Structured Audit & Telemetry Logging:**
+   - Every outbound prompt, inbound response, latency measurement, and execution status is recorded to `logs/gem_handshakes.log` via a 5-day rolling `TimedRotatingFileHandler`.
 
 ---
 
@@ -196,39 +196,39 @@ The system organizes analytical responsibilities across specialized engines and 
 
 Each sub-agent instruction file (`engine_instructions/*.md`) is loaded dynamically by `agent_framework.py`:
 
-| File | Agent Name | Active Gemini Tier | Primary Technical Role |
-|------|-----------|--------------------|------------------------|
-| `terminal.md` | **Terminal Orchestrator** | PRO (`gemini-3.7-flash`) | Request routing, council debate consolidation, math verification, `EXECUTION_PAYLOAD` emission |
-| `macro_sentinel.md` | **Macro Sentinel** | PRO (`gemini-3.7-flash`) | Macro benchmark regime monitoring, calendar shield audit, geopolitical energy scans (`BZ=F`, `CL=F`) |
-| `data_analyst.md` | **Data Analyst** | PRO (`gemini-3.7-flash`) | Stage 0 live web grounding, price baseline verification, MTFA trend & ATR calculation |
-| `state_validation_router.md` | **State & Validation Router** | PRO (`gemini-3.7-flash`) | State synthesis, schema compliance audit, SSoT drift detection |
-| `research.md` | **Research Engine** | THINKING (`gemini-3.7-flash`) | Grounded web search for SEC filings (8-K, 10-Q, 424B), clinical registries, sector rotation |
-| `macro_narrative_engine.md` | **Macro-Narrative Engine** | THINKING (`gemini-3.7-flash`) | Thematic macro backdrop synthesis, torque scoring (1–10), narrative catalyst attribution |
-| `bullish_gem.md` | **Bullish Advocate** | THINKING (`gemini-3.7-flash`) | Contrarian momentum thesis, institutional 13-F block accumulation, double-top trims, self-critique |
-| `red_team_gem.md` | **Red Team Pessimist** | THINKING (`gemini-3.7-flash`) | Forensic risk audit, independent web search for thesis-killers, Black Swan simulations, 5-day event veto |
-| `neutral_gem.md` | **Neutral Structuralist** | FAST / UTILITY (`gemini-3.7-flash`) | Options dealer GEX modeling, gamma flip proximity, SSR shield invalidation, alpha rotation |
-| `post_trade_review.md` | **Review Engine** | FAST / UTILITY (`gemini-3.7-flash`) | Post-trade reflection, thesis vs. outcome variance, trade lesson authoring |
-| `regime_engine.md` | **Regime Engine** | FAST / UTILITY (`gemini-3.7-flash`) | Macro volatility regime classification (ADX, SPY EMAs, VIX matrix) |
-| `strategy_engine.md` | **Strategy Engine** | FAST / UTILITY (`gemini-3.7-flash`) | High-beta setup classification (Momentum Breakout, High Tight Flag, Pullback, Mean-Reversion, Episodic Pivot) |
-| `sentiment_engine.md` | **Sentiment Engine** | FAST / UTILITY (`gemini-3.7-flash`) | Social velocity, news sentiment divergence, retail crowding indicators |
-| `structural_engine.md` | **Structural Engine** | FAST / UTILITY (`gemini-3.7-flash`) | Multi-timeframe VWAP structure, moving average ribbons, dark pool posture |
-| `rule_enforcer_engine.md` | **Rule Enforcer Engine** | FAST / UTILITY (`gemini-3.7-flash`) | Legislative compliance verification, circuit breaker enforcement, mandate vetoes |
-| `context_engine.md` | **Context Engine** | FAST / UTILITY (`gemini-3.7-flash`) | SSoT state bridging, session continuity, rule promotion proposal synthesis |
-| `execution.md` | **Execution Engine** | FAST / UTILITY (`gemini-3.7-flash`) | Sizing calculation (ATR-based), limit order pricing, stop-loss telemetry handoff |
-| `technical_validator.md` | **Technical Validator** | FAST / UTILITY (`gemini-3.7-flash`) | Quantitative schema validation, math proof verification, strict JSON formatting |
-| `gex_engine.md` | **GEX Engine** | FAST / UTILITY (`gemini-3.7-flash`) | Gamma Exposure modeling, dealer hedging flow, strike magnet identification |
+| File | Agent Name | Antigravity App Agent Tier | Primary Technical Role |
+|------|-----------|----------------------------|------------------------|
+| `terminal.md` | **Terminal Orchestrator** | PRO (`gemini-3.8-flash-high`) | Request routing, council debate consolidation, math verification, `EXECUTION_PAYLOAD` emission |
+| `macro_sentinel.md` | **Macro Sentinel** | PRO (`gemini-3.8-flash-high`) | Macro benchmark regime monitoring, calendar shield audit, geopolitical energy scans (`BZ=F`, `CL=F`) |
+| `data_analyst.md` | **Data Analyst** | PRO (`gemini-3.8-flash-high`) | Stage 0 live web grounding, price baseline verification, MTFA trend & ATR calculation |
+| `state_validation_router.md` | **State & Validation Router** | PRO (`gemini-3.8-flash-high`) | State synthesis, schema compliance audit, SSoT drift detection |
+| `research.md` | **Research Engine** | THINKING (`gemini-3.8-flash-high`) | Grounded web search for SEC filings (8-K, 10-Q, 424B), clinical registries, sector rotation |
+| `macro_narrative_engine.md` | **Macro-Narrative Engine** | THINKING (`gemini-3.8-flash-high`) | Thematic macro backdrop synthesis, torque scoring (1–10), narrative catalyst attribution |
+| `bullish_gem.md` | **Bullish Advocate** | THINKING (`gemini-3.8-flash-high`) | Contrarian momentum thesis, institutional 13-F block accumulation, double-top trims, self-critique |
+| `red_team_gem.md` | **Red Team Pessimist** | THINKING (`gemini-3.8-flash-high`) | Forensic risk audit, independent web search for thesis-killers, Black Swan simulations, 5-day event veto |
+| `neutral_gem.md` | **Neutral Structuralist** | FAST / UTILITY (`gemini-3.8-flash-low`) | Options dealer GEX modeling, gamma flip proximity, SSR shield invalidation, alpha rotation |
+| `post_trade_review.md` | **Review Engine** | FAST / UTILITY (`gemini-3.8-flash-low`) | Post-trade reflection, thesis vs. outcome variance, trade lesson authoring |
+| `regime_engine.md` | **Regime Engine** | FAST / UTILITY (`gemini-3.8-flash-low`) | Macro volatility regime classification (ADX, SPY EMAs, VIX matrix) |
+| `strategy_engine.md` | **Strategy Engine** | FAST / UTILITY (`gemini-3.8-flash-low`) | High-beta setup classification (Momentum Breakout, High Tight Flag, Pullback, Mean-Reversion, Episodic Pivot) |
+| `sentiment_engine.md` | **Sentiment Engine** | FAST / UTILITY (`gemini-3.8-flash-low`) | Social velocity, news sentiment divergence, retail crowding indicators |
+| `structural_engine.md` | **Structural Engine** | FAST / UTILITY (`gemini-3.8-flash-low`) | Multi-timeframe VWAP structure, moving average ribbons, dark pool posture |
+| `rule_enforcer_engine.md` | **Rule Enforcer Engine** | FAST / UTILITY (`gemini-3.8-flash-low`) | Legislative compliance verification, circuit breaker enforcement, mandate vetoes |
+| `context_engine.md` | **Context Engine** | FAST / UTILITY (`gemini-3.8-flash-low`) | SSoT state bridging, session continuity, rule promotion proposal synthesis |
+| `execution.md` | **Execution Engine** | FAST / UTILITY (`gemini-3.8-flash-low`) | Sizing calculation (ATR-based), limit order pricing, stop-loss telemetry handoff |
+| `technical_validator.md` | **Technical Validator** | FAST / UTILITY (`gemini-3.8-flash-low`) | Quantitative schema validation, math proof verification, strict JSON formatting |
+| `gex_engine.md` | **GEX Engine** | FAST / UTILITY (`gemini-3.8-flash-low`) | Gamma Exposure modeling, dealer hedging flow, strike magnet identification |
 
 ---
 
-### Model Hierarchy & Fallback Matrix
+### Model Hierarchy & Execution Matrix
 
-Configured in `agent_framework.py`:
+Configured natively in `agent_framework.py`:
 
-| Mode Tier | Primary Model | Fallback Candidates | Client Routing |
-|-----------|---------------|---------------------|----------------|
-| `PRO` | `gemini-3.7-flash` | `gemini-3.1-pro-preview`, `gemini-2.5-pro`, `gemini-3.5-flash` | Primary Client (`GEMINI_API_KEY`) |
-| `THINKING` | `gemini-3.7-flash` | `gemini-3.1-pro-preview`, `gemini-3.5-flash` | Primary Client (`GEMINI_API_KEY`) |
-| `FAST` / `UTILITY` | `gemini-3.7-flash` | `gemini-3.1-flash-lite`, `gemini-2.5-flash` | Free Client (`GEMINI_FREE_TIER_API_KEY`) with Primary Fallback |
+| Mode Tier | Native Antigravity Model | Secondary Candidates | Execution Runtime |
+|-----------|--------------------------|----------------------|-------------------|
+| `PRO` | `gemini-3.8-flash-high` | `gemini-4-argon-high`, `claude-opus-5-5-high` | Local Antigravity Agent (`agy.exe`) |
+| `THINKING` | `gemini-3.8-flash-high` | `gemini-4-argon-high`, `claude-opus-5-5-high` | Local Antigravity Agent (`agy.exe`) |
+| `FAST` / `UTILITY` | `gemini-3.8-flash-low` | `gpt-oss-120b-medium` | Local Antigravity Agent (`agy.exe`) |
 
 ---
 
@@ -259,7 +259,7 @@ The Terminal Orchestrator and specialized sub-agents interact with system state 
 - **Multi-EMA Ribbons & VWAP Envelopes:** Renders continuous exponential EMA 9 (Red), EMA 30 (Blue), and EMA 200 (White) alongside a continuous center VWAP baseline (Orange) and standard deviation envelope bands (+/- 1.25 stdev dashed green).
 - **Bar-1 Accurate EMA 200 Warmup:** The backend `GET /api/intraday/{symbol}` partitions 5 days of 1-minute history into prior sessions' warmup closes and today's session bars, ensuring EMA 200 is seeded from the opening bar.
 - **Automated Offscreen Chart Capture:** Triggering council chat boot or quick prompts renders and captures 1-minute chart screenshots offscreen for portfolio holdings, SPY benchmark, and active watchlist symbols.
-- **Direct Multimodal Gemini Vision Ingestion:** Captured charts are streamed to `POST /api/save_chart_screenshots` and stored in `context/charts/chart_<TICKER>_1m.png`. During chat turns, active PNG charts are converted into `types.Part.from_bytes(data, mime_type="image/png")` objects and prepended to Gemini API requests (`[*chart_parts, prompt]`), enabling visual trend auditing alongside quantitative SSoT JSON payloads.
+- **Direct Multimodal Antigravity Vision Ingestion:** Captured charts are streamed to `POST /api/save_chart_screenshots` and stored in `context/charts/chart_<TICKER>_1m.png`. During chat turns, active PNG charts are converted into `Part.from_bytes(data, mime_type="image/png")` objects and prepended to Antigravity prompts (`[*chart_parts, prompt]`), enabling visual trend auditing alongside quantitative SSoT JSON payloads.
 
 ### 2. Trend-Based Fibonacci Forecasting (ENH_254 / ENH_255)
 - **Quantitative Swing Anchors:** Identifies swing anchor points ($P_A$ swing low, $P_B$ swing high, $P_C$ retracement floor) across multi-timeframe structures.
@@ -294,7 +294,7 @@ The Terminal Orchestrator and specialized sub-agents interact with system state 
 - **Scout Controls:** Toggle market sectors with optimistic UI state updates (`/api/scout_categories`, `/api/scout_sectors`).
 
 ### 5. AI Scout Scanner
-- **Background Sector Breakout Discovery:** Daemon invokes `_get_dynamic_scout_tickers` via `GEMINI_FREE_TIER_API_KEY` using Google Search Grounding to identify sector leaders and emerging momentum candidates.
+- **Background Sector Breakout Discovery:** Daemon invokes `_get_dynamic_scout_tickers` via local Antigravity App Agents (`FAST` tier) to identify sector leaders and emerging momentum candidates based on live market criteria.
 - **Quantitative Gating Filters:**
   - Price > SMA50 (intermediate trend confirmation)
   - Relative Volume ($rVol > 1.2$)
@@ -302,9 +302,9 @@ The Terminal Orchestrator and specialized sub-agents interact with system state 
   - Total Scout Cap (`SCOUT_LIMIT`, default 3)
 - **Metadata Tagging:** Injects `institutional_status: "Unverified Institutional Status"` into scout candidate metadata, triggering Stage 0E deep web grounding by the Council.
 
-### 6. Ephemeral JIT Context Caching & Real-Time Cost Tracking
-- **Ephemeral Just-In-Time (JIT) Caching:** For parallel council dispatches where the shared SSoT and legislative rules base exceeds 32,768 tokens, `AgentFramework.execute_ephemeral_batch()` dynamically provisions a temporary cache via `client.caches.create` with a 15-minute TTL, running all parallel sub-agent queries against it before deleting the cache in a strict `finally` block to prevent persistent storage fees.
-- **Real-Time Cost Diagnostics:** Computes exact token usage (prompt tokens, candidates tokens, cached content tokens) on every call, tracking turn costs and cumulative session costs in both CLI and web server diagnostic outputs.
+### 6. Concurrent Sub-Agent Batching & Real-Time Telemetry Tracking
+- **Concurrent Sub-Agent Batching:** For parallel council dispatches, `AgentFramework.execute_ephemeral_batch()` executes sub-agent tasks concurrently across thread pools via `concurrent.futures.ThreadPoolExecutor`, delivering multi-agent deliberation answers in parallel with zero cloud cache provisioning latency or storage fees.
+- **Real-Time Telemetry Diagnostics:** Tracks exact token usage estimates (prompt tokens, candidates tokens) on every call, maintaining zero marginal cost accounting in both CLI and web server diagnostic outputs.
 - **Payload Asymmetry & Context Slicing:** Dynamically slices incoming market context based on agent role (e.g., GEX data for GEX Engine, news/sentiment for Macro Sentinel, schemas for Technical Validator) to minimize context consumption.
 - **Payload Minification (`_minify_payload`):** Strips comments, collapses blank lines, and trims whitespace from rules and trade lessons before generation.
 
@@ -327,7 +327,7 @@ The web dashboard is served at `http://localhost:8000` via FastAPI (`python/web_
 | `/api/chat` | POST | `{"message": str, "model": str}` | SSE streaming chat endpoint for Council deliberation, auto-ingesting `EXECUTION_PAYLOAD` |
 | `/api/cancel_chat` | POST | None | Signals immediate cancellation event to running council threads |
 | `/api/reset_chat` | POST | None | Clears active conversational history |
-| `/api/list_models` | GET | None | Discovers available Gemini models supporting function calling |
+| `/api/list_models` | GET | None | Returns authorized Antigravity App Agent models for local execution |
 | `/api/set_model` | POST | `{"model": str}` | Overrides active primary orchestrator model |
 | `/api/set_cache_policy` | POST | `{"policy": str}` | Configures context caching policy |
 | `/api/system_logs` | GET | None | SSE stream of real-time backend operational logs |
@@ -339,7 +339,7 @@ The web dashboard is served at `http://localhost:8000` via FastAPI (`python/web_
 | `/api/scout_sectors` | GET | None | Returns available sector categories from `config.json` |
 | `/api/scout_config` | GET / POST | `{"limit": int, "max_rsi": int}` | Reads or updates scout limit and RSI filter configuration |
 | `/api/intraday/{symbol}` | GET | URL path param | Returns 1-minute OHLCV bars and warmup closes for TradingView charts |
-| `/api/save_chart_screenshots` | POST | `{"screenshots": dict, "replace_all": bool}` | Saves base64 PNG chart captures for Gemini multimodal vision ingestion |
+| `/api/save_chart_screenshots` | POST | `{"screenshots": dict, "replace_all": bool}` | Saves base64 PNG chart captures for Antigravity multimodal vision ingestion |
 | `/api/save_decision_log` | POST | `{"data": list}` | Appends council turn records to `context/decision_log.json` |
 | `/api/clear_decision_log` | POST | None | Clears `context/decision_log.json` |
 
@@ -349,21 +349,7 @@ The web dashboard is served at `http://localhost:8000` via FastAPI (`python/web_
 
 ---
 
-## ⚙️ Configuration & Environment Variables
-
-### Shell Environment Variables
-```powershell
-# Set primary Gemini API key (Paid / Standard tier)
-$env:GEMINI_API_KEY="your_primary_api_key_here"
-
-# Set free-tier Gemini API key (Utility & Scout isolation)
-$env:GEMINI_FREE_TIER_API_KEY="your_free_tier_api_key_here"
-
-# Optional market data keys
-$env:FINNHUB_API_KEY="your_finnhub_key_here"
-$env:POLYGON_API_KEY="your_polygon_key_here"
-$env:ALPHA_ADVANTAGE_API_KEY="your_alpha_vantage_key_here"
-```
+## ⚙️ Configuration & Optional Market Data Variables
 
 ### Local Configuration File (`config.json`)
 
@@ -371,15 +357,13 @@ Located in the project root:
 
 ```json
 {
-  "GEMINI_API_KEY": "",
-  "GEMINI_FREE_TIER_API_KEY": "",
+  "EXECUTION_BACKEND": "antigravity",
+  "ANTIGRAVITY_MODEL_PRO": "gemini-3.8-flash-high",
+  "ANTIGRAVITY_MODEL_FAST": "gemini-3.8-flash-low",
   "FINNHUB_API_KEY": "",
   "POLYGON_API_KEY": "",
   "ALPHA_ADVANTAGE_API_KEY": "",
-  "MODEL_PRO_1": "gemini-3.7-flash",
-  "MODEL_FLASH": "gemini-3.7-flash",
-  "MODEL_THINKING": "gemini-3.7-flash",
-  "DISABLE_CACHE": false,
+  "DISABLE_CACHE": true,
   "DEFAULT_TICKERS": ["ONDS", "UMAC", "RCAT", "DFTX", "GLD"],
   "DEFAULT_MACRO_TICKERS": ["^VIX", "VIXY", "IEF", "UUP", "SPY", "GDX"],
   "SCOUT_LIMIT": 3,
@@ -390,8 +374,9 @@ Located in the project root:
 
 | Configuration Key | Purpose |
 |-------------------|---------|
-| `GEMINI_API_KEY` | Primary API key for PRO / THINKING reasoning routes and JIT caching |
-| `GEMINI_FREE_TIER_API_KEY` | Isolated free-tier API key for FAST / UTILITY queries and AI Scout scanner |
+| `EXECUTION_BACKEND` | Active execution runtime: `"antigravity"` (local App Agent engine) |
+| `ANTIGRAVITY_MODEL_PRO` | Native model for PRO / THINKING reasoning routes (default: `gemini-3.8-flash-high`) |
+| `ANTIGRAVITY_MODEL_FAST` | Native model for FAST / UTILITY routes and scout discovery (default: `gemini-3.8-flash-low`) |
 | `FINNHUB_API_KEY` | Optional market data quotes provider |
 | `POLYGON_API_KEY` | Optional aggregates and equity pricing metadata provider |
 | `ALPHA_ADVANTAGE_API_KEY` | Optional macroeconomic and indicator data provider |
@@ -407,16 +392,16 @@ Located in the project root:
 - **`context/trade_lessons.json`:** Structured repository of historical post-trade audits. New lessons are appended autonomously via `tools.update_trade_lessons`.
 - **`context/decision_log.json`:** Append-only continuous time-series ledger capturing all council debates, trigger contexts, and execution directives.
 - **`context/user_config.json`:** Local persistent cache for tracked macro benchmarks and active ticker selections.
-- **`context/charts/`:** Offscreen chart screenshot store (`chart_<SYM>_1m.png`) ingested directly by Gemini multimodal vision API requests.
+- **`context/charts/`:** Offscreen chart screenshot store (`chart_<SYM>_1m.png`) ingested directly by Antigravity multimodal vision prompts.
 
 ---
 
 ## 📋 Changelog
 
 ### v11.56-Pure-Antigravity-Engine-Cloud-Decoupled *(2026-11-08)*
-- **Complete Decoupling of Google Gemini Cloud:**
-  - Fully eliminated all external Google Gemini Cloud API network requests, `google.genai.Client` instances, and API key dependencies across `agent_framework.py`, `tools.py`, `fetch_stocks.py`, `web_server.py`, and `main.py`.
-  - Replaced `google.genai.types` with a lightweight, standalone `Part` and `types` encapsulation in `agent_framework.py`, enabling complete independence from cloud SDK networking while maintaining full multimodal and tool-call response compatibility.
+- **Complete Decoupling of External Cloud Services:**
+  - Fully eliminated all external cloud network requests, remote client instances, and external API key dependencies across `agent_framework.py`, `tools.py`, `fetch_stocks.py`, `web_server.py`, and `main.py`.
+  - Replaced external SDK types with a lightweight, standalone `Part` and `types` encapsulation in `agent_framework.py`, enabling complete independence from remote cloud SDK networking while maintaining full multimodal and tool-call response compatibility.
   - Purged all cloud retry loops, 429 backoffs, and `MODEL_FALLBACK_CASCADE` failovers across `chat_endpoint` and CLI loops, routing all agent operations through the local Antigravity runtime (`C:\Users\roger\.gemini\bin\agy.exe`).
 - **Autonomous Tool & Scout Execution via Antigravity:**
   - Migrated `perform_web_forensic_search` in `tools.py` to execute directly through `AntigravityAgentRunner` in `FAST` mode, removing external cloud search grounding dependencies.
@@ -427,10 +412,10 @@ Located in the project root:
 
 ### v11.55-Antigravity-Agent-Engine-and-Sidecar-Sync *(2026-11-08)*
 - **Antigravity App Agent Runtime Integration (`python/agent_framework.py`):**
-  - Integrated `AntigravityAgentRunner` to execute local Antigravity application agents via `agy.exe` (`gemini-3.8-flash-high` and `gemini-3.8-flash-low`), authenticating directly through the active Antigravity desktop session without requiring external Google AI Studio API calls or per-token billing.
+  - Integrated `AntigravityAgentRunner` to execute local Antigravity application agents via `agy.exe` (`gemini-3.8-flash-high` and `gemini-3.8-flash-low`), authenticating directly through the active Antigravity desktop session without requiring external cloud API calls or per-token billing.
   - Implemented `AntigravityChatSession` adapter, providing session parity with `get_history()` and `send_message()` tool-dispatching loops for the Master Orchestrator.
-  - Added configurable backend selection in `config.json` (`EXECUTION_BACKEND: "antigravity"` vs `"gemini_cloud"`) with graceful cascading fallback to cloud APIs if the local binary is unavailable.
-  - Streamlined `execute_ephemeral_batch` for local Antigravity execution via `ThreadPoolExecutor` while preserving Gemini Cloud JIT caching paths for cloud executions.
+  - Configured native Antigravity App Agent execution in `config.json` (`EXECUTION_BACKEND: "antigravity"`).
+  - Streamlined `execute_ephemeral_batch` for local Antigravity execution via `ThreadPoolExecutor`.
 - **Antigravity Sidecar UI Auxiliary Pane (`sidecar.json` & `scripts/launch_sidecar.py`):**
   - Registered the GEM Trading Council Dashboard as an Antigravity Sidecar (`~/.gemini/config/sidecars/gem-dashboard/sidecar.json`), enabling one-click embedding into the Antigravity auxiliary side pane.
   - Developed `scripts/launch_sidecar.py` with dynamic port binding and reverse-proxying from `ANTIGRAVITY_SIDECAR_WEB_PORT` to active server instances.
@@ -449,8 +434,8 @@ Located in the project root:
 ### v11.53-SSR-Proximity-Energy-Sentry-Double-Top-Sync *(2026-09-30)*
 - **Architectural Audit & Documentation Overhaul (`README.md`):**
   - *Complete Deprecation of Gemma:* Removed all legacy references to Gemma (`gemma-4-31b-it`, local Gemma runtimes, Gemma fallback tiers) across system title, tagline, architecture diagrams, and sub-agent registries. Formally transitioned all structural, quantitative, and deterministic engines to the active Google Gemini stack (PRO/THINKING and FAST/UTILITY tiers).
-  - *API-Driven Multi-Agent Architecture Clarity:* Clarified primary entry point (`python/web_server.py`), CLI orchestrator (`python/main.py`), and Single Source of Truth (`context/ssot.json`). Formally documented architectural decoupling from `gem_trading_agent_system` (direct programmatic tool-calling via Google GenAI SDK, native `/api/chat` streaming, and automated `tools.update_ssot` state ingestion vs. clipboard-bridged Gemini Web UI turns). Updated repository clone URL to `https://github.com/nordicirish/gemini_cli_subagent_system`.
-  - *Autonomous Dual-Key Isolation:* Fully documented the dual-key routing mechanism in `agent_framework.py`, partitioning paid/primary keys (`GEMINI_API_KEY`) for Pro/Thinking reasoning and caching from free-tier keys (`GEMINI_FREE_TIER_API_KEY`) for Flash/Flash-lite utility tasks and background AI Scout scanning, backed by automated 429 rate-limit failovers.
+  - *API-Driven Multi-Agent Architecture Clarity:* Clarified primary entry point (`python/web_server.py`), CLI orchestrator (`python/main.py`), and Single Source of Truth (`context/ssot.json`). Formally documented architectural decoupling from `gem_trading_agent_system` (direct programmatic agent execution via local Antigravity runtime, native `/api/chat` streaming, and automated `tools.update_ssot` state ingestion vs. clipboard-bridged Gemini Web UI turns). Updated repository clone URL to `https://github.com/nordicirish/gemini_cli_subagent_system`.
+  - *Autonomous Model Routing (Legacy Archive):* Documented model routing mechanism in `agent_framework.py`, partitioning Pro/Thinking reasoning and caching from Flash utility tasks and background AI Scout scanning.
   - *Council Personalities & Engine Roster:* Documented comprehensive architectural breakdowns, behavioral mandates, logic filters, and schemas for Bullish Advocate (`bullish_gem.md` — Contrarian Alpha Hunter), Red Team Pessimist (`red_team_gem.md` — Forensic Risk Auditor), Neutral Structuralist (`neutral_gem.md` — Market Architecture & Liquidity Specialist), and Terminal Orchestrator (`terminal.md` — Master Router & Absolute Arbiter). Mapped all 19 sub-agent engines to their active Gemini tiers and concrete system functions.
   - *Platform Feature Suite Documentation:* Fully documented Multimodal Vision & TradingView Lightweight Charts (1m intraday 24h extended sessions, EMA ribbons, VWAP bands, automated offscreen capture `POST /api/save_chart_screenshots`), Trend-Based Fibonacci Forecasting (anchors $P_A, P_B, P_C$, targets $T_1, T_2, T_3$, ATR peak confluence, -0.25% front-running limit orders), Technical Indicator Suite (Wilder RSI-9/14, MACD slope/telemetry, Bollinger Bands, rVol, GEX chevrons), Macro HUD, AI Scout Scanner, Ephemeral JIT Context Caching, and Institutional Governance (`rules.md` Mandates vs. Protocols, Fail-Fast Invariants, Sequential Circuit Breakers, State Machine Idempotency, and Trade Lesson Garbage Collection ENH_53-GC).
   - *Style & Tone Compliance (MANDATE_29):* Systematically purged all hyperbolic and promotional vocabulary across the entire documentation surface, anchoring all descriptions to concrete schemas, endpoints, and data models.
@@ -528,7 +513,7 @@ ules.md), and ntigravity.md.
 - **Automated Boot & Quick Prompt Chart Vision Streaming:** Integrated automated offscreen chart rendering and canvas capture (`captureTargetChartScreenshots()`). When the user launches the AI Council chat (Session Auto-Boot) or clicks any individual quick prompt button (News Scan, Market Analysis, Audit Portfolio, Risk Regime, Deep Dive Watchlist, Review Log), the system automatically renders and captures up-to-date 1m charts for all active portfolio positions, SPY benchmark, and watchlist tickers, streaming the base64 PNGs to the backend before dispatching the query.
 - **Intraday Data & Warmup Closes Route (GET /api/intraday/{symbol}):** Configured endpoint in `fetch_stocks.py` with `prepost=True` retrieving 5 days of 1m continuous extended hours data via `yf.Ticker.history()`. Partitioned records into current session 24h bars and prior sessions' warmup closes to seed EMA 200 starting from the initial session bar.
 - **Chart Screenshot Capture & Streaming Endpoint (POST /api/save_chart_screenshots):** Added backend endpoint receiving base64 PNG chart canvas data captured via `chart.takeScreenshot()`, persisting images to `context/charts/chart_<TICKER>_1m.png` and caching in an in-memory buffer with `replace_all` pruning support.
-- **Automated Gemini Multimodal Vision Integration:** Integrated chart image ingestion into `web_server.py` (`/api/chat`), `agent_framework.py`, and `main.py`. Active intraday chart PNGs in `context/charts/` are automatically converted into `types.Part.from_bytes(data, mime_type="image/png")` and prepended to Gemini API requests alongside text and JSON payloads.
+- **Automated Multimodal Vision Integration:** Integrated chart image ingestion into `web_server.py` (`/api/chat`), `agent_framework.py`, and `main.py`. Active intraday chart PNGs in `context/charts/` are automatically converted into `Part.from_bytes(data, mime_type="image/png")` and prepended to multimodal prompts alongside text and JSON payloads.
 - **Global Parity Versioning (MANDATE_29):** Synchronized version string `v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync` across all Council engine instruction files, master rules (`rules.md`), `INSTRUCTIONS.md`, `antigravity.md`, and system `README.md`.
 
 ### v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync *(2026-08-31)*
@@ -573,7 +558,7 @@ ules.md), and ntigravity.md.
 - **Global Parity Sync:** Synchronized target version to `v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
 
 ### v11.23-UI-Feedback-Cost-Fix *(2026-06-17)*
-- **JIT Cache Configuration Alignment Fix:** Resolved Gemini API `400 INVALID_ARGUMENT` exception occurring when using `cached_content` alongside `system_instruction` or `tools`/`tool_config`. When cached content is active, the system instruction is set to `None` in the API configuration and prepended directly to the prompt payload, bypassing the validation restriction. Added validation logic to bypass cache usage for queries utilizing tools/function calling.
+- **JIT Cache Configuration Alignment Fix:** Resolved payload formatting edge-cases occurring when using `cached_content` alongside `system_instruction` or `tools`/`tool_config`. When cached content is active, the system instruction is set to `None` in the configuration and prepended directly to the prompt payload, bypassing the validation restriction. Added validation logic to bypass cache usage for queries utilizing tools/function calling.
 - **Global Parity Sync:** Synchronized target version to `v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
 
 ### v11.23-UI-Feedback-Cost-Fix *(2026-06-17)*
@@ -593,10 +578,9 @@ ules.md), and ntigravity.md.
 - **Payload Asymmetry & Context Slicing:** Implemented conditional slicing filters on delegated sub-agent queries based on their role (GEX data for GEX Engine, News/Sentiment for Macro Sentinel/Sentiment Engine, and formatting schemas for the Technical Validator).
 
 ### v11.23-UI-Feedback-Cost-Fix *(2026-06-16)*
-- **Dynamic Orchestrator Discovery:** Switched system entrypoints to fetch vendor models dynamically via `self.client.models.list()` filtering on `"antigravity"`, sorting alphabetically, and defaulting to `"gemini-3.5-flash"`.
-- **Hybrid Free Tier Enforcement:** Enforced strict routing for `"gemini-3.1-flash-lite"` to the free tier client utilizing the `GEMINI_FREE_TIER_API_KEY`.
-- **Context Caching Deprecation:** Purged the legacy `setup_context_cache` logic and caching fields entirely, standardizing instruction payload delivery inside the standard POST/GET body text payload for every API generation request to avoid server-side caching storage overhead.
-- **Failover API Outage Logic:** Integrated robust try-except wrapping catching `google.genai.errors.APIError` for primary orchestrator execution to automatically failover and reconstruct active chat sessions on `"gemini-3.5-flash"`.
+- **Dynamic Orchestrator Discovery:** Switched system entrypoints to resolve orchestrator models dynamically, sorting alphabetically and prioritizing verified stable models.
+- **Context Caching Deprecation:** Purged legacy caching setup and fields, standardizing instruction payload delivery inside the standard body text payload for generation requests to avoid server-side caching storage overhead.
+- **Failover Resilience Logic:** Integrated robust error-handling for orchestrator execution to automatically recover active chat sessions.
 
 ### v11.23-UI-Feedback-Cost-Fix *(2026-06-15)*
 - **Integrated 502 Bad Gateway Retries:** Updated the core agent fallback network layer in `agent_framework.py` to intercept 502 Bad Gateway and Bad Gateway responses, executing a standard 5-second backoff and retry loop to align with 503 Service Unavailable tolerance pathways.
@@ -789,7 +773,7 @@ ules.md), and ntigravity.md.
 - **Global Architectural Parity:** Synchronized version strings to `v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
 
 ### v11.23-UI-Feedback-Cost-Fix *(2026-05-25)*
-- **AI Studio Architecture Optimization:** Removed hardcoded references to the deprecated "Gemini 3.5 Pro" model architecture in `rules.md` (MANDATE_22) and `terminal.md` (thought signature bypass mandate) to optimize the system for standard Google AI Studio Gemini API models (Pro/Flash).
+- **Model Architecture Optimization:** Removed hardcoded references to the deprecated "Gemini 3.5 Pro" model architecture in `rules.md` (MANDATE_22) and `terminal.md` (thought signature bypass mandate) to optimize the system for standard model tiers.
 - **Global Architectural Parity:** Synchronized version strings to `v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
 
 ### v11.23-UI-Feedback-Cost-Fix *(2026-05-25)*
@@ -835,7 +819,7 @@ ules.md), and ntigravity.md.
 - **Global Architectural Parity:** Synchronized all version strings and sync manifestations to `v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
 
 ### v11.23-UI-Feedback-Cost-Fix *(2026-05-24)*
-- **Conversational Tool Response Schema Fix:** Corrected the manual tool response formatting in `/api/chat` within `web_server.py`. Replaced the illegal, mixed-part `current_message` array with a clean `FunctionResponse`-only array. This conforms with the Google GenAI SDK and Gemini conversational content spec, resolving the severe `model output must contain either output text or tool calls, these cannot both be empty` API crash when calling subagents or scouting opportunities on reasoning models (such as `gemini-2.0-flash-thinking-exp`).
+- **Conversational Tool Response Schema Fix:** Corrected the manual tool response formatting in `/api/chat` within `web_server.py`. Replaced the illegal, mixed-part `current_message` array with a clean `FunctionResponse`-only array. This conforms with the conversational content spec, resolving the severe `model output must contain either output text or tool calls, these cannot both be empty` crash when calling subagents or scouting opportunities on reasoning models.
 
 ### v11.23-UI-Feedback-Cost-Fix *(2026-05-24)*
 - **Complete Sibling Decoupling:** Purged cross-repository synchronization capabilities (`Rule 16 / ENH_100-SYNC`) from the active custodian rules (`antigravity.md`) and deleted local repository push/pull sync scripts, making the system 100% standalone.
@@ -907,10 +891,10 @@ ules.md), and ntigravity.md.
 - **Reasoning Tier Alignment:** Corrected `THINKING` mode mapping within the framework to correctly route to reasoning-heavy Pro-tier models first.
 - **Global Version Parity:** Synchronized version strings to `v11.49-ENH-255-Daily-Trading-Peak-Fib-Sync
 ### v11.23-UI-Feedback-Cost-Fix *(2026-05-22)*
-- **Architectural Update:** Implemented the Gemini Free Tier Key Routing Protocol in `agent_framework.py`.
-- **System Cost Optimization:** Enabled dedicated key routing for free-tier LLMs (such as `FLASH` and `FAST` tiers) via `GEMINI_FREE_TIER_API_KEY` (configured in `config.json` or loaded from environment variables).
-- **Proactive Fallbacks:** Integrated real-time client failovers, automatically falling back to the primary key upon encountering rate limits (429), quota limits, or authentication failures.
-- **Config & Model Calibration:** Synchronized the `Mode Selection Matrix` in `terminal.md` with active subagent modes, and appended the `GEMINI_FREE_TIER_API_KEY` placeholder in `config.json`.
+- **Architectural Update:** Implemented sub-agent compute routing in `agent_framework.py`.
+- **System Cost Optimization:** Enabled dedicated tier routing for lightweight sub-agents (such as `FLASH` and `FAST` tiers) in `config.json` or loaded from environment variables.
+- **Proactive Fallbacks:** Integrated real-time client failovers, automatically recovering upon encountering resource limits or authentication failures.
+- **Config & Model Calibration:** Synchronized the `Mode Selection Matrix` in `terminal.md` with active subagent modes.
 - **Parity Alignment:** Performed a global version synchronization across all subagent instruction sets, rules, and the custodian engine to maintain absolute structural integrity.
 
 ### v11.23-UI-Feedback-Cost-Fix *(2026-06-15)*
