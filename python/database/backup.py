@@ -1,6 +1,6 @@
 """
 SQLite Online Backup Infrastructure
-Governed by Stage 1.3 Directive and Stage 1.2.1 Architecture Corrections.
+Governed by Stage 1.3 Directive and Stage 1.2.1 / 1.3.1 Architecture Corrections.
 
 Provides atomic, consistent database snapshots using SQLite's native Online Backup API
 (`sqlite3.Connection.backup()`). Guarantees consistent point-in-time snapshots
@@ -8,6 +8,7 @@ even when the source database is in active WAL mode with concurrent readers/writ
 """
 
 import os
+import sys
 import sqlite3
 import datetime
 from dataclasses import dataclass
@@ -20,6 +21,11 @@ from typing import Optional, Callable, Dict, Any
 
 class BackupError(Exception):
     """Base exception for database backup operations."""
+    pass
+
+
+class BackupDestinationExistsError(BackupError):
+    """Raised when the backup destination already exists and overwrite is False."""
     pass
 
 
@@ -56,8 +62,33 @@ class BackupManager:
     a fully self-contained, standalone database file.
     """
 
-    @staticmethod
+    @classmethod
+    def _place_backup_file(cls, tmp_path: str, dest_path: str, overwrite: bool) -> None:
+        """
+        Moves the verified temporary backup to dest_path atomically and race-safely.
+        If overwrite is False, guarantees that dest_path cannot be replaced even if
+        created concurrently between backup start and completion.
+        """
+        if overwrite:
+            # os.replace is an atomic replacement on both Windows NTFS and POSIX
+            os.replace(tmp_path, dest_path)
+        else:
+            # On Windows, os.rename raises FileExistsError if dest_path already exists
+            # On POSIX, os.link + os.unlink guarantees atomic placement without overwrite
+            try:
+                if sys.platform == "win32":
+                    os.rename(tmp_path, dest_path)
+                else:
+                    os.link(tmp_path, dest_path)
+                    os.unlink(tmp_path)
+            except FileExistsError as e:
+                raise BackupDestinationExistsError(
+                    f"Backup destination '{dest_path}' already exists and overwrite is False."
+                ) from e
+
+    @classmethod
     def create_backup(
+        cls,
         source: sqlite3.Connection | str,
         dest_path: str,
         overwrite: bool = False,
@@ -70,7 +101,7 @@ class BackupManager:
         Parameters:
             source: An active sqlite3.Connection instance or a path to a source database file.
             dest_path: Target filesystem path for the backup database file.
-            overwrite: If False, raises BackupError if dest_path already exists.
+            overwrite: If False, raises BackupDestinationExistsError if dest_path already exists.
             pages_per_step: Number of pages to copy per step (-1 copies all pages in one step).
             progress_callback: Optional callback(status, remaining, total).
 
@@ -80,7 +111,7 @@ class BackupManager:
         dest_path = os.path.abspath(dest_path)
 
         if os.path.exists(dest_path) and not overwrite:
-            raise BackupError(
+            raise BackupDestinationExistsError(
                 f"Backup destination '{dest_path}' already exists and overwrite is False."
             )
 
@@ -109,7 +140,8 @@ class BackupManager:
             raise TypeError(f"Expected sqlite3.Connection or str path, got {type(source).__name__}")
 
         # Temporary backup target path to ensure atomic destination replacement
-        tmp_dest = f"{dest_path}.tmp_{os.getpid()}_{datetime.datetime.now(datetime.timezone.utc).strftime('%H%M%S%f')}"
+        now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%H%M%S%f")
+        tmp_dest = f"{dest_path}.tmp_{os.getpid()}_{now_str}"
         dst_conn = None
 
         try:
@@ -134,11 +166,8 @@ class BackupManager:
             dst_conn.close()
             dst_conn = None
 
-            # Atomically replace or place target destination file
-            if os.path.exists(dest_path) and overwrite:
-                os.replace(tmp_dest, dest_path)
-            else:
-                os.rename(tmp_dest, dest_path)
+            # Atomically place or replace target destination file
+            cls._place_backup_file(tmp_dest, dest_path, overwrite=overwrite)
 
             file_size = os.path.getsize(dest_path)
             now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -198,4 +227,3 @@ class BackupManager:
             if isinstance(e, BackupIntegrityError):
                 raise
             raise BackupError(f"Failed to verify backup '{backup_path}': {e}") from e
-

@@ -1,9 +1,23 @@
 """
 Database Connection Manager and Configuration Infrastructure
-Governed by Stage 1.3 Directive and Stage 1.2.1 Architecture Corrections.
+Governed by Stage 1.3 Directive and Stage 1.2.1 / 1.3.1 Architecture Corrections.
 
 Provides isolated, explicit connection lifecycle and transaction management
 for SQLite databases using Write-Ahead Logging (WAL) and strict PRAGMA configurations.
+
+Durability & Consistency Considerations:
+- Transactional Consistency: SQLite transactions in WAL mode guarantee consistency
+  (no torn pages or half-written rows) following unexpected application crashes or
+  power interruptions.
+- SQLite Durability Guarantees: PRIMARY_FINANCIAL_PROFILE configures `PRAGMA synchronous = FULL;`.
+  In WAL mode with FULL, SQLite executes an explicit filesystem flush (Win32 FlushFileBuffers on
+  Windows, fsync on POSIX) on the WAL file upon every transaction commit before returning control
+  to the caller. This ensures that committed transactions survive operating-system crashes and
+  sudden power loss on conforming storage hardware.
+- Storage & Hardware Assumptions: No database software can provide absolute durability against
+  catastrophic storage-controller failures, non-volatile drive wear-out, or drive firmware that
+  reorders or falsely reports cache flush completion. Regular point-in-time backups via BackupManager
+  provide independent recovery against physical and filesystem-level disasters.
 """
 
 import os
@@ -43,7 +57,7 @@ class DatabaseCorruptionError(DatabaseError):
 
 
 class DatabaseTransactionError(DatabaseError):
-    """Raised when transaction begin, commit, or rollback fails."""
+    """Raised when transaction begin, commit, or rollback fails, or on nested transaction attempts."""
     pass
 
 
@@ -260,11 +274,18 @@ class DatabaseManager:
         Explicit ACID transaction context manager using BEGIN IMMEDIATE.
         Acquires write lock immediately to prevent deadlock in concurrent write flows.
         Commits on clean exit, rolls back on exception, and cleans up resources.
+
+        Nested transactions on the same connection are strictly rejected to prevent
+        ambiguous commit boundaries.
         """
         owns_connection = False
         if conn is None:
             conn = self.connect()
             owns_connection = True
+        elif conn.in_transaction:
+            raise DatabaseTransactionError(
+                "Nested transactions are not supported; transaction already active on connection."
+            )
 
         try:
             conn.execute("BEGIN IMMEDIATE;")
@@ -287,8 +308,8 @@ class DatabaseManager:
         except Exception as exc:
             try:
                 conn.execute("ROLLBACK;")
-            except Exception as rb_exc:
-                # Log or swallow rollback secondary exception, preserve primary cause
+            except Exception:
+                # Swallow rollback secondary exception, preserve primary cause
                 pass
             if isinstance(exc, DatabaseError):
                 raise
@@ -335,4 +356,3 @@ class DatabaseManager:
             cursor.execute("PRAGMA integrity_check;")
             rows = cursor.fetchall()
             return [r[0] for r in rows if r]
-

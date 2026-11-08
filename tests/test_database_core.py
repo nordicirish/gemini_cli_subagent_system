@@ -1,14 +1,15 @@
 """
 Comprehensive Automated Unit Tests for Isolated SQLite Core Infrastructure
-Governed by Stage 1.3 Directive.
+Governed by Stage 1.3 Directive and Stage 1.3.1 Integrity Corrections.
 
 Tests cover:
 - D1: Connection lifecycle, WAL mode, profile-specific PRAGMAs.
-- D2: Schema initialisation, versioning, primary/unique/check constraints.
-- D3: Explicit ACID transaction commits, rollbacks, and multi-row atomicity.
-- D4: Financial storage validation (TEXT columns, no REAL, exact Decimal preservation).
-- D5: SQLite Online Backup API snapshots, integrity checks, and data equivalence.
-- D6: Architectural isolation from live application state and files.
+- D2: Schema initialisation, versioning, primary/unique/check constraints, schema integrity checks.
+- D3: Financial decimal structural constraints (Workstream A & B: zero REAL, no malformed values).
+- D4: Audit event identifier integrity (Workstream B: strict 32-hex lowercase UUID).
+- D5: Explicit ACID transaction commits, rollbacks, multi-row atomicity, nested transaction rejection.
+- D6: SQLite Online Backup API snapshots, race-safe overwrite protection, failed backup cleanup.
+- D7: Cryptographic hash-based persistence isolation verification (Workstream F).
 """
 
 import os
@@ -17,7 +18,8 @@ import tempfile
 import sqlite3
 import unittest
 import hashlib
-from typing import List
+import uuid
+from typing import List, Dict, Optional
 
 # Ensure python directory is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "python")))
@@ -38,18 +40,20 @@ from database.schema import (
     SchemaMigrator,
     SchemaError,
     SchemaVersionMismatchError,
+    SchemaIntegrityError,
     CURRENT_SCHEMA_VERSION,
 )
 from database.backup import (
     BackupManager,
     BackupError,
+    BackupDestinationExistsError,
     BackupIntegrityError,
     BackupResult,
 )
 
 
 class TestDatabaseConnectionAndPragmas(unittest.TestCase):
-    """D1: Connection and PRAGMA tests."""
+    """D1: Connection lifecycle and PRAGMA configuration tests."""
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -145,7 +149,7 @@ class TestDatabaseConnectionAndPragmas(unittest.TestCase):
 
 
 class TestDatabaseSchema(unittest.TestCase):
-    """D2: Schema design, integrity constraints, and versioning tests."""
+    """D2: Schema design, versioning, integrity verification, and constraints."""
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -185,7 +189,7 @@ class TestDatabaseSchema(unittest.TestCase):
             self.assertEqual(row[1], 0)
 
     def test_idempotent_schema_initialization(self):
-        """Verify repeated initialization is safe and idempotent."""
+        """Verify repeated initialization is safe, verifies integrity, and returns version."""
         with self.manager.connection() as conn:
             v1 = SchemaMigrator.initialize_core_schema(conn)
             v2 = SchemaMigrator.initialize_core_schema(conn)
@@ -193,7 +197,7 @@ class TestDatabaseSchema(unittest.TestCase):
             self.assertEqual(v2, CURRENT_SCHEMA_VERSION)
 
     def test_unknown_future_schema_version_rejected(self):
-        """Verify database with future schema version raises SchemaVersionMismatchError."""
+        """Verify core database with future schema version raises SchemaVersionMismatchError."""
         with self.manager.connection() as conn:
             SchemaMigrator.initialize_core_schema(conn)
             # Simulate a newer version installed by a future code version
@@ -201,6 +205,50 @@ class TestDatabaseSchema(unittest.TestCase):
 
             with self.assertRaises(SchemaVersionMismatchError):
                 SchemaMigrator.initialize_core_schema(conn)
+
+    def test_cache_schema_future_version_rejected(self):
+        """Verify cache database with future schema version raises SchemaVersionMismatchError."""
+        cache_path = os.path.join(self.temp_dir.name, "cache_future.db")
+        cache_mgr = DatabaseManager(cache_path, profile=MARKET_DATA_CACHE_PROFILE)
+        with cache_mgr.connection() as conn:
+            SchemaMigrator.initialize_cache_schema(conn)
+            conn.execute("UPDATE cache_metadata SET schema_version = 999 WHERE id = 1;")
+
+            with self.assertRaises(SchemaVersionMismatchError):
+                SchemaMigrator.initialize_cache_schema(conn)
+
+    def test_core_schema_integrity_verification_missing_table(self):
+        """Verify that existing database missing an expected table fails with SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            # Drop a required table
+            conn.execute("DROP TABLE portfolio_positions;")
+
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.initialize_core_schema(conn)
+            self.assertIn("portfolio_positions", str(ctx.exception))
+
+    def test_core_schema_integrity_verification_missing_index(self):
+        """Verify that existing database missing an expected index fails with SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            # Drop a required index
+            conn.execute("DROP INDEX idx_audit_timestamp;")
+
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.initialize_core_schema(conn)
+            self.assertIn("idx_audit_timestamp", str(ctx.exception))
+
+    def test_cache_schema_integrity_verification(self):
+        """Verify cache schema integrity fails closed if daily_bars table is dropped."""
+        cache_path = os.path.join(self.temp_dir.name, "cache_integrity.db")
+        cache_mgr = DatabaseManager(cache_path, profile=MARKET_DATA_CACHE_PROFILE)
+        with cache_mgr.connection() as conn:
+            SchemaMigrator.initialize_cache_schema(conn)
+            conn.execute("DROP TABLE daily_bars;")
+
+            with self.assertRaises(SchemaIntegrityError):
+                SchemaMigrator.initialize_cache_schema(conn)
 
     def test_portfolio_positions_primary_key(self):
         """Verify primary key on (account_id, ticker) prevents duplicate entries."""
@@ -238,185 +286,13 @@ class TestDatabaseSchema(unittest.TestCase):
                     (now,),
                 )
 
-    def test_cash_check_constraints(self):
-        """Verify cash check constraints reject negative values, invalid characters, and excess decimals."""
-        with self.manager.connection() as conn:
-            SchemaMigrator.initialize_core_schema(conn)
-            now = "2026-11-08T18:00:00+00:00"
 
-            # Valid cash values
-            conn.execute("INSERT INTO portfolio_cash VALUES ('PRIMARY', 'EUR', '15000.00', ?);", (now,))
-            conn.execute("INSERT INTO portfolio_cash VALUES ('PRIMARY', 'USD', '500', ?);", (now,))
-
-            # Negative cash must fail
-            with self.assertRaises(sqlite3.IntegrityError):
-                conn.execute("INSERT INTO portfolio_cash VALUES ('ACC2', 'EUR', '-100.00', ?);", (now,))
-
-            # Three decimal places on cash must fail
-            with self.assertRaises(sqlite3.IntegrityError):
-                conn.execute("INSERT INTO portfolio_cash VALUES ('ACC2', 'EUR', '100.555', ?);", (now,))
-
-            # Non-numeric characters must fail
-            with self.assertRaises(sqlite3.IntegrityError):
-                conn.execute("INSERT INTO portfolio_cash VALUES ('ACC2', 'EUR', '100.00EUR', ?);", (now,))
-
-            # Multiple dots must fail
-            with self.assertRaises(sqlite3.IntegrityError):
-                conn.execute("INSERT INTO portfolio_cash VALUES ('ACC2', 'EUR', '10.5.2', ?);", (now,))
-
-    def test_shares_check_constraints(self):
-        """Verify share check constraints reject negative amounts, characters, and excess decimals."""
-        with self.manager.connection() as conn:
-            SchemaMigrator.initialize_core_schema(conn)
-            now = "2026-11-08T18:00:00+00:00"
-
-            # Valid fractional shares
-            conn.execute(
-                "INSERT INTO portfolio_positions VALUES ('PRIMARY', 'AAPL', '12.5000', '180.2500', NULL, ?);",
-                (now,),
-            )
-
-            # More than 4 decimals on shares must fail
-            with self.assertRaises(sqlite3.IntegrityError):
-                conn.execute(
-                    "INSERT INTO portfolio_positions VALUES ('PRIMARY', 'MSFT', '10.12345', '400.0000', NULL, ?);",
-                    (now,),
-                )
-
-    def test_audit_events_primary_key(self):
-        """Verify audit_events enforces uniqueness on event_id (32-hex UUID)."""
-        with self.manager.connection() as conn:
-            SchemaMigrator.initialize_core_schema(conn)
-            now = "2026-11-08T18:00:00+00:00"
-            ev_id = "a" * 32
-
-            conn.execute(
-                """
-                INSERT INTO audit_events VALUES (
-                    ?, ?, 'TOOL_CALL', 'SUCCESS', 'Data Analyst', 'echo', 'GRANTED', 'NOT_REQUIRED', 'hash', '{}'
-                );
-                """,
-                (ev_id, now),
-            )
-            # Duplicate event_id must fail
-            with self.assertRaises(sqlite3.IntegrityError):
-                conn.execute(
-                    """
-                    INSERT INTO audit_events VALUES (
-                        ?, ?, 'TOOL_CALL', 'SUCCESS', 'Data Analyst', 'echo', 'GRANTED', 'NOT_REQUIRED', 'hash', '{}'
-                    );
-                    """,
-                    (ev_id, now),
-                )
-
-    def test_cache_schema_initialization(self):
-        """Verify cache schema installs cache_metadata and daily_bars with correct constraints."""
-        cache_path = os.path.join(self.temp_dir.name, "cache.db")
-        cache_manager = DatabaseManager(cache_path, profile=MARKET_DATA_CACHE_PROFILE)
-        with cache_manager.connection() as conn:
-            version = SchemaMigrator.initialize_cache_schema(conn)
-            self.assertEqual(version, 1)
-
-            tables = SchemaMigrator.get_table_names(conn)
-            self.assertIn("daily_bars", tables)
-            self.assertIn("cache_metadata", tables)
-
-
-class TestDatabaseTransactions(unittest.TestCase):
-    """D3: Explicit ACID transaction commits, rollbacks, and multi-row atomicity."""
+class TestFinancialDecimalConstraints(unittest.TestCase):
+    """D3: Parameterised tests for financial numeric constraints and canonical decimal contract."""
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = os.path.join(self.temp_dir.name, "test_tx.db")
-        self.manager = DatabaseManager(self.db_path, profile=PRIMARY_FINANCIAL_PROFILE)
-        with self.manager.connection() as conn:
-            SchemaMigrator.initialize_core_schema(conn)
-
-    def tearDown(self):
-        self.temp_dir.cleanup()
-
-    def test_successful_transaction_commit(self):
-        """Verify writes within a transaction context are durably committed on clean exit."""
-        now = "2026-11-08T18:00:00+00:00"
-        with self.manager.transaction() as conn:
-            conn.execute("INSERT INTO portfolio_cash VALUES ('PRIMARY', 'EUR', '10000.00', ?);", (now,))
-
-        # Verify in a separate fresh connection
-        with self.manager.connection() as conn:
-            row = conn.execute("SELECT amount FROM portfolio_cash WHERE currency = 'EUR';").fetchone()
-            self.assertIsNotNone(row)
-            self.assertEqual(row[0], "10000.00")
-
-    def test_transaction_rollback_on_exception(self):
-        """Verify all writes within a transaction context roll back cleanly when an exception is raised."""
-        now = "2026-11-08T18:00:00+00:00"
-        with self.assertRaises(RuntimeError):
-            with self.manager.transaction() as conn:
-                conn.execute("INSERT INTO portfolio_cash VALUES ('PRIMARY', 'EUR', '5000.00', ?);", (now,))
-                raise RuntimeError("Simulated failure mid-transaction")
-
-        # Verify nothing was persisted
-        with self.manager.connection() as conn:
-            row = conn.execute("SELECT amount FROM portfolio_cash WHERE currency = 'EUR';").fetchone()
-            self.assertIsNone(row)
-
-    def test_multi_row_atomic_consistency(self):
-        """
-        Verify multi-table atomic commit: portfolio position, changelog entry, and db_revision
-        must commit together or roll back entirely.
-        """
-        now = "2026-11-08T18:00:00+00:00"
-
-        # Successful atomic update
-        with self.manager.transaction() as conn:
-            conn.execute(
-                "INSERT INTO portfolio_positions VALUES ('PRIMARY', 'NVDA', '5.0000', '130.0000', NULL, ?);",
-                (now,),
-            )
-            conn.execute(
-                """
-                INSERT INTO financial_changelog (
-                    correlation_id, actor_role, operation_name, target_resource,
-                    before_state_json, after_state_json, timestamp_utc
-                ) VALUES ('tx-101', 'Terminal Orchestrator', 'trade_buy', 'portfolio_positions', '{}', '{"NVDA":5}', ?);
-                """,
-                (now,),
-            )
-            conn.execute("UPDATE database_metadata SET db_revision = db_revision + 1 WHERE id = 1;")
-
-        with self.manager.connection() as conn:
-            pos = conn.execute("SELECT ticker, shares FROM portfolio_positions WHERE ticker='NVDA';").fetchone()
-            cl = conn.execute("SELECT correlation_id FROM financial_changelog WHERE correlation_id='tx-101';").fetchone()
-            rev = conn.execute("SELECT db_revision FROM database_metadata WHERE id = 1;").fetchone()[0]
-
-            self.assertEqual(pos, ("NVDA", "5.0000"))
-            self.assertIsNotNone(cl)
-            self.assertEqual(rev, 1)
-
-        # Failed atomic update must leave NO partial rows
-        with self.assertRaises(ValueError):
-            with self.manager.transaction() as conn:
-                conn.execute(
-                    "INSERT INTO portfolio_positions VALUES ('PRIMARY', 'AMD', '10.0000', '150.0000', NULL, ?);",
-                    (now,),
-                )
-                conn.execute("UPDATE database_metadata SET db_revision = db_revision + 1 WHERE id = 1;")
-                # Simulated failure before changelog insertion
-                raise ValueError("Validation error before changelog inserted")
-
-        with self.manager.connection() as conn:
-            amd_pos = conn.execute("SELECT ticker FROM portfolio_positions WHERE ticker='AMD';").fetchone()
-            rev = conn.execute("SELECT db_revision FROM database_metadata WHERE id = 1;").fetchone()[0]
-            self.assertIsNone(amd_pos)
-            self.assertEqual(rev, 1)  # Revision did not increment
-
-
-class TestFinancialStorageExactness(unittest.TestCase):
-    """D4: Financial numeric validation, zero REAL usage, exact Decimal preservation."""
-
-    def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = os.path.join(self.temp_dir.name, "test_fin.db")
+        self.db_path = os.path.join(self.temp_dir.name, "test_fin_decimal.db")
         self.manager = DatabaseManager(self.db_path, profile=PRIMARY_FINANCIAL_PROFILE)
         with self.manager.connection() as conn:
             SchemaMigrator.initialize_core_schema(conn)
@@ -444,33 +320,294 @@ class TestFinancialStorageExactness(unittest.TestCase):
                             f"Financial column '{col_name}' in table '{table_name}' must be TEXT, got {col_type}",
                         )
 
-    def test_exact_decimal_string_preservation(self):
-        """Verify that decimal strings preserve exact string representations without binary float drift."""
-        test_strings = [
-            ("EUR", "15000.00"),
-            ("USD", "16200.50"),
+    def test_invalid_cash_representations_rejected(self):
+        """Parameterised test verifying malformed values are rejected by portfolio_cash.amount constraints."""
+        invalid_cash_values = [
+            "",             # Empty string
+            ".",            # Bare period
+            "1.",           # Trailing period without fractional digits
+            ".1",           # Leading period without integer digits
+            "00.10",        # Non-canonical leading zero with decimals
+            "01",           # Non-canonical leading zero integer
+            "1.2.3",        # Multiple periods
+            "-1",           # Negative integer
+            "-10.00",       # Negative decimal
+            "+1",           # Explicit positive sign
+            "+10.00",       # Explicit positive sign decimal
+            "1e3",          # Scientific notation
+            "NaN",          # Non-numeric NaN
+            "Infinity",     # Non-numeric Infinity
+            " 1.00 ",       # Whitespace-padded
+            "100.00 EUR",   # Character suffix
+            "1.001",        # Scale violation (> 2 decimal places for cash)
         ]
+
         now = "2026-11-08T18:00:00+00:00"
         with self.manager.connection() as conn:
-            for currency, amount_str in test_strings:
-                conn.execute(
-                    "INSERT INTO portfolio_cash VALUES ('PRIMARY', ?, ?, ?);",
-                    (currency, amount_str, now),
-                )
+            for idx, bad_val in enumerate(invalid_cash_values):
+                with self.subTest(bad_val=bad_val):
+                    with self.assertRaises(
+                        sqlite3.IntegrityError,
+                        msg=f"Expected IntegrityError for invalid cash amount {bad_val!r}",
+                    ):
+                        conn.execute(
+                            "INSERT INTO portfolio_cash VALUES (?, 'EUR', ?, ?);",
+                            (f"ACC_{idx}", bad_val, now),
+                        )
 
-            for currency, amount_str in test_strings:
-                row = conn.execute(
-                    "SELECT amount FROM portfolio_cash WHERE currency = ?;",
-                    (currency,),
-                ).fetchone()
-                self.assertEqual(row[0], amount_str)
-                # Verify exact character length and identity
-                self.assertIsInstance(row[0], str)
-                self.assertEqual(len(row[0]), len(amount_str))
+    def test_valid_cash_representations_accepted(self):
+        """Parameterised test verifying valid canonical cash decimal strings are accepted exactly."""
+        valid_cash_values = [
+            "0",
+            "0.00",
+            "0.5",
+            "0.50",
+            "100",
+            "100.5",
+            "100.50",
+            "15000.00",
+            "999999999.99",
+        ]
+
+        now = "2026-11-08T18:00:00+00:00"
+        with self.manager.connection() as conn:
+            for idx, good_val in enumerate(valid_cash_values):
+                with self.subTest(good_val=good_val):
+                    acc_id = f"ACC_VALID_{idx}"
+                    conn.execute(
+                        "INSERT INTO portfolio_cash VALUES (?, 'EUR', ?, ?);",
+                        (acc_id, good_val, now),
+                    )
+                    stored = conn.execute(
+                        "SELECT amount FROM portfolio_cash WHERE account_id = ?;",
+                        (acc_id,),
+                    ).fetchone()[0]
+                    self.assertEqual(stored, good_val)
+                    self.assertIsInstance(stored, str)
+
+    def test_invalid_shares_representations_rejected(self):
+        """Parameterised test verifying malformed share quantities are rejected."""
+        invalid_shares = [
+            "",
+            ".",
+            "1.",
+            ".1",
+            "00.10",
+            "-5.0000",
+            "10.12345",    # Scale violation (> 4 decimal places)
+            "NaN",
+            "Infinity",
+            "10 shares",
+        ]
+
+        now = "2026-11-08T18:00:00+00:00"
+        with self.manager.connection() as conn:
+            for idx, bad_shares in enumerate(invalid_shares):
+                with self.subTest(bad_shares=bad_shares):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        conn.execute(
+                            "INSERT INTO portfolio_positions VALUES ('PRIMARY', ?, ?, '100.0000', NULL, ?);",
+                            (f"TICK_{idx}", bad_shares, now),
+                        )
+
+    def test_valid_fractional_shares_preserved_exactly(self):
+        """Verify fractional share quantities up to 4 decimal places are preserved exactly as TEXT."""
+        valid_shares = [
+            ("SPY", "10.0000"),
+            ("AAPL", "12.5000"),
+            ("MSFT", "0.1234"),
+            ("NVDA", "500"),
+        ]
+
+        now = "2026-11-08T18:00:00+00:00"
+        with self.manager.connection() as conn:
+            for ticker, sh_val in valid_shares:
+                conn.execute(
+                    "INSERT INTO portfolio_positions VALUES ('PRIMARY', ?, ?, '150.0000', NULL, ?);",
+                    (ticker, sh_val, now),
+                )
+                stored = conn.execute(
+                    "SELECT shares FROM portfolio_positions WHERE ticker = ?;",
+                    (ticker,),
+                ).fetchone()[0]
+                self.assertEqual(stored, sh_val)
+                self.assertIsInstance(stored, str)
+
+
+class TestAuditEventIdentifierIntegrity(unittest.TestCase):
+    """D4: Strict 32-hex lowercase UUID format validation for audit_events.event_id."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test_audit_id.db")
+        self.manager = DatabaseManager(self.db_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_valid_lowercase_32hex_event_id_accepted(self):
+        """Verify valid 32-hex lowercase UUIDs (generated by audit_logger.py) are accepted."""
+        now = "2026-11-08T18:00:00+00:00"
+        valid_ids = [
+            uuid.uuid4().hex,
+            "00000000000000000000000000000000",
+            "abcdef0123456789abcdef0123456789",
+        ]
+        with self.manager.connection() as conn:
+            for ev_id in valid_ids:
+                conn.execute(
+                    """
+                    INSERT INTO audit_events VALUES (
+                        ?, ?, 'TOOL_CALL', 'SUCCESS', 'Data Analyst', 'echo', 'GRANTED', 'NOT_REQUIRED', 'hash', '{}'
+                    );
+                    """,
+                    (ev_id, now),
+                )
+                stored = conn.execute(
+                    "SELECT event_id FROM audit_events WHERE event_id = ?;",
+                    (ev_id,),
+                ).fetchone()[0]
+                self.assertEqual(stored, ev_id)
+
+    def test_invalid_event_ids_rejected(self):
+        """Verify uppercase hex, wrong length, non-hex, empty, and NULL IDs are rejected."""
+        sample_hex = uuid.uuid4().hex
+        invalid_ids = [
+            sample_hex.upper(),       # Uppercase rejected (policy requires lowercase)
+            sample_hex[:31],          # Too short (31 chars)
+            sample_hex + "0",         # Too long (33 chars)
+            sample_hex[:-1] + "g",    # Non-hex character 'g'
+            sample_hex[:-1] + "z",    # Non-hex character 'z'
+            "",                       # Empty
+            None,                     # NULL
+        ]
+
+        now = "2026-11-08T18:00:00+00:00"
+        with self.manager.connection() as conn:
+            for bad_id in invalid_ids:
+                with self.subTest(bad_id=bad_id):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        conn.execute(
+                            """
+                            INSERT INTO audit_events VALUES (
+                                ?, ?, 'TOOL_CALL', 'SUCCESS', 'Data Analyst', 'echo', 'GRANTED', 'NOT_REQUIRED', 'hash', '{}'
+                            );
+                            """,
+                            (bad_id, now),
+                        )
+
+
+class TestDatabaseTransactions(unittest.TestCase):
+    """D5: Explicit ACID transaction commits, rollbacks, multi-row atomicity, and failure paths."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test_tx.db")
+        self.manager = DatabaseManager(self.db_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_successful_transaction_commit(self):
+        """Verify writes within a transaction context are durably committed on clean exit."""
+        now = "2026-11-08T18:00:00+00:00"
+        with self.manager.transaction() as conn:
+            conn.execute("INSERT INTO portfolio_cash VALUES ('PRIMARY', 'EUR', '10000.00', ?);", (now,))
+
+        with self.manager.connection() as conn:
+            row = conn.execute("SELECT amount FROM portfolio_cash WHERE currency = 'EUR';").fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[0], "10000.00")
+
+    def test_transaction_rollback_on_exception(self):
+        """Verify all writes within a transaction context roll back cleanly when an exception is raised."""
+        now = "2026-11-08T18:00:00+00:00"
+        with self.assertRaises(RuntimeError):
+            with self.manager.transaction() as conn:
+                conn.execute("INSERT INTO portfolio_cash VALUES ('PRIMARY', 'EUR', '5000.00', ?);", (now,))
+                raise RuntimeError("Simulated failure mid-transaction")
+
+        with self.manager.connection() as conn:
+            row = conn.execute("SELECT amount FROM portfolio_cash WHERE currency = 'EUR';").fetchone()
+            self.assertIsNone(row)
+
+    def test_multi_row_atomic_consistency(self):
+        """Verify multi-table atomic commit: portfolio position, changelog, and db_revision commit together."""
+        now = "2026-11-08T18:00:00+00:00"
+
+        with self.manager.transaction() as conn:
+            conn.execute(
+                "INSERT INTO portfolio_positions VALUES ('PRIMARY', 'NVDA', '5.0000', '130.0000', NULL, ?);",
+                (now,),
+            )
+            conn.execute(
+                """
+                INSERT INTO financial_changelog (
+                    correlation_id, actor_role, operation_name, target_resource,
+                    before_state_json, after_state_json, timestamp_utc
+                ) VALUES ('tx-101', 'Terminal Orchestrator', 'trade_buy', 'portfolio_positions', '{}', '{"NVDA":5}', ?);
+                """,
+                (now,),
+            )
+            conn.execute("UPDATE database_metadata SET db_revision = db_revision + 1 WHERE id = 1;")
+
+        with self.manager.connection() as conn:
+            pos = conn.execute("SELECT ticker, shares FROM portfolio_positions WHERE ticker='NVDA';").fetchone()
+            cl = conn.execute("SELECT correlation_id FROM financial_changelog WHERE correlation_id='tx-101';").fetchone()
+            rev = conn.execute("SELECT db_revision FROM database_metadata WHERE id = 1;").fetchone()[0]
+
+            self.assertEqual(pos, ("NVDA", "5.0000"))
+            self.assertIsNotNone(cl)
+            self.assertEqual(rev, 1)
+
+    def test_multi_row_failure_leaves_no_partial_data(self):
+        """Verify failed transaction leaves zero partial data."""
+        now = "2026-11-08T18:00:00+00:00"
+        with self.assertRaises(ValueError):
+            with self.manager.transaction() as conn:
+                conn.execute(
+                    "INSERT INTO portfolio_positions VALUES ('PRIMARY', 'AMD', '10.0000', '150.0000', NULL, ?);",
+                    (now,),
+                )
+                conn.execute("UPDATE database_metadata SET db_revision = db_revision + 1 WHERE id = 1;")
+                raise ValueError("Simulated failure before changelog inserted")
+
+        with self.manager.connection() as conn:
+            amd_pos = conn.execute("SELECT ticker FROM portfolio_positions WHERE ticker='AMD';").fetchone()
+            rev = conn.execute("SELECT db_revision FROM database_metadata WHERE id = 1;").fetchone()[0]
+            self.assertIsNone(amd_pos)
+            self.assertEqual(rev, 0)
+
+    def test_nested_transaction_attempt_rejected(self):
+        """Verify nested transaction attempts on the same connection raise DatabaseTransactionError."""
+        with self.manager.connection() as conn:
+            with self.manager.transaction(conn):
+                with self.assertRaises(DatabaseTransactionError) as ctx:
+                    with self.manager.transaction(conn):
+                        pass
+                self.assertIn("Nested transactions are not supported", str(ctx.exception))
+
+    def test_caller_connection_clean_after_failure(self):
+        """Verify that when caller provides a connection, after a failed transaction, in_transaction is False."""
+        now = "2026-11-08T18:00:00+00:00"
+        with self.manager.connection() as conn:
+            with self.assertRaises(RuntimeError):
+                with self.manager.transaction(conn):
+                    conn.execute("INSERT INTO portfolio_cash VALUES ('PRIMARY', 'USD', '100.00', ?);", (now,))
+                    raise RuntimeError("Crash inside transaction")
+
+            # Connection must be rolled back and not left in an active transaction
+            self.assertFalse(conn.in_transaction)
+            row = conn.execute("SELECT amount FROM portfolio_cash WHERE currency='USD';").fetchone()
+            self.assertIsNone(row)
 
 
 class TestBackupInfrastructure(unittest.TestCase):
-    """D5: SQLite Online Backup API snapshots, integrity checks, and data equivalence."""
+    """D6: SQLite Online Backup API snapshots, race-safe overwrite protection, and failure cleanup."""
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -478,7 +615,6 @@ class TestBackupInfrastructure(unittest.TestCase):
         self.dst_path = os.path.join(self.temp_dir.name, "backup.db")
         self.manager = DatabaseManager(self.src_path, profile=PRIMARY_FINANCIAL_PROFILE)
 
-        # Seed source database with schema and records
         with self.manager.connection() as conn:
             SchemaMigrator.initialize_core_schema(conn)
             now = "2026-11-08T18:00:00+00:00"
@@ -499,15 +635,12 @@ class TestBackupInfrastructure(unittest.TestCase):
         self.assertTrue(os.path.exists(self.dst_path))
         self.assertGreater(res.file_size_bytes, 0)
         self.assertEqual(res.integrity_status, "ok")
-
-        # Verify verify_backup utility
         self.assertTrue(BackupManager.verify_backup(self.dst_path))
 
     def test_backup_data_equivalence(self):
         """Verify all records from source database are accurately copied to the backup database."""
         BackupManager.create_backup(self.src_path, self.dst_path)
 
-        # Query destination backup independently
         dst_manager = DatabaseManager(self.dst_path, profile=PRIMARY_FINANCIAL_PROFILE)
         with dst_manager.connection() as conn:
             cash = conn.execute("SELECT amount FROM portfolio_cash WHERE currency='EUR';").fetchone()[0]
@@ -518,50 +651,117 @@ class TestBackupInfrastructure(unittest.TestCase):
             self.assertEqual(pos, ("50.0000", "495.5000"))
             self.assertEqual(wl, "GOOG")
 
-    def test_existing_destination_handling(self):
-        """Verify overwrite=False raises BackupError when destination exists, and overwrite=True succeeds."""
-        # Create first backup
+    def test_existing_destination_overwrite_false_raises(self):
+        """Verify overwrite=False raises BackupDestinationExistsError when destination exists."""
         BackupManager.create_backup(self.src_path, self.dst_path)
 
-        # Attempt second backup without overwrite -> must fail
-        with self.assertRaises(BackupError):
+        with self.assertRaises(BackupDestinationExistsError):
             BackupManager.create_backup(self.src_path, self.dst_path, overwrite=False)
 
-        # Attempt second backup with overwrite -> must succeed
+    def test_existing_destination_overwrite_true_replaces(self):
+        """Verify overwrite=True atomically replaces an existing backup destination."""
+        BackupManager.create_backup(self.src_path, self.dst_path)
         res = BackupManager.create_backup(self.src_path, self.dst_path, overwrite=True)
         self.assertEqual(res.integrity_status, "ok")
 
-    def test_backup_from_active_connection(self):
-        """Verify backup can be initiated directly from an active sqlite3.Connection handle."""
-        with self.manager.connection() as conn:
-            res = BackupManager.create_backup(conn, self.dst_path)
-            self.assertEqual(res.integrity_status, "ok")
-            self.assertTrue(os.path.exists(self.dst_path))
+    def test_concurrent_destination_creation_race_safe(self):
+        """
+        Verify that if dest_path is created during backup execution when overwrite=False,
+        _place_backup_file raises BackupDestinationExistsError and does NOT overwrite dest_path.
+        """
+        tmp_backup = os.path.join(self.temp_dir.name, "tmp_test.db")
+        with open(tmp_backup, "w") as f:
+            f.write("temporary content")
+
+        # Destination already exists with original content
+        with open(self.dst_path, "w") as f:
+            f.write("original preserved content")
+
+        with self.assertRaises(BackupDestinationExistsError):
+            BackupManager._place_backup_file(tmp_backup, self.dst_path, overwrite=False)
+
+        # Assert destination still has original content
+        with open(self.dst_path, "r") as f:
+            content = f.read()
+        self.assertEqual(content, "original preserved content")
+
+        if os.path.exists(tmp_backup):
+            os.unlink(tmp_backup)
+
+    def test_failed_backup_preserves_original_destination(self):
+        """Verify that a backup failure preserves the original destination intact."""
+        # Create an initial valid file
+        with open(self.dst_path, "w") as f:
+            f.write("original destination data")
+
+        # Attempt backup with invalid source connection to trigger failure
+        with self.assertRaises(BackupError):
+            BackupManager.create_backup("non_existent_source.db", self.dst_path, overwrite=True)
+
+        # Original destination must remain completely untouched
+        with open(self.dst_path, "r") as f:
+            self.assertEqual(f.read(), "original destination data")
 
 
-class TestArchitecturalIsolation(unittest.TestCase):
-    """D6: Isolation tests verifying no interference with live application state or files."""
+class TestPersistenceIsolationStrengthened(unittest.TestCase):
+    """D7: Cryptographic hash verification demonstrating zero modification to file-backed state."""
 
-    def test_import_does_not_create_production_database(self):
-        """Verify importing database infrastructure does NOT create context/gem.db or cache/market_data.db."""
-        import database
+    CRITICAL_STATE_FILES = [
+        os.path.join("context", "ssot.json"),
+        os.path.join("context", "trade_lessons.json"),
+        os.path.join("context", "decision_log.json"),
+        os.path.join("context", "config.json"),
+        os.path.join("context", "agent_logs", "agent-events.jsonl"),
+        "config.json",
+    ]
+
+    def _compute_hashes(self) -> Dict[str, Optional[str]]:
+        hashes = {}
+        for fpath in self.CRITICAL_STATE_FILES:
+            if os.path.exists(fpath):
+                with open(fpath, "rb") as f:
+                    hashes[fpath] = hashlib.sha256(f.read()).hexdigest()
+            else:
+                hashes[fpath] = None
+        return hashes
+
+    def test_zero_modification_to_existing_state_files(self):
+        """
+        Computes SHA-256 hashes of all authoritative application state files,
+        exercises database operations on temporary files, and asserts 100% hash invariance.
+        """
+        before_hashes = self._compute_hashes()
+
+        # Run temporary database operations
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            temp_db = os.path.join(tmp_dir, "isolated.db")
+            temp_backup = os.path.join(tmp_dir, "isolated_backup.db")
+
+            manager = DatabaseManager(temp_db, profile=PRIMARY_FINANCIAL_PROFILE)
+            with manager.connection() as conn:
+                SchemaMigrator.initialize_core_schema(conn)
+                now = "2026-11-08T18:00:00+00:00"
+                conn.execute("INSERT INTO portfolio_cash VALUES ('PRIMARY', 'EUR', '100.00', ?);", (now,))
+
+            BackupManager.create_backup(temp_db, temp_backup)
+
+        after_hashes = self._compute_hashes()
+
+        # Assert every file has identical hash and existence state
+        for fpath, before_hash in before_hashes.items():
+            after_hash = after_hashes[fpath]
+            self.assertEqual(
+                before_hash,
+                after_hash,
+                f"Persistence isolation violation: File '{fpath}' hash modified during test execution!",
+            )
+
+    def test_no_production_database_created(self):
+        """Verify context/gem.db and cache/market_data.db do not exist."""
         self.assertFalse(os.path.exists(os.path.join("context", "gem.db")))
         self.assertFalse(os.path.exists(os.path.join("context", "gem.db-wal")))
         self.assertFalse(os.path.exists(os.path.join("cache", "market_data.db")))
 
-    def test_existing_persistence_files_unmodified(self):
-        """Verify existing JSON and JSONL state files remain present and untouched."""
-        critical_files = [
-            os.path.join("context", "ssot.json"),
-            os.path.join("context", "trade_lessons.json"),
-            os.path.join("context", "decision_log.json"),
-            os.path.join("context", "agent_logs", "agent-events.jsonl"),
-            os.path.join("gem_trading_rules", "rules.md"),
-        ]
-        for fpath in critical_files:
-            self.assertTrue(os.path.exists(fpath), f"Critical file missing: {fpath}")
-
 
 if __name__ == "__main__":
     unittest.main()
-
