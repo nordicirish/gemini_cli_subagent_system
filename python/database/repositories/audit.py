@@ -25,6 +25,7 @@ from python.database.repositories.base import (
     ValidationError,
     AppendOnlyViolationError,
     RepositoryError,
+    _FinancialMutationCapability,
     validate_event_id,
     validate_identifier,
     utc_now_iso,
@@ -263,19 +264,21 @@ class FinancialChangelogRepository(BaseRepository):
 
     def append_entry(
         self,
-        correlation_id: str,
-        actor_role: Optional[str],
-        operation_name: str,
-        target_resource: str,
-        before_state: Optional[Dict[str, Any]],
-        after_state: Optional[Dict[str, Any]],
+        correlation_id: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        operation_name: Optional[str] = None,
+        target_resource: Optional[str] = None,
+        before_state: Optional[Dict[str, Any]] = None,
+        after_state: Optional[Dict[str, Any]] = None,
         approval_digest: Optional[str] = None,
         timestamp_utc: Optional[str] = None,
+        *,
+        mutation_capability: Optional[Any] = None,
     ) -> FinancialChangelogEntry:
         """
-        Appends a new financial changelog entry (R3).
-        Enforces authorization boundary: rejects engineering roles and unauthorized callers.
-        Derives actor role from trusted execution context; rejects spoofed actor_role.
+        Appends a new financial changelog entry (R1, R3).
+        Public/independent insertion is strictly prohibited. Changelog entries can ONLY
+        be appended via an internal _FinancialMutationCapability bound to an active transaction.
         """
         self._check_active()
         active_role = get_active_caller_role()
@@ -294,18 +297,47 @@ class FinancialChangelogRepository(BaseRepository):
 
         # R3: Enforce financial mutation authorization boundary
         authorize_financial_mutation(
-            operation_name=operation_name,
-            target_resource=target_resource,
+            operation_name=operation_name or "update_ssot",
+            target_resource=target_resource or "portfolio_cash/PRIMARY/EUR",
             caller_role=active_role,
         )
 
-        norm_cid = validate_identifier(correlation_id, "correlation_id")
-        norm_actor = active_role
-        norm_op = validate_identifier(operation_name, "operation_name")
-        norm_target = validate_identifier(target_resource, "target_resource")
-        ts = timestamp_utc or utc_now_iso()
-        before_json = json.dumps(before_state, sort_keys=True) if before_state is not None else "{}"
-        after_json = json.dumps(after_state, sort_keys=True) if after_state is not None else "{}"
+        # R1: Reject direct insertion without internal mutation capability
+        if mutation_capability is None:
+            raise PermissionError(
+                "Direct insertion into financial_changelog via public repository API is prohibited. "
+                "Financial changelog entries must be generated through trusted financial mutation operations."
+            )
+
+        if not isinstance(mutation_capability, _FinancialMutationCapability):
+            raise PermissionError("Invalid mutation capability provided.")
+
+        if mutation_capability.connection is not self._conn:
+            raise PermissionError("Mutation capability is bound to a different database connection.")
+
+        if not self._conn.in_transaction:
+            raise PermissionError("Cannot append financial changelog: connection is not in an active transaction.")
+
+        if mutation_capability.is_consumed:
+            raise IntegrityConflictError("Mutation capability has already been consumed.")
+
+        # Extract authoritative values strictly from capability - ignore any caller-supplied arguments
+        norm_cid = validate_identifier(mutation_capability.correlation_id, "correlation_id")
+        norm_actor = mutation_capability.actor_role
+        norm_op = validate_identifier(mutation_capability.operation_name, "operation_name")
+        norm_target = validate_identifier(mutation_capability.target_resource, "target_resource")
+        digest = mutation_capability.approval_digest
+        ts = mutation_capability.timestamp_utc or utc_now_iso()
+        before_json = (
+            json.dumps(mutation_capability.before_state, sort_keys=True)
+            if mutation_capability.before_state is not None
+            else "{}"
+        )
+        after_json = (
+            json.dumps(mutation_capability.after_state, sort_keys=True)
+            if mutation_capability.after_state is not None
+            else "{}"
+        )
 
         cur = self._conn.cursor()
         try:
@@ -321,13 +353,14 @@ class FinancialChangelogRepository(BaseRepository):
                     norm_actor,
                     norm_op,
                     norm_target,
-                    approval_digest,
+                    digest,
                     before_json,
                     after_json,
                     ts,
                 ),
             )
             record_id = cur.lastrowid
+            mutation_capability.mark_consumed()
         except sqlite3.IntegrityError as e:
             raise IntegrityConflictError(f"Integrity violation appending financial changelog: {e}") from e
 
@@ -337,9 +370,9 @@ class FinancialChangelogRepository(BaseRepository):
             actor_role=norm_actor,
             operation_name=norm_op,
             target_resource=norm_target,
-            approval_digest=approval_digest,
-            before_state=before_state,
-            after_state=after_state,
+            approval_digest=digest,
+            before_state=mutation_capability.before_state,
+            after_state=mutation_capability.after_state,
             timestamp_utc=ts,
         )
 

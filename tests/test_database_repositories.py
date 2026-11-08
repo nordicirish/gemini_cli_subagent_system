@@ -115,76 +115,78 @@ class TestRepositoryCrudAndMapping(BaseRepositoryTestCase):
     def test_cash_crud_and_mapping(self):
         with self.core_manager.connection() as conn:
             repo = CashRepository(conn)
-            # Insert cash
-            balance = repo.set_cash_balance("PRIMARY", "EUR", Decimal("15000.50"), caller_role="Terminal Orchestrator")
-            self.assertEqual(balance.account_id, "PRIMARY")
-            self.assertEqual(balance.currency, "EUR")
-            self.assertEqual(balance.amount, Decimal("15000.50"))
-            self.assertIsInstance(balance.amount, Decimal)
+            with execution_role_context("Terminal Orchestrator"):
+                # Insert cash
+                balance = repo.set_cash_balance("PRIMARY", "EUR", Decimal("15000.50"), caller_role="Terminal Orchestrator")
+                self.assertEqual(balance.account_id, "PRIMARY")
+                self.assertEqual(balance.currency, "EUR")
+                self.assertEqual(balance.amount, Decimal("15000.50"))
+                self.assertIsInstance(balance.amount, Decimal)
 
-            # Retrieve cash
-            fetched = repo.get_cash("PRIMARY", "EUR")
-            self.assertIsNotNone(fetched)
-            self.assertEqual(fetched.amount, Decimal("15000.50"))
+                # Retrieve cash
+                fetched = repo.get_cash("PRIMARY", "EUR")
+                self.assertIsNotNone(fetched)
+                self.assertEqual(fetched.amount, Decimal("15000.50"))
 
-            # Update cash
-            updated = repo.set_cash_balance("PRIMARY", "EUR", "20000.00", caller_role="Terminal Orchestrator")
-            self.assertEqual(updated.amount, Decimal("20000.00"))
+                # Update cash
+                updated = repo.set_cash_balance("PRIMARY", "EUR", "20000.00", caller_role="Terminal Orchestrator")
+                self.assertEqual(updated.amount, Decimal("20000.00"))
 
-            # List cash
-            repo.set_cash_balance("PRIMARY", "USD", Decimal("5000.00"), caller_role="Terminal Orchestrator")
-            all_cash = repo.list_cash("PRIMARY")
-            self.assertEqual(len(all_cash), 2)
-            self.assertEqual({c.currency for c in all_cash}, {"EUR", "USD"})
+                # List cash
+                repo.set_cash_balance("PRIMARY", "USD", Decimal("5000.00"), caller_role="Terminal Orchestrator")
+                all_cash = repo.list_cash("PRIMARY")
+                self.assertEqual(len(all_cash), 2)
+                self.assertEqual({c.currency for c in all_cash}, {"EUR", "USD"})
 
-            # Delete cash
-            deleted = repo.delete_cash("PRIMARY", "USD", caller_role="Terminal Orchestrator")
-            self.assertTrue(deleted)
-            self.assertIsNone(repo.get_cash("PRIMARY", "USD"))
+                # Delete cash
+                deleted = repo.delete_cash("PRIMARY", "USD", caller_role="Terminal Orchestrator")
+                self.assertTrue(deleted)
+                self.assertIsNone(repo.get_cash("PRIMARY", "USD"))
 
     def test_position_crud_and_mapping(self):
         with self.core_manager.connection() as conn:
             repo = PositionRepository(conn)
-            # Insert position without USD cost basis
-            pos = repo.upsert_position(
-                account_id="PRIMARY",
-                ticker="NOVO-B.CO",
-                shares=Decimal("150.0000"),
-                wac_eur=Decimal("95.2500"),
-                caller_role="Terminal Orchestrator",
-            )
-            self.assertEqual(pos.ticker, "NOVO-B.CO")
-            self.assertEqual(pos.shares, Decimal("150.0000"))
-            self.assertEqual(pos.wac_eur, Decimal("95.2500"))
-            self.assertIsNone(pos.wac_usd)
-            self.assertIsInstance(pos.shares, Decimal)
+            with execution_role_context("Terminal Orchestrator"):
+                # Insert position without USD cost basis
+                pos = repo.upsert_position(
+                    account_id="PRIMARY",
+                    ticker="NOVO-B.CO",
+                    shares=Decimal("150.0000"),
+                    wac_eur=Decimal("95.2500"),
+                    caller_role="Terminal Orchestrator",
+                )
+                self.assertEqual(pos.ticker, "NOVO-B.CO")
+                self.assertEqual(pos.shares, Decimal("150.0000"))
+                self.assertEqual(pos.wac_eur, Decimal("95.2500"))
+                self.assertIsNone(pos.wac_usd)
+                self.assertIsInstance(pos.shares, Decimal)
 
-            # Retrieve position
-            fetched = repo.get_position("PRIMARY", "NOVO-B.CO")
-            self.assertIsNotNone(fetched)
-            self.assertEqual(fetched.shares, Decimal("150.0000"))
+                # Retrieve position
+                fetched = repo.get_position("PRIMARY", "NOVO-B.CO")
+                self.assertIsNotNone(fetched)
+                self.assertEqual(fetched.shares, Decimal("150.0000"))
 
-            # Update position with USD cost basis
-            updated = repo.upsert_position(
-                account_id="PRIMARY",
-                ticker="NOVO-B.CO",
-                shares=Decimal("200.0000"),
-                wac_eur=Decimal("92.1000"),
-                wac_usd=Decimal("100.5000"),
-                caller_role="Terminal Orchestrator",
-            )
-            self.assertEqual(updated.shares, Decimal("200.0000"))
-            self.assertEqual(updated.wac_usd, Decimal("100.5000"))
+                # Update position with USD cost basis
+                updated = repo.upsert_position(
+                    account_id="PRIMARY",
+                    ticker="NOVO-B.CO",
+                    shares=Decimal("200.0000"),
+                    wac_eur=Decimal("92.1000"),
+                    wac_usd=Decimal("100.5000"),
+                    caller_role="Terminal Orchestrator",
+                )
+                self.assertEqual(updated.shares, Decimal("200.0000"))
+                self.assertEqual(updated.wac_usd, Decimal("100.5000"))
 
-            # List positions
-            repo.upsert_position("PRIMARY", "SAP.DE", Decimal("50.0000"), Decimal("180.0000"), caller_role="Terminal Orchestrator")
-            positions = repo.list_positions("PRIMARY")
-            self.assertEqual(len(positions), 2)
+                # List positions
+                repo.upsert_position("PRIMARY", "SAP.DE", Decimal("50.0000"), Decimal("180.0000"), caller_role="Terminal Orchestrator")
+                positions = repo.list_positions("PRIMARY")
+                self.assertEqual(len(positions), 2)
 
-            # Delete position
-            deleted = repo.delete_position("PRIMARY", "SAP.DE", caller_role="Terminal Orchestrator")
-            self.assertTrue(deleted)
-            self.assertIsNone(repo.get_position("PRIMARY", "SAP.DE"))
+                # Delete position
+                deleted = repo.delete_position("PRIMARY", "SAP.DE", caller_role="Terminal Orchestrator")
+                self.assertTrue(deleted)
+                self.assertIsNone(repo.get_position("PRIMARY", "SAP.DE"))
 
     def test_watchlist_crud_and_mapping(self):
         with self.core_manager.connection() as conn:
@@ -290,26 +292,26 @@ class TestRepositoryCrudAndMapping(BaseRepositoryTestCase):
 
     def test_financial_changelog_crud_and_mapping(self):
         with self.core_manager.connection() as conn:
+            pos_repo = PositionRepository(conn)
             repo = FinancialChangelogRepository(conn)
             with execution_role_context("Terminal Orchestrator"):
-                entry = repo.append_entry(
+                pos_repo.upsert_position(
+                    account_id="PRIMARY",
+                    ticker="SAP.DE",
+                    shares=Decimal("100.0000"),
+                    wac_eur=Decimal("150.0000"),
                     correlation_id="CORR_123",
-                    actor_role="Terminal Orchestrator",
-                    operation_name="update_ssot",
-                    target_resource="portfolio_positions/PRIMARY/SAP.DE",
-                    before_state=None,
-                    after_state={"ticker": "SAP.DE", "shares": "100.0000"},
                 )
+                entries = repo.list_entries(correlation_id="CORR_123")
+                self.assertEqual(len(entries), 1)
+                entry = entries[0]
                 self.assertIsNotNone(entry.id)
                 self.assertEqual(entry.correlation_id, "CORR_123")
                 self.assertEqual(entry.after_state["shares"], "100.0000")
 
                 fetched = repo.get_entry(entry.id)
                 self.assertIsNotNone(fetched)
-                self.assertEqual(fetched.operation_name, "update_ssot")
-
-                entries = repo.list_entries(correlation_id="CORR_123")
-                self.assertEqual(len(entries), 1)
+                self.assertEqual(fetched.operation_name, "upsert_position")
 
     def test_owner_approvals_crud_and_mapping(self):
         with self.core_manager.connection() as conn:
@@ -425,33 +427,36 @@ class TestFinancialDecimalIntegrity(BaseRepositoryTestCase):
     def test_cash_decimal_precision_scale(self):
         with self.core_manager.connection() as conn:
             repo = CashRepository(conn)
-            # Valid: scale <= 2
-            repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.25"), caller_role="Terminal Orchestrator")
-            repo.set_cash_balance("PRIMARY", "EUR", "100.2", caller_role="Terminal Orchestrator")
-            repo.set_cash_balance("PRIMARY", "EUR", 100, caller_role="Terminal Orchestrator")
-            repo.set_cash_balance("PRIMARY", "EUR", "0", caller_role="Terminal Orchestrator")
-            repo.set_cash_balance("PRIMARY", "EUR", "0.05", caller_role="Terminal Orchestrator")
+            with execution_role_context("Terminal Orchestrator"):
+                # Valid: scale <= 2
+                repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.25"), caller_role="Terminal Orchestrator")
+                repo.set_cash_balance("PRIMARY", "EUR", "100.2", caller_role="Terminal Orchestrator")
+                repo.set_cash_balance("PRIMARY", "EUR", 100, caller_role="Terminal Orchestrator")
+                repo.set_cash_balance("PRIMARY", "EUR", "0", caller_role="Terminal Orchestrator")
+                repo.set_cash_balance("PRIMARY", "EUR", "0.05", caller_role="Terminal Orchestrator")
 
-            # Excess scale (> 2 decimal places) must be rejected
-            with self.assertRaises(ValidationError):
-                repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.255"), caller_role="Terminal Orchestrator")
-            with self.assertRaises(ValidationError):
-                repo.set_cash_balance("PRIMARY", "EUR", "100.001", caller_role="Terminal Orchestrator")
+                # Excess scale (> 2 decimal places) must be rejected
+                with self.assertRaises(ValidationError):
+                    repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.255"), caller_role="Terminal Orchestrator")
+                with self.assertRaises(ValidationError):
+                    repo.set_cash_balance("PRIMARY", "EUR", "100.001", caller_role="Terminal Orchestrator")
 
     def test_cash_float_rejected(self):
         with self.core_manager.connection() as conn:
             repo = CashRepository(conn)
-            with self.assertRaises(ValidationError) as ctx:
-                repo.set_cash_balance("PRIMARY", "EUR", 100.50, caller_role="Terminal Orchestrator")
-            self.assertIn("Floating-point values strictly forbidden", str(ctx.exception))
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(ValidationError) as ctx:
+                    repo.set_cash_balance("PRIMARY", "EUR", 100.50, caller_role="Terminal Orchestrator")
+                self.assertIn("Floating-point values strictly forbidden", str(ctx.exception))
 
     def test_cash_negative_rejected(self):
         with self.core_manager.connection() as conn:
             repo = CashRepository(conn)
-            with self.assertRaises(ValidationError):
-                repo.set_cash_balance("PRIMARY", "EUR", Decimal("-10.00"), caller_role="Terminal Orchestrator")
-            with self.assertRaises(ValidationError):
-                repo.set_cash_balance("PRIMARY", "EUR", "-5.00", caller_role="Terminal Orchestrator")
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(ValidationError):
+                    repo.set_cash_balance("PRIMARY", "EUR", Decimal("-10.00"), caller_role="Terminal Orchestrator")
+                with self.assertRaises(ValidationError):
+                    repo.set_cash_balance("PRIMARY", "EUR", "-5.00", caller_role="Terminal Orchestrator")
 
     def test_cash_malformed_strings(self):
         with self.core_manager.connection() as conn:
@@ -460,59 +465,64 @@ class TestFinancialDecimalIntegrity(BaseRepositoryTestCase):
                 "1.2.3", "1..2", ".5", "5.", "05", "00", "05.20",
                 "abc", "1e5", "1.5E2", "100 ", " 100", "", "   "
             ]
-            for val in malformed:
-                with self.subTest(val=val):
-                    with self.assertRaises(ValidationError):
-                        repo.set_cash_balance("PRIMARY", "EUR", val, caller_role="Terminal Orchestrator")
+            with execution_role_context("Terminal Orchestrator"):
+                for val in malformed:
+                    with self.subTest(val=val):
+                        with self.assertRaises(ValidationError):
+                            repo.set_cash_balance("PRIMARY", "EUR", val, caller_role="Terminal Orchestrator")
 
     def test_cash_nan_inf_rejected(self):
         with self.core_manager.connection() as conn:
             repo = CashRepository(conn)
-            with self.assertRaises(ValidationError):
-                repo.set_cash_balance("PRIMARY", "EUR", Decimal("NaN"), caller_role="Terminal Orchestrator")
-            with self.assertRaises(ValidationError):
-                repo.set_cash_balance("PRIMARY", "EUR", Decimal("Infinity"), caller_role="Terminal Orchestrator")
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(ValidationError):
+                    repo.set_cash_balance("PRIMARY", "EUR", Decimal("NaN"), caller_role="Terminal Orchestrator")
+                with self.assertRaises(ValidationError):
+                    repo.set_cash_balance("PRIMARY", "EUR", Decimal("Infinity"), caller_role="Terminal Orchestrator")
 
     def test_position_decimal_precision_scale(self):
         with self.core_manager.connection() as conn:
             repo = PositionRepository(conn)
-            # Valid: scale <= 4
-            repo.upsert_position(
-                "PRIMARY", "SAP.DE", Decimal("100.1234"), Decimal("150.5555"), caller_role="Terminal Orchestrator"
-            )
+            with execution_role_context("Terminal Orchestrator"):
+                # Valid: scale <= 4
+                repo.upsert_position(
+                    "PRIMARY", "SAP.DE", Decimal("100.1234"), Decimal("150.5555"), caller_role="Terminal Orchestrator"
+                )
 
-            # Excess scale (> 4) rejected
-            with self.assertRaises(ValidationError):
-                repo.upsert_position(
-                    "PRIMARY", "SAP.DE", Decimal("100.12345"), Decimal("150.0000"), caller_role="Terminal Orchestrator"
-                )
-            with self.assertRaises(ValidationError):
-                repo.upsert_position(
-                    "PRIMARY", "SAP.DE", Decimal("100.0000"), Decimal("150.12345"), caller_role="Terminal Orchestrator"
-                )
+                # Excess scale (> 4) rejected
+                with self.assertRaises(ValidationError):
+                    repo.upsert_position(
+                        "PRIMARY", "SAP.DE", Decimal("100.12345"), Decimal("150.0000"), caller_role="Terminal Orchestrator"
+                    )
+                with self.assertRaises(ValidationError):
+                    repo.upsert_position(
+                        "PRIMARY", "SAP.DE", Decimal("100.0000"), Decimal("150.12345"), caller_role="Terminal Orchestrator"
+                    )
 
     def test_position_zero_and_negative_shares_rejected(self):
         with self.core_manager.connection() as conn:
             repo = PositionRepository(conn)
-            # Zero shares forbidden
-            with self.assertRaises(ValidationError):
-                repo.upsert_position(
-                    "PRIMARY", "SAP.DE", Decimal("0"), Decimal("150.0000"), caller_role="Terminal Orchestrator"
-                )
-            # Negative shares forbidden
-            with self.assertRaises(ValidationError):
-                repo.upsert_position(
-                    "PRIMARY", "SAP.DE", Decimal("-10.0000"), Decimal("150.0000"), caller_role="Terminal Orchestrator"
-                )
+            with execution_role_context("Terminal Orchestrator"):
+                # Zero shares forbidden
+                with self.assertRaises(ValidationError):
+                    repo.upsert_position(
+                        "PRIMARY", "SAP.DE", Decimal("0"), Decimal("150.0000"), caller_role="Terminal Orchestrator"
+                    )
+                # Negative shares forbidden
+                with self.assertRaises(ValidationError):
+                    repo.upsert_position(
+                        "PRIMARY", "SAP.DE", Decimal("-10.0000"), Decimal("150.0000"), caller_role="Terminal Orchestrator"
+                    )
 
     def test_exact_roundtrip_persistence(self):
         with self.core_manager.connection() as conn:
             repo = PositionRepository(conn)
             original_shares = Decimal("123.4567")
             original_wac = Decimal("987.6543")
-            repo.upsert_position(
-                "PRIMARY", "ASML.AS", original_shares, original_wac, caller_role="Terminal Orchestrator"
-            )
+            with execution_role_context("Terminal Orchestrator"):
+                repo.upsert_position(
+                    "PRIMARY", "ASML.AS", original_shares, original_wac, caller_role="Terminal Orchestrator"
+                )
 
             fetched = repo.get_position("PRIMARY", "ASML.AS")
             self.assertEqual(fetched.shares, original_shares)
@@ -639,9 +649,9 @@ class TestTransactionalAtomicityAndRollback(BaseRepositoryTestCase):
             self.assertEqual(cash_repo.get_cash("PRIMARY", "EUR").amount, Decimal("10000.00"))
             self.assertEqual(pos_repo.get_position("PRIMARY", "SAP.DE").shares, Decimal("50.0000"))
             self.assertEqual(watch_repo.get_watchlist_item("SAP.DE").status, "ACTIVE")
-            # Both cash and position recorded changelog entries
+            # Cash, position, and watchlist all recorded changelog entries (R1)
             entries = changelog_repo.list_entries()
-            self.assertEqual(len(entries), 2)
+            self.assertEqual(len(entries), 3)
 
     def test_uow_rollback_on_exception(self):
         with self.assertRaises(ValueError):
@@ -1392,6 +1402,400 @@ class TestR8DailyBarInputValidation(BaseRepositoryTestCase):
             with self.assertRaises(ValidationError) as ctx:
                 repo.list_bars("ASML.AS", start_date="2026-11-10", end_date="2026-11-01")
             self.assertIn("Inverted date range", str(ctx.exception))
+
+
+# ===========================================================================
+# 18. Stage 1.4.1.1 R1: Financial Changelog Integrity Tests
+# ===========================================================================
+
+class TestR1FinancialChangelogIntegrity(BaseRepositoryTestCase):
+    """
+    Verifies that financial changelog entries cannot be independently fabricated
+    or decoupled from an actual financial state mutation.
+    """
+
+    def test_default_system_context_cannot_append_fabricated_changelog(self):
+        """Default System context cannot independently append a fabricated changelog entry."""
+        with self.core_manager.connection() as conn:
+            repo = FinancialChangelogRepository(conn)
+            with self.assertRaises(PermissionError) as ctx:
+                repo.append_entry(
+                    correlation_id="FABRICATED_01",
+                    actor_role="System",
+                    operation_name="update_ssot",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state=None,
+                    after_state={"amount": "999999.00"},
+                )
+            self.assertIn("Direct insertion into financial_changelog via public repository API is prohibited", str(ctx.exception))
+
+    def test_authorized_mutation_creates_corresponding_changelog(self):
+        """An authorized financial mutation creates its corresponding changelog entry."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            pos_repo = PositionRepository(conn)
+            watch_repo = WatchlistRepository(conn)
+            changelog_repo = FinancialChangelogRepository(conn)
+
+            # 1. Cash mutation
+            cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("1500.00"), correlation_id="CID_CASH_AUTH")
+            entries = changelog_repo.list_entries(correlation_id="CID_CASH_AUTH")
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].operation_name, "set_cash_balance")
+            self.assertEqual(entries[0].after_state["amount"], "1500.00")
+
+            # 2. Position mutation
+            pos_repo.upsert_position("PRIMARY", "NOVO.CO", Decimal("50.0000"), Decimal("850.0000"), correlation_id="CID_POS_AUTH")
+            entries = changelog_repo.list_entries(correlation_id="CID_POS_AUTH")
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].operation_name, "upsert_position")
+            self.assertEqual(entries[0].after_state["shares"], "50.0000")
+
+            # 3. Watchlist upsert
+            watch_repo.upsert_watchlist_item("NOVO.CO", status="ACTIVE", notes="Strong pipeline", correlation_id="CID_WATCH_AUTH")
+            entries = changelog_repo.list_entries(correlation_id="CID_WATCH_AUTH")
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].operation_name, "upsert_watchlist_item")
+            self.assertEqual(entries[0].after_state["status"], "ACTIVE")
+
+            # 4. Watchlist remove
+            watch_repo.remove_watchlist_item("NOVO.CO", correlation_id="CID_WATCH_REM")
+            entries = changelog_repo.list_entries(correlation_id="CID_WATCH_REM")
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].operation_name, "remove_watchlist_item")
+            self.assertIsNone(entries[0].after_state)
+
+    def test_changelog_failure_rolls_back_financial_mutation(self):
+        """Changelog insertion failure rolls back the financial mutation."""
+        with self.core_manager.connection() as conn:
+            conn.execute("DROP TABLE financial_changelog;")
+            cash_repo = CashRepository(conn)
+            pos_repo = PositionRepository(conn)
+            watch_repo = WatchlistRepository(conn)
+
+            with self.assertRaises(sqlite3.OperationalError):
+                cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("7500.00"))
+
+            with self.assertRaises(sqlite3.OperationalError):
+                pos_repo.upsert_position("PRIMARY", "ASML.AS", Decimal("10.0000"), Decimal("700.0000"))
+
+            with self.assertRaises(sqlite3.OperationalError):
+                watch_repo.upsert_watchlist_item("ASML.AS", status="ACTIVE")
+
+            # Assert no mutations persisted
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM portfolio_cash WHERE currency = 'EUR'")
+            self.assertEqual(cur.fetchone()[0], 0)
+            cur.execute("SELECT count(*) FROM portfolio_positions WHERE ticker = 'ASML.AS'")
+            self.assertEqual(cur.fetchone()[0], 0)
+            cur.execute("SELECT count(*) FROM watchlist WHERE ticker = 'ASML.AS'")
+            self.assertEqual(cur.fetchone()[0], 0)
+
+    def test_cannot_fabricate_state_or_actor_through_public_arguments(self):
+        """A caller cannot fabricate before/after state or actor attribution through public repository arguments."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            # Public API does not accept before_state or after_state arguments
+            with self.assertRaises(TypeError):
+                cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("2000.00"), before_state={"amount": "0.00"})
+
+            # Attempting to supply a fake caller_role in System context fails closed
+            with self.assertRaises(PermissionError):
+                cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("2000.00"), caller_role="Owner")
+
+    def test_direct_repository_access_cannot_bypass_trusted_mutation_path(self):
+        """Direct repository access cannot bypass the trusted mutation path."""
+        with self.core_manager.connection() as conn:
+            repo = FinancialChangelogRepository(conn)
+            with execution_role_context("Owner"):
+                with self.assertRaises(PermissionError):
+                    repo.append_entry(
+                        correlation_id="FORGE_OWNER",
+                        actor_role="Owner",
+                        operation_name="update_ssot",
+                        target_resource="portfolio_cash/PRIMARY/EUR",
+                    )
+
+    def test_capability_direct_instantiation_and_tampering_rejected(self):
+        """_FinancialMutationCapability cannot be instantiated directly and cannot be reused."""
+        from python.database.repositories.base import _FinancialMutationCapability
+        with self.assertRaises(PermissionError) as ctx:
+            _FinancialMutationCapability(
+                key=object(),  # Invalid key
+                connection=None,
+                correlation_id="DUMMY",
+                actor_role="Owner",
+                operation_name="test",
+                target_resource="res",
+                before_state=None,
+                after_state=None,
+                approval_digest=None,
+                timestamp_utc="2026-11-09T00:00:00Z",
+            )
+        self.assertIn("Direct instantiation of _FinancialMutationCapability is prohibited", str(ctx.exception))
+
+
+# ===========================================================================
+# 19. Stage 1.4.1.1 R2: Exact Trusted Actor Attribution Tests
+# ===========================================================================
+
+class TestR2ExactTrustedActorAttribution(BaseRepositoryTestCase):
+    """
+    Verifies that actor attribution is strictly derived from trusted execution context
+    and rejects any mismatched or impersonated caller_role.
+    """
+
+    def test_default_system_context_cannot_claim_another_actor(self):
+        """Default System context cannot claim another actor."""
+        with self.core_manager.connection() as conn:
+            repo = CashRepository(conn)
+            with self.assertRaises(PermissionError) as ctx:
+                repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"), caller_role="UnknownActor")
+            self.assertIn("Active context 'System' cannot claim 'UnknownActor' attribution", str(ctx.exception))
+
+    def test_system_cannot_claim_owner_or_human(self):
+        """System cannot claim Owner or Human."""
+        with self.core_manager.connection() as conn:
+            repo = CashRepository(conn)
+            with self.assertRaises(PermissionError) as ctx:
+                repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"), caller_role="Owner")
+            self.assertIn("Active context 'System' cannot claim 'Owner' attribution", str(ctx.exception))
+
+            with self.assertRaises(PermissionError) as ctx:
+                repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"), caller_role="Human")
+            self.assertIn("Active context 'System' cannot claim 'Human' attribution", str(ctx.exception))
+
+    def test_system_cannot_claim_terminal_orchestrator_or_investment_agent(self):
+        """System cannot claim Terminal Orchestrator or Investment Agent."""
+        with self.core_manager.connection() as conn:
+            repo = CashRepository(conn)
+            with self.assertRaises(PermissionError) as ctx:
+                repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"), caller_role="Terminal Orchestrator")
+            self.assertIn("Active context 'System' cannot claim 'Terminal Orchestrator' attribution", str(ctx.exception))
+
+            with self.assertRaises(PermissionError) as ctx:
+                repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"), caller_role="Macro Sentinel")
+            self.assertIn("Active context 'System' cannot claim 'Macro Sentinel' attribution", str(ctx.exception))
+
+    def test_mismatched_explicit_caller_role_is_rejected(self):
+        """A mismatched explicit caller_role is rejected fail-closed."""
+        with self.core_manager.connection() as conn:
+            repo = CashRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PermissionError):
+                    repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"), caller_role="Owner")
+            with execution_role_context("Owner"):
+                with self.assertRaises(PermissionError):
+                    repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"), caller_role="System")
+
+    def test_exact_matching_trusted_identity_is_accepted(self):
+        """Exact matching trusted identity is accepted where legitimately supplied."""
+        with self.core_manager.connection() as conn:
+            repo = CashRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                balance = repo.set_cash_balance("PRIMARY", "EUR", Decimal("250.00"), caller_role="Terminal Orchestrator")
+                self.assertEqual(balance.amount, Decimal("250.00"))
+            with execution_role_context("Owner"):
+                balance = repo.set_cash_balance("PRIMARY", "EUR", Decimal("500.00"), caller_role="Owner")
+                self.assertEqual(balance.amount, Decimal("500.00"))
+
+    def test_audit_and_financial_changelog_attribution_consistent(self):
+        """Audit and financial changelog attribution remain strictly consistent with trusted context."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            changelog_repo = FinancialChangelogRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("800.00"), correlation_id="CID_CONSISTENT")
+                entries = changelog_repo.list_entries(correlation_id="CID_CONSISTENT")
+                self.assertEqual(len(entries), 1)
+                self.assertEqual(entries[0].actor_role, "Terminal Orchestrator")
+
+
+# ===========================================================================
+# 20. Stage 1.4.1.1 R3: DailyBar Nested Batch Atomicity Tests
+# ===========================================================================
+
+class TestR3DailyBarNestedBatchAtomicity(BaseRepositoryTestCase):
+    """
+    Verifies that DailyBarRepository.upsert_bars_batch() executes atomically
+    both inside caller-owned transactions (via savepoints) and standalone.
+    """
+
+    def test_a_failed_nested_batch_rolls_back_to_savepoint(self):
+        """
+        Test A — Failed nested batch:
+        - Start a caller-owned transaction.
+        - Insert an unrelated valid record.
+        - Execute a batch containing valid rows followed by a deliberately invalid row.
+        - Confirm that no rows from the failed batch remain.
+        - Confirm that the unrelated record remains available in the caller's transaction.
+        - Confirm that the caller can still commit or roll back its transaction.
+        """
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+
+            # Start caller-owned transaction
+            conn.execute("BEGIN IMMEDIATE;")
+
+            # Insert an unrelated valid record
+            repo.upsert_bar("AAPL", "2026-01-02", "150.00", "155.00", "149.00", "154.00", 50000)
+
+            # Prepare batch with valid rows followed by an invalid row (invalid date '2026-02-30')
+            batch = [
+                {
+                    "ticker": "MSFT",
+                    "bar_date": "2026-01-02",
+                    "open": "200.00",
+                    "high": "205.00",
+                    "low": "199.00",
+                    "close": "204.00",
+                    "volume": 20000,
+                },
+                {
+                    "ticker": "MSFT",
+                    "bar_date": "2026-01-05",
+                    "open": "204.00",
+                    "high": "210.00",
+                    "low": "203.00",
+                    "close": "209.00",
+                    "volume": 25000,
+                },
+                {
+                    "ticker": "MSFT",
+                    "bar_date": "2026-02-30",  # Calendar invalid!
+                    "open": "209.00",
+                    "high": "212.00",
+                    "low": "208.00",
+                    "close": "211.00",
+                    "volume": 15000,
+                },
+            ]
+
+            # Batch execution must raise ValidationError
+            with self.assertRaises(ValidationError):
+                repo.upsert_bars_batch(batch)
+
+            # Transaction must still be open
+            self.assertTrue(conn.in_transaction)
+
+            # Confirm no rows from the failed batch remain
+            msft_bars = repo.list_bars("MSFT")
+            self.assertEqual(len(msft_bars), 0)
+
+            # Confirm the unrelated record remains available in the transaction
+            aapl_bar = repo.get_bar("AAPL", "2026-01-02")
+            self.assertIsNotNone(aapl_bar)
+            self.assertEqual(aapl_bar.ticker, "AAPL")
+
+            # Confirm caller can still commit transaction
+            conn.execute("COMMIT;")
+            self.assertFalse(conn.in_transaction)
+
+            # Unrelated record durably persisted
+            aapl_durable = repo.get_bar("AAPL", "2026-01-02")
+            self.assertIsNotNone(aapl_durable)
+
+    def test_b_successful_nested_batch_preserves_caller_transaction(self):
+        """
+        Test B — Successful nested batch:
+        - Start a caller-owned transaction.
+        - Execute a valid batch.
+        - Confirm that all batch rows are visible within the transaction.
+        - Confirm that the repository has not committed the caller's transaction.
+        - Confirm that the caller retains control over the final commit or rollback.
+        """
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+
+            # Start caller-owned transaction
+            conn.execute("BEGIN IMMEDIATE;")
+
+            # Execute a valid batch
+            batch = [
+                {
+                    "ticker": "NVDA",
+                    "bar_date": "2026-01-02",
+                    "open": "100.00",
+                    "high": "105.00",
+                    "low": "99.00",
+                    "close": "104.00",
+                    "volume": 30000,
+                },
+                {
+                    "ticker": "NVDA",
+                    "bar_date": "2026-01-05",
+                    "open": "104.00",
+                    "high": "110.00",
+                    "low": "103.00",
+                    "close": "108.00",
+                    "volume": 35000,
+                },
+            ]
+            count = repo.upsert_bars_batch(batch)
+            self.assertEqual(count, 2)
+
+            # Transaction must still be open (repository must NOT commit caller's transaction)
+            self.assertTrue(conn.in_transaction)
+
+            # Batch rows visible in the transaction
+            bars = repo.list_bars("NVDA")
+            self.assertEqual(len(bars), 2)
+
+            # Caller rolls back transaction
+            conn.execute("ROLLBACK;")
+            self.assertFalse(conn.in_transaction)
+
+            # After rollback, rows are gone
+            bars_post_rollback = repo.list_bars("NVDA")
+            self.assertEqual(len(bars_post_rollback), 0)
+
+    def test_c_repository_owned_transaction_standalone_behavior(self):
+        """Test C — Repository-owned transaction standalone success and failure."""
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+
+            # Standalone success: commits durably
+            valid_batch = [
+                {
+                    "ticker": "SAP.DE",
+                    "bar_date": "2026-01-02",
+                    "open": "150.00",
+                    "high": "155.00",
+                    "low": "148.00",
+                    "close": "154.00",
+                    "volume": 12000,
+                }
+            ]
+            count = repo.upsert_bars_batch(valid_batch)
+            self.assertEqual(count, 1)
+            self.assertFalse(conn.in_transaction)
+            self.assertIsNotNone(repo.get_bar("SAP.DE", "2026-01-02"))
+
+            # Standalone failure: rolls back cleanly
+            invalid_batch = [
+                {
+                    "ticker": "SAP.DE",
+                    "bar_date": "2026-01-05",
+                    "open": "154.00",
+                    "high": "160.00",
+                    "low": "153.00",
+                    "close": "158.00",
+                    "volume": 14000,
+                },
+                {
+                    "ticker": "SAP.DE",
+                    "bar_date": "2026-02-31",  # Invalid date
+                    "open": "158.00",
+                    "high": "162.00",
+                    "low": "157.00",
+                    "close": "161.00",
+                    "volume": 10000,
+                },
+            ]
+            with self.assertRaises(ValidationError):
+                repo.upsert_bars_batch(invalid_batch)
+            self.assertFalse(conn.in_transaction)
+            self.assertIsNone(repo.get_bar("SAP.DE", "2026-01-05"))
 
 
 if __name__ == "__main__":

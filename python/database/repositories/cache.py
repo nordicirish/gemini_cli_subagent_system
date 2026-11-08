@@ -13,6 +13,7 @@ from decimal import Decimal
 import json
 import sqlite3
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+import uuid
 
 from python.database.repositories.base import (
     BaseRepository,
@@ -266,113 +267,116 @@ class DailyBarRepository(BaseRepository):
         self, bars: Sequence[Union[DailyBarRecord, Dict[str, Any]]]
     ) -> int:
         """
-        Performs an atomic batch upsert of multiple daily bars (R7).
-        Enforces identical upfront validation on DailyBarRecord and dict items (R8).
-        Rolls back the entire batch if any record or write fails.
+        Performs an atomic batch upsert of multiple daily bars (R3/R7).
+        Enforces identical validation on DailyBarRecord and dict items (R8).
+        When the repository owns the transaction, uses BEGIN IMMEDIATE / COMMIT / ROLLBACK.
+        When invoked inside a caller-owned transaction, uses a SAVEPOINT so that batch failures
+        roll back only the batch without corrupting or committing the caller's transaction.
         """
         self._check_active()
         if not bars:
             return 0
 
         timestamp_utc = utc_now_iso()
-        rows_to_insert = []
 
-        # R8: Validate ALL records upfront before any database writes
-        for b in bars:
-            if isinstance(b, DailyBarRecord):
-                (
-                    norm_ticker,
-                    norm_date,
-                    dec_open,
-                    dec_high,
-                    dec_low,
-                    dec_close,
-                    vol,
-                    ind_json,
-                ) = _validate_bar_inputs(
-                    ticker=b.ticker,
-                    bar_date=b.bar_date,
-                    open_val=b.open,
-                    high_val=b.high,
-                    low_val=b.low,
-                    close_val=b.close,
-                    volume=b.volume,
-                    indicators=b.indicators,
-                )
-                rows_to_insert.append((
-                    norm_ticker,
-                    norm_date,
-                    decimal_to_canonical_str(dec_open),
-                    decimal_to_canonical_str(dec_high),
-                    decimal_to_canonical_str(dec_low),
-                    decimal_to_canonical_str(dec_close),
-                    vol,
-                    ind_json,
-                    timestamp_utc,
-                ))
-            elif isinstance(b, dict):
-                (
-                    norm_ticker,
-                    norm_date,
-                    dec_open,
-                    dec_high,
-                    dec_low,
-                    dec_close,
-                    vol,
-                    ind_json,
-                ) = _validate_bar_inputs(
-                    ticker=b.get("ticker"),
-                    bar_date=b.get("bar_date"),
-                    open_val=b.get("open"),
-                    high_val=b.get("high"),
-                    low_val=b.get("low"),
-                    close_val=b.get("close"),
-                    volume=b.get("volume"),
-                    indicators=b.get("indicators"),
-                )
-                rows_to_insert.append((
-                    norm_ticker,
-                    norm_date,
-                    decimal_to_canonical_str(dec_open),
-                    decimal_to_canonical_str(dec_high),
-                    decimal_to_canonical_str(dec_low),
-                    decimal_to_canonical_str(dec_close),
-                    vol,
-                    ind_json,
-                    timestamp_utc,
-                ))
-            else:
-                raise ValidationError(f"Unsupported bar item type: {type(b).__name__}")
-
-        # R7: Atomic transaction management across the batch
+        # R3/R7: Transaction / savepoint management across the batch
         owns_tx = not self._conn.in_transaction
+        sp_name = f"sp_batch_{uuid.uuid4().hex}" if not owns_tx else None
+
         if owns_tx:
             self._conn.execute("BEGIN IMMEDIATE;")
+        else:
+            self._conn.execute(f"SAVEPOINT {sp_name};")
 
         cur = self._conn.cursor()
+        inserted_count = 0
         try:
-            cur.executemany(
-                """
-                INSERT INTO daily_bars (
-                    ticker, bar_date, open, high, low, close, volume, indicators_json, updated_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(ticker, bar_date) DO UPDATE SET
-                    open = excluded.open,
-                    high = excluded.high,
-                    low = excluded.low,
-                    close = excluded.close,
-                    volume = excluded.volume,
-                    indicators_json = excluded.indicators_json,
-                    updated_at_utc = excluded.updated_at_utc
-                """,
-                rows_to_insert,
-            )
+            for b in bars:
+                if isinstance(b, DailyBarRecord):
+                    (
+                        norm_ticker,
+                        norm_date,
+                        dec_open,
+                        dec_high,
+                        dec_low,
+                        dec_close,
+                        vol,
+                        ind_json,
+                    ) = _validate_bar_inputs(
+                        ticker=b.ticker,
+                        bar_date=b.bar_date,
+                        open_val=b.open,
+                        high_val=b.high,
+                        low_val=b.low,
+                        close_val=b.close,
+                        volume=b.volume,
+                        indicators=b.indicators,
+                    )
+                elif isinstance(b, dict):
+                    (
+                        norm_ticker,
+                        norm_date,
+                        dec_open,
+                        dec_high,
+                        dec_low,
+                        dec_close,
+                        vol,
+                        ind_json,
+                    ) = _validate_bar_inputs(
+                        ticker=b.get("ticker"),
+                        bar_date=b.get("bar_date"),
+                        open_val=b.get("open"),
+                        high_val=b.get("high"),
+                        low_val=b.get("low"),
+                        close_val=b.get("close"),
+                        volume=b.get("volume"),
+                        indicators=b.get("indicators"),
+                    )
+                else:
+                    raise ValidationError(f"Unsupported bar item type: {type(b).__name__}")
+
+                cur.execute(
+                    """
+                    INSERT INTO daily_bars (
+                        ticker, bar_date, open, high, low, close, volume, indicators_json, updated_at_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(ticker, bar_date) DO UPDATE SET
+                        open = excluded.open,
+                        high = excluded.high,
+                        low = excluded.low,
+                        close = excluded.close,
+                        volume = excluded.volume,
+                        indicators_json = excluded.indicators_json,
+                        updated_at_utc = excluded.updated_at_utc
+                    """,
+                    (
+                        norm_ticker,
+                        norm_date,
+                        decimal_to_canonical_str(dec_open),
+                        decimal_to_canonical_str(dec_high),
+                        decimal_to_canonical_str(dec_low),
+                        decimal_to_canonical_str(dec_close),
+                        vol,
+                        ind_json,
+                        timestamp_utc,
+                    ),
+                )
+                inserted_count += 1
+
             if owns_tx:
                 self._conn.execute("COMMIT;")
+            else:
+                self._conn.execute(f"RELEASE SAVEPOINT {sp_name};")
         except sqlite3.IntegrityError as e:
             if owns_tx:
                 try:
                     self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+            else:
+                try:
+                    self._conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name};")
+                    self._conn.execute(f"RELEASE SAVEPOINT {sp_name};")
                 except Exception:
                     pass
             raise IntegrityConflictError(f"Integrity violation in batch daily bar upsert: {e}") from e
@@ -382,9 +386,15 @@ class DailyBarRepository(BaseRepository):
                     self._conn.execute("ROLLBACK;")
                 except Exception:
                     pass
+            else:
+                try:
+                    self._conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name};")
+                    self._conn.execute(f"RELEASE SAVEPOINT {sp_name};")
+                except Exception:
+                    pass
             raise
 
-        return len(rows_to_insert)
+        return inserted_count
 
     def delete_bars(self, ticker: str) -> int:
         """Deletes all daily bars for a ticker. Returns count of deleted rows."""

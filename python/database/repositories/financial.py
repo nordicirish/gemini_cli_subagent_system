@@ -20,11 +20,13 @@ from python.database.repositories.base import (
     CashBalance,
     PositionRecord,
     WatchlistItem,
+    FinancialChangelogEntry,
     EntityNotFoundError,
     DuplicateEntityError,
     IntegrityConflictError,
     ValidationError,
     RepositoryError,
+    create_mutation_capability,
     validate_decimal,
     decimal_to_canonical_str,
     validate_identifier,
@@ -48,43 +50,37 @@ def _record_changelog(
     before_state: Optional[Dict[str, Any]],
     after_state: Optional[Dict[str, Any]],
     timestamp_utc: str,
-) -> None:
-    """Inserts an immutable audit entry into financial_changelog on the same connection."""
-    before_json = json.dumps(before_state, sort_keys=True) if before_state is not None else "{}"
-    after_json = json.dumps(after_state, sort_keys=True) if after_state is not None else "{}"
-    conn.execute(
-        """
-        INSERT INTO financial_changelog (
-            correlation_id, actor_role, operation_name, target_resource,
-            approval_digest, before_state_json, after_state_json, timestamp_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            correlation_id,
-            actor_role,
-            operation_name,
-            target_resource,
-            approval_digest,
-            before_json,
-            after_json,
-            timestamp_utc,
-        ),
+) -> FinancialChangelogEntry:
+    """Inserts an immutable audit entry into financial_changelog via trusted mutation capability (R1)."""
+    from python.database.repositories.audit import FinancialChangelogRepository
+
+    capability = create_mutation_capability(
+        connection=conn,
+        correlation_id=correlation_id,
+        actor_role=actor_role,
+        operation_name=operation_name,
+        target_resource=target_resource,
+        before_state=before_state,
+        after_state=after_state,
+        approval_digest=approval_digest,
+        timestamp_utc=timestamp_utc,
     )
+    repo = FinancialChangelogRepository(conn)
+    return repo.append_entry(mutation_capability=capability)
 
 
 def _resolve_effective_actor(caller_role: Optional[str] = None) -> str:
     """
-    Determines trusted actor role strictly from execution context (R4).
-    Rejects attempts by System or agent contexts to claim Owner or Human attribution.
+    Derives financial actor attribution strictly from trusted execution context (R2).
+    Requires exact agreement if caller_role is explicitly supplied; rejects any mismatch.
+    A System context cannot claim or impersonate any other execution identity.
     """
     active_role = get_active_caller_role()
     if caller_role is not None and caller_role != active_role:
-        if active_role in TRUSTED_SYSTEM_ROLES:
-            if caller_role in ("Owner", "Human") and active_role not in ("Owner", "Human"):
-                raise PermissionError(
-                    f"Security violation: Active context '{active_role}' cannot claim '{caller_role}' attribution."
-                )
-            return caller_role
+        if active_role in ("System", "Root"):
+            raise PermissionError(
+                f"Security violation: Active context '{active_role}' cannot claim '{caller_role}' attribution."
+            )
         else:
             raise PermissionError(
                 f"Security violation: Agent role '{active_role}' cannot spoof actor role '{caller_role}'."
@@ -745,6 +741,13 @@ class WatchlistRepository(BaseRepository):
             existing = self.get_watchlist_item(norm_ticker)
             added_at = existing.added_at_utc if existing else timestamp_utc
 
+            before_state = (
+                {"ticker": existing.ticker, "status": existing.status, "notes": existing.notes}
+                if existing
+                else None
+            )
+            after_state = {"ticker": norm_ticker, "status": norm_status, "notes": notes}
+
             self._conn.execute(
                 """
                 INSERT INTO watchlist (ticker, status, added_at_utc, notes)
@@ -755,6 +758,22 @@ class WatchlistRepository(BaseRepository):
                 """,
                 (norm_ticker, norm_status, added_at, notes),
             )
+
+            cid = correlation_id or uuid.uuid4().hex
+            approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
+
+            _record_changelog(
+                conn=self._conn,
+                correlation_id=cid,
+                actor_role=effective_actor,
+                operation_name="upsert_watchlist_item",
+                target_resource=target_resource,
+                approval_digest=approval_digest,
+                before_state=before_state,
+                after_state=after_state,
+                timestamp_utc=timestamp_utc,
+            )
+
             if owns_tx:
                 self._conn.execute("COMMIT;")
         except sqlite3.IntegrityError as e:
@@ -786,7 +805,7 @@ class WatchlistRepository(BaseRepository):
         caller_role: Optional[str] = None,
         requires_owner_approval: bool = False,
     ) -> bool:
-        """Deletes a watchlist item from the table."""
+        """Deletes a watchlist item from the table with mandatory changelog capture (R1)."""
         self._check_active()
         norm_ticker = validate_identifier(ticker, "ticker").upper()
 
@@ -802,6 +821,7 @@ class WatchlistRepository(BaseRepository):
             requires_owner_approval=requires_owner_approval,
         )
 
+        timestamp_utc = utc_now_iso()
         owns_tx = not self._conn.in_transaction
         if owns_tx:
             self._conn.execute("BEGIN IMMEDIATE;")
@@ -813,7 +833,25 @@ class WatchlistRepository(BaseRepository):
                     self._conn.execute("COMMIT;")
                 return False
 
+            before_state = {"ticker": existing.ticker, "status": existing.status, "notes": existing.notes}
+
             self._conn.execute("DELETE FROM watchlist WHERE ticker = ?", (norm_ticker,))
+
+            cid = correlation_id or uuid.uuid4().hex
+            approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
+
+            _record_changelog(
+                conn=self._conn,
+                correlation_id=cid,
+                actor_role=effective_actor,
+                operation_name="remove_watchlist_item",
+                target_resource=target_resource,
+                approval_digest=approval_digest,
+                before_state=before_state,
+                after_state=None,
+                timestamp_utc=timestamp_utc,
+            )
+
             if owns_tx:
                 self._conn.execute("COMMIT;")
         except Exception:
