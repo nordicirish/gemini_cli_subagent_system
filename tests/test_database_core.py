@@ -1,15 +1,15 @@
 """
 Comprehensive Automated Unit Tests for Isolated SQLite Core Infrastructure
-Governed by Stage 1.3 Directive and Stage 1.3.1 Integrity Corrections.
+Governed by Stage 1.3 Directive and Stage 1.3.1 / 1.3.1.2 Integrity Corrections.
 
 Tests cover:
 - D1: Connection lifecycle, WAL mode, profile-specific PRAGMAs.
-- D2: Schema initialisation, versioning, primary/unique/check constraints, schema integrity checks.
-- D3: Financial decimal structural constraints (Workstream A & B: zero REAL, no malformed values).
+- D2: Schema initialisation, versioning, primary/unique/check constraints, structural integrity checks.
+- D3: Financial decimal structural constraints (Workstream A: multiple decimal points, zero REAL).
 - D4: Audit event identifier integrity (Workstream B: strict 32-hex lowercase UUID).
 - D5: Explicit ACID transaction commits, rollbacks, multi-row atomicity, nested transaction rejection.
 - D6: SQLite Online Backup API snapshots, race-safe overwrite protection, failed backup cleanup.
-- D7: Cryptographic hash-based persistence isolation verification (Workstream F).
+- D7: Cryptographic hash-based persistence isolation verification.
 """
 
 import os
@@ -149,7 +149,7 @@ class TestDatabaseConnectionAndPragmas(unittest.TestCase):
 
 
 class TestDatabaseSchema(unittest.TestCase):
-    """D2: Schema design, versioning, integrity verification, and constraints."""
+    """D2: Schema design, versioning, structural definition verification, and constraints."""
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -217,38 +217,116 @@ class TestDatabaseSchema(unittest.TestCase):
             with self.assertRaises(SchemaVersionMismatchError):
                 SchemaMigrator.initialize_cache_schema(conn)
 
-    def test_core_schema_integrity_verification_missing_table(self):
+    def test_core_schema_integrity_missing_table(self):
         """Verify that existing database missing an expected table fails with SchemaIntegrityError."""
         with self.manager.connection() as conn:
             SchemaMigrator.initialize_core_schema(conn)
-            # Drop a required table
             conn.execute("DROP TABLE portfolio_positions;")
 
             with self.assertRaises(SchemaIntegrityError) as ctx:
                 SchemaMigrator.initialize_core_schema(conn)
             self.assertIn("portfolio_positions", str(ctx.exception))
 
-    def test_core_schema_integrity_verification_missing_index(self):
-        """Verify that existing database missing an expected index fails with SchemaIntegrityError."""
+    def test_core_schema_integrity_column_missing(self):
+        """Verify that a table missing an expected column raises SchemaIntegrityError."""
         with self.manager.connection() as conn:
             SchemaMigrator.initialize_core_schema(conn)
-            # Drop a required index
-            conn.execute("DROP INDEX idx_audit_timestamp;")
+            # Drop portfolio_cash and recreate with missing currency column
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                "CREATE TABLE portfolio_cash (account_id TEXT PRIMARY KEY, amount TEXT NOT NULL, last_updated_at_utc TEXT NOT NULL);"
+            )
 
             with self.assertRaises(SchemaIntegrityError) as ctx:
-                SchemaMigrator.initialize_core_schema(conn)
-            self.assertIn("idx_audit_timestamp", str(ctx.exception))
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("missing column", str(ctx.exception))
+            self.assertIn("currency", str(ctx.exception))
+
+    def test_core_schema_integrity_column_type_mismatch(self):
+        """Verify that a table with declared column type mismatch (e.g. REAL instead of TEXT) fails integrity check."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL,
+                    currency TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("declared type mismatch", str(ctx.exception))
+
+    def test_core_schema_integrity_missing_check_constraint(self):
+        """Verify that a table missing critical financial CHECK constraints fails integrity check."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            # Recreate portfolio_cash without the amount CHECK constraint
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL,
+                    currency TEXT NOT NULL,
+                    amount TEXT NOT NULL,
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("missing mandatory constraint pattern", str(ctx.exception))
+
+    def test_core_schema_integrity_index_mismatch(self):
+        """Verify that an index pointing to the wrong column or table raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP INDEX idx_audit_timestamp;")
+            # Recreate index on the wrong column
+            conn.execute("CREATE INDEX idx_audit_timestamp ON audit_events(status);")
+
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("column mismatch", str(ctx.exception))
 
     def test_cache_schema_integrity_verification(self):
-        """Verify cache schema integrity fails closed if daily_bars table is dropped."""
+        """Verify cache schema integrity fails closed if daily_bars has a missing column or constraint."""
         cache_path = os.path.join(self.temp_dir.name, "cache_integrity.db")
         cache_mgr = DatabaseManager(cache_path, profile=MARKET_DATA_CACHE_PROFILE)
         with cache_mgr.connection() as conn:
             SchemaMigrator.initialize_cache_schema(conn)
             conn.execute("DROP TABLE daily_bars;")
+            # Recreate daily_bars without open constraint
+            conn.execute(
+                """
+                CREATE TABLE daily_bars (
+                    ticker TEXT NOT NULL,
+                    bar_date TEXT NOT NULL,
+                    open TEXT NOT NULL,
+                    high TEXT NOT NULL,
+                    low TEXT NOT NULL,
+                    close TEXT NOT NULL,
+                    volume INTEGER NOT NULL,
+                    indicators_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (ticker, bar_date)
+                );
+                """
+            )
+            conn.execute("CREATE INDEX idx_bars_ticker ON daily_bars(ticker);")
+            conn.execute("CREATE INDEX idx_bars_date ON daily_bars(bar_date);")
 
-            with self.assertRaises(SchemaIntegrityError):
-                SchemaMigrator.initialize_cache_schema(conn)
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_cache_schema_integrity(conn)
+            self.assertIn("missing mandatory constraint pattern", str(ctx.exception))
 
     def test_portfolio_positions_primary_key(self):
         """Verify primary key on (account_id, ticker) prevents duplicate entries."""
@@ -288,14 +366,18 @@ class TestDatabaseSchema(unittest.TestCase):
 
 
 class TestFinancialDecimalConstraints(unittest.TestCase):
-    """D3: Parameterised tests for financial numeric constraints and canonical decimal contract."""
+    """D3: Parameterised tests for financial numeric constraints and multiple-decimal-point rejection (F1)."""
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = os.path.join(self.temp_dir.name, "test_fin_decimal.db")
+        self.cache_path = os.path.join(self.temp_dir.name, "test_cache_decimal.db")
         self.manager = DatabaseManager(self.db_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        self.cache_mgr = DatabaseManager(self.cache_path, profile=MARKET_DATA_CACHE_PROFILE)
         with self.manager.connection() as conn:
             SchemaMigrator.initialize_core_schema(conn)
+        with self.cache_mgr.connection() as conn:
+            SchemaMigrator.initialize_cache_schema(conn)
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -318,6 +400,80 @@ class TestFinancialDecimalConstraints(unittest.TestCase):
                             col_type,
                             "TEXT",
                             f"Financial column '{col_name}' in table '{table_name}' must be TEXT, got {col_type}",
+                        )
+
+    def test_multiple_decimal_points_rejected_across_all_financial_columns(self):
+        """
+        F1 Parameterised Test: Verify that multiple decimal points are strictly rejected
+        across portfolio_cash.amount, portfolio_positions.shares, wac_eur, wac_usd,
+        and daily_bars.open/high/low/close.
+        """
+        multi_dot_cases = [
+            "1.2.3",
+            "1..2",
+            "12.3.4",
+            "0.1.2",
+            "100..00",
+            "0..0",
+            "1.2.3.4.5",
+        ]
+
+        now = "2026-11-08T18:00:00+00:00"
+
+        # 1. Test portfolio_cash.amount
+        with self.manager.connection() as conn:
+            for bad_val in multi_dot_cases:
+                with self.subTest(column="portfolio_cash.amount", bad_val=bad_val):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        conn.execute(
+                            "INSERT INTO portfolio_cash VALUES ('ACC_MD', 'EUR', ?, ?);",
+                            (bad_val, now),
+                        )
+
+        # 2. Test portfolio_positions.shares
+        with self.manager.connection() as conn:
+            for bad_val in multi_dot_cases:
+                with self.subTest(column="portfolio_positions.shares", bad_val=bad_val):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        conn.execute(
+                            "INSERT INTO portfolio_positions VALUES ('PRIMARY', 'SH_TEST', ?, '100.0000', NULL, ?);",
+                            (bad_val, now),
+                        )
+
+        # 3. Test portfolio_positions.wac_eur
+        with self.manager.connection() as conn:
+            for bad_val in multi_dot_cases:
+                with self.subTest(column="portfolio_positions.wac_eur", bad_val=bad_val):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        conn.execute(
+                            "INSERT INTO portfolio_positions VALUES ('PRIMARY', 'WAC_EUR_TEST', '10.0000', ?, NULL, ?);",
+                            (bad_val, now),
+                        )
+
+        # 4. Test portfolio_positions.wac_usd
+        with self.manager.connection() as conn:
+            for bad_val in multi_dot_cases:
+                with self.subTest(column="portfolio_positions.wac_usd", bad_val=bad_val):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        conn.execute(
+                            "INSERT INTO portfolio_positions VALUES ('PRIMARY', 'WAC_USD_TEST', '10.0000', '100.0000', ?, ?);",
+                            (bad_val, now),
+                        )
+
+        # 5. Test daily_bars (open, high, low, close)
+        with self.cache_mgr.connection() as conn:
+            for bad_val in multi_dot_cases:
+                with self.subTest(column="daily_bars.open", bad_val=bad_val):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        conn.execute(
+                            "INSERT INTO daily_bars VALUES ('SPY', '2026-11-08', ?, '100.0000', '100.0000', '100.0000', 1000, '{}', ?);",
+                            (bad_val, now),
+                        )
+                with self.subTest(column="daily_bars.high", bad_val=bad_val):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        conn.execute(
+                            "INSERT INTO daily_bars VALUES ('SPY', '2026-11-08', '100.0000', ?, '100.0000', '100.0000', 1000, '{}', ?);",
+                            (bad_val, now),
                         )
 
     def test_invalid_cash_representations_rejected(self):
@@ -398,6 +554,8 @@ class TestFinancialDecimalConstraints(unittest.TestCase):
             "NaN",
             "Infinity",
             "10 shares",
+            "1.2.3",
+            "1..2",
         ]
 
         now = "2026-11-08T18:00:00+00:00"
@@ -690,15 +848,12 @@ class TestBackupInfrastructure(unittest.TestCase):
 
     def test_failed_backup_preserves_original_destination(self):
         """Verify that a backup failure preserves the original destination intact."""
-        # Create an initial valid file
         with open(self.dst_path, "w") as f:
             f.write("original destination data")
 
-        # Attempt backup with invalid source connection to trigger failure
         with self.assertRaises(BackupError):
             BackupManager.create_backup("non_existent_source.db", self.dst_path, overwrite=True)
 
-        # Original destination must remain completely untouched
         with open(self.dst_path, "r") as f:
             self.assertEqual(f.read(), "original destination data")
 

@@ -1,6 +1,6 @@
 """
 Database Schema Definitions and Versioned Migration Infrastructure
-Governed by Stage 1.3 Directive and Stage 1.2.1 / 1.3.1 Architecture Corrections.
+Governed by Stage 1.3 Directive and Stage 1.2.1 / 1.3.1 / 1.3.1.2 Architecture Corrections.
 
 Provides canonical DDL definitions, table constraints, index definitions,
 and versioned schema initialisation for GEM's embedded SQLite persistence layer.
@@ -29,7 +29,7 @@ class SchemaVersionMismatchError(SchemaError):
 
 
 class SchemaIntegrityError(SchemaError):
-    """Raised when an existing database is missing required tables, indexes, or constraints."""
+    """Raised when an existing database is missing required tables, columns, indexes, or constraints."""
     pass
 
 
@@ -51,7 +51,8 @@ CORE_SCHEMA_STATEMENTS = [
 
     # 2. Portfolio Cash Balances (Exact Decimal TEXT Storage; NO REAL)
     # Scale: at most 2 decimal places. Canonical decimal string:
-    # Digits and at most one period, no leading/trailing dot, no non-canonical leading zeros,
+    # Exactly one period permitted (NOT GLOB '*.*.*' and NOT LIKE '%.%.%'),
+    # no leading/trailing dot, no non-canonical leading zeros,
     # strictly non-negative, non-empty, no exponents or whitespace.
     """
     CREATE TABLE IF NOT EXISTS portfolio_cash (
@@ -59,7 +60,8 @@ CORE_SCHEMA_STATEMENTS = [
         currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
         amount TEXT NOT NULL CHECK (
             amount NOT GLOB '*[^0-9.]*'
-            AND amount NOT LIKE '%.%.*'
+            AND amount NOT GLOB '*.*.*'
+            AND amount NOT LIKE '%.%.%'
             AND amount NOT GLOB '.*'
             AND amount NOT GLOB '*.'
             AND amount NOT GLOB '0[0-9]*'
@@ -82,7 +84,8 @@ CORE_SCHEMA_STATEMENTS = [
         ticker TEXT NOT NULL CHECK (ticker = UPPER(TRIM(ticker)) AND length(ticker) > 0),
         shares TEXT NOT NULL CHECK (
             shares NOT GLOB '*[^0-9.]*'
-            AND shares NOT LIKE '%.%.*'
+            AND shares NOT GLOB '*.*.*'
+            AND shares NOT LIKE '%.%.%'
             AND shares NOT GLOB '.*'
             AND shares NOT GLOB '*.'
             AND shares NOT GLOB '0[0-9]*'
@@ -94,7 +97,8 @@ CORE_SCHEMA_STATEMENTS = [
         ),
         wac_eur TEXT NOT NULL CHECK (
             wac_eur NOT GLOB '*[^0-9.]*'
-            AND wac_eur NOT LIKE '%.%.*'
+            AND wac_eur NOT GLOB '*.*.*'
+            AND wac_eur NOT LIKE '%.%.%'
             AND wac_eur NOT GLOB '.*'
             AND wac_eur NOT GLOB '*.'
             AND wac_eur NOT GLOB '0[0-9]*'
@@ -107,7 +111,8 @@ CORE_SCHEMA_STATEMENTS = [
         wac_usd TEXT CHECK (
             wac_usd IS NULL OR (
                 wac_usd NOT GLOB '*[^0-9.]*'
-                AND wac_usd NOT LIKE '%.%.*'
+                AND wac_usd NOT GLOB '*.*.*'
+                AND wac_usd NOT LIKE '%.%.%'
                 AND wac_usd NOT GLOB '.*'
                 AND wac_usd NOT GLOB '*.'
                 AND wac_usd NOT GLOB '0[0-9]*'
@@ -247,35 +252,55 @@ CACHE_SCHEMA_STATEMENTS = [
         bar_date TEXT NOT NULL CHECK (length(bar_date) = 10), -- YYYY-MM-DD
         open TEXT NOT NULL CHECK (
             open NOT GLOB '*[^0-9.]*'
-            AND open NOT LIKE '%.%.*'
+            AND open NOT GLOB '*.*.*'
+            AND open NOT LIKE '%.%.%'
             AND open NOT GLOB '.*'
             AND open NOT GLOB '*.'
             AND open NOT GLOB '0[0-9]*'
             AND length(open) > 0
+            AND (
+                open NOT LIKE '%.%'
+                OR length(substr(open, instr(open, '.') + 1)) <= 4
+            )
         ),
         high TEXT NOT NULL CHECK (
             high NOT GLOB '*[^0-9.]*'
-            AND high NOT LIKE '%.%.*'
+            AND high NOT GLOB '*.*.*'
+            AND high NOT LIKE '%.%.%'
             AND high NOT GLOB '.*'
             AND high NOT GLOB '*.'
             AND high NOT GLOB '0[0-9]*'
             AND length(high) > 0
+            AND (
+                high NOT LIKE '%.%'
+                OR length(substr(high, instr(high, '.') + 1)) <= 4
+            )
         ),
         low TEXT NOT NULL CHECK (
             low NOT GLOB '*[^0-9.]*'
-            AND low NOT LIKE '%.%.*'
+            AND low NOT GLOB '*.*.*'
+            AND low NOT LIKE '%.%.%'
             AND low NOT GLOB '.*'
             AND low NOT GLOB '*.'
             AND low NOT GLOB '0[0-9]*'
             AND length(low) > 0
+            AND (
+                low NOT LIKE '%.%'
+                OR length(substr(low, instr(low, '.') + 1)) <= 4
+            )
         ),
         close TEXT NOT NULL CHECK (
             close NOT GLOB '*[^0-9.]*'
-            AND close NOT LIKE '%.%.*'
+            AND close NOT GLOB '*.*.*'
+            AND close NOT LIKE '%.%.%'
             AND close NOT GLOB '.*'
             AND close NOT GLOB '*.'
             AND close NOT GLOB '0[0-9]*'
             AND length(close) > 0
+            AND (
+                close NOT LIKE '%.%'
+                OR length(substr(close, instr(close, '.') + 1)) <= 4
+            )
         ),
         volume INTEGER NOT NULL CHECK (volume >= 0),
         indicators_json TEXT NOT NULL DEFAULT '{}',
@@ -288,36 +313,169 @@ CACHE_SCHEMA_STATEMENTS = [
 ]
 
 
-# Expected schema structures for integrity verification
-EXPECTED_CORE_TABLES: Set[str] = {
-    "database_metadata",
-    "portfolio_cash",
-    "portfolio_positions",
-    "watchlist",
-    "scout_categories",
-    "trade_lessons",
-    "decision_log",
-    "financial_changelog",
-    "owner_approvals",
-    "audit_events",
+# ---------------------------------------------------------------------------
+# Expected Structural Definitions for Integrity Verification
+# ---------------------------------------------------------------------------
+
+# Expected columns: {table_name: {column_name: (declared_type, notnull_bool, pk_order)}}
+EXPECTED_CORE_TABLE_DEFS: Dict[str, Dict[str, Tuple[str, bool, int]]] = {
+    "database_metadata": {
+        "id": ("INTEGER", False, 1),
+        "schema_version": ("INTEGER", True, 0),
+        "db_revision": ("INTEGER", True, 0),
+        "created_at_utc": ("TEXT", True, 0),
+        "last_updated_at_utc": ("TEXT", True, 0),
+    },
+    "portfolio_cash": {
+        "account_id": ("TEXT", True, 1),
+        "currency": ("TEXT", True, 2),
+        "amount": ("TEXT", True, 0),
+        "last_updated_at_utc": ("TEXT", True, 0),
+    },
+    "portfolio_positions": {
+        "account_id": ("TEXT", True, 1),
+        "ticker": ("TEXT", True, 2),
+        "shares": ("TEXT", True, 0),
+        "wac_eur": ("TEXT", True, 0),
+        "wac_usd": ("TEXT", False, 0),
+        "last_updated_at_utc": ("TEXT", True, 0),
+    },
+    "watchlist": {
+        "ticker": ("TEXT", True, 1),
+        "status": ("TEXT", True, 0),
+        "added_at_utc": ("TEXT", True, 0),
+        "notes": ("TEXT", False, 0),
+    },
+    "scout_categories": {
+        "id": ("INTEGER", False, 1),
+        "category_name": ("TEXT", True, 0),
+        "description": ("TEXT", False, 0),
+        "tickers_json": ("TEXT", True, 0),
+        "updated_at_utc": ("TEXT", True, 0),
+    },
+    "trade_lessons": {
+        "rule_code": ("TEXT", True, 1),
+        "directive_text": ("TEXT", True, 0),
+        "category": ("TEXT", True, 0),
+        "status": ("TEXT", True, 0),
+        "created_at_utc": ("TEXT", True, 0),
+        "last_reviewed_at_utc": ("TEXT", True, 0),
+    },
+    "decision_log": {
+        "id": ("INTEGER", False, 1),
+        "session_id": ("TEXT", True, 0),
+        "ticker": ("TEXT", False, 0),
+        "action_proposed": ("TEXT", True, 0),
+        "decision_outcome": ("TEXT", True, 0),
+        "votes_json": ("TEXT", True, 0),
+        "transcript_text": ("TEXT", False, 0),
+        "timestamp_utc": ("TEXT", True, 0),
+    },
+    "financial_changelog": {
+        "id": ("INTEGER", False, 1),
+        "correlation_id": ("TEXT", True, 0),
+        "actor_role": ("TEXT", True, 0),
+        "operation_name": ("TEXT", True, 0),
+        "target_resource": ("TEXT", True, 0),
+        "approval_digest": ("TEXT", False, 0),
+        "before_state_json": ("TEXT", True, 0),
+        "after_state_json": ("TEXT", True, 0),
+        "timestamp_utc": ("TEXT", True, 0),
+    },
+    "owner_approvals": {
+        "id": ("INTEGER", False, 1),
+        "approval_id": ("TEXT", True, 0),
+        "operation_name": ("TEXT", True, 0),
+        "target_resource": ("TEXT", True, 0),
+        "payload_digest": ("TEXT", True, 0),
+        "granted_by": ("TEXT", True, 0),
+        "consumed_at_utc": ("TEXT", False, 0),
+        "status": ("TEXT", True, 0),
+        "created_at_utc": ("TEXT", True, 0),
+    },
+    "audit_events": {
+        "event_id": ("TEXT", True, 1),
+        "timestamp_utc": ("TEXT", True, 0),
+        "action_category": ("TEXT", True, 0),
+        "status": ("TEXT", True, 0),
+        "agent_role": ("TEXT", True, 0),
+        "tool_name": ("TEXT", False, 0),
+        "permission_decision": ("TEXT", True, 0),
+        "approval_status": ("TEXT", True, 0),
+        "payload_hash": ("TEXT", False, 0),
+        "raw_event_json": ("TEXT", True, 0),
+    },
 }
 
-EXPECTED_CORE_INDEXES: Set[str] = {
-    "idx_audit_timestamp",
-    "idx_audit_action",
-    "idx_changelog_corr",
-    "idx_decision_session",
-    "idx_decision_ticker",
+EXPECTED_CORE_INDEX_DEFS: Dict[str, Tuple[str, List[str]]] = {
+    "idx_audit_timestamp": ("audit_events", ["timestamp_utc"]),
+    "idx_audit_action": ("audit_events", ["action_category"]),
+    "idx_changelog_corr": ("financial_changelog", ["correlation_id"]),
+    "idx_decision_session": ("decision_log", ["session_id"]),
+    "idx_decision_ticker": ("decision_log", ["ticker"]),
 }
 
-EXPECTED_CACHE_TABLES: Set[str] = {
-    "cache_metadata",
-    "daily_bars",
+EXPECTED_CACHE_TABLE_DEFS: Dict[str, Dict[str, Tuple[str, bool, int]]] = {
+    "cache_metadata": {
+        "id": ("INTEGER", False, 1),
+        "schema_version": ("INTEGER", True, 0),
+        "created_at_utc": ("TEXT", True, 0),
+        "last_updated_at_utc": ("TEXT", True, 0),
+    },
+    "daily_bars": {
+        "ticker": ("TEXT", True, 1),
+        "bar_date": ("TEXT", True, 2),
+        "open": ("TEXT", True, 0),
+        "high": ("TEXT", True, 0),
+        "low": ("TEXT", True, 0),
+        "close": ("TEXT", True, 0),
+        "volume": ("INTEGER", True, 0),
+        "indicators_json": ("TEXT", True, 0),
+        "updated_at_utc": ("TEXT", True, 0),
+    },
 }
 
-EXPECTED_CACHE_INDEXES: Set[str] = {
-    "idx_bars_ticker",
-    "idx_bars_date",
+EXPECTED_CACHE_INDEX_DEFS: Dict[str, Tuple[str, List[str]]] = {
+    "idx_bars_ticker": ("daily_bars", ["ticker"]),
+    "idx_bars_date": ("daily_bars", ["bar_date"]),
+}
+
+# Critical constraint patterns that must be present in table DDL
+MANDATORY_CORE_TABLE_CONSTRAINTS: Dict[str, List[str]] = {
+    "portfolio_cash": [
+        "amount NOT GLOB '*[^0-9.]*'",
+        "amount NOT GLOB '*.*.*'",
+        "amount NOT LIKE '%.%.%'",
+        "amount NOT GLOB '.*'",
+        "amount NOT GLOB '*.'",
+        "amount NOT GLOB '0[0-9]*'",
+        "currency IN ('EUR', 'USD')",
+    ],
+    "portfolio_positions": [
+        "ticker = UPPER(TRIM(ticker))",
+        "shares NOT GLOB '*.*.*'",
+        "shares NOT LIKE '%.%.%'",
+        "wac_eur NOT GLOB '*.*.*'",
+        "wac_eur NOT LIKE '%.%.%'",
+        "wac_usd NOT GLOB '*.*.*'",
+        "wac_usd NOT LIKE '%.%.%'",
+    ],
+    "audit_events": [
+        "length(event_id) = 32",
+        "event_id NOT GLOB '*[^0-9a-f]*'",
+    ],
+}
+
+MANDATORY_CACHE_TABLE_CONSTRAINTS: Dict[str, List[str]] = {
+    "daily_bars": [
+        "ticker = UPPER(TRIM(ticker))",
+        "open NOT GLOB '*.*.*'",
+        "open NOT LIKE '%.%.%'",
+        "high NOT GLOB '*.*.*'",
+        "low NOT GLOB '*.*.*'",
+        "close NOT GLOB '*.*.*'",
+        "volume >= 0",
+    ],
 }
 
 
@@ -351,44 +509,185 @@ class SchemaMigrator:
     @classmethod
     def verify_core_schema_integrity(cls, conn: sqlite3.Connection) -> bool:
         """
-        Verifies that all required core tables and indexes exist.
-        Fails closed with SchemaIntegrityError if any expected object is missing.
+        Verifies that all required core tables, column structures, indexes,
+        and critical validation constraints exist and match expected definitions.
+        Fails closed with SchemaIntegrityError if any discrepancy is found.
         """
-        existing_tables = set(cls.get_table_names(conn))
-        missing_tables = EXPECTED_CORE_TABLES - existing_tables
-        if missing_tables:
-            raise SchemaIntegrityError(
-                f"Core schema integrity failure: missing required table(s): {sorted(missing_tables)}"
-            )
+        # 1. Verify table existence and column definitions
+        for table_name, expected_cols in EXPECTED_CORE_TABLE_DEFS.items():
+            actual_cols_info = cls.get_column_info(conn, table_name)
+            if not actual_cols_info:
+                raise SchemaIntegrityError(
+                    f"Core schema integrity failure: missing required table '{table_name}'."
+                )
 
-        existing_indexes = set(cls.get_index_names(conn))
-        missing_indexes = EXPECTED_CORE_INDEXES - existing_indexes
-        if missing_indexes:
-            raise SchemaIntegrityError(
-                f"Core schema integrity failure: missing required index(es): {sorted(missing_indexes)}"
+            actual_cols = {
+                col["name"]: (col["type"], col["notnull"], col["pk"])
+                for col in actual_cols_info
+            }
+
+            # First verify all expected columns are present
+            missing_cols = set(expected_cols.keys()) - set(actual_cols.keys())
+            if missing_cols:
+                raise SchemaIntegrityError(
+                    f"Core schema integrity failure: table '{table_name}' is missing column(s): {sorted(missing_cols)}."
+                )
+
+            for col_name, (exp_type, exp_notnull, exp_pk) in expected_cols.items():
+                act_type, act_notnull, act_pk = actual_cols[col_name]
+                if act_type != exp_type:
+                    raise SchemaIntegrityError(
+                        f"Core schema integrity failure: column '{table_name}.{col_name}' declared type mismatch: "
+                        f"expected '{exp_type}', found '{act_type}'."
+                    )
+                if act_notnull != exp_notnull:
+                    raise SchemaIntegrityError(
+                        f"Core schema integrity failure: column '{table_name}.{col_name}' NOT NULL mismatch: "
+                        f"expected {exp_notnull}, found {act_notnull}."
+                    )
+                if act_pk != exp_pk:
+                    raise SchemaIntegrityError(
+                        f"Core schema integrity failure: column '{table_name}.{col_name}' primary key mismatch: "
+                        f"expected pk={exp_pk}, found pk={act_pk}."
+                    )
+
+        # 2. Verify mandatory CHECK constraints in table DDL
+        for table_name, required_patterns in MANDATORY_CORE_TABLE_CONSTRAINTS.items():
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?;",
+                (table_name,),
             )
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                raise SchemaIntegrityError(
+                    f"Core schema integrity failure: cannot read DDL for table '{table_name}'."
+                )
+            ddl_sql = " ".join(row[0].split())
+            for pattern in required_patterns:
+                if pattern not in ddl_sql:
+                    raise SchemaIntegrityError(
+                        f"Core schema integrity failure: table '{table_name}' is missing mandatory constraint pattern: '{pattern}'."
+                    )
+
+        # 3. Verify index existence and indexed column definitions
+        for index_name, (expected_tbl, expected_cols) in EXPECTED_CORE_INDEX_DEFS.items():
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?;",
+                (index_name,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise SchemaIntegrityError(
+                    f"Core schema integrity failure: missing required index '{index_name}'."
+                )
+            act_tbl = row[0]
+            if act_tbl != expected_tbl:
+                raise SchemaIntegrityError(
+                    f"Core schema integrity failure: index '{index_name}' target table mismatch: "
+                    f"expected '{expected_tbl}', found '{act_tbl}'."
+                )
+
+            cursor.execute(f"PRAGMA index_info({index_name});")
+            act_cols = [r[2] for r in cursor.fetchall()]
+            if act_cols != expected_cols:
+                raise SchemaIntegrityError(
+                    f"Core schema integrity failure: index '{index_name}' column mismatch: "
+                    f"expected {expected_cols}, found {act_cols}."
+                )
 
         return True
 
     @classmethod
     def verify_cache_schema_integrity(cls, conn: sqlite3.Connection) -> bool:
         """
-        Verifies that all required cache tables and indexes exist.
-        Fails closed with SchemaIntegrityError if any expected object is missing.
+        Verifies that all required cache tables, column structures, indexes,
+        and critical validation constraints exist and match expected definitions.
+        Fails closed with SchemaIntegrityError if any discrepancy is found.
         """
-        existing_tables = set(cls.get_table_names(conn))
-        missing_tables = EXPECTED_CACHE_TABLES - existing_tables
-        if missing_tables:
-            raise SchemaIntegrityError(
-                f"Cache schema integrity failure: missing required table(s): {sorted(missing_tables)}"
-            )
+        for table_name, expected_cols in EXPECTED_CACHE_TABLE_DEFS.items():
+            actual_cols_info = cls.get_column_info(conn, table_name)
+            if not actual_cols_info:
+                raise SchemaIntegrityError(
+                    f"Cache schema integrity failure: missing required table '{table_name}'."
+                )
 
-        existing_indexes = set(cls.get_index_names(conn))
-        missing_indexes = EXPECTED_CACHE_INDEXES - existing_indexes
-        if missing_indexes:
-            raise SchemaIntegrityError(
-                f"Cache schema integrity failure: missing required index(es): {sorted(missing_indexes)}"
+            actual_cols = {
+                col["name"]: (col["type"], col["notnull"], col["pk"])
+                for col in actual_cols_info
+            }
+
+            # First verify all expected columns are present
+            missing_cols = set(expected_cols.keys()) - set(actual_cols.keys())
+            if missing_cols:
+                raise SchemaIntegrityError(
+                    f"Cache schema integrity failure: table '{table_name}' is missing column(s): {sorted(missing_cols)}."
+                )
+
+            for col_name, (exp_type, exp_notnull, exp_pk) in expected_cols.items():
+                act_type, act_notnull, act_pk = actual_cols[col_name]
+                if act_type != exp_type:
+                    raise SchemaIntegrityError(
+                        f"Cache schema integrity failure: column '{table_name}.{col_name}' declared type mismatch: "
+                        f"expected '{exp_type}', found '{act_type}'."
+                    )
+                if act_notnull != exp_notnull:
+                    raise SchemaIntegrityError(
+                        f"Cache schema integrity failure: column '{table_name}.{col_name}' NOT NULL mismatch: "
+                        f"expected {exp_notnull}, found {act_notnull}."
+                    )
+                if act_pk != exp_pk:
+                    raise SchemaIntegrityError(
+                        f"Cache schema integrity failure: column '{table_name}.{col_name}' primary key mismatch: "
+                        f"expected pk={exp_pk}, found pk={act_pk}."
+                    )
+
+        # Verify mandatory CHECK constraints in daily_bars
+        for table_name, required_patterns in MANDATORY_CACHE_TABLE_CONSTRAINTS.items():
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?;",
+                (table_name,),
             )
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                raise SchemaIntegrityError(
+                    f"Cache schema integrity failure: cannot read DDL for table '{table_name}'."
+                )
+            ddl_sql = " ".join(row[0].split())
+            for pattern in required_patterns:
+                if pattern not in ddl_sql:
+                    raise SchemaIntegrityError(
+                        f"Cache schema integrity failure: table '{table_name}' is missing mandatory constraint pattern: '{pattern}'."
+                    )
+
+        # Verify cache indexes
+        for index_name, (expected_tbl, expected_cols) in EXPECTED_CACHE_INDEX_DEFS.items():
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?;",
+                (index_name,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise SchemaIntegrityError(
+                    f"Cache schema integrity failure: missing required index '{index_name}'."
+                )
+            act_tbl = row[0]
+            if act_tbl != expected_tbl:
+                raise SchemaIntegrityError(
+                    f"Cache schema integrity failure: index '{index_name}' target table mismatch: "
+                    f"expected '{expected_tbl}', found '{act_tbl}'."
+                )
+
+            cursor.execute(f"PRAGMA index_info({index_name});")
+            act_cols = [r[2] for r in cursor.fetchall()]
+            if act_cols != expected_cols:
+                raise SchemaIntegrityError(
+                    f"Cache schema integrity failure: index '{index_name}' column mismatch: "
+                    f"expected {expected_cols}, found {act_cols}."
+                )
 
         return True
 
