@@ -1310,5 +1310,503 @@ class TestPersistenceIsolationStrengthened(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join("cache", "market_data.db")))
 
 
+class TestCheckConstraintEnforcementAndBypassPrevention(unittest.TestCase):
+    """
+    Stage 1.3.1.4 Workstream B: Adversarial CHECK Constraint Verification & Anti-Bypass Testing.
+    Verifies that SchemaMigrator rejects any weakening or bypass of financial/market-data
+    CHECK constraints, including OR 1=1, OR TRUE, OR 1, parenthesized variants,
+    unusual whitespace, altered precision/scale, and altered enum values.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.core_db = os.path.join(self.temp_dir.name, "test_core.db")
+        self.cache_db = os.path.join(self.temp_dir.name, "test_cache.db")
+        self.core_mgr = DatabaseManager(self.core_db, profile=PRIMARY_FINANCIAL_PROFILE)
+        self.cache_mgr = DatabaseManager(self.cache_db, profile=MARKET_DATA_CACHE_PROFILE)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_check_bypass_or_1_equals_1_rejected_core(self):
+        """Verify that appending 'OR 1=1' to portfolio_cash.amount CHECK raises SchemaIntegrityError."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                    amount TEXT NOT NULL CHECK (
+                        amount NOT GLOB '*[^0-9.]*'
+                        AND amount NOT GLOB '*.*.*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                        AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)
+                        OR 1=1
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertTrue(
+                "unconditional CHECK constraint bypass" in str(ctx.exception)
+                or "unexpected or altered CHECK constraint" in str(ctx.exception)
+            )
+
+    def test_check_bypass_or_1_equals_1_rejected_cache(self):
+        """Verify that appending 'OR 1=1' to daily_bars.open CHECK raises SchemaIntegrityError."""
+        with self.cache_mgr.connection() as conn:
+            SchemaMigrator.initialize_cache_schema(conn)
+            conn.execute("DROP TABLE daily_bars;")
+            conn.execute(
+                """
+                CREATE TABLE daily_bars (
+                    ticker TEXT NOT NULL CHECK (ticker = UPPER(TRIM(ticker)) AND length(ticker) > 0),
+                    bar_date TEXT NOT NULL CHECK (length(bar_date) = 10),
+                    open TEXT NOT NULL CHECK (
+                        open NOT GLOB '*[^0-9.]*'
+                        AND open NOT GLOB '*.*.*'
+                        AND open NOT LIKE '%.%.%'
+                        AND open NOT GLOB '.*'
+                        AND open NOT GLOB '*.'
+                        AND open NOT GLOB '0[0-9]*'
+                        AND length(open) > 0
+                        AND (open NOT LIKE '%.%' OR length(substr(open, instr(open, '.') + 1)) <= 4)
+                        OR 1=1
+                    ),
+                    high TEXT NOT NULL CHECK (
+                        high NOT GLOB '*[^0-9.]*'
+                        AND high NOT GLOB '*.*.*'
+                        AND high NOT LIKE '%.%.%'
+                        AND high NOT GLOB '.*'
+                        AND high NOT GLOB '*.'
+                        AND high NOT GLOB '0[0-9]*'
+                        AND length(high) > 0
+                        AND (high NOT LIKE '%.%' OR length(substr(high, instr(high, '.') + 1)) <= 4)
+                    ),
+                    low TEXT NOT NULL CHECK (
+                        low NOT GLOB '*[^0-9.]*'
+                        AND low NOT GLOB '*.*.*'
+                        AND low NOT LIKE '%.%.%'
+                        AND low NOT GLOB '.*'
+                        AND low NOT GLOB '*.'
+                        AND low NOT GLOB '0[0-9]*'
+                        AND length(low) > 0
+                        AND (low NOT LIKE '%.%' OR length(substr(low, instr(low, '.') + 1)) <= 4)
+                    ),
+                    close TEXT NOT NULL CHECK (
+                        close NOT GLOB '*[^0-9.]*'
+                        AND close NOT GLOB '*.*.*'
+                        AND close NOT LIKE '%.%.%'
+                        AND close NOT GLOB '.*'
+                        AND close NOT GLOB '*.'
+                        AND close NOT GLOB '0[0-9]*'
+                        AND length(close) > 0
+                        AND (close NOT LIKE '%.%' OR length(substr(close, instr(close, '.') + 1)) <= 4)
+                    ),
+                    volume INTEGER NOT NULL CHECK (volume >= 0),
+                    indicators_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (ticker, bar_date)
+                );
+                """
+            )
+            conn.execute("CREATE INDEX idx_bars_ticker ON daily_bars(ticker);")
+            conn.execute("CREATE INDEX idx_bars_date ON daily_bars(bar_date);")
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_cache_schema_integrity(conn)
+            self.assertTrue(
+                "unconditional CHECK constraint bypass" in str(ctx.exception)
+                or "unexpected or altered CHECK constraint" in str(ctx.exception)
+            )
+
+    def test_check_bypass_or_true_rejected(self):
+        """Verify that appending 'OR TRUE' (case-insensitive) is rejected."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                    amount TEXT NOT NULL CHECK (
+                        amount NOT GLOB '*[^0-9.]*'
+                        AND amount NOT GLOB '*.*.*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                        AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)
+                        OR TrUe
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertTrue(
+                "unconditional CHECK constraint bypass" in str(ctx.exception)
+                or "unexpected or altered CHECK constraint" in str(ctx.exception)
+            )
+
+    def test_check_bypass_or_1_rejected(self):
+        """Verify that appending 'OR 1' is rejected."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                    amount TEXT NOT NULL CHECK (
+                        amount NOT GLOB '*[^0-9.]*'
+                        AND amount NOT GLOB '*.*.*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                        AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)
+                        OR 1
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError):
+                SchemaMigrator.verify_core_schema_integrity(conn)
+
+    def test_check_bypass_parenthesized_rejected(self):
+        """Verify parenthesized bypasses like 'OR (1=1)' and 'OR (TRUE)' are rejected."""
+        variants = ["OR ( 1 = 1 )", "OR (1=1)", "OR (TRUE)", "OR (0=0)", "OR ('A'='A')"]
+        for variant in variants:
+            with self.subTest(variant=variant):
+                conn = sqlite3.connect(":memory:")
+                try:
+                    SchemaMigrator.initialize_core_schema(conn)
+                    conn.execute("DROP TABLE portfolio_cash;")
+                    conn.execute(
+                        f"""
+                        CREATE TABLE portfolio_cash (
+                            account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                            currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                            amount TEXT NOT NULL CHECK (
+                                (amount NOT GLOB '*[^0-9.]*'
+                                AND amount NOT GLOB '*.*.*'
+                                AND amount NOT LIKE '%.%.%'
+                                AND amount NOT GLOB '.*'
+                                AND amount NOT GLOB '*.'
+                                AND amount NOT GLOB '0[0-9]*'
+                                AND length(amount) > 0
+                                AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2))
+                                {variant}
+                            ),
+                            last_updated_at_utc TEXT NOT NULL,
+                            PRIMARY KEY (account_id, currency)
+                        );
+                        """
+                    )
+                    with self.assertRaises(SchemaIntegrityError):
+                        SchemaMigrator.verify_core_schema_integrity(conn)
+                finally:
+                    conn.close()
+
+    def test_check_bypass_case_and_whitespace_rejected(self):
+        """Verify unusual whitespace, linebreaks, and case variants in bypass expressions are rejected."""
+        bypass_expr = "   oR   \n   1  \t  =   1   "
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                f"""
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                    amount TEXT NOT NULL CHECK (
+                        amount NOT GLOB '*[^0-9.]*'
+                        AND amount NOT GLOB '*.*.*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                        AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)
+                        {bypass_expr}
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError):
+                SchemaMigrator.verify_core_schema_integrity(conn)
+
+    def test_individual_decimal_field_bypass_rejected(self):
+        """Verify tampering on individual decimal fields (e.g. shares, wac_eur, high) is rejected."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_positions;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_positions (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    ticker TEXT NOT NULL CHECK (ticker = UPPER(TRIM(ticker)) AND length(ticker) > 0),
+                    shares TEXT NOT NULL CHECK (
+                        shares NOT GLOB '*[^0-9.]*'
+                        AND shares NOT GLOB '*.*.*'
+                        AND shares NOT LIKE '%.%.%'
+                        AND shares NOT GLOB '.*'
+                        AND shares NOT GLOB '*.'
+                        AND shares NOT GLOB '0[0-9]*'
+                        AND length(shares) > 0
+                        AND (shares NOT LIKE '%.%' OR length(substr(shares, instr(shares, '.') + 1)) <= 4)
+                        OR 1=1
+                    ),
+                    wac_eur TEXT NOT NULL CHECK (
+                        wac_eur NOT GLOB '*[^0-9.]*'
+                        AND wac_eur NOT GLOB '*.*.*'
+                        AND wac_eur NOT LIKE '%.%.%'
+                        AND wac_eur NOT GLOB '.*'
+                        AND wac_eur NOT GLOB '*.'
+                        AND wac_eur NOT GLOB '0[0-9]*'
+                        AND length(wac_eur) > 0
+                        AND (wac_eur NOT LIKE '%.%' OR length(substr(wac_eur, instr(wac_eur, '.') + 1)) <= 4)
+                    ),
+                    wac_usd TEXT CHECK (
+                        wac_usd IS NULL OR (
+                            wac_usd NOT GLOB '*[^0-9.]*'
+                            AND wac_usd NOT GLOB '*.*.*'
+                            AND wac_usd NOT LIKE '%.%.%'
+                            AND wac_usd NOT GLOB '.*'
+                            AND wac_usd NOT GLOB '*.'
+                            AND wac_usd NOT GLOB '0[0-9]*'
+                            AND length(wac_usd) > 0
+                            AND (wac_usd NOT LIKE '%.%' OR length(substr(wac_usd, instr(wac_usd, '.') + 1)) <= 4)
+                        )
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, ticker)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError):
+                SchemaMigrator.verify_core_schema_integrity(conn)
+
+    def test_check_constraint_count_mismatch_rejected(self):
+        """Verify adding an extra CHECK constraint or dropping one raises SchemaIntegrityError with count mismatch."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                    amount TEXT NOT NULL CHECK (
+                        amount NOT GLOB '*[^0-9.]*'
+                        AND amount NOT GLOB '*.*.*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                        AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency),
+                    CHECK (length(account_id) > 0)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("count mismatch", str(ctx.exception))
+
+    def test_check_constraint_semantic_tampering_rejected(self):
+        """Verify subtle semantic changes (e.g. adding GBP to allowed currencies) raise SchemaIntegrityError."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD', 'GBP')),
+                    amount TEXT NOT NULL CHECK (
+                        amount NOT GLOB '*[^0-9.]*'
+                        AND amount NOT GLOB '*.*.*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                        AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertTrue(
+                "missing mandatory constraint pattern" in str(ctx.exception)
+                or "unexpected or altered CHECK constraint" in str(ctx.exception)
+            )
+
+
+class TestSchemaInventoryHardening(unittest.TestCase):
+    """
+    Stage 1.3.1.4 Workstream C: User Table Inventory Hardening & SQLite Internal Object Handling.
+    Verifies that SchemaMigrator rejects databases containing unauthorized user tables,
+    while correctly allowing SQLite internal tables (prefixed with 'sqlite_').
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.core_db = os.path.join(self.temp_dir.name, "test_core.db")
+        self.cache_db = os.path.join(self.temp_dir.name, "test_cache.db")
+        self.core_mgr = DatabaseManager(self.core_db, profile=PRIMARY_FINANCIAL_PROFILE)
+        self.cache_mgr = DatabaseManager(self.cache_db, profile=MARKET_DATA_CACHE_PROFILE)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_unexpected_table_rejected_core(self):
+        """Verify that an unauthorized user table in core database raises SchemaIntegrityError."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("CREATE TABLE unauthorized_user_table (id INTEGER PRIMARY KEY, note TEXT);")
+
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("unexpected additional user table(s) detected", str(ctx.exception))
+            self.assertIn("unauthorized_user_table", str(ctx.exception))
+
+    def test_unexpected_table_rejected_cache(self):
+        """Verify that an unauthorized user table in cache database raises SchemaIntegrityError."""
+        with self.cache_mgr.connection() as conn:
+            SchemaMigrator.initialize_cache_schema(conn)
+            conn.execute("CREATE TABLE shadow_cache (ticker TEXT PRIMARY KEY);")
+
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_cache_schema_integrity(conn)
+            self.assertIn("unexpected additional user table(s) detected", str(ctx.exception))
+            self.assertIn("shadow_cache", str(ctx.exception))
+
+    def test_reinitialize_existing_with_unexpected_table_fails_closed(self):
+        """Verify calling initialize_core_schema on an existing DB with unexpected table fails closed."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("CREATE TABLE rogue_table (val TEXT);")
+
+        with self.core_mgr.connection() as conn:
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.initialize_core_schema(conn)
+            self.assertIn("unexpected additional user table(s) detected", str(ctx.exception))
+            self.assertIn("rogue_table", str(ctx.exception))
+
+    def test_internal_sqlite_tables_ignored(self):
+        """Verify that SQLite internal tables (e.g. sqlite_stat1) do not trigger false positives."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("ANALYZE;")
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE name = 'sqlite_stat1';")
+            if cursor.fetchone():
+                self.assertTrue(SchemaMigrator.verify_core_schema_integrity(conn))
+
+
+class TestSchemaVerificationReadOnlyAndFailClosed(unittest.TestCase):
+    """
+    Stage 1.3.1.4 Workstream D: Read-Only Verification Invariance & Fail-Closed Behavior.
+    Verifies that schema verification performs zero writes to the database file (preserving byte hashes),
+    can run across read-only connections, and does not perform auto-repair when schema integrity fails.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.core_db = os.path.join(self.temp_dir.name, "test_core.db")
+        self.core_mgr = DatabaseManager(self.core_db, profile=PRIMARY_FINANCIAL_PROFILE)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def _file_hash(self, path: str) -> str:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
+    def test_verification_is_read_only_and_preserves_hashes(self):
+        """Verify schema verification is strictly read-only and preserves exact database file hashes."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+        self.core_mgr.checkpoint(mode="TRUNCATE")
+
+        hash_before = self._file_hash(self.core_db)
+
+        # 1. Run verification on valid DB over read-only URI connection
+        conn_ro = sqlite3.connect(f"file:{self.core_db}?mode=ro", uri=True)
+        try:
+            self.assertTrue(SchemaMigrator.verify_core_schema_integrity(conn_ro))
+        finally:
+            conn_ro.close()
+
+        hash_after_valid = self._file_hash(self.core_db)
+        self.assertEqual(hash_before, hash_after_valid, "Valid verification mutated the database file!")
+
+        # 2. Corrupt schema by adding unexpected table
+        with self.core_mgr.connection() as conn:
+            conn.execute("CREATE TABLE rogue_table (x INT);")
+        self.core_mgr.checkpoint(mode="TRUNCATE")
+
+        hash_corrupt_before = self._file_hash(self.core_db)
+
+        # 3. Run verification on corrupt DB over read-only connection -> must fail closed
+        conn_corrupt_ro = sqlite3.connect(f"file:{self.core_db}?mode=ro", uri=True)
+        try:
+            with self.assertRaises(SchemaIntegrityError):
+                SchemaMigrator.verify_core_schema_integrity(conn_corrupt_ro)
+        finally:
+            conn_corrupt_ro.close()
+
+        hash_corrupt_after = self._file_hash(self.core_db)
+        self.assertEqual(
+            hash_corrupt_before,
+            hash_corrupt_after,
+            "Failed verification mutated the corrupted database file!",
+        )
+
+    def test_verification_does_not_auto_repair(self):
+        """Verify that verification does not attempt any self-repair or schema mutation."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("CREATE TABLE rogue_table (x INT);")
+
+        with self.core_mgr.connection() as conn:
+            with self.assertRaises(SchemaIntegrityError):
+                SchemaMigrator.verify_core_schema_integrity(conn)
+
+            with self.assertRaises(SchemaIntegrityError):
+                SchemaMigrator.verify_core_schema_integrity(conn)
+
+            cursor = conn.cursor()
+            cursor.execute("SELECT count(*) FROM sqlite_master WHERE name='rogue_table';")
+            self.assertEqual(cursor.fetchone()[0], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

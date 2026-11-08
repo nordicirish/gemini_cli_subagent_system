@@ -1,6 +1,6 @@
 """
 Database Schema Definitions and Versioned Migration Infrastructure
-Governed by Stage 1.3 Directive and Stage 1.2.1 / 1.3.1 / 1.3.1.2 / 1.3.1.3 Architecture Corrections.
+Governed by Stage 1.3 Directive and Stage 1.2.1 / 1.3.1 / 1.3.1.2 / 1.3.1.3 / 1.3.1.4 Architecture Corrections.
 
 Provides canonical DDL definitions, table constraints, index definitions,
 and versioned schema initialisation for GEM's embedded SQLite persistence layer.
@@ -568,6 +568,76 @@ MANDATORY_CACHE_TABLE_CONSTRAINTS: Dict[str, List[str]] = {
     ],
 }
 
+# Authoritative canonical CHECK constraints for exact expression verification
+# Each entry is the normalized token string of the canonical expression
+EXPECTED_CORE_CHECK_CONSTRAINTS: Dict[str, List[str]] = {
+    "database_metadata": [
+        "id = 1",
+    ],
+    "portfolio_cash": [
+        "currency IN ( 'EUR' , 'USD' )",
+        "amount NOT GLOB '*[^0-9.]*' AND amount NOT GLOB '*.*.*' AND amount NOT LIKE '%.%.%' AND amount NOT GLOB '.*' AND amount NOT GLOB '*.' AND amount NOT GLOB '0[0-9]*' AND LENGTH ( amount ) > 0 AND ( amount NOT LIKE '%.%' OR LENGTH ( SUBSTR ( amount , INSTR ( amount , '.' ) + 1 ) ) <= 2 )",
+    ],
+    "portfolio_positions": [
+        "ticker = UPPER ( TRIM ( ticker ) ) AND LENGTH ( ticker ) > 0",
+        "shares NOT GLOB '*[^0-9.]*' AND shares NOT GLOB '*.*.*' AND shares NOT LIKE '%.%.%' AND shares NOT GLOB '.*' AND shares NOT GLOB '*.' AND shares NOT GLOB '0[0-9]*' AND LENGTH ( shares ) > 0 AND ( shares NOT LIKE '%.%' OR LENGTH ( SUBSTR ( shares , INSTR ( shares , '.' ) + 1 ) ) <= 4 )",
+        "wac_eur NOT GLOB '*[^0-9.]*' AND wac_eur NOT GLOB '*.*.*' AND wac_eur NOT LIKE '%.%.%' AND wac_eur NOT GLOB '.*' AND wac_eur NOT GLOB '*.' AND wac_eur NOT GLOB '0[0-9]*' AND LENGTH ( wac_eur ) > 0 AND ( wac_eur NOT LIKE '%.%' OR LENGTH ( SUBSTR ( wac_eur , INSTR ( wac_eur , '.' ) + 1 ) ) <= 4 )",
+        "wac_usd IS NULL OR ( wac_usd NOT GLOB '*[^0-9.]*' AND wac_usd NOT GLOB '*.*.*' AND wac_usd NOT LIKE '%.%.%' AND wac_usd NOT GLOB '.*' AND wac_usd NOT GLOB '*.' AND wac_usd NOT GLOB '0[0-9]*' AND LENGTH ( wac_usd ) > 0 AND ( wac_usd NOT LIKE '%.%' OR LENGTH ( SUBSTR ( wac_usd , INSTR ( wac_usd , '.' ) + 1 ) ) <= 4 ) )",
+    ],
+    "watchlist": [
+        "ticker = UPPER ( TRIM ( ticker ) ) AND LENGTH ( ticker ) > 0",
+        "status IN ( 'ACTIVE' , 'PAUSED' , 'REMOVED' )",
+    ],
+    "scout_categories": [
+        "LENGTH ( TRIM ( category_name ) ) > 0",
+    ],
+    "trade_lessons": [
+        "rule_code = UPPER ( TRIM ( rule_code ) ) AND LENGTH ( rule_code ) > 0",
+        "LENGTH ( TRIM ( directive_text ) ) > 0",
+        "category IN ( 'MANDATE' , 'EXECUTION' , 'STRUCTURAL' , 'RISK' , 'HEURISTIC' )",
+        "status IN ( 'ACTIVE' , 'DEPRECATED' , 'SUSPENDED' )",
+    ],
+    "decision_log": [
+        "ticker IS NULL OR ( ticker = UPPER ( TRIM ( ticker ) ) AND LENGTH ( ticker ) > 0 )",
+    ],
+    "financial_changelog": [],
+    "owner_approvals": [
+        "status IN ( 'PENDING' , 'CONSUMED' , 'EXPIRED' , 'REVOKED' )",
+    ],
+    "audit_events": [
+        "LENGTH ( event_id ) = 32 AND event_id NOT GLOB '*[^0-9a-f]*'",
+    ],
+}
+
+EXPECTED_CACHE_CHECK_CONSTRAINTS: Dict[str, List[str]] = {
+    "cache_metadata": [
+        "id = 1",
+    ],
+    "daily_bars": [
+        "ticker = UPPER ( TRIM ( ticker ) ) AND LENGTH ( ticker ) > 0",
+        "LENGTH ( bar_date ) = 10",
+        "open NOT GLOB '*[^0-9.]*' AND open NOT GLOB '*.*.*' AND open NOT LIKE '%.%.%' AND open NOT GLOB '.*' AND open NOT GLOB '*.' AND open NOT GLOB '0[0-9]*' AND LENGTH ( open ) > 0 AND ( open NOT LIKE '%.%' OR LENGTH ( SUBSTR ( open , INSTR ( open , '.' ) + 1 ) ) <= 4 )",
+        "high NOT GLOB '*[^0-9.]*' AND high NOT GLOB '*.*.*' AND high NOT LIKE '%.%.%' AND high NOT GLOB '.*' AND high NOT GLOB '*.' AND high NOT GLOB '0[0-9]*' AND LENGTH ( high ) > 0 AND ( high NOT LIKE '%.%' OR LENGTH ( SUBSTR ( high , INSTR ( high , '.' ) + 1 ) ) <= 4 )",
+        "low NOT GLOB '*[^0-9.]*' AND low NOT GLOB '*.*.*' AND low NOT LIKE '%.%.%' AND low NOT GLOB '.*' AND low NOT GLOB '*.' AND low NOT GLOB '0[0-9]*' AND LENGTH ( low ) > 0 AND ( low NOT LIKE '%.%' OR LENGTH ( SUBSTR ( low , INSTR ( low , '.' ) + 1 ) ) <= 4 )",
+        "close NOT GLOB '*[^0-9.]*' AND close NOT GLOB '*.*.*' AND close NOT LIKE '%.%.%' AND close NOT GLOB '.*' AND close NOT GLOB '*.' AND close NOT GLOB '0[0-9]*' AND LENGTH ( close ) > 0 AND ( close NOT LIKE '%.%' OR LENGTH ( SUBSTR ( close , INSTR ( close , '.' ) + 1 ) ) <= 4 )",
+        "volume >= 0",
+    ],
+}
+
+# Unconditional bypass patterns that must be rejected fail-closed
+UNCONDITIONAL_BYPASS_PATTERNS: List[str] = [
+    "OR 1 = 1",
+    "OR TRUE",
+    "OR 1",
+    "OR ( 1 = 1 )",
+    "OR ( TRUE )",
+    "OR ( 1 )",
+    "OR 0 = 0",
+    "OR ( 0 = 0 )",
+    "OR 'A' = 'A'",
+    "OR ( 'A' = 'A' )",
+]
+
 
 # ---------------------------------------------------------------------------
 # SchemaMigrator
@@ -605,18 +675,37 @@ class SchemaMigrator:
         expected_indexes: Dict[str, Tuple[str, List[str], bool, bool]],
         mandatory_constraints: Dict[str, List[str]],
         expected_fks: Dict[str, List[Dict[str, Any]]],
+        expected_checks: Dict[str, List[str]],
     ) -> bool:
         """
         Shared fail-closed structural schema verifier for core and cache database profiles.
         Performs exhaustive structural verification across:
+        0. Exact user table inventory (no missing required tables, no unexpected tables).
         1. Exact table existence, column sets, column ordering, declared types,
            nullability, primary key ordinals, and default values.
         2. Authoritative foreign-key definitions, referenced tables/columns, and actions.
         3. Mandatory financial and market-data CHECK constraint DDL patterns.
-        4. Complete index specifications (target table, indexed columns, ordering,
+        4. Authoritative canonical CHECK constraints (exact expression matching and anti-bypass scanning).
+        5. Complete index specifications (target table, indexed columns, ordering,
            uniqueness, partial status, and absence of unexpected user indexes).
         """
         cursor = conn.cursor()
+
+        # 0. Verify exact database user table inventory (no missing and no unexpected user tables)
+        actual_user_tables = set(cls.get_table_names(conn))
+        expected_user_tables = set(expected_tables.keys())
+
+        missing_tables = expected_user_tables - actual_user_tables
+        if missing_tables:
+            raise SchemaIntegrityError(
+                f"{profile} schema integrity failure: missing required table(s): {sorted(missing_tables)}."
+            )
+
+        unexpected_tables = actual_user_tables - expected_user_tables
+        if unexpected_tables:
+            raise SchemaIntegrityError(
+                f"{profile} schema integrity failure: unexpected additional user table(s) detected: {sorted(unexpected_tables)}."
+            )
 
         # 1. Verify exact tables, columns, ordering, types, nullability, PKs, and defaults
         for table_name, expected_cols in expected_tables.items():
@@ -729,7 +818,55 @@ class SchemaMigrator:
                         f"{profile} schema integrity failure: table '{table_name}' is missing mandatory constraint pattern: '{pattern}'."
                     )
 
-        # 4. Verify indexes: existence, target table, columns, ordering, uniqueness, and partial status
+        # 4. Verify authoritative canonical CHECK constraints and anti-bypass scanning
+        for table_name, expected_canonical_checks in expected_checks.items():
+            cursor.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?;",
+                (table_name,),
+            )
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                raise SchemaIntegrityError(
+                    f"{profile} schema integrity failure: cannot read DDL for table '{table_name}'."
+                )
+            ddl_sql = row[0]
+            actual_raw_checks = cls.extract_check_expressions(ddl_sql)
+            actual_normalized_checks = [cls.normalize_check_expression(c) for c in actual_raw_checks]
+
+            # Anti-bypass scan across all actual check expressions
+            for raw_check in actual_raw_checks:
+                tokens = cls.tokenize_sql_expression(raw_check)
+                token_str = " ".join(tokens)
+                for bypass_pattern in UNCONDITIONAL_BYPASS_PATTERNS:
+                    if bypass_pattern in token_str:
+                        raise SchemaIntegrityError(
+                            f"{profile} schema integrity failure: table '{table_name}' contains "
+                            f"unconditional CHECK constraint bypass: '{bypass_pattern}'."
+                        )
+
+            # Exact count comparison
+            if len(actual_normalized_checks) != len(expected_canonical_checks):
+                raise SchemaIntegrityError(
+                    f"{profile} schema integrity failure: table '{table_name}' CHECK constraint count mismatch: "
+                    f"expected {len(expected_canonical_checks)}, found {len(actual_normalized_checks)}."
+                )
+
+            # Exact canonical set equivalence
+            missing_checks = set(expected_canonical_checks) - set(actual_normalized_checks)
+            if missing_checks:
+                raise SchemaIntegrityError(
+                    f"{profile} schema integrity failure: table '{table_name}' missing expected CHECK constraint(s): "
+                    f"{sorted(missing_checks)}."
+                )
+
+            unexpected_checks = set(actual_normalized_checks) - set(expected_canonical_checks)
+            if unexpected_checks:
+                raise SchemaIntegrityError(
+                    f"{profile} schema integrity failure: table '{table_name}' has unexpected or altered CHECK constraint(s): "
+                    f"{sorted(unexpected_checks)}."
+                )
+
+        # 5. Verify indexes: existence, target table, columns, ordering, uniqueness, and partial status
         for index_name, (expected_tbl, expected_cols, exp_unique, exp_partial) in expected_indexes.items():
             cursor.execute(
                 "SELECT tbl_name FROM sqlite_master WHERE type='index' AND name=?;",
@@ -777,7 +914,7 @@ class SchemaMigrator:
                     f"expected {expected_cols}, found {act_cols}."
                 )
 
-        # 5. Verify no unexpected user-created indexes exist on expected tables
+        # 6. Verify no unexpected user-created indexes exist on expected tables
         for table_name in expected_tables:
             cursor.execute(f"PRAGMA index_list({table_name});")
             for r in cursor.fetchall():
@@ -805,6 +942,7 @@ class SchemaMigrator:
             expected_indexes=EXPECTED_CORE_INDEX_DEFS,
             mandatory_constraints=MANDATORY_CORE_TABLE_CONSTRAINTS,
             expected_fks=EXPECTED_CORE_FOREIGN_KEYS,
+            expected_checks=EXPECTED_CORE_CHECK_CONSTRAINTS,
         )
 
     @classmethod
@@ -822,6 +960,7 @@ class SchemaMigrator:
             expected_indexes=EXPECTED_CACHE_INDEX_DEFS,
             mandatory_constraints=MANDATORY_CACHE_TABLE_CONSTRAINTS,
             expected_fks=EXPECTED_CACHE_FOREIGN_KEYS,
+            expected_checks=EXPECTED_CACHE_CHECK_CONSTRAINTS,
         )
 
     @classmethod
@@ -961,3 +1100,164 @@ class SchemaMigrator:
                 "pk": row[5],
             })
         return columns
+
+    @staticmethod
+    def extract_check_expressions(ddl_sql: str) -> List[str]:
+        """
+        Extracts all raw CHECK (...) expressions from a CREATE TABLE DDL statement.
+        Correctly handles comments, string literals with escaped quotes, and nested parentheses.
+        """
+        # 1. Strip single-line comments (-- ...) while preserving string literals
+        lines = []
+        for line in ddl_sql.splitlines():
+            in_quote = False
+            clean_chars = []
+            i = 0
+            while i < len(line):
+                ch = line[i]
+                if ch == "'":
+                    in_quote = not in_quote
+                    clean_chars.append(ch)
+                elif not in_quote and ch == '-' and i + 1 < len(line) and line[i+1] == '-':
+                    break
+                else:
+                    clean_chars.append(ch)
+                i += 1
+            lines.append("".join(clean_chars))
+        clean_sql = "\n".join(lines)
+
+        # 2. Extract CREATE TABLE body between outermost parentheses
+        first_paren = clean_sql.find("(")
+        last_paren = clean_sql.rfind(")")
+        if first_paren == -1 or last_paren == -1 or last_paren <= first_paren:
+            return []
+        body = clean_sql[first_paren + 1:last_paren]
+
+        # 3. Find CHECK (...) occurrences
+        checks: List[str] = []
+        idx = 0
+        upper_body = body.upper()
+        while idx < len(body):
+            pos = upper_body.find("CHECK", idx)
+            if pos == -1:
+                break
+
+            # Ensure "CHECK" is a standalone token, not part of an identifier
+            before_ok = (pos == 0) or not (body[pos - 1].isalnum() or body[pos - 1] == '_')
+            after_pos = pos + 5
+            after_ok = (after_pos >= len(body)) or not (body[after_pos].isalnum() or body[after_pos] == '_')
+
+            if not (before_ok and after_ok):
+                idx = after_pos
+                continue
+
+            # Find opening paren for CHECK
+            open_paren = body.find("(", pos)
+            if open_paren == -1:
+                break
+
+            # Find matching closing paren
+            depth = 1
+            i = open_paren + 1
+            in_str = False
+            while i < len(body) and depth > 0:
+                ch = body[i]
+                if ch == "'":
+                    if in_str and i + 1 < len(body) and body[i+1] == "'":
+                        i += 1  # Skip escaped quote
+                    else:
+                        in_str = not in_str
+                elif not in_str:
+                    if ch == '(':
+                        depth += 1
+                    elif ch == ')':
+                        depth -= 1
+                i += 1
+
+            if depth == 0:
+                raw_check = body[open_paren + 1:i - 1].strip()
+                checks.append(raw_check)
+                idx = i
+            else:
+                break
+
+        return checks
+
+    @staticmethod
+    def tokenize_sql_expression(expr: str) -> List[str]:
+        """
+        Tokenizes an SQL expression into canonical tokens.
+        Preserves string literals, standardizes SQL keywords to uppercase,
+        and standardizes identifiers/column names to lowercase.
+        """
+        SQL_KEYWORDS = {
+            "AND", "OR", "NOT", "GLOB", "LIKE", "IN", "IS", "NULL",
+            "CHECK", "UPPER", "TRIM", "LENGTH", "SUBSTR", "INSTR",
+            "TRUE", "FALSE"
+        }
+
+        tokens: List[str] = []
+        i = 0
+        n = len(expr)
+
+        while i < n:
+            ch = expr[i]
+
+            # Whitespace
+            if ch.isspace():
+                i += 1
+                continue
+
+            # String literal
+            if ch == "'":
+                start = i
+                i += 1
+                while i < n:
+                    if expr[i] == "'":
+                        if i + 1 < n and expr[i+1] == "'":
+                            i += 2  # Escaped quote
+                        else:
+                            i += 1
+                            break
+                    else:
+                        i += 1
+                tokens.append(expr[start:i])
+                continue
+
+            # Multi-character operators
+            if i + 1 < n and expr[i:i+2] in ("<=", ">=", "!=", "<>"):
+                tokens.append(expr[i:i+2])
+                i += 2
+                continue
+
+            # Single-character operators and punctuation
+            if ch in "()=<>+-*/,":
+                tokens.append(ch)
+                i += 1
+                continue
+
+            # Identifiers, keywords, numbers
+            if ch.isalnum() or ch == '_':
+                start = i
+                while i < n and (expr[i].isalnum() or expr[i] == '_'):
+                    i += 1
+                word = expr[start:i]
+                upper_word = word.upper()
+                if upper_word in SQL_KEYWORDS:
+                    tokens.append(upper_word)
+                else:
+                    tokens.append(word.lower())
+                continue
+
+            # Any other character
+            tokens.append(ch)
+            i += 1
+
+        return tokens
+
+    @staticmethod
+    def normalize_check_expression(expr: str) -> str:
+        """
+        Returns a canonical, whitespace-normalized string representation of an SQL CHECK expression.
+        """
+        return " ".join(SchemaMigrator.tokenize_sql_expression(expr))
