@@ -1,8 +1,10 @@
 """
 Audit & Changelog Repositories: AuditEventRepository and FinancialChangelogRepository.
-Governed by Stage 1.4 Architecture and Agent Governance Framework.
+Governed by Stage 1.4.1 Architecture and Agent Governance Framework.
 
 Enforces:
+- R3: Financial changelog repository protection: authorization enforcement and trusted actor attribution.
+- R6: Strict Unit of Work lifecycle checking on all methods.
 - Strict 32-character lowercase hex event_id validation on audit_events.
 - Idempotent event deduplication: replaying identical event returns existing record.
 - Conflict detection: replaying duplicate event_id with different payload raises IntegrityConflictError.
@@ -22,9 +24,15 @@ from python.database.repositories.base import (
     IntegrityConflictError,
     ValidationError,
     AppendOnlyViolationError,
+    RepositoryError,
     validate_event_id,
     validate_identifier,
     utc_now_iso,
+)
+from python.tool_registry import (
+    authorize_financial_mutation,
+    get_active_caller_role,
+    ENGINEERING_ROLES,
 )
 
 
@@ -57,6 +65,7 @@ class AuditEventRepository(BaseRepository):
         Appends a new audit event, or deterministically returns existing record if replayed identically.
         Raises IntegrityConflictError if event_id already exists with different payload hash or json.
         """
+        self._check_active()
         norm_id = validate_event_id(event_id)
         norm_category = validate_identifier(action_category, "action_category")
         norm_status = validate_identifier(status, "status")
@@ -145,6 +154,7 @@ class AuditEventRepository(BaseRepository):
 
     def get_event(self, event_id: str) -> Optional[AuditEventRecord]:
         """Retrieves an audit event by 32-character hex ID."""
+        self._check_active()
         norm_id = validate_event_id(event_id)
         cur = self._conn.cursor()
         cur.execute(
@@ -179,6 +189,7 @@ class AuditEventRepository(BaseRepository):
         limit: Optional[int] = None,
     ) -> List[AuditEventRecord]:
         """Lists audit events ordered newest first, with optional filters."""
+        self._check_active()
         query = (
             "SELECT event_id, timestamp_utc, action_category, status, agent_role, "
             "tool_name, permission_decision, approval_status, payload_hash, raw_event_json "
@@ -222,6 +233,7 @@ class AuditEventRepository(BaseRepository):
 
     def count_events(self) -> int:
         """Returns total count of recorded audit events."""
+        self._check_active()
         cur = self._conn.cursor()
         cur.execute("SELECT COUNT(*) FROM audit_events")
         row = cur.fetchone()
@@ -229,27 +241,30 @@ class AuditEventRepository(BaseRepository):
 
     def update(self, *args, **kwargs):
         """Append-only audit record: updates are strictly forbidden."""
+        self._check_active()
         raise AppendOnlyViolationError("Audit events are append-only; update operations are prohibited.")
 
     def delete(self, *args, **kwargs):
         """Append-only audit record: deletions are strictly forbidden."""
+        self._check_active()
         raise AppendOnlyViolationError("Audit events are append-only; delete operations are prohibited.")
 
 
 # ---------------------------------------------------------------------------
-# Financial Changelog Repository (Append-Only)
+# Financial Changelog Repository (Append-Only & Authorization-Protected R3)
 # ---------------------------------------------------------------------------
 
 class FinancialChangelogRepository(BaseRepository):
     """
     Repository for transactional financial state mutations (financial_changelog).
+    R3: Enforces financial mutation authorization boundary and trusted execution context.
     Append-only: captures before/after states, actor role, approval digest, and correlation ID.
     """
 
     def append_entry(
         self,
         correlation_id: str,
-        actor_role: str,
+        actor_role: Optional[str],
         operation_name: str,
         target_resource: str,
         before_state: Optional[Dict[str, Any]],
@@ -257,9 +272,35 @@ class FinancialChangelogRepository(BaseRepository):
         approval_digest: Optional[str] = None,
         timestamp_utc: Optional[str] = None,
     ) -> FinancialChangelogEntry:
-        """Appends a new financial changelog entry."""
+        """
+        Appends a new financial changelog entry (R3).
+        Enforces authorization boundary: rejects engineering roles and unauthorized callers.
+        Derives actor role from trusted execution context; rejects spoofed actor_role.
+        """
+        self._check_active()
+        active_role = get_active_caller_role()
+
+        # R3: Reject engineering roles fail-closed
+        if active_role in ENGINEERING_ROLES:
+            raise PermissionError(
+                f"Security violation: Engineering role '{active_role}' cannot append to financial changelog."
+            )
+
+        # R3: Reject spoofed actor_role
+        if actor_role is not None and actor_role != active_role:
+            raise PermissionError(
+                f"Attribution spoofing attempt: caller claimed actor_role '{actor_role}', but active context is '{active_role}'."
+            )
+
+        # R3: Enforce financial mutation authorization boundary
+        authorize_financial_mutation(
+            operation_name=operation_name,
+            target_resource=target_resource,
+            caller_role=active_role,
+        )
+
         norm_cid = validate_identifier(correlation_id, "correlation_id")
-        norm_actor = validate_identifier(actor_role, "actor_role")
+        norm_actor = active_role
         norm_op = validate_identifier(operation_name, "operation_name")
         norm_target = validate_identifier(target_resource, "target_resource")
         ts = timestamp_utc or utc_now_iso()
@@ -304,6 +345,7 @@ class FinancialChangelogRepository(BaseRepository):
 
     def get_entry(self, entry_id: int) -> Optional[FinancialChangelogEntry]:
         """Retrieves a financial changelog entry by primary key ID."""
+        self._check_active()
         cur = self._conn.cursor()
         cur.execute(
             """
@@ -333,6 +375,7 @@ class FinancialChangelogRepository(BaseRepository):
         self, correlation_id: Optional[str] = None, limit: Optional[int] = None
     ) -> List[FinancialChangelogEntry]:
         """Lists financial changelog entries ordered by ID ASC, with optional correlation_id filter."""
+        self._check_active()
         query = (
             "SELECT id, correlation_id, actor_role, operation_name, target_resource, "
             "approval_digest, before_state_json, after_state_json, timestamp_utc "
@@ -368,9 +411,10 @@ class FinancialChangelogRepository(BaseRepository):
 
     def update(self, *args, **kwargs):
         """Append-only audit record: updates are strictly forbidden."""
+        self._check_active()
         raise AppendOnlyViolationError("Financial changelog is append-only; update operations are prohibited.")
 
     def delete(self, *args, **kwargs):
         """Append-only audit record: deletions are strictly forbidden."""
+        self._check_active()
         raise AppendOnlyViolationError("Financial changelog is append-only; delete operations are prohibited.")
-

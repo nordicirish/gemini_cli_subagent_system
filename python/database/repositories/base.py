@@ -212,9 +212,13 @@ def validate_event_id(event_id: str) -> str:
 
 
 def validate_date_str(date_str: str) -> str:
-    """Validates that date_str is in YYYY-MM-DD format."""
+    """Validates that date_str is a real calendar date in YYYY-MM-DD format."""
     if not isinstance(date_str, str) or not _DATE_PATTERN.match(date_str):
         raise ValidationError(f"Date must be in YYYY-MM-DD format, got '{date_str}'")
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError as e:
+        raise ValidationError(f"Invalid calendar date '{date_str}': {e}") from e
     return date_str
 
 
@@ -340,15 +344,25 @@ class BaseRepository:
     """
     Abstract base repository encapsulating parameterised SQLite operations.
     Receives an existing, caller-supplied sqlite3.Connection.
+    Optionally tracks parent UnitOfWork to invalidate retained references on completion.
     """
 
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: sqlite3.Connection, uow: Any = None):
         if connection is None:
             raise ValueError("Repository connection cannot be None")
         self._conn = connection
+        self._uow = uow
+
+    def _check_active(self) -> None:
+        """Verifies that the repository and its managing UnitOfWork are active."""
+        if self._uow is not None and not getattr(self._uow, "is_active", True):
+            raise RepositoryError(
+                "UnitOfWork is no longer active; operations through retained repository references are prohibited."
+            )
 
     @property
     def connection(self) -> sqlite3.Connection:
         """The underlying sqlite3.Connection."""
+        self._check_active()
         return self._conn
 

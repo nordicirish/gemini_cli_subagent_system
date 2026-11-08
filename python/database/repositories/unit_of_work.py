@@ -1,12 +1,17 @@
 """
 Unit of Work Coordinator for Atomic Core SQLite Transactions.
-Governed by Stage 1.4 Architecture and Agent Governance Framework.
+Governed by Stage 1.4.1 Architecture and Agent Governance Framework.
 
 Features:
 - Single-connection transaction ownership across multiple core repositories.
 - BEGIN IMMEDIATE semantics preventing concurrent writer deadlocks.
 - Automatic rollback on exception and deterministic connection cleanup.
-- Strict rejection of nested transactions on the same connection.
+- R6: Strict lifecycle enforcement:
+  - Repositories accessible only while UnitOfWork is active.
+  - Retained repository references fail-closed after commit, rollback, or exit.
+  - Safe exit policy for auto_commit=False: rolls back uncommitted transaction so no dangling lock remains.
+  - Prevents re-entry of completed UnitOfWork instances.
+  - Preserves external connection ownership without leaving open transactions.
 - Strict isolation preventing market-data cache repositories from participating in core UoW.
 """
 
@@ -53,6 +58,8 @@ class UnitOfWork:
         self._owns_conn = connection is None
         self._conn: Optional[sqlite3.Connection] = None
         self._in_transaction = False
+        self._is_active = False
+        self._completed = False
         self._committed = False
         self._rolled_back = False
         self._auto_commit = auto_commit
@@ -68,8 +75,27 @@ class UnitOfWork:
         self._owner_approvals: Optional[OwnerApprovalRepository] = None
         self._audit_events: Optional[AuditEventRepository] = None
 
+    @property
+    def is_active(self) -> bool:
+        """Returns True if the Unit of Work is actively managing an open transaction."""
+        return self._is_active and self._in_transaction
+
+    def _clear_repositories(self) -> None:
+        """Clears repository references on UoW completion (R6)."""
+        self._positions = None
+        self._cash = None
+        self._watchlist = None
+        self._scout_categories = None
+        self._trade_lessons = None
+        self._decision_log = None
+        self._financial_changelog = None
+        self._owner_approvals = None
+        self._audit_events = None
+
     def __enter__(self) -> "UnitOfWork":
-        if self._in_transaction:
+        if self._completed:
+            raise RepositoryError("UnitOfWork has already completed and cannot be re-entered.")
+        if self._is_active or self._in_transaction:
             raise RepositoryError("UnitOfWork already active; nested transactions are prohibited.")
 
         if self._external_conn is not None:
@@ -102,19 +128,20 @@ class UnitOfWork:
             raise DatabaseTransactionError(f"Failed to begin immediate transaction: {e}") from e
 
         self._in_transaction = True
+        self._is_active = True
         self._committed = False
         self._rolled_back = False
 
-        # Bind repositories to this transaction's connection
-        self._positions = PositionRepository(self._conn)
-        self._cash = CashRepository(self._conn)
-        self._watchlist = WatchlistRepository(self._conn)
-        self._scout_categories = ScoutCategoryRepository(self._conn)
-        self._trade_lessons = TradeLessonRepository(self._conn)
-        self._decision_log = DecisionLogRepository(self._conn)
-        self._financial_changelog = FinancialChangelogRepository(self._conn)
-        self._owner_approvals = OwnerApprovalRepository(self._conn)
-        self._audit_events = AuditEventRepository(self._conn)
+        # Bind repositories to this transaction's connection and UoW lifecycle (R6)
+        self._positions = PositionRepository(self._conn, uow=self)
+        self._cash = CashRepository(self._conn, uow=self)
+        self._watchlist = WatchlistRepository(self._conn, uow=self)
+        self._scout_categories = ScoutCategoryRepository(self._conn, uow=self)
+        self._trade_lessons = TradeLessonRepository(self._conn, uow=self)
+        self._decision_log = DecisionLogRepository(self._conn, uow=self)
+        self._financial_changelog = FinancialChangelogRepository(self._conn, uow=self)
+        self._owner_approvals = OwnerApprovalRepository(self._conn, uow=self)
+        self._audit_events = AuditEventRepository(self._conn, uow=self)
 
         return self
 
@@ -123,20 +150,29 @@ class UnitOfWork:
             if exc_type is not None:
                 self.rollback()
             else:
-                if not self._committed and not self._rolled_back and self._auto_commit:
-                    self.commit()
+                if not self._committed and not self._rolled_back:
+                    if self._auto_commit:
+                        self.commit()
+                    else:
+                        # R6: Explicit exit policy for auto_commit=False: roll back uncommitted work
+                        # so no open transaction remains dangling on an external connection.
+                        self.rollback()
         finally:
+            self._is_active = False
+            self._completed = True
+            self._in_transaction = False
+            self._clear_repositories()
+
             if self._owns_conn and self._conn is not None:
                 try:
                     self._conn.close()
                 except Exception:
                     pass
                 self._conn = None
-            self._in_transaction = False
 
     def commit(self) -> None:
-        """Commits the current transaction."""
-        if not self._in_transaction or self._conn is None:
+        """Commits the current transaction (R6)."""
+        if not self._is_active or not self._in_transaction or self._conn is None:
             raise RepositoryError("No active transaction to commit.")
         if self._rolled_back:
             raise RepositoryError("Cannot commit: transaction has already been rolled back.")
@@ -147,12 +183,14 @@ class UnitOfWork:
             self._conn.execute("COMMIT;")
             self._committed = True
             self._in_transaction = False
+            self._is_active = False
+            self._clear_repositories()
         except Exception as e:
             self.rollback()
             raise DatabaseTransactionError(f"Commit failed: {e}") from e
 
     def rollback(self) -> None:
-        """Rolls back the current transaction."""
+        """Rolls back the current transaction (R6)."""
         if self._conn is None or self._rolled_back:
             return
         try:
@@ -163,67 +201,69 @@ class UnitOfWork:
         finally:
             self._rolled_back = True
             self._in_transaction = False
+            self._is_active = False
+            self._clear_repositories()
 
     @property
     def positions(self) -> PositionRepository:
         """Portfolio positions repository bound to this unit of work."""
-        if self._positions is None:
+        if not self._is_active or self._positions is None:
             raise RepositoryError("UnitOfWork is not active.")
         return self._positions
 
     @property
     def cash(self) -> CashRepository:
         """Portfolio cash repository bound to this unit of work."""
-        if self._cash is None:
+        if not self._is_active or self._cash is None:
             raise RepositoryError("UnitOfWork is not active.")
         return self._cash
 
     @property
     def watchlist(self) -> WatchlistRepository:
         """Watchlist repository bound to this unit of work."""
-        if self._watchlist is None:
+        if not self._is_active or self._watchlist is None:
             raise RepositoryError("UnitOfWork is not active.")
         return self._watchlist
 
     @property
     def scout_categories(self) -> ScoutCategoryRepository:
         """Scout category repository bound to this unit of work."""
-        if self._scout_categories is None:
+        if not self._is_active or self._scout_categories is None:
             raise RepositoryError("UnitOfWork is not active.")
         return self._scout_categories
 
     @property
     def trade_lessons(self) -> TradeLessonRepository:
         """Trade lessons repository bound to this unit of work."""
-        if self._trade_lessons is None:
+        if not self._is_active or self._trade_lessons is None:
             raise RepositoryError("UnitOfWork is not active.")
         return self._trade_lessons
 
     @property
     def decision_log(self) -> DecisionLogRepository:
         """Decision log repository bound to this unit of work."""
-        if self._decision_log is None:
+        if not self._is_active or self._decision_log is None:
             raise RepositoryError("UnitOfWork is not active.")
         return self._decision_log
 
     @property
     def financial_changelog(self) -> FinancialChangelogRepository:
         """Financial changelog repository bound to this unit of work."""
-        if self._financial_changelog is None:
+        if not self._is_active or self._financial_changelog is None:
             raise RepositoryError("UnitOfWork is not active.")
         return self._financial_changelog
 
     @property
     def owner_approvals(self) -> OwnerApprovalRepository:
         """Owner approvals repository bound to this unit of work."""
-        if self._owner_approvals is None:
+        if not self._is_active or self._owner_approvals is None:
             raise RepositoryError("UnitOfWork is not active.")
         return self._owner_approvals
 
     @property
     def audit_events(self) -> AuditEventRepository:
         """Audit events repository bound to this unit of work."""
-        if self._audit_events is None:
+        if not self._is_active or self._audit_events is None:
             raise RepositoryError("UnitOfWork is not active.")
         return self._audit_events
 
@@ -234,4 +274,3 @@ class UnitOfWork:
             "Cross-database boundary violation: DailyBarRepository operates strictly on the "
             "reconstructible market-data cache database. It cannot be part of the core financial UnitOfWork."
         )
-

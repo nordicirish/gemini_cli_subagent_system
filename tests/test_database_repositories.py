@@ -1,6 +1,6 @@
 """
 Automated Test Suite for SQLite Repository Layer & Transactional Persistence Verification.
-Governed by Stage 1.4 Architecture and Agent Governance Framework.
+Governed by Stage 1.4 & Stage 1.4.1 Architecture and Agent Governance Framework.
 
 Covers:
 1. CRUD and Mapping (all 10 entities).
@@ -11,8 +11,17 @@ Covers:
 6. Append-Only Immutability (audit events, changelog, owner approvals, decision log).
 7. Cache Isolation (core vs cache database separation, cross-connection boundary enforcement).
 8. Import and Lifecycle Safety (zero side-effects, state file invariance).
+9. R1: Mandatory Financial Changelog Enforcement.
+10. R2: Owner Approval Record Integrity & Trusted Attribution.
+11. R3: Financial Changelog Repository Protection.
+12. R4: Trusted Actor Attribution.
+13. R5: Transaction Snapshot Consistency.
+14. R6: Unit of Work Lifecycle Enforcement.
+15. R7: Daily Bar Batch Atomicity.
+16. R8: Consistent Daily Bar Input & Calendar Date Validation.
 """
 
+from datetime import datetime
 from decimal import Decimal
 import hashlib
 import json
@@ -282,52 +291,54 @@ class TestRepositoryCrudAndMapping(BaseRepositoryTestCase):
     def test_financial_changelog_crud_and_mapping(self):
         with self.core_manager.connection() as conn:
             repo = FinancialChangelogRepository(conn)
-            entry = repo.append_entry(
-                correlation_id="CORR_123",
-                actor_role="Terminal Orchestrator",
-                operation_name="upsert_position",
-                target_resource="portfolio_positions/PRIMARY/SAP.DE",
-                before_state=None,
-                after_state={"ticker": "SAP.DE", "shares": "100.0000"},
-            )
-            self.assertIsNotNone(entry.id)
-            self.assertEqual(entry.correlation_id, "CORR_123")
-            self.assertEqual(entry.after_state["shares"], "100.0000")
+            with execution_role_context("Terminal Orchestrator"):
+                entry = repo.append_entry(
+                    correlation_id="CORR_123",
+                    actor_role="Terminal Orchestrator",
+                    operation_name="update_ssot",
+                    target_resource="portfolio_positions/PRIMARY/SAP.DE",
+                    before_state=None,
+                    after_state={"ticker": "SAP.DE", "shares": "100.0000"},
+                )
+                self.assertIsNotNone(entry.id)
+                self.assertEqual(entry.correlation_id, "CORR_123")
+                self.assertEqual(entry.after_state["shares"], "100.0000")
 
-            fetched = repo.get_entry(entry.id)
-            self.assertIsNotNone(fetched)
-            self.assertEqual(fetched.operation_name, "upsert_position")
+                fetched = repo.get_entry(entry.id)
+                self.assertIsNotNone(fetched)
+                self.assertEqual(fetched.operation_name, "update_ssot")
 
-            entries = repo.list_entries(correlation_id="CORR_123")
-            self.assertEqual(len(entries), 1)
+                entries = repo.list_entries(correlation_id="CORR_123")
+                self.assertEqual(len(entries), 1)
 
     def test_owner_approvals_crud_and_mapping(self):
         with self.core_manager.connection() as conn:
             repo = OwnerApprovalRepository(conn)
-            approval = repo.append_approval(
-                approval_id="APP_001",
-                operation_name="update_rules",
-                target_resource="rules/core",
-                payload_digest="a" * 64,
-                granted_by="Owner",
-            )
-            self.assertEqual(approval.approval_id, "APP_001")
-            self.assertEqual(approval.status, "PENDING")
-            self.assertIsNone(approval.consumed_at_utc)
+            with execution_role_context("Owner"):
+                approval = repo.append_approval(
+                    approval_id="APP_001",
+                    operation_name="update_rules",
+                    target_resource="rules/core",
+                    payload_digest="a" * 64,
+                )
+                self.assertEqual(approval.approval_id, "APP_001")
+                self.assertEqual(approval.status, "PENDING")
+                self.assertEqual(approval.granted_by, "Owner")
+                self.assertIsNone(approval.consumed_at_utc)
 
-            fetched = repo.get_approval("APP_001")
-            self.assertIsNotNone(fetched)
+                fetched = repo.get_approval("APP_001")
+                self.assertIsNotNone(fetched)
 
-            # Consume approval
-            consumed = repo.consume_approval("APP_001")
-            self.assertTrue(consumed)
-            after_consume = repo.get_approval("APP_001")
-            self.assertEqual(after_consume.status, "CONSUMED")
-            self.assertIsNotNone(after_consume.consumed_at_utc)
+                # Consume approval
+                consumed = repo.consume_approval("APP_001")
+                self.assertTrue(consumed)
+                after_consume = repo.get_approval("APP_001")
+                self.assertEqual(after_consume.status, "CONSUMED")
+                self.assertIsNotNone(after_consume.consumed_at_utc)
 
-            # Cannot re-consume
-            reconsumed = repo.consume_approval("APP_001")
-            self.assertFalse(reconsumed)
+                # Cannot re-consume
+                reconsumed = repo.consume_approval("APP_001")
+                self.assertFalse(reconsumed)
 
     def test_audit_event_crud_and_mapping(self):
         with self.core_manager.connection() as conn:
@@ -658,7 +669,7 @@ class TestTransactionalAtomicityAndRollback(BaseRepositoryTestCase):
             repo = CashRepository(conn)
 
             with self.assertRaises(sqlite3.OperationalError):
-                repo.set_cash_balance("PRIMARY", "EUR", Decimal("10000.00"), record_changelog=True)
+                repo.set_cash_balance("PRIMARY", "EUR", Decimal("10000.00"))
 
             # Cash record must not exist
             cur = conn.cursor()
@@ -773,9 +784,10 @@ class TestConcurrencyAndIdempotency(BaseRepositoryTestCase):
     def test_owner_approval_duplicate_id_raises_duplicate_entity_error(self):
         with self.core_manager.connection() as conn:
             repo = OwnerApprovalRepository(conn)
-            repo.append_approval("APP_DUPLICATE", "update_rules", "rules/core", "digest123")
-            with self.assertRaises(DuplicateEntityError):
+            with execution_role_context("Owner"):
                 repo.append_approval("APP_DUPLICATE", "update_rules", "rules/core", "digest123")
+                with self.assertRaises(DuplicateEntityError):
+                    repo.append_approval("APP_DUPLICATE", "update_rules", "rules/core", "digest123")
 
 
 # ===========================================================================
@@ -894,6 +906,492 @@ class TestImportAndLifecycleSafety(unittest.TestCase):
                 expected_hash.lower(),
                 f"State file {path_str} hash mismatch! Expected {expected_hash}, got {actual_hash}",
             )
+
+
+# ===========================================================================
+# 9. R1: Mandatory Financial Changelog Enforcement Tests
+# ===========================================================================
+
+class TestR1MandatoryFinancialChangelogEnforcement(BaseRepositoryTestCase):
+    """Verifies that changelog recording cannot be suppressed through any public financial API."""
+
+    def test_r1_cash_mutation_suppress_changelog_impossible(self):
+        with self.core_manager.connection() as conn:
+            repo = CashRepository(conn)
+            # Passing record_changelog must raise TypeError (parameter removed from public API)
+            with self.assertRaises(TypeError):
+                repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"), record_changelog=False)
+            with self.assertRaises(TypeError):
+                repo.delete_cash("PRIMARY", "EUR", record_changelog=False)
+
+    def test_r1_position_mutation_suppress_changelog_impossible(self):
+        with self.core_manager.connection() as conn:
+            repo = PositionRepository(conn)
+            with self.assertRaises(TypeError):
+                repo.upsert_position("PRIMARY", "SAP.DE", Decimal("10.0000"), Decimal("150.0000"), record_changelog=False)
+            with self.assertRaises(TypeError):
+                repo.delete_position("PRIMARY", "SAP.DE", record_changelog=False)
+
+    def test_r1_successful_cash_mutation_creates_exactly_one_changelog(self):
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            changelog_repo = FinancialChangelogRepository(conn)
+
+            cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("5000.00"), correlation_id="CID_CASH_01")
+            entries = changelog_repo.list_entries(correlation_id="CID_CASH_01")
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].operation_name, "set_cash_balance")
+            self.assertEqual(entries[0].target_resource, "portfolio_cash/PRIMARY/EUR")
+            self.assertEqual(entries[0].after_state["amount"], "5000.00")
+
+    def test_r1_successful_position_mutation_creates_exactly_one_changelog(self):
+        with self.core_manager.connection() as conn:
+            pos_repo = PositionRepository(conn)
+            changelog_repo = FinancialChangelogRepository(conn)
+
+            pos_repo.upsert_position(
+                "PRIMARY", "SAP.DE", Decimal("25.0000"), Decimal("175.5000"), correlation_id="CID_POS_01"
+            )
+            entries = changelog_repo.list_entries(correlation_id="CID_POS_01")
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].operation_name, "upsert_position")
+            self.assertEqual(entries[0].after_state["shares"], "25.0000")
+
+    def test_r1_deletion_creates_exactly_one_changelog(self):
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            pos_repo = PositionRepository(conn)
+            changelog_repo = FinancialChangelogRepository(conn)
+
+            cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("1000.00"))
+            pos_repo.upsert_position("PRIMARY", "SAP.DE", Decimal("10.0000"), Decimal("150.0000"))
+
+            cash_repo.delete_cash("PRIMARY", "EUR", correlation_id="CID_DEL_CASH")
+            del_cash_entries = changelog_repo.list_entries(correlation_id="CID_DEL_CASH")
+            self.assertEqual(len(del_cash_entries), 1)
+            self.assertEqual(del_cash_entries[0].operation_name, "delete_cash")
+            self.assertIsNone(del_cash_entries[0].after_state)
+
+            pos_repo.delete_position("PRIMARY", "SAP.DE", correlation_id="CID_DEL_POS")
+            del_pos_entries = changelog_repo.list_entries(correlation_id="CID_DEL_POS")
+            self.assertEqual(len(del_pos_entries), 1)
+            self.assertEqual(del_pos_entries[0].operation_name, "delete_position")
+            self.assertIsNone(del_pos_entries[0].after_state)
+
+
+# ===========================================================================
+# 10. R2: Owner Approval Record Integrity Tests
+# ===========================================================================
+
+class TestR2OwnerApprovalRecordIntegrity(BaseRepositoryTestCase):
+    """Verifies that owner approvals strictly require trusted Owner or Human execution context."""
+
+    def test_r2_engineering_role_cannot_create_approval(self):
+        with self.core_manager.connection() as conn:
+            repo = OwnerApprovalRepository(conn)
+            with execution_role_context("Python Engineer"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.append_approval("APP_FAIL_01", "update_rules", "rules/core", "digest123")
+                self.assertIn("not authorized to create owner approvals", str(ctx.exception))
+
+    def test_r2_investment_role_cannot_create_approval(self):
+        with self.core_manager.connection() as conn:
+            repo = OwnerApprovalRepository(conn)
+            with execution_role_context("Macro Sentinel"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.append_approval("APP_FAIL_02", "update_rules", "rules/core", "digest123")
+                self.assertIn("not authorized to create owner approvals", str(ctx.exception))
+
+    def test_r2_system_context_cannot_manufacture_owner_approval(self):
+        with self.core_manager.connection() as conn:
+            repo = OwnerApprovalRepository(conn)
+            # Default System context must fail closed
+            with execution_role_context("System"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.append_approval("APP_FAIL_03", "update_rules", "rules/core", "digest123")
+                self.assertIn("Active context role 'System' is not authorized", str(ctx.exception))
+
+    def test_r2_untrusted_caller_cannot_claim_granted_by_owner(self):
+        with self.core_manager.connection() as conn:
+            repo = OwnerApprovalRepository(conn)
+            with execution_role_context("System"):
+                with self.assertRaises(PermissionError):
+                    repo.append_approval("APP_FAIL_04", "update_rules", "rules/core", "digest123", granted_by="Owner")
+
+    def test_r2_authorized_owner_context_creates_approval(self):
+        with self.core_manager.connection() as conn:
+            repo = OwnerApprovalRepository(conn)
+            with execution_role_context("Owner"):
+                approval = repo.append_approval("APP_OK_01", "update_rules", "rules/core", "digest_owner_123")
+                self.assertEqual(approval.granted_by, "Owner")
+                self.assertEqual(approval.status, "PENDING")
+
+    def test_r2_authorized_human_context_creates_approval(self):
+        with self.core_manager.connection() as conn:
+            repo = OwnerApprovalRepository(conn)
+            with execution_role_context("Human"):
+                approval = repo.append_approval("APP_OK_02", "update_rules", "rules/core", "digest_human_123")
+                self.assertEqual(approval.granted_by, "Human")
+                self.assertEqual(approval.status, "PENDING")
+
+    def test_r2_approval_consumption_preserves_immutable_attributes(self):
+        with self.core_manager.connection() as conn:
+            repo = OwnerApprovalRepository(conn)
+            with execution_role_context("Owner"):
+                original = repo.append_approval("APP_CONSUME", "update_rules", "rules/core", "digest_immutable")
+
+            consumed = repo.consume_approval("APP_CONSUME")
+            self.assertTrue(consumed)
+
+            after = repo.get_approval("APP_CONSUME")
+            self.assertEqual(after.operation_name, original.operation_name)
+            self.assertEqual(after.target_resource, original.target_resource)
+            self.assertEqual(after.payload_digest, original.payload_digest)
+            self.assertEqual(after.granted_by, original.granted_by)
+            self.assertEqual(after.status, "CONSUMED")
+            self.assertIsNotNone(after.consumed_at_utc)
+
+
+# ===========================================================================
+# 11. R3: Financial Changelog Repository Protection Tests
+# ===========================================================================
+
+class TestR3FinancialChangelogRepositoryProtection(BaseRepositoryTestCase):
+    """Verifies that arbitrary callers cannot fabricate financial changelog entries."""
+
+    def test_r3_engineering_role_cannot_append_changelog(self):
+        with self.core_manager.connection() as conn:
+            repo = FinancialChangelogRepository(conn)
+            with execution_role_context("Python Engineer"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.append_entry(
+                        correlation_id="FORGE_01",
+                        actor_role="Python Engineer",
+                        operation_name="update_ssot",
+                        target_resource="portfolio_cash/PRIMARY/EUR",
+                        before_state=None,
+                        after_state={"amount": "1000000.00"},
+                    )
+                self.assertIn("Engineering role 'Python Engineer' cannot append to financial changelog", str(ctx.exception))
+
+    def test_r3_unauthorized_investment_role_cannot_append_changelog(self):
+        with self.core_manager.connection() as conn:
+            repo = FinancialChangelogRepository(conn)
+            with execution_role_context("Macro Sentinel"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.append_entry(
+                        correlation_id="FORGE_02",
+                        actor_role="Macro Sentinel",
+                        operation_name="update_ssot",
+                        target_resource="portfolio_cash/PRIMARY/EUR",
+                        before_state=None,
+                        after_state={"amount": "1000000.00"},
+                    )
+                self.assertIn("not authorized to perform financial mutation", str(ctx.exception))
+
+    def test_r3_caller_cannot_spoof_actor_role_in_changelog(self):
+        with self.core_manager.connection() as conn:
+            repo = FinancialChangelogRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.append_entry(
+                        correlation_id="FORGE_03",
+                        actor_role="Owner",
+                        operation_name="update_ssot",
+                        target_resource="portfolio_cash/PRIMARY/EUR",
+                        before_state=None,
+                        after_state={"amount": "1000000.00"},
+                    )
+                self.assertIn("Attribution spoofing attempt", str(ctx.exception))
+
+
+# ===========================================================================
+# 12. R4: Trusted Actor Attribution Tests
+# ===========================================================================
+
+class TestR4TrustedActorAttribution(BaseRepositoryTestCase):
+    """Verifies that actor attribution is strictly derived from trusted execution context."""
+
+    def test_r4_active_engineering_or_agent_cannot_spoof_role(self):
+        with self.core_manager.connection() as conn:
+            repo = CashRepository(conn)
+            with execution_role_context("Python Engineer"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"), caller_role="Terminal Orchestrator")
+                self.assertIn("cannot spoof actor role", str(ctx.exception))
+
+    def test_r4_system_context_cannot_claim_owner_via_caller_role(self):
+        with self.core_manager.connection() as conn:
+            repo = CashRepository(conn)
+            with execution_role_context("System"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"), caller_role="Owner")
+                self.assertIn("cannot claim 'Owner' attribution", str(ctx.exception))
+
+    def test_r4_changelog_actor_matches_trusted_context(self):
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            changelog_repo = FinancialChangelogRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("1234.56"), correlation_id="CID_ACTOR_MATCH")
+                entries = changelog_repo.list_entries(correlation_id="CID_ACTOR_MATCH")
+                self.assertEqual(len(entries), 1)
+                self.assertEqual(entries[0].actor_role, "Terminal Orchestrator")
+
+
+# ===========================================================================
+# 13. R5: Transaction Snapshot Consistency Tests
+# ===========================================================================
+
+class TestR5TransactionSnapshotConsistency(BaseRepositoryTestCase):
+    """Verifies that before-state queries execute under write lock inside the transaction."""
+
+    def test_r5_read_under_write_lock_consistency(self):
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            changelog_repo = FinancialChangelogRepository(conn)
+
+            # Initial write
+            cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("1000.00"), correlation_id="CID_SNAP_01")
+            first_entry = changelog_repo.list_entries(correlation_id="CID_SNAP_01")[0]
+            self.assertIsNone(first_entry.before_state)
+            self.assertEqual(first_entry.after_state["amount"], "1000.00")
+
+            # Sequential update: before-state must capture 1000.00 exactly under lock
+            cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("2500.00"), correlation_id="CID_SNAP_02")
+            second_entry = changelog_repo.list_entries(correlation_id="CID_SNAP_02")[0]
+            self.assertIsNotNone(second_entry.before_state)
+            self.assertEqual(second_entry.before_state["amount"], "1000.00")
+            self.assertEqual(second_entry.after_state["amount"], "2500.00")
+
+    def test_r5_concurrent_modification_lock_prevention(self):
+        """Verifies that an active write transaction locks out concurrent writers."""
+        with self.core_manager.connection() as conn1:
+            with self.core_manager.connection() as conn2:
+                conn1.execute("BEGIN IMMEDIATE;")
+                # conn2 attempting BEGIN IMMEDIATE with small timeout must fail or wait
+                with self.assertRaises(sqlite3.OperationalError):
+                    # Set busy timeout on conn2 to 10ms for instant conflict detection
+                    conn2.execute("PRAGMA busy_timeout = 10;")
+                    conn2.execute("BEGIN IMMEDIATE;")
+                conn1.execute("ROLLBACK;")
+
+
+# ===========================================================================
+# 14. R6: Unit of Work Lifecycle Enforcement Tests
+# ===========================================================================
+
+class TestR6UnitOfWorkLifecycleEnforcement(BaseRepositoryTestCase):
+    """Verifies strict lifecycle enforcement and rejection of operations through retained references."""
+
+    def test_r6_repository_access_invalid_before_uow_enter(self):
+        uow = self.factory.create_unit_of_work()
+        with self.assertRaises(RepositoryError):
+            _ = uow.positions
+        with self.assertRaises(RepositoryError):
+            _ = uow.cash
+
+    def test_r6_repository_access_during_uow_succeeds(self):
+        with self.factory.create_unit_of_work() as uow:
+            uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("500.00"))
+            self.assertEqual(uow.cash.get_cash("PRIMARY", "EUR").amount, Decimal("500.00"))
+
+    def test_r6_retained_repository_reference_fails_after_commit(self):
+        uow = self.factory.create_unit_of_work()
+        with uow:
+            retained_cash = uow.cash
+            uow.commit()
+
+        # Retained repository reference must fail closed
+        with self.assertRaises(RepositoryError) as ctx:
+            retained_cash.set_cash_balance("PRIMARY", "EUR", Decimal("999.00"))
+        self.assertIn("UnitOfWork is no longer active", str(ctx.exception))
+
+    def test_r6_retained_repository_reference_fails_after_rollback(self):
+        uow = self.factory.create_unit_of_work()
+        with uow:
+            retained_pos = uow.positions
+            uow.rollback()
+
+        with self.assertRaises(RepositoryError) as ctx:
+            retained_pos.upsert_position("PRIMARY", "SAP.DE", Decimal("10.0000"), Decimal("150.0000"))
+        self.assertIn("UnitOfWork is no longer active", str(ctx.exception))
+
+    def test_r6_retained_repository_reference_fails_after_context_exit(self):
+        uow = self.factory.create_unit_of_work()
+        with uow:
+            retained_cash = uow.cash
+
+        # After normal context exit
+        with self.assertRaises(RepositoryError):
+            retained_cash.set_cash_balance("PRIMARY", "EUR", Decimal("999.00"))
+        with self.assertRaises(RepositoryError):
+            _ = uow.cash
+
+    def test_r6_reentering_completed_uow_fails(self):
+        uow = self.factory.create_unit_of_work()
+        with uow:
+            uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"))
+        with self.assertRaises(RepositoryError) as ctx:
+            with uow:
+                pass
+        self.assertIn("cannot be re-entered", str(ctx.exception))
+
+    def test_r6_auto_commit_false_leaves_no_open_transaction_on_external_conn(self):
+        """Verifies that auto_commit=False rolls back uncommitted work on context exit without dangling transaction."""
+        with self.core_manager.connection() as ext_conn:
+            uow = UnitOfWork(self.core_manager, connection=ext_conn, auto_commit=False)
+            with uow:
+                uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("1000.00"))
+                # Do NOT commit explicitly
+
+            # Verify no transaction remains active on the external connection
+            self.assertFalse(ext_conn.in_transaction)
+
+            # Verify cash record was rolled back cleanly
+            cur = ext_conn.cursor()
+            cur.execute("SELECT * FROM portfolio_cash WHERE currency = 'EUR'")
+            self.assertIsNone(cur.fetchone())
+
+            # Verify external connection is still alive and operational
+            cur.execute("SELECT 1")
+            self.assertEqual(cur.fetchone()[0], 1)
+
+
+# ===========================================================================
+# 15. R7: Daily Bar Batch Atomicity Tests
+# ===========================================================================
+
+class TestR7DailyBarBatchAtomicity(BaseRepositoryTestCase):
+    """Verifies all-or-nothing atomicity for daily bar batch upserts."""
+
+    def test_r7_batch_success_commits_all_or_nothing(self):
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+            batch = [
+                {
+                    "ticker": "SAP.DE",
+                    "bar_date": "2026-11-01",
+                    "open": "150.00",
+                    "high": "155.00",
+                    "low": "149.00",
+                    "close": "154.00",
+                    "volume": 10000,
+                },
+                {
+                    "ticker": "SAP.DE",
+                    "bar_date": "2026-11-02",
+                    "open": "154.00",
+                    "high": "158.00",
+                    "low": "153.00",
+                    "close": "157.00",
+                    "volume": 12000,
+                },
+            ]
+            count = repo.upsert_bars_batch(batch)
+            self.assertEqual(count, 2)
+            self.assertEqual(len(repo.list_bars("SAP.DE")), 2)
+
+    def test_r7_batch_failure_rolls_back_entire_batch(self):
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+            # Second item has an invalid calendar date
+            batch = [
+                {
+                    "ticker": "NOVO-B.CO",
+                    "bar_date": "2026-11-01",
+                    "open": "100.00",
+                    "high": "105.00",
+                    "low": "99.00",
+                    "close": "104.00",
+                    "volume": 10000,
+                },
+                {
+                    "ticker": "NOVO-B.CO",
+                    "bar_date": "2026-02-30",  # Impossible calendar date
+                    "open": "104.00",
+                    "high": "108.00",
+                    "low": "103.00",
+                    "close": "107.00",
+                    "volume": 12000,
+                },
+            ]
+            with self.assertRaises(ValidationError):
+                repo.upsert_bars_batch(batch)
+
+            # Verify ZERO rows persisted
+            self.assertEqual(len(repo.list_bars("NOVO-B.CO")), 0)
+
+    def test_r7_empty_batch_is_noop(self):
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+            self.assertEqual(repo.upsert_bars_batch([]), 0)
+
+
+# ===========================================================================
+# 16. R8: Consistent Daily Bar Input & Calendar Date Validation Tests
+# ===========================================================================
+
+class TestR8DailyBarInputValidation(BaseRepositoryTestCase):
+    """Verifies equivalent validation for DailyBarRecord and dicts, and strict calendar dates."""
+
+    def test_r8_calendar_invalid_dates_rejected(self):
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+            invalid_dates = [
+                "2026-02-30",  # February 30 does not exist
+                "2026-99-99",  # Non-existent month and day
+                "2026-13-01",  # Month 13 does not exist
+                "2026-02-29",  # 2026 is not a leap year
+            ]
+            for bad_date in invalid_dates:
+                with self.subTest(bad_date=bad_date):
+                    with self.assertRaises(ValidationError):
+                        repo.upsert_bar("ASML.AS", bad_date, "100.00", "105.00", "99.00", "104.00", 1000)
+
+            # Leap year valid date must succeed
+            valid_bar = repo.upsert_bar("ASML.AS", "2024-02-29", "100.00", "105.00", "99.00", "104.00", 1000)
+            self.assertEqual(valid_bar.bar_date, "2024-02-29")
+
+    def test_r8_record_and_dict_validation_equivalence(self):
+        """Verifies DailyBarRecord and dict paths enforce identical validations in batch upsert."""
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+
+            # 1. Invalid excess scale (scale 5) in DailyBarRecord
+            bad_record = DailyBarRecord(
+                ticker="ASML.AS",
+                bar_date="2026-11-01",
+                open=Decimal("100.12345"),  # Excess scale > 4
+                high=Decimal("105.0000"),
+                low=Decimal("99.0000"),
+                close=Decimal("104.0000"),
+                volume=1000,
+                indicators={},
+                updated_at_utc="2026-11-01T00:00:00Z",
+            )
+            with self.assertRaises(ValidationError):
+                repo.upsert_bars_batch([bad_record])
+
+            # 2. Invalid excess scale in dict
+            bad_dict = {
+                "ticker": "ASML.AS",
+                "bar_date": "2026-11-01",
+                "open": Decimal("100.12345"),
+                "high": Decimal("105.0000"),
+                "low": Decimal("99.0000"),
+                "close": Decimal("104.0000"),
+                "volume": 1000,
+            }
+            with self.assertRaises(ValidationError):
+                repo.upsert_bars_batch([bad_dict])
+
+    def test_r8_inverted_date_range_rejected(self):
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+            with self.assertRaises(ValidationError) as ctx:
+                repo.list_bars("ASML.AS", start_date="2026-11-10", end_date="2026-11-01")
+            self.assertIn("Inverted date range", str(ctx.exception))
 
 
 if __name__ == "__main__":

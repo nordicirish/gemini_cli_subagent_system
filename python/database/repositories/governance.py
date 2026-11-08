@@ -1,12 +1,13 @@
 """
 Governance Repositories: Scout Categories, Trade Lessons, Decision Log, and Owner Approvals.
-Governed by Stage 1.4 Architecture and Agent Governance Framework.
+Governed by Stage 1.4.1 Architecture and Agent Governance Framework.
 
 Enforces:
-- Authorization on trade lessons (operation 'update_trade_lessons') and decision log ('update_decision_log').
+- R2: Strict Owner approval record integrity: grantor derived strictly from trusted Owner/Human context.
+- R6: Strict Unit of Work lifecycle checking on all methods.
+- Authorization on trade lessons ('update_trade_lessons') and decision log ('update_decision_log').
 - Append-only immutability on decision log and owner approvals.
 - Controlled state transition on owner approvals (PENDING -> CONSUMED).
-- Fail-closed validation on all entity fields.
 """
 
 import json
@@ -24,10 +25,11 @@ from python.database.repositories.base import (
     IntegrityConflictError,
     ValidationError,
     AppendOnlyViolationError,
+    RepositoryError,
     validate_identifier,
     utc_now_iso,
 )
-from python.tool_registry import authorize_financial_mutation
+from python.tool_registry import authorize_financial_mutation, get_active_caller_role
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +41,7 @@ class ScoutCategoryRepository(BaseRepository):
 
     def get_category(self, category_id: int) -> Optional[ScoutCategory]:
         """Retrieves a scout category by primary key ID."""
+        self._check_active()
         cur = self._conn.cursor()
         cur.execute(
             """
@@ -62,6 +65,7 @@ class ScoutCategoryRepository(BaseRepository):
 
     def get_category_by_name(self, category_name: str) -> Optional[ScoutCategory]:
         """Retrieves a scout category by unique name."""
+        self._check_active()
         norm_name = validate_identifier(category_name, "category_name")
         cur = self._conn.cursor()
         cur.execute(
@@ -86,6 +90,7 @@ class ScoutCategoryRepository(BaseRepository):
 
     def list_categories(self) -> List[ScoutCategory]:
         """Lists all scout categories ordered by name."""
+        self._check_active()
         cur = self._conn.cursor()
         cur.execute(
             """
@@ -115,6 +120,7 @@ class ScoutCategoryRepository(BaseRepository):
         tickers: Optional[Sequence[str]] = None,
     ) -> ScoutCategory:
         """Upserts a scout category definition."""
+        self._check_active()
         norm_name = validate_identifier(category_name, "category_name")
         tickers_list = [validate_identifier(t, "ticker").upper() for t in (tickers or [])]
         tickers_json = json.dumps(tickers_list, sort_keys=True)
@@ -143,6 +149,7 @@ class ScoutCategoryRepository(BaseRepository):
 
     def delete_category(self, category_id: int) -> bool:
         """Deletes a scout category by ID."""
+        self._check_active()
         cur = self._conn.cursor()
         cur.execute("DELETE FROM scout_categories WHERE id = ?", (category_id,))
         return cur.rowcount > 0
@@ -163,6 +170,7 @@ class TradeLessonRepository(BaseRepository):
 
     def get_lesson(self, rule_code: str) -> Optional[TradeLesson]:
         """Retrieves a trade lesson by rule code."""
+        self._check_active()
         norm_code = validate_identifier(rule_code, "rule_code").upper()
         cur = self._conn.cursor()
         cur.execute(
@@ -189,6 +197,7 @@ class TradeLessonRepository(BaseRepository):
         self, category: Optional[str] = None, status: Optional[str] = None
     ) -> List[TradeLesson]:
         """Lists trade lessons, optionally filtered by category and/or status."""
+        self._check_active()
         query = "SELECT rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc FROM trade_lessons"
         params: List[Any] = []
         clauses = []
@@ -228,6 +237,7 @@ class TradeLessonRepository(BaseRepository):
         caller_role: Optional[str] = None,
     ) -> TradeLesson:
         """Upserts a trade lesson with authorization check."""
+        self._check_active()
         norm_code = validate_identifier(rule_code, "rule_code").upper()
         norm_directive = validate_identifier(directive_text, "directive_text")
         norm_cat = validate_identifier(category, "category").upper()
@@ -246,11 +256,14 @@ class TradeLessonRepository(BaseRepository):
             "status": norm_status,
         }
 
+        active_role = get_active_caller_role()
+        effective_role = caller_role or active_role
+
         authorize_financial_mutation(
             operation_name="update_trade_lessons",
             target_resource=target_resource,
             payload=payload,
-            caller_role=caller_role,
+            caller_role=effective_role,
         )
 
         timestamp_utc = utc_now_iso()
@@ -285,14 +298,18 @@ class TradeLessonRepository(BaseRepository):
 
     def delete_lesson(self, rule_code: str, caller_role: Optional[str] = None) -> bool:
         """Deletes a trade lesson with authorization."""
+        self._check_active()
         norm_code = validate_identifier(rule_code, "rule_code").upper()
         target_resource = f"trade_lessons/{norm_code}"
+
+        active_role = get_active_caller_role()
+        effective_role = caller_role or active_role
 
         authorize_financial_mutation(
             operation_name="update_trade_lessons",
             target_resource=target_resource,
             payload={"rule_code": norm_code, "action": "delete"},
-            caller_role=caller_role,
+            caller_role=effective_role,
         )
 
         cur = self._conn.cursor()
@@ -321,6 +338,7 @@ class DecisionLogRepository(BaseRepository):
         caller_role: Optional[str] = None,
     ) -> DecisionRecord:
         """Appends a new council decision record."""
+        self._check_active()
         norm_session = validate_identifier(session_id, "session_id")
         norm_action = validate_identifier(action_proposed, "action_proposed")
         norm_outcome = validate_identifier(decision_outcome, "decision_outcome")
@@ -335,11 +353,14 @@ class DecisionLogRepository(BaseRepository):
             "ticker": norm_ticker,
         }
 
+        active_role = get_active_caller_role()
+        effective_role = caller_role or active_role
+
         authorize_financial_mutation(
             operation_name="update_decision_log",
             target_resource="decision_log",
             payload=payload,
-            caller_role=caller_role,
+            caller_role=effective_role,
         )
 
         cur = self._conn.cursor()
@@ -378,6 +399,7 @@ class DecisionLogRepository(BaseRepository):
 
     def get_decision(self, decision_id: int) -> Optional[DecisionRecord]:
         """Retrieves a decision record by primary key."""
+        self._check_active()
         cur = self._conn.cursor()
         cur.execute(
             """
@@ -409,6 +431,7 @@ class DecisionLogRepository(BaseRepository):
         limit: Optional[int] = None,
     ) -> List[DecisionRecord]:
         """Lists decision records ordered newest first, with optional filters."""
+        self._check_active()
         query = (
             "SELECT id, session_id, ticker, action_proposed, decision_outcome, "
             "votes_json, transcript_text, timestamp_utc FROM decision_log"
@@ -449,20 +472,23 @@ class DecisionLogRepository(BaseRepository):
 
     def update(self, *args, **kwargs):
         """Append-only entity: updates are strictly forbidden."""
+        self._check_active()
         raise AppendOnlyViolationError("Decision log is append-only; update operations are prohibited.")
 
     def delete(self, *args, **kwargs):
         """Append-only entity: deletions are strictly forbidden."""
+        self._check_active()
         raise AppendOnlyViolationError("Decision log is append-only; delete operations are prohibited.")
 
 
 # ---------------------------------------------------------------------------
-# Owner Approval Repository (Controlled Immutability)
+# Owner Approval Repository (Controlled Immutability & Trusted Attribution R2)
 # ---------------------------------------------------------------------------
 
 class OwnerApprovalRepository(BaseRepository):
     """
     Repository for owner approval records (owner_approvals).
+    R2: Grantor identity derived strictly from trusted Owner/Human context.
     Records are append-only; only controlled status transition to CONSUMED is permitted.
     """
 
@@ -474,14 +500,34 @@ class OwnerApprovalRepository(BaseRepository):
         operation_name: str,
         target_resource: str,
         payload_digest: str,
-        granted_by: str = "Owner",
+        granted_by: Optional[str] = None,
     ) -> OwnerApprovalRecord:
-        """Appends a new owner approval with PENDING status."""
+        """
+        Appends a new owner approval with PENDING status (R2).
+        Strictly requires active execution context in ('Owner', 'Human').
+        Rejects engineering, investment agent, and default System contexts fail-closed.
+        """
+        self._check_active()
+        active_role = get_active_caller_role()
+
+        # R2: Strictly require Owner or Human execution context
+        if active_role not in ("Owner", "Human"):
+            raise PermissionError(
+                f"Security violation: Active context role '{active_role}' is not authorized to create owner approvals. "
+                f"Owner approvals require explicit Owner or Human execution context."
+            )
+
+        # R2: Do not permit caller to spoof granted_by
+        if granted_by is not None and granted_by != active_role:
+            raise PermissionError(
+                f"Attribution violation: caller passed granted_by='{granted_by}', but active context is '{active_role}'."
+            )
+
         norm_id = validate_identifier(approval_id, "approval_id")
         norm_op = validate_identifier(operation_name, "operation_name")
         norm_target = validate_identifier(target_resource, "target_resource")
         norm_digest = validate_identifier(payload_digest, "payload_digest")
-        norm_grantor = validate_identifier(granted_by, "granted_by")
+        norm_grantor = active_role
         timestamp_utc = utc_now_iso()
 
         cur = self._conn.cursor()
@@ -515,6 +561,7 @@ class OwnerApprovalRepository(BaseRepository):
 
     def get_approval(self, approval_id: str) -> Optional[OwnerApprovalRecord]:
         """Retrieves an approval record by its unique approval_id."""
+        self._check_active()
         norm_id = validate_identifier(approval_id, "approval_id")
         cur = self._conn.cursor()
         cur.execute(
@@ -545,6 +592,7 @@ class OwnerApprovalRepository(BaseRepository):
         self, operation_name: str, target_resource: str, payload_digest: str
     ) -> Optional[OwnerApprovalRecord]:
         """Retrieves the oldest PENDING approval matching operation, target, and payload digest."""
+        self._check_active()
         norm_op = validate_identifier(operation_name, "operation_name")
         norm_target = validate_identifier(target_resource, "target_resource")
         norm_digest = validate_identifier(payload_digest, "payload_digest")
@@ -576,7 +624,11 @@ class OwnerApprovalRepository(BaseRepository):
         )
 
     def consume_approval(self, approval_id: str) -> bool:
-        """Atomically transitions an approval from PENDING to CONSUMED with timestamp."""
+        """
+        Atomically transitions an approval from PENDING to CONSUMED with timestamp.
+        Preserves original operation, target, payload digest, and grantor immutability.
+        """
+        self._check_active()
         norm_id = validate_identifier(approval_id, "approval_id")
         timestamp_utc = utc_now_iso()
         cur = self._conn.cursor()
@@ -592,6 +644,7 @@ class OwnerApprovalRepository(BaseRepository):
 
     def list_approvals(self, status: Optional[str] = None) -> List[OwnerApprovalRecord]:
         """Lists owner approvals, optionally filtered by status."""
+        self._check_active()
         query = (
             "SELECT id, approval_id, operation_name, target_resource, payload_digest, "
             "granted_by, consumed_at_utc, status, created_at_utc FROM owner_approvals"
@@ -622,9 +675,10 @@ class OwnerApprovalRepository(BaseRepository):
 
     def update(self, *args, **kwargs):
         """Append-only audit record: arbitrary updates are strictly prohibited."""
+        self._check_active()
         raise AppendOnlyViolationError("Owner approvals are immutable audit records; arbitrary updates are prohibited.")
 
     def delete(self, *args, **kwargs):
         """Append-only audit record: deletions are strictly prohibited."""
+        self._check_active()
         raise AppendOnlyViolationError("Owner approvals are immutable audit records; deletions are prohibited.")
-

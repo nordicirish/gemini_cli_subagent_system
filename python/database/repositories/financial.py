@@ -1,13 +1,12 @@
 """
 Financial Repositories: Cash, Positions, and Watchlist.
-Governed by Stage 1.4 Architecture and Agent Governance Framework.
+Governed by Stage 1.4.1 Architecture and Agent Governance Framework.
 
 Enforces:
-- Exact Decimal validation on all financial quantities (shares, wac_eur, wac_usd, amount).
-- Mandatory invocation of authorize_financial_mutation() on all mutations.
-- Actor identity extraction from trusted context (get_active_caller_role()).
-- Transactional atomicity: financial mutation + financial_changelog on the same connection.
-- Autocommit protection: automatically manages atomic transaction if invoked outside an active transaction.
+- R1: Mandatory financial changelog capture on all financial mutations (no suppression parameter).
+- R4: Trusted actor attribution derived from execution context; no Owner/Human spoofing from System.
+- R5: Transaction snapshot consistency: write lock (BEGIN IMMEDIATE) acquired before before-state query.
+- R6: Strict Unit of Work lifecycle checking: retained repository references fail-closed on completion.
 """
 
 from decimal import Decimal
@@ -25,6 +24,7 @@ from python.database.repositories.base import (
     DuplicateEntityError,
     IntegrityConflictError,
     ValidationError,
+    RepositoryError,
     validate_decimal,
     decimal_to_canonical_str,
     validate_identifier,
@@ -73,11 +73,23 @@ def _record_changelog(
 
 
 def _resolve_effective_actor(caller_role: Optional[str] = None) -> str:
-    """Determines trusted actor role without allowing agent spoofing."""
+    """
+    Determines trusted actor role strictly from execution context (R4).
+    Rejects attempts by System or agent contexts to claim Owner or Human attribution.
+    """
     active_role = get_active_caller_role()
-    if active_role not in TRUSTED_SYSTEM_ROLES:
-        return active_role
-    return caller_role or active_role
+    if caller_role is not None and caller_role != active_role:
+        if active_role in TRUSTED_SYSTEM_ROLES:
+            if caller_role in ("Owner", "Human") and active_role not in ("Owner", "Human"):
+                raise PermissionError(
+                    f"Security violation: Active context '{active_role}' cannot claim '{caller_role}' attribution."
+                )
+            return caller_role
+        else:
+            raise PermissionError(
+                f"Security violation: Agent role '{active_role}' cannot spoof actor role '{caller_role}'."
+            )
+    return active_role
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +104,7 @@ class CashRepository(BaseRepository):
 
     def get_cash(self, account_id: str = "PRIMARY", currency: str = "EUR") -> Optional[CashBalance]:
         """Retrieves a single cash balance by account and currency."""
+        self._check_active()
         norm_account = validate_identifier(account_id, "account_id")
         norm_currency = validate_identifier(currency, "currency").upper()
         cur = self._conn.cursor()
@@ -115,6 +128,7 @@ class CashRepository(BaseRepository):
 
     def list_cash(self, account_id: Optional[str] = None) -> List[CashBalance]:
         """Lists all cash balances, optionally filtered by account_id."""
+        self._check_active()
         cur = self._conn.cursor()
         if account_id:
             norm_account = validate_identifier(account_id, "account_id")
@@ -153,12 +167,13 @@ class CashRepository(BaseRepository):
         correlation_id: Optional[str] = None,
         caller_role: Optional[str] = None,
         requires_owner_approval: bool = False,
-        record_changelog: bool = True,
     ) -> CashBalance:
         """
         Sets the cash balance for an account and currency.
-        Enforces Decimal scale <= 2, non-negative, authorization, and changelog atomicity.
+        Enforces Decimal scale <= 2, non-negative, authorization, and mandatory changelog atomicity (R1).
+        Acquires write lock before before-state query for snapshot consistency (R5).
         """
+        self._check_active()
         norm_account = validate_identifier(account_id, "account_id")
         norm_currency = validate_identifier(currency, "currency").upper()
         if norm_currency not in ("EUR", "USD"):
@@ -189,38 +204,38 @@ class CashRepository(BaseRepository):
             operation_name="update_ssot",
             target_resource=target_resource,
             payload=payload,
-            caller_role=caller_role,
+            caller_role=effective_actor,
             requires_owner_approval=requires_owner_approval,
         )
 
         approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
-        # Fetch before-state for changelog
-        existing = self.get_cash(norm_account, norm_currency)
-        before_state = (
-            {
-                "account_id": existing.account_id,
-                "currency": existing.currency,
-                "amount": decimal_to_canonical_str(existing.amount),
-                "last_updated_at_utc": existing.last_updated_at_utc,
-            }
-            if existing
-            else None
-        )
-
-        after_state = {
-            "account_id": norm_account,
-            "currency": norm_currency,
-            "amount": amount_str,
-            "last_updated_at_utc": timestamp_utc,
-        }
-
-        # Ensure atomic transaction if not already in one
+        # R5: Acquire write lock BEFORE reading before-state for snapshot consistency
         owns_tx = not self._conn.in_transaction
         if owns_tx:
             self._conn.execute("BEGIN IMMEDIATE;")
 
         try:
+            # Fetch before-state under write lock inside the transaction
+            existing = self.get_cash(norm_account, norm_currency)
+            before_state = (
+                {
+                    "account_id": existing.account_id,
+                    "currency": existing.currency,
+                    "amount": decimal_to_canonical_str(existing.amount),
+                    "last_updated_at_utc": existing.last_updated_at_utc,
+                }
+                if existing
+                else None
+            )
+
+            after_state = {
+                "account_id": norm_account,
+                "currency": norm_currency,
+                "amount": amount_str,
+                "last_updated_at_utc": timestamp_utc,
+            }
+
             self._conn.execute(
                 """
                 INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc)
@@ -231,18 +246,20 @@ class CashRepository(BaseRepository):
                 """,
                 (norm_account, norm_currency, amount_str, timestamp_utc),
             )
-            if record_changelog:
-                _record_changelog(
-                    conn=self._conn,
-                    correlation_id=cid,
-                    actor_role=effective_actor,
-                    operation_name="set_cash_balance",
-                    target_resource=target_resource,
-                    approval_digest=approval_digest,
-                    before_state=before_state,
-                    after_state=after_state,
-                    timestamp_utc=timestamp_utc,
-                )
+
+            # R1: Mandatory changelog insertion on the same transaction
+            _record_changelog(
+                conn=self._conn,
+                correlation_id=cid,
+                actor_role=effective_actor,
+                operation_name="set_cash_balance",
+                target_resource=target_resource,
+                approval_digest=approval_digest,
+                before_state=before_state,
+                after_state=after_state,
+                timestamp_utc=timestamp_utc,
+            )
+
             if owns_tx:
                 self._conn.execute("COMMIT;")
         except sqlite3.IntegrityError as e:
@@ -274,59 +291,65 @@ class CashRepository(BaseRepository):
         correlation_id: Optional[str] = None,
         caller_role: Optional[str] = None,
         requires_owner_approval: bool = False,
-        record_changelog: bool = True,
     ) -> bool:
-        """Deletes a cash balance record with authorization and changelog capture."""
+        """Deletes a cash balance record with authorization and mandatory changelog capture (R1)."""
+        self._check_active()
         norm_account = validate_identifier(account_id, "account_id")
         norm_currency = validate_identifier(currency, "currency").upper()
-        existing = self.get_cash(norm_account, norm_currency)
-        if existing is None:
-            return False
 
         target_resource = f"portfolio_cash/{norm_account}/{norm_currency}"
         payload = {"account_id": norm_account, "currency": norm_currency, "action": "delete"}
 
+        effective_actor = _resolve_effective_actor(caller_role)
         authorize_financial_mutation(
             operation_name="update_ssot",
             target_resource=target_resource,
             payload=payload,
-            caller_role=caller_role,
+            caller_role=effective_actor,
             requires_owner_approval=requires_owner_approval,
         )
 
         timestamp_utc = utc_now_iso()
         cid = correlation_id or uuid.uuid4().hex
-        effective_actor = _resolve_effective_actor(caller_role)
         approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
-        before_state = {
-            "account_id": existing.account_id,
-            "currency": existing.currency,
-            "amount": decimal_to_canonical_str(existing.amount),
-            "last_updated_at_utc": existing.last_updated_at_utc,
-        }
-
+        # R5: Acquire write lock BEFORE reading before-state
         owns_tx = not self._conn.in_transaction
         if owns_tx:
             self._conn.execute("BEGIN IMMEDIATE;")
 
         try:
+            existing = self.get_cash(norm_account, norm_currency)
+            if existing is None:
+                if owns_tx:
+                    self._conn.execute("COMMIT;")
+                return False
+
+            before_state = {
+                "account_id": existing.account_id,
+                "currency": existing.currency,
+                "amount": decimal_to_canonical_str(existing.amount),
+                "last_updated_at_utc": existing.last_updated_at_utc,
+            }
+
             self._conn.execute(
                 "DELETE FROM portfolio_cash WHERE account_id = ? AND currency = ?",
                 (norm_account, norm_currency),
             )
-            if record_changelog:
-                _record_changelog(
-                    conn=self._conn,
-                    correlation_id=cid,
-                    actor_role=effective_actor,
-                    operation_name="delete_cash",
-                    target_resource=target_resource,
-                    approval_digest=approval_digest,
-                    before_state=before_state,
-                    after_state=None,
-                    timestamp_utc=timestamp_utc,
-                )
+
+            # R1: Mandatory changelog recording
+            _record_changelog(
+                conn=self._conn,
+                correlation_id=cid,
+                actor_role=effective_actor,
+                operation_name="delete_cash",
+                target_resource=target_resource,
+                approval_digest=approval_digest,
+                before_state=before_state,
+                after_state=None,
+                timestamp_utc=timestamp_utc,
+            )
+
             if owns_tx:
                 self._conn.execute("COMMIT;")
         except Exception:
@@ -351,6 +374,7 @@ class PositionRepository(BaseRepository):
 
     def get_position(self, account_id: str = "PRIMARY", ticker: str = "") -> Optional[PositionRecord]:
         """Retrieves a single position by account and ticker."""
+        self._check_active()
         norm_account = validate_identifier(account_id, "account_id")
         norm_ticker = validate_identifier(ticker, "ticker").upper()
         cur = self._conn.cursor()
@@ -376,6 +400,7 @@ class PositionRepository(BaseRepository):
 
     def list_positions(self, account_id: Optional[str] = None) -> List[PositionRecord]:
         """Lists positions, optionally filtered by account_id."""
+        self._check_active()
         cur = self._conn.cursor()
         if account_id:
             norm_account = validate_identifier(account_id, "account_id")
@@ -418,12 +443,13 @@ class PositionRepository(BaseRepository):
         correlation_id: Optional[str] = None,
         caller_role: Optional[str] = None,
         requires_owner_approval: bool = False,
-        record_changelog: bool = True,
     ) -> PositionRecord:
         """
         Upserts a portfolio position.
-        Enforces positive shares & cost basis, Decimal scale <= 4, authorization, and changelog.
+        Enforces positive shares & cost basis, Decimal scale <= 4, authorization, and mandatory changelog atomicity (R1).
+        Acquires write lock before reading before-state (R5).
         """
+        self._check_active()
         norm_account = validate_identifier(account_id, "account_id")
         norm_ticker = validate_identifier(ticker, "ticker").upper()
 
@@ -461,40 +487,42 @@ class PositionRepository(BaseRepository):
             operation_name="update_ssot",
             target_resource=target_resource,
             payload=payload,
-            caller_role=caller_role,
+            caller_role=effective_actor,
             requires_owner_approval=requires_owner_approval,
         )
 
         approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
-        existing = self.get_position(norm_account, norm_ticker)
-        before_state = (
-            {
-                "account_id": existing.account_id,
-                "ticker": existing.ticker,
-                "shares": decimal_to_canonical_str(existing.shares),
-                "wac_eur": decimal_to_canonical_str(existing.wac_eur),
-                "wac_usd": decimal_to_canonical_str(existing.wac_usd) if existing.wac_usd else None,
-                "last_updated_at_utc": existing.last_updated_at_utc,
-            }
-            if existing
-            else None
-        )
-
-        after_state = {
-            "account_id": norm_account,
-            "ticker": norm_ticker,
-            "shares": shares_str,
-            "wac_eur": wac_eur_str,
-            "wac_usd": wac_usd_str,
-            "last_updated_at_utc": timestamp_utc,
-        }
-
+        # R5: Acquire write lock BEFORE reading before-state
         owns_tx = not self._conn.in_transaction
         if owns_tx:
             self._conn.execute("BEGIN IMMEDIATE;")
 
         try:
+            # Query before-state under write lock inside transaction
+            existing = self.get_position(norm_account, norm_ticker)
+            before_state = (
+                {
+                    "account_id": existing.account_id,
+                    "ticker": existing.ticker,
+                    "shares": decimal_to_canonical_str(existing.shares),
+                    "wac_eur": decimal_to_canonical_str(existing.wac_eur),
+                    "wac_usd": decimal_to_canonical_str(existing.wac_usd) if existing.wac_usd else None,
+                    "last_updated_at_utc": existing.last_updated_at_utc,
+                }
+                if existing
+                else None
+            )
+
+            after_state = {
+                "account_id": norm_account,
+                "ticker": norm_ticker,
+                "shares": shares_str,
+                "wac_eur": wac_eur_str,
+                "wac_usd": wac_usd_str,
+                "last_updated_at_utc": timestamp_utc,
+            }
+
             self._conn.execute(
                 """
                 INSERT INTO portfolio_positions (
@@ -508,18 +536,20 @@ class PositionRepository(BaseRepository):
                 """,
                 (norm_account, norm_ticker, shares_str, wac_eur_str, wac_usd_str, timestamp_utc),
             )
-            if record_changelog:
-                _record_changelog(
-                    conn=self._conn,
-                    correlation_id=cid,
-                    actor_role=effective_actor,
-                    operation_name="upsert_position",
-                    target_resource=target_resource,
-                    approval_digest=approval_digest,
-                    before_state=before_state,
-                    after_state=after_state,
-                    timestamp_utc=timestamp_utc,
-                )
+
+            # R1: Mandatory changelog insertion on the same transaction
+            _record_changelog(
+                conn=self._conn,
+                correlation_id=cid,
+                actor_role=effective_actor,
+                operation_name="upsert_position",
+                target_resource=target_resource,
+                approval_digest=approval_digest,
+                before_state=before_state,
+                after_state=after_state,
+                timestamp_utc=timestamp_utc,
+            )
+
             if owns_tx:
                 self._conn.execute("COMMIT;")
         except sqlite3.IntegrityError as e:
@@ -553,61 +583,67 @@ class PositionRepository(BaseRepository):
         correlation_id: Optional[str] = None,
         caller_role: Optional[str] = None,
         requires_owner_approval: bool = False,
-        record_changelog: bool = True,
     ) -> bool:
-        """Deletes a portfolio position with authorization and changelog capture."""
+        """Deletes a portfolio position with authorization and mandatory changelog capture (R1)."""
+        self._check_active()
         norm_account = validate_identifier(account_id, "account_id")
         norm_ticker = validate_identifier(ticker, "ticker").upper()
-        existing = self.get_position(norm_account, norm_ticker)
-        if existing is None:
-            return False
 
         target_resource = f"portfolio_positions/{norm_account}/{norm_ticker}"
         payload = {"account_id": norm_account, "ticker": norm_ticker, "action": "delete"}
 
+        effective_actor = _resolve_effective_actor(caller_role)
         authorize_financial_mutation(
             operation_name="update_ssot",
             target_resource=target_resource,
             payload=payload,
-            caller_role=caller_role,
+            caller_role=effective_actor,
             requires_owner_approval=requires_owner_approval,
         )
 
         timestamp_utc = utc_now_iso()
         cid = correlation_id or uuid.uuid4().hex
-        effective_actor = _resolve_effective_actor(caller_role)
         approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
-        before_state = {
-            "account_id": existing.account_id,
-            "ticker": existing.ticker,
-            "shares": decimal_to_canonical_str(existing.shares),
-            "wac_eur": decimal_to_canonical_str(existing.wac_eur),
-            "wac_usd": decimal_to_canonical_str(existing.wac_usd) if existing.wac_usd else None,
-            "last_updated_at_utc": existing.last_updated_at_utc,
-        }
-
+        # R5: Acquire write lock BEFORE reading before-state
         owns_tx = not self._conn.in_transaction
         if owns_tx:
             self._conn.execute("BEGIN IMMEDIATE;")
 
         try:
+            existing = self.get_position(norm_account, norm_ticker)
+            if existing is None:
+                if owns_tx:
+                    self._conn.execute("COMMIT;")
+                return False
+
+            before_state = {
+                "account_id": existing.account_id,
+                "ticker": existing.ticker,
+                "shares": decimal_to_canonical_str(existing.shares),
+                "wac_eur": decimal_to_canonical_str(existing.wac_eur),
+                "wac_usd": decimal_to_canonical_str(existing.wac_usd) if existing.wac_usd else None,
+                "last_updated_at_utc": existing.last_updated_at_utc,
+            }
+
             self._conn.execute(
                 "DELETE FROM portfolio_positions WHERE account_id = ? AND ticker = ?",
                 (norm_account, norm_ticker),
             )
-            if record_changelog:
-                _record_changelog(
-                    conn=self._conn,
-                    correlation_id=cid,
-                    actor_role=effective_actor,
-                    operation_name="delete_position",
-                    target_resource=target_resource,
-                    approval_digest=approval_digest,
-                    before_state=before_state,
-                    after_state=None,
-                    timestamp_utc=timestamp_utc,
-                )
+
+            # R1: Mandatory changelog recording
+            _record_changelog(
+                conn=self._conn,
+                correlation_id=cid,
+                actor_role=effective_actor,
+                operation_name="delete_position",
+                target_resource=target_resource,
+                approval_digest=approval_digest,
+                before_state=before_state,
+                after_state=None,
+                timestamp_utc=timestamp_utc,
+            )
+
             if owns_tx:
                 self._conn.execute("COMMIT;")
         except Exception:
@@ -631,6 +667,7 @@ class WatchlistRepository(BaseRepository):
 
     def get_watchlist_item(self, ticker: str) -> Optional[WatchlistItem]:
         """Retrieves a single watched ticker."""
+        self._check_active()
         norm_ticker = validate_identifier(ticker, "ticker").upper()
         cur = self._conn.cursor()
         cur.execute(
@@ -649,6 +686,7 @@ class WatchlistRepository(BaseRepository):
 
     def list_watchlist(self, status: Optional[str] = None) -> List[WatchlistItem]:
         """Lists watched tickers, optionally filtered by status."""
+        self._check_active()
         cur = self._conn.cursor()
         if status:
             norm_status = validate_identifier(status, "status").upper()
@@ -678,9 +716,9 @@ class WatchlistRepository(BaseRepository):
         correlation_id: Optional[str] = None,
         caller_role: Optional[str] = None,
         requires_owner_approval: bool = False,
-        record_changelog: bool = False,
     ) -> WatchlistItem:
         """Upserts a watchlist item."""
+        self._check_active()
         norm_ticker = validate_identifier(ticker, "ticker").upper()
         norm_status = validate_identifier(status, "status").upper()
         if norm_status not in ("ACTIVE", "PAUSED", "REMOVED"):
@@ -690,22 +728,23 @@ class WatchlistRepository(BaseRepository):
         target_resource = f"watchlist/{norm_ticker}"
         payload = {"ticker": norm_ticker, "status": norm_status, "notes": notes}
 
+        effective_actor = _resolve_effective_actor(caller_role)
         authorize_financial_mutation(
             operation_name="update_ssot",
             target_resource=target_resource,
             payload=payload,
-            caller_role=caller_role,
+            caller_role=effective_actor,
             requires_owner_approval=requires_owner_approval,
         )
-
-        existing = self.get_watchlist_item(norm_ticker)
-        added_at = existing.added_at_utc if existing else timestamp_utc
 
         owns_tx = not self._conn.in_transaction
         if owns_tx:
             self._conn.execute("BEGIN IMMEDIATE;")
 
         try:
+            existing = self.get_watchlist_item(norm_ticker)
+            added_at = existing.added_at_utc if existing else timestamp_utc
+
             self._conn.execute(
                 """
                 INSERT INTO watchlist (ticker, status, added_at_utc, notes)
@@ -716,27 +755,6 @@ class WatchlistRepository(BaseRepository):
                 """,
                 (norm_ticker, norm_status, added_at, notes),
             )
-            if record_changelog:
-                cid = correlation_id or uuid.uuid4().hex
-                effective_actor = _resolve_effective_actor(caller_role)
-                approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
-                before_state = (
-                    {"ticker": existing.ticker, "status": existing.status, "notes": existing.notes}
-                    if existing
-                    else None
-                )
-                after_state = {"ticker": norm_ticker, "status": norm_status, "notes": notes}
-                _record_changelog(
-                    conn=self._conn,
-                    correlation_id=cid,
-                    actor_role=effective_actor,
-                    operation_name="upsert_watchlist_item",
-                    target_resource=target_resource,
-                    approval_digest=approval_digest,
-                    before_state=before_state,
-                    after_state=after_state,
-                    timestamp_utc=timestamp_utc,
-                )
             if owns_tx:
                 self._conn.execute("COMMIT;")
         except sqlite3.IntegrityError as e:
@@ -767,22 +785,20 @@ class WatchlistRepository(BaseRepository):
         correlation_id: Optional[str] = None,
         caller_role: Optional[str] = None,
         requires_owner_approval: bool = False,
-        record_changelog: bool = False,
     ) -> bool:
         """Deletes a watchlist item from the table."""
+        self._check_active()
         norm_ticker = validate_identifier(ticker, "ticker").upper()
-        existing = self.get_watchlist_item(norm_ticker)
-        if existing is None:
-            return False
 
         target_resource = f"watchlist/{norm_ticker}"
         payload = {"ticker": norm_ticker, "action": "delete"}
 
+        effective_actor = _resolve_effective_actor(caller_role)
         authorize_financial_mutation(
             operation_name="update_ssot",
             target_resource=target_resource,
             payload=payload,
-            caller_role=caller_role,
+            caller_role=effective_actor,
             requires_owner_approval=requires_owner_approval,
         )
 
@@ -791,24 +807,13 @@ class WatchlistRepository(BaseRepository):
             self._conn.execute("BEGIN IMMEDIATE;")
 
         try:
+            existing = self.get_watchlist_item(norm_ticker)
+            if existing is None:
+                if owns_tx:
+                    self._conn.execute("COMMIT;")
+                return False
+
             self._conn.execute("DELETE FROM watchlist WHERE ticker = ?", (norm_ticker,))
-            if record_changelog:
-                timestamp_utc = utc_now_iso()
-                cid = correlation_id or uuid.uuid4().hex
-                effective_actor = _resolve_effective_actor(caller_role)
-                approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
-                before_state = {"ticker": existing.ticker, "status": existing.status, "notes": existing.notes}
-                _record_changelog(
-                    conn=self._conn,
-                    correlation_id=cid,
-                    actor_role=effective_actor,
-                    operation_name="remove_watchlist_item",
-                    target_resource=target_resource,
-                    approval_digest=approval_digest,
-                    before_state=before_state,
-                    after_state=None,
-                    timestamp_utc=timestamp_utc,
-                )
             if owns_tx:
                 self._conn.execute("COMMIT;")
         except Exception:
