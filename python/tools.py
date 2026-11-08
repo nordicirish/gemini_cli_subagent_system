@@ -4,6 +4,9 @@ import asyncio
 import threading
 import time
 
+from atomic_io import atomic_write_json, atomic_read_json, atomic_write_text
+from tool_registry import GLOBAL_TOOL_REGISTRY, HUMAN_APPROVAL_TOKEN_RULES, INVESTMENT_ROLES, ALL_VALID_ROLES
+
 # We import from the existing fetch_stocks to leverage its battle-tested logic
 from fetch_stocks import handle_paste, run_daemon
 import fetch_stocks
@@ -136,8 +139,7 @@ def update_trade_lessons(lessons_json: str) -> str:
             
         save_data = {"trade_lessons": current_data} if is_dict_format else current_data
             
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(save_data, f, indent=2)
+        atomic_write_json(path, save_data)
             
         return "Trade lessons updated successfully."
     except Exception as e:
@@ -280,24 +282,24 @@ def intercept_and_log_decision(data_input) -> None:
                         log_data.append(turn_log)
                         if len(log_data) > 300:
                             log_data = log_data[-300:]
-                        with open(decision_log_file, 'w', encoding='utf-8') as f:
-                            json.dump(log_data, f, indent=2)
+                        atomic_write_json(decision_log_file, log_data)
                         print(f"[System] Decision Log Appended: {len(turn_log['decisions'])} decisions.")
                     break
     except Exception as e:
         print(f"[System Error] Decision log interception failure: {e}")
 
-def update_rules(rules_md_content: str) -> str:
+def update_rules(rules_md_content: str, approval_token: str = None) -> str:
     """
     Appends or updates the canonical rules.md file. 
     MANDATORY: This tool MUST ONLY be called after the user has explicitly approved 
-    a rule promotion proposal per MANDATE_21.
+    a rule promotion proposal per MANDATE_21. Requires verified human approval token.
     """
+    if approval_token != HUMAN_APPROVAL_TOKEN_RULES:
+        return "Error updating rules: Unauthorized. Modifying canonical investment rules requires an explicit verified human approval token."
     path = os.path.join('gem_trading_rules', 'rules.md')
     try:
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(rules_md_content)
-        return "Rules.md updated successfully. NOTE: A server restart is required to refresh the Context Cache."
+        atomic_write_text(path, rules_md_content)
+        return "Rules.md updated successfully."
     except Exception as e:
         return f"Error updating rules: {str(e)}"
 
@@ -350,4 +352,103 @@ def perform_web_forensic_search(query: str) -> str:
         return response.text
     except Exception as e:
         return f"Error performing web search: {str(e)}"
+
+# ---------------------------------------------------------------------------
+# Central Tool Registration with GLOBAL_TOOL_REGISTRY
+# Enforcing Protocol 03 and Protocol 06 runtime permissions
+# ---------------------------------------------------------------------------
+GLOBAL_TOOL_REGISTRY.register(
+    name="read_ssot",
+    func=read_ssot,
+    description="Reads the current Single Source of Truth (SSoT) portfolio state.",
+    classification="READ",
+    required_permission="read_portfolio",
+    requires_human_approval=False,
+    allowed_roles=ALL_VALID_ROLES,
+    affects_financial_state=False,
+)
+
+GLOBAL_TOOL_REGISTRY.register(
+    name="update_ssot",
+    func=update_ssot,
+    description="Takes an EXECUTION_PAYLOAD JSON string and merges it into the local SSoT.",
+    classification="WRITE",
+    required_permission="write_portfolio",
+    requires_human_approval=False,
+    allowed_roles={"Terminal Orchestrator", "State Validation Router", "Context Engine", "Human"},
+    is_reversible=False,
+    affects_financial_state=True,
+    parameters={"payload_json": str},
+)
+
+GLOBAL_TOOL_REGISTRY.register(
+    name="read_trade_lessons",
+    func=read_trade_lessons,
+    description="Reads historical trade lessons from context/trade_lessons.json.",
+    classification="READ",
+    required_permission="read_lessons",
+    requires_human_approval=False,
+    allowed_roles=ALL_VALID_ROLES,
+    affects_financial_state=False,
+)
+
+GLOBAL_TOOL_REGISTRY.register(
+    name="update_trade_lessons",
+    func=update_trade_lessons,
+    description="Appends or updates historical trade lessons in context/trade_lessons.json.",
+    classification="WRITE",
+    required_permission="write_lessons",
+    requires_human_approval=False,
+    allowed_roles={"Terminal Orchestrator", "Context Engine", "Review Engine", "Human"},
+    is_reversible=False,
+    affects_financial_state=True,
+    parameters={"lessons_json": str},
+)
+
+GLOBAL_TOOL_REGISTRY.register(
+    name="read_decision_log",
+    func=read_decision_log,
+    description="Reads the continuous time-series ledger of all Council decisions.",
+    classification="READ",
+    required_permission="read_decision_log",
+    requires_human_approval=False,
+    allowed_roles=ALL_VALID_ROLES,
+    affects_financial_state=False,
+)
+
+GLOBAL_TOOL_REGISTRY.register(
+    name="update_rules",
+    func=update_rules,
+    description="Updates canonical rules.md. Requires explicit verified human approval token.",
+    classification="WRITE",
+    required_permission="write_rules",
+    requires_human_approval=True,
+    allowed_roles={"Human", "Context Engine"},
+    is_reversible=False,
+    affects_financial_state=True,
+    parameters={"rules_md_content": str, "approval_token": str},
+)
+
+GLOBAL_TOOL_REGISTRY.register(
+    name="get_market_data",
+    func=get_market_data,
+    description="Returns live market data for all tickers and macro benchmarks from background daemon.",
+    classification="READ",
+    required_permission="read_market",
+    requires_human_approval=False,
+    allowed_roles=ALL_VALID_ROLES,
+    affects_financial_state=False,
+)
+
+GLOBAL_TOOL_REGISTRY.register(
+    name="perform_web_forensic_search",
+    func=perform_web_forensic_search,
+    description="Performs a web search to fetch market filings, catalysts, or news for forensic verification.",
+    classification="READ",
+    required_permission="search_web",
+    requires_human_approval=False,
+    allowed_roles=ALL_VALID_ROLES,
+    affects_financial_state=False,
+    parameters={"query": str},
+)
 

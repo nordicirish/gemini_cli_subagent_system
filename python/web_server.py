@@ -649,112 +649,23 @@ def chat_endpoint(req: ChatRequest):
         if chart_parts:
             framework.log(f"[Vision] Attaching {len(chart_parts)} fresh 1m chart screenshot(s) [{', '.join(chart_symbols)}] to Gemini multimodal prompt...")
 
-        all_text = []
-        turn_count = 0
-        fallback_occurred = False
-        
-        while True:
-            if cancel_event.is_set():
-                framework.log("[Orchestrator] Interrupted by user.")
-                return {"status": "success", "response": "[OFFLINE] Session terminated by user interrupt."}
+        from tool_dispatcher import GLOBAL_TOOL_DISPATCHER
+        payload_to_send = [*chart_parts, current_message] if chart_parts else current_message
 
-            turn_count += 1
-            framework.log(f"[Orchestrator ({ORCHESTRATOR_MODEL})] Starting turn {turn_count}...")
+        dispatch_res = GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session(
+            session=session,
+            initial_message=payload_to_send,
+            part_factory=agent_framework.types.Part,
+            agent_role="Terminal Orchestrator",
+            cancel_check=lambda: cancel_event.is_set(),
+            log_callback=framework.log,
+        )
 
-            # --- GUARD: strip orphaned function_call turns from history (causes 400 INVALID_ARGUMENT)
-            # Only run this guard if we are sending a NEW text prompt (not returning a function response)
-            if isinstance(current_message, str):
-                try:
-                    h = session.get_history()
-                    if h and hasattr(h[-1], 'parts'):
-                        last_parts = h[-1].parts
-                        has_fc = any(hasattr(p, 'function_call') and p.function_call for p in last_parts)
-                        has_fr = any(hasattr(p, 'function_response') and p.function_response for p in last_parts)
-                        if has_fc and not has_fr:
-                            framework.log("[Orchestrator] WARNING: Orphaned function_call in history — pruning to avoid 400 error.")
-                            session._history = list(h[:-1])  # drop the dangling turn
-                except Exception as guard_err:
-                    framework.log(f"[Orchestrator] History guard check failed (non-critical): {guard_err}")
+        if dispatch_res.get("status") == "cancelled":
+            return {"status": "success", "response": dispatch_res["response"]}
 
-            payload_to_send = [*chart_parts, current_message] if (turn_count == 1 and chart_parts and isinstance(current_message, str)) else current_message
-
-            try:
-                response = session.send_message(payload_to_send)
-            except Exception as exc:
-                framework.log(f"[Orchestrator Error] Antigravity chat session failed: {exc}")
-                raise exc
-            
-            if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                raw_prompt_tokens = response.usage_metadata.prompt_token_count or 0
-                cached_tokens = getattr(response.usage_metadata, 'cached_content_token_count', 0) or 0
-                p_tokens = raw_prompt_tokens - cached_tokens
-                c_tokens = response.usage_metadata.candidates_token_count or 0
-                framework.turn_usage['prompt_tokens'] += p_tokens
-                framework.turn_usage['candidates_tokens'] += c_tokens
-                framework.turn_usage['cached_tokens'] += cached_tokens
-                
-                call_cost = framework._calculate_call_cost(ORCHESTRATOR_MODEL, "Primary Key", p_tokens, c_tokens, cached_tokens)
-                framework.turn_usage['estimated_cost'] += call_cost
-                framework.session_cost += call_cost
-            
-            if cancel_event.is_set():
-                framework.log("[Orchestrator] Interrupted after model response.")
-                return {"status": "success", "response": "[OFFLINE] Session terminated by user interrupt."}
-            
-            # Capture any text in this turn
-            found_text_in_turn = False
-            try:
-                for part in response.candidates[0].content.parts:
-                    if part.text:
-                        txt = part.text.strip()
-                        if txt:
-                            framework.log(f"[Orchestrator] Turn {turn_count} captured {len(txt)} chars.")
-                            all_text.append(txt)
-                            found_text_in_turn = True
-            except Exception as e:
-                framework.log(f"[Orchestrator] Text capture warning: {e}")
-                try:
-                    if response.candidates:
-                        cand = response.candidates[0]
-                        framework.log(f"[Orchestrator Debug] Candidate finish reason: {cand.finish_reason}")
-                        framework.log(f"[Orchestrator Debug] Safety ratings: {getattr(cand, 'safety_ratings', None)}")
-                        framework.log(f"[Orchestrator Debug] Content present: {cand.content is not None}")
-                except Exception as de:
-                    framework.log(f"[Orchestrator Debug] Failed to log candidate details: {de}")
-                if hasattr(response, 'text') and response.text:
-                    all_text.append(response.text)
-                    found_text_in_turn = True
-            
-            # Manual function call handling
-            if response.function_calls:
-                framework.log(f"[Orchestrator] Turn {turn_count} requested {len(response.function_calls)} tools.")
-                tool_responses = []
-                for call in response.function_calls:
-                    name = call.name
-                    args = call.args or {}
-                    framework.log(f"[Tool Execution] {name}")
-                    
-                    if name in tool_map:
-                        try:
-                            result = tool_map[name](**args)
-                            tool_responses.append(agent_framework.types.Part.from_function_response(
-                                name=name, response={'result': result}
-                            ))
-                        except Exception as te:
-                            tool_responses.append(agent_framework.types.Part.from_function_response(
-                                name=name, response={'error': str(te)}
-                            ))
-                    else:
-                        tool_responses.append(agent_framework.types.Part.from_function_response(
-                            name=name, response={'error': 'Tool not found'}
-                        ))
-                
-                current_message = tool_responses
-                continue
-            
-            break
-        
-        if not all_text:
+        full_response = dispatch_res["response"]
+        if not full_response:
             framework.log("[Orchestrator] WARNING: No text captured across all turns.")
             return {"status": "success", "response": "_[The model performed its internal reasoning and tools but did not emit a final text summary. Please try again or check system logs.]_"}
 

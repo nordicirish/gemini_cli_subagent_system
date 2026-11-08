@@ -28,6 +28,7 @@ import math
 from scipy.stats import norm
 from yfinance.data import YfData
 import threading
+from atomic_io import atomic_write_json, atomic_read_json
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
@@ -669,8 +670,7 @@ async def save_basket(req: Request):
             else:
                 data["portfolio_snapshot"] = new_snapshot
             
-            with open("context/ssot.json", "w") as f:
-                json.dump(data, f, indent=2)
+            atomic_write_json("context/ssot.json", data)
             
             # Reload TICKERS
             TICKERS = _load_ssot_tickers()
@@ -740,8 +740,7 @@ async def save_watch_list(req: Request):
             else:
                 data["watched_tickers"] = new_list
                 
-            with open("context/ssot.json", "w") as f:
-                json.dump(data, f, indent=2)
+            atomic_write_json("context/ssot.json", data)
             
             # Reload TICKERS
             TICKERS = _load_ssot_tickers()
@@ -1218,8 +1217,7 @@ async def handle_paste(req: Request):
             merged_ssot.pop("DELETE_FIELD", None)
             merged_ssot.pop("DELETE_FIELD (optional)", None)
 
-        with open('context/ssot.json', 'w') as f:
-            json.dump(merged_ssot, f, indent=2)
+        atomic_write_json('context/ssot.json', merged_ssot)
             
         def _normalize_lessons(lessons_list):
             normalized = []

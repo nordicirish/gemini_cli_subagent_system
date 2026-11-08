@@ -227,27 +227,21 @@ def main():
             payload_to_send = [*chart_parts, current_message] if chart_parts else current_message
 
             try:
-                response = chat.send_message(payload_to_send)
+                from tool_dispatcher import GLOBAL_TOOL_DISPATCHER
+                dispatch_res = GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session(
+                    session=chat,
+                    initial_message=payload_to_send,
+                    part_factory=agent_framework.types.Part,
+                    agent_role="Terminal Orchestrator",
+                    log_callback=framework.log,
+                )
+                final_text = dispatch_res["response"]
             except Exception as exc:
                 framework.log(f"[Orchestrator Error] Antigravity chat session failed: {exc}")
                 raise exc
 
-            if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                raw_prompt_tokens = response.usage_metadata.prompt_token_count or 0
-                cached_tokens = getattr(response.usage_metadata, 'cached_content_token_count', 0) or 0
-                p_tokens = raw_prompt_tokens - cached_tokens
-                c_tokens = response.usage_metadata.candidates_token_count or 0
-                
-                framework.turn_usage['prompt_tokens'] += p_tokens
-                framework.turn_usage['candidates_tokens'] += c_tokens
-                framework.turn_usage['cached_tokens'] += cached_tokens
-                
-                call_cost = framework._calculate_call_cost(orchestrator_model, "Antigravity Local", p_tokens, c_tokens, cached_tokens)
-                framework.turn_usage['estimated_cost'] += call_cost
-                framework.session_cost += call_cost
-
             print("\n[Terminal Orchestrator] Response:")
-            print(response.text)
+            print(final_text)
 
             turn_cost = framework.turn_usage['estimated_cost']
             session_cost = framework.session_cost

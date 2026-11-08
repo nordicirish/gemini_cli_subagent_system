@@ -121,7 +121,7 @@ To eliminate external API costs, quota throttling, and third-party cloud vulnera
 
 1. **Local `agy.exe` Desktop Runtime:**
    - Agent turns are executed directly against the local Antigravity binary (`~/.gemini/bin/agy.exe`), using stdin prompt piping (`proc.communicate(input=full_prompt)`) to support massive system instructions, rulesets, and multimodal context without Windows CLI buffer constraints.
-   - Headless execution is enabled via `--dangerously-skip-permissions` to eliminate prompt-blocking in background and sidecar modes.
+   - Execution runs with sandboxed permissions; unconfined host shell commands are blocked fail-closed, and all tool execution is governed by the application-level `ToolRegistry`.
 
 2. **Zero-Marginal-Cost Session Authentication:**
    - Authenticates natively through the user's active Antigravity desktop session.
@@ -134,7 +134,71 @@ To eliminate external API costs, quota throttling, and third-party cloud vulnera
    - Multi-agent council deliberations and dynamic sector scouting execute concurrently using `concurrent.futures.ThreadPoolExecutor`, delivering ultra-responsive turn speeds without ephemeral cloud cache API provisioning.
 
 5. **Structured Audit & Telemetry Logging:**
-   - Every outbound prompt, inbound response, latency measurement, and execution status is recorded to `logs/gem_handshakes.log` via a 5-day rolling `TimedRotatingFileHandler`.
+   - Outbound prompt telemetry and handshake measurements are logged to `logs/gem_handshakes.log`.
+   - Security-critical events, tool dispatches, file modifications, and permission checks are recorded in append-only JSON Lines format to `context/agent_logs/agent-events.jsonl` with automatic recursive secret redaction and file locking.
+
+---
+
+## 🏛️ Agent Governance & Runtime Integrity Framework (`.agents/`)
+
+The repository enforces a formal engineering governance model adapted from the `tk-site-new` governance standard, establishing strict separation of concerns, fail-closed verification gates, and absolute human authority over financial rules and releases.
+
+### 1. Hierarchy of Authority & Domain Isolation
+
+```
+                  ┌─────────────────────────────────────┐
+                  │        Human Repository Owner       │
+                  │   (Final Architecture, Risk, Git)   │
+                  └──────────────────┬──────────────────┘
+                                     │
+         ┌───────────────────────────┴───────────────────────────┐
+         │                                                       │
+         ▼                                                       ▼
+┌─────────────────────────────────┐             ┌─────────────────────────────────┐
+│     Engineering Governance      │             │   Investment Decision Council   │
+│            (.agents/)           │             │      (engine_instructions/)     │
+├─────────────────────────────────┤             ├─────────────────────────────────┤
+│ • Architecture Agent            │             │ • Terminal Orchestrator         │
+│ • Python Engineer               │             │ • Macro Sentinel / Data Analyst │
+│ • Security Agent                │             │ • Bullish / Red Team / Neutral  │
+│ • Testing Agent                 │             │ • GEX, Structural, Execution    │
+│ • Documentation Agent           │             │ • Technical Validator           │
+│ • Independent Reviewer          │             │ • Context & Review Engines      │
+└────────────────┬────────────────┘             └────────────────┬────────────────┘
+                 │                                               │
+                 │     STRICT SEPARATION: ZERO LEAKAGE           │
+                 └───────────────────X───────────────────────────┘
+```
+
+- **Human Authority:** The human repository owner holds exclusive authority over financial mandates, capital risk parameters, trading execution, git commits, git pushes, and releases. Autonomous commits, pushes, and production deployments are strictly forbidden.
+- **Engineering Agents:** Operate exclusively on code quality, test coverage, security boundaries, documentation, bug fixes, and infrastructure. **Forbidden** from modifying trading rules (`gem_trading_rules/rules.md`), portfolio allocations (`context/ssot.json`), or trade lessons.
+- **Investment Council Agents:** Operate exclusively on market analysis, regime detection, catalyst scrutiny, and portfolio proposals. **Forbidden** from executing host shell commands or modifying codebase infrastructure.
+
+### 2. Specialist Engineering Agent Directory (`.agents/agents/`)
+
+- [`architecture-agent.md`](.agents/agents/architecture-agent.md): System boundaries, dependency integrity, architectural assessment, refactoring plans.
+- [`python-engineer.md`](.agents/agents/python-engineer.md): Python implementation, code quality, error handling, maintainability, type compliance.
+- [`security-agent.md`](.agents/agents/security-agent.md): Runtime permission enforcement, subprocess isolation, input sanitization, financial state protection.
+- [`testing-agent.md`](.agents/agents/testing-agent.md): Automated test authoring, test execution, baseline verification, regression prevention.
+- [`documentation-agent.md`](.agents/agents/documentation-agent.md): Technical documentation, architectural synchronisation, changelogs, audit reports.
+- [`independent-reviewer.md`](.agents/agents/independent-reviewer.md): Independent code review, boundary compliance verification, rejection of unauthorized changes.
+
+### 3. Engineering Governance Protocols (`.agents/protocols/`)
+
+- [`01-agent-orchestration.md`](.agents/protocols/01-agent-orchestration.md): Agent invocation lifecycle, task scoping, and single-responsibility boundaries.
+- [`02-development-standards.md`](.agents/protocols/02-development-standards.md): Code quality, typing, docstrings, backward compatibility, and error handling.
+- [`03-security-policy.md`](.agents/protocols/03-security-policy.md): Zero-Trust execution, sandboxed subprocesses, tool allowlisting, and secret redaction.
+- [`04-review-gates.md`](.agents/protocols/04-review-gates.md): 4-gate verification lifecycle and independent read-only code review.
+- [`05-testing-policy.md`](.agents/protocols/05-testing-policy.md): Mandatory unit, integration, and regression test suites; baseline preservation.
+- [`06-financial-boundaries.md`](.agents/protocols/06-financial-boundaries.md): Absolute protection of canonical trading rules and SSoT financial records.
+
+### 4. Core Runtime Integrity Components
+
+- **Centralized Tool Registry (`python/tool_registry.py`):** Single Source of Truth for tool registration. Enforces parameter signature validation via `inspect.signature`, role categorization (`ENGINEERING_ROLES` vs `INVESTMENT_ROLES`), read/write classification, and requires a human authorization token (`HUMAN_APPROVED_RULE_MUTATION`) for sensitive rule updates.
+- **Atomic State Persistence (`python/atomic_io.py`):** Cross-platform file locking (`msvcrt` on Windows, `fcntl` on POSIX) with lock timeouts, in-memory serialization validation, temp file write with `os.fsync`, and atomic swap (`os.replace`) to eliminate state amnesia or file truncation risks.
+- **Unified Tool Dispatcher (`python/tool_dispatcher.py`):** Shared dispatch service wired to both CLI (`python/main.py`) and Web Chat (`python/web_server.py`), enforcing 100% dispatch parity, role authorization, single-tool audit logging, cycle detection, and a `MAX_TOOL_TURNS = 5` threshold.
+- **Structured Audit Logging (`python/audit_logger.py`):** Concurrency-safe, append-only JSONL event logging (`context/agent_logs/agent-events.jsonl`) with recursive secret redaction.
+- **Automated Verification Harness (`scripts/verify_stage_1.py`):** Automated 8-gate fail-closed verification checking environment, compilation, governance files, out-of-scope boundaries, unit test suite, Antigravity integration, baseline failures preservation, and git commit authority.
 
 ---
 
