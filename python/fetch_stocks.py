@@ -693,26 +693,20 @@ def get_watch_list():
     try:
         watchlist = []
         if os.path.exists("context/config.json"):
-            with open("context/config.json", "r") as f:
+            with open("context/config.json", "r", encoding="utf-8") as f:
                 cfg = json.load(f)
                 watchlist = cfg.get("WATCHLIST", [])
 
-        # Make sure ssot.json is in sync
-        if os.path.exists("context/ssot.json"):
-            def _sync_watchlist(data):
-                if not isinstance(data, dict):
-                    data = {}
+        if not watchlist and os.path.exists("context/ssot.json"):
+            with open("context/ssot.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
                 ms = data.get("mutable_state", data)
-                if ms.get("watched_tickers") != watchlist:
-                    if "mutable_state" in data:
-                        data["mutable_state"]["watched_tickers"] = watchlist
-                    else:
-                        data["watched_tickers"] = watchlist
-                return data
-            atomic_update_json("context/ssot.json", _sync_watchlist, default_factory=dict)
+                watchlist = ms.get("watched_tickers", data.get("watched_tickers", []))
 
+        watchlist = [w.strip().upper() for w in watchlist if isinstance(w, str) and w.strip()]
         return JSONResponse(watchlist)
-    except: pass
+    except Exception:
+        pass
     return JSONResponse([])
 
 @app.post("/api/save_watch_list")

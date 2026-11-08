@@ -1,4 +1,4 @@
-# Independent Code Review: Stage 1 & Stage 1.1 — Agentic Engineering Governance, Local-Safety Remediation & Runtime Integrity
+# Independent Code Review: Stage 1, Stage 1.1 & Stage 1.1.1 — Agentic Engineering Governance, Data Integrity & Mutation Boundary Closure
 
 **Artifact:** `.agents/reviews/STAGE_1_INDEPENDENT_REVIEW.md`  
 **Reviewer:** Independent Reviewer Agent  
@@ -6,6 +6,7 @@
 **Standard:** `.agents/protocols/04-review-gates.md` (Adapted from `tk-site-new` Protocol 04)  
 **Pre-Stage 1 Baseline Git Commit:** `bb919c010ac2ac1995235d0f96aa49999e0c1c82`  
 **Stage 1 Committed Git HEAD:** `60919b5f9e9614bda4d877886219446b351ceacb`  
+**Stage 1.1 Committed Git HEAD:** `c9bbd363f80d1b6c26528222434de918dafce6e3`  
 **Review Date:** 2026-11-08  
 **Verdict:** **ACCEPTED FOR HUMAN SIGN-OFF (PASS)**
 
@@ -64,8 +65,56 @@ All Stage 1.1 modifications remain uncommitted in the local working tree for hum
 
 ---
 
-## 5. Review Conclusion & Recommendation
+## 5. Review Conclusion & Recommendation (Stage 1.1)
 
-All Stage 1.1 remediation requirements (`R1`–`R7`) and verification requirements (`T1`–`T3`) have been verified against the codebase and test outputs. No Critical, High, Medium, or Low defects remain open.
+All Stage 1.1 remediation requirements (`R1`–`R7`) and verification requirements (`T1`–`T3`) have been verified against the codebase and test outputs. No Critical, High, Medium, or Low defects remain open from Stage 1.1.
 
-**Recommendation:** **APPROVE** Stage 1.1 for human owner review and sign-off.
+---
+
+## 6. Stage 1.1.1 Targeted Remediation: Data Integrity & Mutation Boundary Closure
+
+### 6.1 Scope & Inspection
+Stage 1.1.1 addressed two post-pushed defects identified during source inspection of commit `c9bbd363f80d1b6c26528222434de918dafce6e3`:
+1. **Workstream F1 (Safe Handling of Corrupted JSON in `atomic_update_json`):** Broad exception handling was catching invalid JSON syntax or empty files and substituting `default_factory()`, overwriting damaged files on disk.
+2. **Workstream F2 (Make Watchlist GET Endpoints Read-Only):** `GET /api/get_watch_list` in [`python/fetch_stocks.py`](file:///c:/github/gemini_cli_subagent_system/python/fetch_stocks.py) and `GET /api/watchlist` in [`python/web_server.py`](file:///c:/github/gemini_cli_subagent_system/python/web_server.py) were calling `atomic_update_json("context/ssot.json", ...)` on read requests without authorization.
+
+### 6.2 Stage 1.1.1 Verification Matrix
+
+| Item | Requirement | Inspection Evidence & File References | Verdict |
+|---|---|---|---|
+| **F1.1** | Missing file initialization | In [`python/atomic_io.py`](file:///c:/github/gemini_cli_subagent_system/python/atomic_io.py), `if not os.path.exists(file_path):` safely calls `default_factory()`, creates parent directories, and persists new file under lock. Covered by `tests/test_atomic_io.py::test_f1_missing_file_initializes_with_default_factory`. | **PASS** |
+| **F1.2** | Corrupted existing JSON rejection | `json.loads(raw_content)` failure raises `ValueError("Failed to parse existing JSON file ... Original file preserved unchanged.")`. No write occurs; original bytes preserved byte-for-byte. Covered by `tests/test_atomic_io.py::test_f1_malformed_json_raises_value_error_and_preserves_original_bytes`. | **PASS** |
+| **F1.3** | Empty file protection | `if not raw_content.strip():` raises `ValueError("Existing file ... is empty. Refusing to silently overwrite.")`. Original file untouched. Covered by `tests/test_atomic_io.py::test_f1_existing_empty_file_fails_safely_and_preserves_file`. | **PASS** |
+| **F1.4** | Failed read / validation safe-abort | Target file is read before temporary file write; read errors raise `IOError` without creating temporary files or altering target file. Temp files unlinked on error in `finally` block. Covered by `tests/test_atomic_io.py::test_f1_read_error_fails_safely_and_preserves_file` and `test_f1_invalid_update_result_preserves_original_file`. | **PASS** |
+| **F2.1** | `fetch_stocks.py` GET watchlist read-only | Removed `atomic_update_json("context/ssot.json", ...)` from `get_watch_list()`. Normalizes symbols (`w.strip().upper()`), filters, falls back to `ssot.json` watched_tickers if `config.json` empty, zero file modifications. Covered by `tests/test_watchlist_endpoints.py::test_f2_fetch_stocks_get_watch_list_is_strictly_read_only`. | **PASS** |
+| **F2.2** | `web_server.py` GET watchlist read-only | Removed `atomic_update_json("context/ssot.json", ...)` from `get_watchlist()`. Strictly reads and formats JSON payload with zero disk writes. Covered by `tests/test_watchlist_endpoints.py::test_f2_web_server_get_watchlist_is_strictly_read_only`. | **PASS** |
+| **F2.3** | Authorized watchlist writes remain functional | `POST /api/save_watch_list` and `POST /api/watchlist` enforce `authorize_financial_mutation("update_ssot", "context/ssot.json", payload=...)` and persist to both `config.json` and `ssot.json`. Covered by `tests/test_watchlist_endpoints.py::test_f2_authorized_watchlist_writes_succeed`. | **PASS** |
+| **F2.4** | Unauthorized watchlist writes blocked fail-closed | Unauthorized roles attempting POST mutations to watchlist endpoints raise `PermissionError`. Covered by `tests/test_watchlist_endpoints.py::test_f2_unauthorized_watchlist_writes_blocked`. | **PASS** |
+| **F2.5** | Audit of all remaining GET endpoints | Audited all 18 `@app.get` endpoints across `fetch_stocks.py` and `web_server.py`. Zero unauthorized mutations found on any remaining GET route. | **PASS** |
+| **T1** | Test suite expansion | Full test suite expanded to 54 tests across 6 modules (15 `test_atomic_io`, 15 `test_permissions`, 10 `test_tool_dispatch`, 6 `test_watchlist_endpoints`, 4 `test_audit_logger`, 4 `test_investment_regression`). 100% pass (54/54) in 1.87s. | **PASS** |
+| **T2** | Independent review | Independent read-only source review verified complete boundary closure for F1 and F2. | **PASS** |
+| **T3** | Financial & strategy invariance | Zero diff in `gem_trading_rules/rules.md` or `engine_instructions/`. All 3 historical baseline failures preserved and separately identifiable. | **PASS** |
+
+---
+
+## 7. Defect & Remediation Register (Stage 1.1.1 Additions)
+
+| ID | Component | Defect Description | Remediation | Status |
+|---|---|---|---|---|
+| **REM-09 (F1)** | `python/atomic_io.py` | `atomic_update_json()` caught broad exceptions during JSON loading and substituted `default_factory()`, overwriting corrupted or empty files. | Refactored loading logic to strictly distinguish missing files from empty or malformed files. Empty or corrupted files fail closed with `ValueError` and preserve the target file byte-for-byte. | **CLOSED** |
+| **REM-10 (F2)** | `python/fetch_stocks.py`, `python/web_server.py` | `get_watch_list()` endpoints on HTTP GET mutated `context/ssot.json` via `atomic_update_json()` without mutation authorization. | Removed `atomic_update_json()` from both GET handlers; endpoints now strictly read-only, reading `config.json` (falling back to `ssot.json`), normalizing symbols, and performing zero disk writes. | **CLOSED** |
+| **REM-11** | `tests/test_investment_regression.py` | `test_fibonacci_forecast_calculation_invariance` checked against unverified extension values rather than canonical mathematical benchmarks from `scripts/verify_trading_system_fib.py`. | Aligned test assertions with canonical Fibonacci extension formulas (`t1_100 = 26.84`, `t2_1618 = 28.35`, `t3_2618 = 30.80`), matching mathematical benchmarks and canonical verification script output. | **CLOSED** |
+
+---
+
+## 8. Final Independent Reviewer Verdict
+
+The Stage 1.1.1 corrective remediation has successfully closed both the corrupted-JSON recovery vulnerability and the unauthenticated GET watchlist mutation path without architectural churn, external dependencies, or modifications to investment rules.
+
+- **Verification Harness (`scripts/verify_stage_1.py`):** **ALL 8 GATES PASSED** (89.73s total execution time)
+- **Automated Tests:** **54/54 PASSED (100%)**
+- **Protected Strategy Invariance:** **ZERO DIFF** against baseline commit `bb919c01` and `HEAD`
+- **Known Baseline Failures:** **3/3 PRESERVED** and separately identifiable
+- **Open Defects:** **0**
+
+**Final Recommendation:** **ACCEPT FOR HUMAN SIGN-OFF**. All changes are contained cleanly in the working tree awaiting local repository owner commit.

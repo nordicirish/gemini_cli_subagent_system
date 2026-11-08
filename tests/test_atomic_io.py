@@ -115,6 +115,141 @@ class TestAtomicIO(unittest.TestCase):
         self.assertIn("thread_id", final_data)
         self.assertIn("iteration", final_data)
 
+    # --- F1: Safe Handling of Corrupted JSON & Safe Recovery ---
+
+    def test_f1_missing_file_initializes_with_default_factory(self):
+        """F1.1: A file that does not exist must be initialized using default_factory and updated normally."""
+        missing_file = os.path.join(self.temp_dir.name, "brand_new_state.json")
+        self.assertFalse(os.path.exists(missing_file))
+
+        res = atomic_update_json(
+            missing_file,
+            lambda d: {"count": d.get("count", 0) + 1, "initialized": True},
+            default_factory=dict,
+        )
+        self.assertTrue(os.path.exists(missing_file))
+        self.assertEqual(res, {"count": 1, "initialized": True})
+
+        on_disk = atomic_read_json(missing_file)
+        self.assertEqual(on_disk, {"count": 1, "initialized": True})
+
+    def test_f1_valid_existing_json_updates_correctly(self):
+        """F1: Valid existing JSON is read and updated under lock without issue."""
+        valid_file = os.path.join(self.temp_dir.name, "valid_existing.json")
+        atomic_write_json(valid_file, {"users": ["alice"]})
+
+        res = atomic_update_json(
+            valid_file,
+            lambda d: {"users": d["users"] + ["bob"]},
+            default_factory=dict,
+        )
+        self.assertEqual(res, {"users": ["alice", "bob"]})
+
+        on_disk = atomic_read_json(valid_file)
+        self.assertEqual(on_disk, {"users": ["alice", "bob"]})
+
+    def test_f1_malformed_json_raises_value_error_and_preserves_original_bytes(self):
+        """F1.2 & F1.4: Malformed existing JSON must raise ValueError and preserve original file bytes unchanged."""
+        corrupt_file = os.path.join(self.temp_dir.name, "corrupt_data.json")
+        raw_bad_json = b'{"portfolio": [{"ticker": "SPY", "shares": 10}], "broken_syntax": '
+        with open(corrupt_file, "wb") as f:
+            f.write(raw_bad_json)
+
+        # Attempt to update the corrupted file
+        with self.assertRaises(ValueError) as ctx:
+            atomic_update_json(
+                corrupt_file,
+                lambda d: {"portfolio": [], "reset": True},
+                default_factory=dict,
+            )
+
+        self.assertIn("Failed to parse existing JSON file", str(ctx.exception))
+        self.assertIn("Original file preserved", str(ctx.exception))
+
+        # Original file must remain byte-for-byte identical
+        with open(corrupt_file, "rb") as f:
+            current_bytes = f.read()
+        self.assertEqual(current_bytes, raw_bad_json)
+
+    def test_f1_existing_empty_file_fails_safely_and_preserves_file(self):
+        """F1.3 & F1.4: An existing empty file (0 bytes) must fail safely and not be silently replaced."""
+        empty_file = os.path.join(self.temp_dir.name, "empty_zero_byte.json")
+        with open(empty_file, "wb") as f:
+            f.write(b"")
+
+        with self.assertRaises(ValueError) as ctx:
+            atomic_update_json(
+                empty_file,
+                lambda d: {"portfolio": [{"ticker": "AAPL"}]},
+                default_factory=dict,
+            )
+
+        self.assertIn("empty", str(ctx.exception).lower())
+        self.assertIn("Refusing to silently overwrite", str(ctx.exception))
+
+        # Empty file must not be modified or replaced
+        self.assertEqual(os.path.getsize(empty_file), 0)
+
+    def test_f1_invalid_update_result_preserves_original_file(self):
+        """F1.4: An invalid update result (unserializable or failing validate_fn) preserves the original file."""
+        test_file = os.path.join(self.temp_dir.name, "test_preserve.json")
+        initial_data = {"key": "original_safe_value"}
+        atomic_write_json(test_file, initial_data)
+        with open(test_file, "rb") as f:
+            original_bytes = f.read()
+
+        # 1. Unserializable object from update_fn
+        class UnserializableType:
+            pass
+
+        with self.assertRaises(ValueError):
+            atomic_update_json(
+                test_file,
+                lambda d: {"corrupted": UnserializableType()},
+            )
+
+        with open(test_file, "rb") as f:
+            self.assertEqual(f.read(), original_bytes)
+
+        # 2. validate_fn rejection
+        with self.assertRaises(ValueError):
+            atomic_update_json(
+                test_file,
+                lambda d: {"key": "invalid_value"},
+                validate_fn=lambda d: d.get("key") == "original_safe_value",
+            )
+
+        with open(test_file, "rb") as f:
+            self.assertEqual(f.read(), original_bytes)
+
+    def test_f1_read_error_fails_safely_and_preserves_file(self):
+        """F1: Permission/read errors raise IOError and preserve the original file."""
+        from unittest.mock import patch
+        test_file = os.path.join(self.temp_dir.name, "unreadable.json")
+        atomic_write_json(test_file, {"data": 123})
+        with open(test_file, "rb") as f:
+            original_bytes = f.read()
+
+        import builtins
+        orig_open = builtins.open
+
+        def selective_open(path, *args, **kwargs):
+            # Only fail on the target data file read, allowing .lock and temp files to open
+            if str(path) == os.path.abspath(test_file) and (not args or "r" in args[0] or kwargs.get("mode", "r") == "r"):
+                raise PermissionError("Mocked read access denied")
+            return orig_open(path, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=selective_open):
+            with self.assertRaises(IOError) as ctx:
+                atomic_update_json(
+                    test_file,
+                    lambda d: {"data": 456},
+                )
+            self.assertIn("Failed to read existing file", str(ctx.exception))
+
+        with open(test_file, "rb") as f:
+            self.assertEqual(f.read(), original_bytes)
+
     def test_r6_concurrent_read_modify_write_zero_lost_updates(self):
         """R6: Concurrent read-modify-write via atomic_update_json must preserve 100% of appended entries."""
         rmw_path = os.path.join(self.temp_dir.name, "concurrent_lessons.json")

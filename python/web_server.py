@@ -1135,26 +1135,20 @@ def save_basket(req: BasketSaveRequest):
 @app.get("/api/watchlist")
 def get_watch_list():
     try:
-        from atomic_io import atomic_read_json, atomic_update_json
+        from atomic_io import atomic_read_json
         watchlist = []
         # Load from config.json if it exists (ENH_83)
         if os.path.exists("context/config.json"):
             cfg = atomic_read_json("context/config.json", default={})
             watchlist = cfg.get("WATCHLIST", [])
         
-        # Make sure ssot.json is in sync
-        if os.path.exists("context/ssot.json"):
+        # Fall back to ssot.json if config.json does not provide a watchlist
+        if not watchlist and os.path.exists("context/ssot.json"):
             data = atomic_read_json("context/ssot.json", default={})
             ms = data.get("mutable_state", data)
-            if ms.get("watched_tickers") != watchlist:
-                def _sync_wl(d):
-                    if "mutable_state" in d and isinstance(d["mutable_state"], dict):
-                        d["mutable_state"]["watched_tickers"] = watchlist
-                    else:
-                        d["watched_tickers"] = watchlist
-                    return d
-                atomic_update_json("context/ssot.json", _sync_wl, default_factory=dict)
+            watchlist = ms.get("watched_tickers", data.get("watched_tickers", []))
                     
+        watchlist = [w.strip().upper() for w in watchlist if isinstance(w, str) and w.strip()]
         return watchlist
     except Exception as e:
         framework.log(f"[Error] Failed to get watchlist: {e}")

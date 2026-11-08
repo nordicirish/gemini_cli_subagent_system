@@ -250,27 +250,43 @@ def atomic_update_json(
     """
     Executes a complete read-modify-write cycle on a JSON file under a single unbroken FileLock.
     Prevents lost updates when multiple threads or processes concurrently update the same file.
-    1. Acquires FileLock(file_path + '.lock').
-    2. Reads existing JSON content (or initializes via default_factory() if missing/corrupt/empty).
-    3. Invokes updated_data = update_fn(current_data).
-    4. Validates JSON serialization and optional validate_fn(updated_data).
-    5. Atomically writes updated_data via temp file + fsync + os.replace before releasing lock.
-    Returns updated_data.
+
+    Safety guarantees (Stage 1.1.1 F1):
+    1. If file does not exist: initialises using default_factory().
+    2. If file exists and contains valid JSON: loads and updates normally.
+    3. If file exists but is empty: raises ValueError and preserves original file.
+    4. If file exists but has invalid JSON syntax: raises ValueError and preserves original file.
+    5. If file cannot be read (I/O/permission error): raises IOError and preserves original file.
+    6. If update_fn result is invalid or fails validate_fn: raises ValueError and preserves original file.
+    7. Retains thread-reentrant and cross-process FileLock across entire read-modify-write sequence.
     """
     lock_path = file_path + ".lock"
     with FileLock(lock_path, timeout=timeout):
-        current_data = None
-        if os.path.exists(file_path):
+        if not os.path.exists(file_path):
+            current_data = default_factory() if callable(default_factory) else default_factory
+        else:
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read().strip()
-                    if content:
-                        current_data = json.loads(content)
-            except Exception:
-                current_data = None
+                    raw_content = f.read()
+            except Exception as read_err:
+                raise IOError(
+                    f"Failed to read existing file '{file_path}': {read_err}. "
+                    "Original file preserved to prevent data loss."
+                ) from read_err
 
-        if current_data is None:
-            current_data = default_factory() if callable(default_factory) else default_factory
+            if not raw_content.strip():
+                raise ValueError(
+                    f"Existing file '{file_path}' is empty. Refusing to silently overwrite. "
+                    "Original file preserved to prevent data loss."
+                )
+
+            try:
+                current_data = json.loads(raw_content)
+            except json.JSONDecodeError as json_err:
+                raise ValueError(
+                    f"Failed to parse existing JSON file '{file_path}': {json_err}. "
+                    "Original file preserved to prevent data loss."
+                ) from json_err
 
         updated_data = update_fn(current_data)
 
