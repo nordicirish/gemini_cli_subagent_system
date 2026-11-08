@@ -1808,5 +1808,231 @@ class TestSchemaVerificationReadOnlyAndFailClosed(unittest.TestCase):
             self.assertEqual(cursor.fetchone()[0], 1)
 
 
+class TestCheckExtractorSqlLexicalIntegrity(unittest.TestCase):
+    """
+    Stage 1.3.1.5: SQLite CHECK Extractor SQL Lexical Integrity & Quoted-Identifier Spoofing Prevention.
+    Verifies that SchemaMigrator.extract_check_expressions() strictly distinguishes SQL keywords
+    from text inside quoting forms ("...", `...`, [...], '...') and comments (--..., /*...*/),
+    rejects quoted-identifier spoofing attacks, and fails closed on malformed DDL.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.core_db = os.path.join(self.temp_dir.name, "test_core.db")
+        self.core_mgr = DatabaseManager(self.core_db, profile=PRIMARY_FINANCIAL_PROFILE)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    # -------------------------------------------------------------------------
+    # A. Quoted constraint-name spoofing
+    # -------------------------------------------------------------------------
+    def test_quoted_constraint_name_spoofing_double_quotes_rejected(self):
+        """
+        Verify that a table with a double-quoted constraint name mimicking a CHECK expression
+        (e.g. CONSTRAINT "CHECK (id = 1)" UNIQUE(schema_version)) has 0 checks extracted,
+        and verify_core_schema_integrity fails closed with SchemaIntegrityError.
+        """
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE database_metadata;")
+            conn.execute(
+                """
+                CREATE TABLE database_metadata (
+                    id INTEGER PRIMARY KEY,
+                    schema_version INTEGER NOT NULL,
+                    db_revision INTEGER NOT NULL DEFAULT 0,
+                    created_at_utc TEXT NOT NULL,
+                    last_updated_at_utc TEXT NOT NULL,
+                    CONSTRAINT "CHECK (id = 1)" UNIQUE(schema_version)
+                );
+                """
+            )
+            # Extractor must return 0 checks (quoted name must not be extracted)
+            cursor = conn.cursor()
+            cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='database_metadata';")
+            ddl = cursor.fetchone()[0]
+            checks = SchemaMigrator.extract_check_expressions(ddl)
+            self.assertEqual(checks, [], "Quoted constraint name was falsely extracted as CHECK!")
+
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("count mismatch", str(ctx.exception))
+
+    def test_quoted_constraint_name_spoofing_backticks_rejected(self):
+        """Verify backtick-quoted constraint names mimicking CHECK are not extracted and verification fails."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE database_metadata;")
+            conn.execute(
+                """
+                CREATE TABLE database_metadata (
+                    id INTEGER PRIMARY KEY,
+                    schema_version INTEGER NOT NULL,
+                    db_revision INTEGER NOT NULL DEFAULT 0,
+                    created_at_utc TEXT NOT NULL,
+                    last_updated_at_utc TEXT NOT NULL,
+                    CONSTRAINT `CHECK (id = 1)` UNIQUE(schema_version)
+                );
+                """
+            )
+            cursor = conn.cursor()
+            cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='database_metadata';")
+            ddl = cursor.fetchone()[0]
+            self.assertEqual(SchemaMigrator.extract_check_expressions(ddl), [])
+            with self.assertRaises(SchemaIntegrityError):
+                SchemaMigrator.verify_core_schema_integrity(conn)
+
+    def test_quoted_constraint_name_spoofing_brackets_rejected(self):
+        """Verify bracket-quoted constraint names mimicking CHECK are not extracted and verification fails."""
+        with self.core_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE database_metadata;")
+            conn.execute(
+                """
+                CREATE TABLE database_metadata (
+                    id INTEGER PRIMARY KEY,
+                    schema_version INTEGER NOT NULL,
+                    db_revision INTEGER NOT NULL DEFAULT 0,
+                    created_at_utc TEXT NOT NULL,
+                    last_updated_at_utc TEXT NOT NULL,
+                    CONSTRAINT [CHECK (id = 1)] UNIQUE(schema_version)
+                );
+                """
+            )
+            cursor = conn.cursor()
+            cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='database_metadata';")
+            ddl = cursor.fetchone()[0]
+            self.assertEqual(SchemaMigrator.extract_check_expressions(ddl), [])
+            with self.assertRaises(SchemaIntegrityError):
+                SchemaMigrator.verify_core_schema_integrity(conn)
+
+    # -------------------------------------------------------------------------
+    # B. Quoted-token handling
+    # -------------------------------------------------------------------------
+    def test_single_quoted_string_literal_not_extracted_as_check(self):
+        """Verify text inside single quotes (e.g. DEFAULT 'CHECK (id = 1)') is not extracted as CHECK."""
+        ddl = "CREATE TABLE t ( id INT PRIMARY KEY, note TEXT DEFAULT 'CHECK (id = 1)' );"
+        self.assertEqual(SchemaMigrator.extract_check_expressions(ddl), [])
+
+    def test_quoted_column_names_not_extracted_as_check(self):
+        """Verify column names formatted as quoted CHECK strings are not extracted."""
+        ddl_double = 'CREATE TABLE t ( id INT PRIMARY KEY, "CHECK (id = 1)" TEXT );'
+        self.assertEqual(SchemaMigrator.extract_check_expressions(ddl_double), [])
+
+        ddl_backtick = 'CREATE TABLE t ( id INT PRIMARY KEY, `CHECK (id = 1)` TEXT );'
+        self.assertEqual(SchemaMigrator.extract_check_expressions(ddl_backtick), [])
+
+        ddl_bracket = 'CREATE TABLE t ( id INT PRIMARY KEY, [CHECK (id = 1)] TEXT );'
+        self.assertEqual(SchemaMigrator.extract_check_expressions(ddl_bracket), [])
+
+    # -------------------------------------------------------------------------
+    # C. Comment handling
+    # -------------------------------------------------------------------------
+    def test_single_line_comment_with_check_not_extracted(self):
+        """Verify CHECK expressions inside single-line comments (-- ...) are ignored."""
+        ddl = "CREATE TABLE t (\n  id INT PRIMARY KEY,\n  -- CHECK (id = 1)\n  val TEXT\n);"
+        self.assertEqual(SchemaMigrator.extract_check_expressions(ddl), [])
+
+    def test_block_comment_with_check_not_extracted(self):
+        """Verify CHECK expressions inside block comments (/* ... */) are ignored."""
+        ddl = "CREATE TABLE t ( id INT PRIMARY KEY /* CHECK (id = 1) */, val TEXT );"
+        self.assertEqual(SchemaMigrator.extract_check_expressions(ddl), [])
+
+    def test_block_comment_with_nested_parentheses_not_extracted(self):
+        """Verify block comments containing unbalanced or nested parentheses do not corrupt parsing."""
+        ddl = "CREATE TABLE t ( id INT PRIMARY KEY /* (((( CHECK (id = 1) )))) */, val TEXT );"
+        self.assertEqual(SchemaMigrator.extract_check_expressions(ddl), [])
+
+    # -------------------------------------------------------------------------
+    # D. Parenthesis and escaping handling
+    # -------------------------------------------------------------------------
+    def test_nested_parentheses_in_genuine_check_extracted(self):
+        """Verify genuine CHECK expressions with complex nested parentheses are extracted intact."""
+        ddl = "CREATE TABLE t ( amount TEXT NOT NULL CHECK ((amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)) );"
+        checks = SchemaMigrator.extract_check_expressions(ddl)
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0], "(amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)")
+
+    def test_escaped_single_quotes_inside_check(self):
+        """Verify escaped single quotes ('') inside string literals within CHECK are preserved."""
+        ddl = "CREATE TABLE t ( rule TEXT NOT NULL CHECK (rule != 'it''s deprecated') );"
+        checks = SchemaMigrator.extract_check_expressions(ddl)
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0], "rule != 'it''s deprecated'")
+
+    def test_escaped_double_quotes_in_quoted_identifier(self):
+        """Verify escaped double quotes (\"\") in constraint identifiers do not break parser."""
+        ddl = 'CREATE TABLE t ( id INT PRIMARY KEY, CONSTRAINT "chk_""valid""_id" CHECK (id = 1) );'
+        checks = SchemaMigrator.extract_check_expressions(ddl)
+        self.assertEqual(checks, ["id = 1"])
+
+    def test_parentheses_inside_string_literals_do_not_balance(self):
+        """Verify parentheses inside single-quoted strings do not close the CHECK clause early."""
+        ddl = "CREATE TABLE t ( pattern TEXT CHECK (pattern NOT LIKE '%(%)%' AND length(pattern) > 0) );"
+        checks = SchemaMigrator.extract_check_expressions(ddl)
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0], "pattern NOT LIKE '%(%)%' AND length(pattern) > 0")
+
+    def test_parentheses_inside_quoted_identifiers_do_not_balance(self):
+        """Verify parentheses inside quoted identifiers do not close the CHECK clause early."""
+        ddl = 'CREATE TABLE t ( "col(1)" TEXT CHECK ("col(1)" != \'\') );'
+        checks = SchemaMigrator.extract_check_expressions(ddl)
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0], '"col(1)" != \'\'')
+
+    # -------------------------------------------------------------------------
+    # E. Fail-closed handling
+    # -------------------------------------------------------------------------
+    def test_unterminated_single_quote_fails_closed(self):
+        """Verify DDL with an unterminated single-quoted string raises SchemaIntegrityError."""
+        ddl = "CREATE TABLE t ( id INT PRIMARY KEY, val TEXT DEFAULT 'unclosed );"
+        with self.assertRaises(SchemaIntegrityError) as ctx:
+            SchemaMigrator.extract_check_expressions(ddl)
+        self.assertIn("unterminated string literal", str(ctx.exception))
+
+    def test_unterminated_double_quote_fails_closed(self):
+        """Verify DDL with an unterminated double-quoted identifier raises SchemaIntegrityError."""
+        ddl = 'CREATE TABLE t ( "unclosed_col INT PRIMARY KEY );'
+        with self.assertRaises(SchemaIntegrityError) as ctx:
+            SchemaMigrator.extract_check_expressions(ddl)
+        self.assertIn("unterminated double-quoted identifier", str(ctx.exception))
+
+    def test_unterminated_backtick_fails_closed(self):
+        """Verify DDL with an unterminated backtick identifier raises SchemaIntegrityError."""
+        ddl = 'CREATE TABLE t ( `unclosed_col INT PRIMARY KEY );'
+        with self.assertRaises(SchemaIntegrityError) as ctx:
+            SchemaMigrator.extract_check_expressions(ddl)
+        self.assertIn("unterminated backtick identifier", str(ctx.exception))
+
+    def test_unterminated_bracket_fails_closed(self):
+        """Verify DDL with an unterminated bracket identifier raises SchemaIntegrityError."""
+        ddl = 'CREATE TABLE t ( [unclosed_col INT PRIMARY KEY );'
+        with self.assertRaises(SchemaIntegrityError) as ctx:
+            SchemaMigrator.extract_check_expressions(ddl)
+        self.assertIn("unterminated bracket identifier", str(ctx.exception))
+
+    def test_unterminated_block_comment_fails_closed(self):
+        """Verify DDL with an unterminated block comment raises SchemaIntegrityError."""
+        ddl = 'CREATE TABLE t ( id INT PRIMARY KEY /* unclosed comment );'
+        with self.assertRaises(SchemaIntegrityError) as ctx:
+            SchemaMigrator.extract_check_expressions(ddl)
+        self.assertIn("unterminated block comment", str(ctx.exception))
+
+    def test_unbalanced_check_parentheses_fails_closed(self):
+        """Verify DDL with unbalanced parentheses in a CHECK expression raises SchemaIntegrityError."""
+        ddl = 'CREATE TABLE t ( id INT PRIMARY KEY, CHECK (id = 1 );'
+        with self.assertRaises(SchemaIntegrityError) as ctx:
+            SchemaMigrator.extract_check_expressions(ddl)
+        self.assertIn("malformed CREATE TABLE body", str(ctx.exception))
+
+    def test_check_keyword_without_opening_parenthesis_fails_closed(self):
+        """Verify a standalone unquoted CHECK keyword not followed by '(' raises SchemaIntegrityError."""
+        ddl = 'CREATE TABLE t ( id INT PRIMARY KEY, CHECK id = 1 );'
+        with self.assertRaises(SchemaIntegrityError) as ctx:
+            SchemaMigrator.extract_check_expressions(ddl)
+        self.assertIn("CHECK keyword not followed by opening parenthesis", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

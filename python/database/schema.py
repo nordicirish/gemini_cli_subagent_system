@@ -1,6 +1,6 @@
 """
 Database Schema Definitions and Versioned Migration Infrastructure
-Governed by Stage 1.3 Directive and Stage 1.2.1 / 1.3.1 / 1.3.1.2 / 1.3.1.3 / 1.3.1.4 Architecture Corrections.
+Governed by Stage 1.3 Directive and Stage 1.2.1 / 1.3.1 / 1.3.1.2 / 1.3.1.3 / 1.3.1.4 / 1.3.1.5 Architecture Corrections.
 
 Provides canonical DDL definitions, table constraints, index definitions,
 and versioned schema initialisation for GEM's embedded SQLite persistence layer.
@@ -1104,91 +1104,393 @@ class SchemaMigrator:
     @staticmethod
     def extract_check_expressions(ddl_sql: str) -> List[str]:
         """
-        Extracts all raw CHECK (...) expressions from a CREATE TABLE DDL statement.
-        Correctly handles comments, string literals with escaped quotes, and nested parentheses.
+        Hardened SQL lexical scanner for SQLite CREATE TABLE DDL statements.
+        Extracts all genuine, unquoted CHECK (...) expressions.
+        Correctly recognizes and skips:
+        - Single-quoted string literals ('...') including escaped single quotes ('')
+        - Double-quoted identifiers ("...") including escaped double quotes ("")
+        - Backtick-quoted identifiers (`...`) including escaped backticks (``)
+        - Bracket-quoted identifiers ([...])
+        - Single-line SQL comments (-- ...)
+        - Block comments (/* ... */)
+
+        Strictly fail-closed: raises SchemaIntegrityError on unterminated quotes,
+        unterminated comments, unbalanced parentheses, or malformed DDL.
         """
-        # 1. Strip single-line comments (-- ...) while preserving string literals
-        lines = []
-        for line in ddl_sql.splitlines():
-            in_quote = False
-            clean_chars = []
-            i = 0
-            while i < len(line):
-                ch = line[i]
-                if ch == "'":
-                    in_quote = not in_quote
-                    clean_chars.append(ch)
-                elif not in_quote and ch == '-' and i + 1 < len(line) and line[i+1] == '-':
-                    break
-                else:
-                    clean_chars.append(ch)
+        n = len(ddl_sql)
+        i = 0
+
+        # Phase 1: Locate outermost table body parentheses: CREATE TABLE name ( <body> )
+        table_body_start = -1
+        table_body_end = -1
+        depth = 0
+
+        while i < n:
+            ch = ddl_sql[i]
+
+            if ch.isspace():
                 i += 1
-            lines.append("".join(clean_chars))
-        clean_sql = "\n".join(lines)
-
-        # 2. Extract CREATE TABLE body between outermost parentheses
-        first_paren = clean_sql.find("(")
-        last_paren = clean_sql.rfind(")")
-        if first_paren == -1 or last_paren == -1 or last_paren <= first_paren:
-            return []
-        body = clean_sql[first_paren + 1:last_paren]
-
-        # 3. Find CHECK (...) occurrences
-        checks: List[str] = []
-        idx = 0
-        upper_body = body.upper()
-        while idx < len(body):
-            pos = upper_body.find("CHECK", idx)
-            if pos == -1:
-                break
-
-            # Ensure "CHECK" is a standalone token, not part of an identifier
-            before_ok = (pos == 0) or not (body[pos - 1].isalnum() or body[pos - 1] == '_')
-            after_pos = pos + 5
-            after_ok = (after_pos >= len(body)) or not (body[after_pos].isalnum() or body[after_pos] == '_')
-
-            if not (before_ok and after_ok):
-                idx = after_pos
                 continue
 
-            # Find opening paren for CHECK
-            open_paren = body.find("(", pos)
-            if open_paren == -1:
-                break
+            # Single-line comment: -- ...
+            if ch == '-' and i + 1 < n and ddl_sql[i + 1] == '-':
+                newline_pos = ddl_sql.find('\n', i + 2)
+                if newline_pos == -1:
+                    i = n
+                else:
+                    i = newline_pos + 1
+                continue
 
-            # Find matching closing paren
-            depth = 1
-            i = open_paren + 1
-            in_str = False
-            while i < len(body) and depth > 0:
-                ch = body[i]
-                if ch == "'":
-                    if in_str and i + 1 < len(body) and body[i+1] == "'":
-                        i += 1  # Skip escaped quote
-                    else:
-                        in_str = not in_str
-                elif not in_str:
-                    if ch == '(':
-                        depth += 1
-                    elif ch == ')':
-                        depth -= 1
+            # Block comment: /* ... */
+            if ch == '/' and i + 1 < n and ddl_sql[i + 1] == '*':
+                end_comment = ddl_sql.find('*/', i + 2)
+                if end_comment == -1:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated block comment.")
+                i = end_comment + 2
+                continue
+
+            # Single-quoted string literal: '...'
+            if ch == "'":
                 i += 1
+                while i < n:
+                    if ddl_sql[i] == "'":
+                        if i + 1 < n and ddl_sql[i + 1] == "'":
+                            i += 2  # Escaped single quote ''
+                        else:
+                            i += 1
+                            break
+                    else:
+                        i += 1
+                else:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated string literal.")
+                continue
 
-            if depth == 0:
-                raw_check = body[open_paren + 1:i - 1].strip()
-                checks.append(raw_check)
-                idx = i
-            else:
-                break
+            # Double-quoted identifier: "..."
+            if ch == '"':
+                i += 1
+                while i < n:
+                    if ddl_sql[i] == '"':
+                        if i + 1 < n and ddl_sql[i + 1] == '"':
+                            i += 2  # Escaped double quote ""
+                        else:
+                            i += 1
+                            break
+                    else:
+                        i += 1
+                else:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated double-quoted identifier.")
+                continue
+
+            # Backtick-quoted identifier: `...`
+            if ch == '`':
+                i += 1
+                while i < n:
+                    if ddl_sql[i] == '`':
+                        if i + 1 < n and ddl_sql[i + 1] == '`':
+                            i += 2  # Escaped backtick ``
+                        else:
+                            i += 1
+                            break
+                    else:
+                        i += 1
+                else:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated backtick identifier.")
+                continue
+
+            # Bracket-quoted identifier: [...]
+            if ch == '[':
+                close_bracket = ddl_sql.find(']', i + 1)
+                if close_bracket == -1:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated bracket identifier.")
+                i = close_bracket + 1
+                continue
+
+            # Parentheses
+            if ch == '(':
+                if depth == 0:
+                    table_body_start = i
+                depth += 1
+                i += 1
+                continue
+
+            if ch == ')':
+                if depth <= 0:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unbalanced closing parenthesis.")
+                depth -= 1
+                if depth == 0:
+                    table_body_end = i
+                    i += 1
+                    break
+                i += 1
+                continue
+
+            i += 1
+
+        if table_body_start == -1 or table_body_end == -1 or depth != 0:
+            raise SchemaIntegrityError("DDL lexical analysis failure: malformed CREATE TABLE body.")
+
+        # Check trailing DDL for unterminated quotes/comments or unbalanced parens
+        while i < n:
+            ch = ddl_sql[i]
+            if ch.isspace() or ch == ';' or ch.isalnum() or ch == '_':
+                i += 1
+                continue
+            if ch == '-' and i + 1 < n and ddl_sql[i + 1] == '-':
+                newline_pos = ddl_sql.find('\n', i + 2)
+                if newline_pos == -1:
+                    break
+                i = newline_pos + 1
+                continue
+            if ch == '/' and i + 1 < n and ddl_sql[i + 1] == '*':
+                end_comment = ddl_sql.find('*/', i + 2)
+                if end_comment == -1:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated block comment in trailing DDL.")
+                i = end_comment + 2
+                continue
+            if ch == "'":
+                raise SchemaIntegrityError("DDL lexical analysis failure: unexpected or unterminated string literal in trailing DDL.")
+            if ch == '"':
+                raise SchemaIntegrityError("DDL lexical analysis failure: unexpected or unterminated double-quoted identifier in trailing DDL.")
+            if ch in '()':
+                raise SchemaIntegrityError("DDL lexical analysis failure: unbalanced parenthesis in trailing DDL.")
+            i += 1
+
+        # Phase 2: Scan the table body for genuine unquoted CHECK keywords and extract their expressions
+        checks: List[str] = []
+        body = ddl_sql[table_body_start + 1:table_body_end]
+        bn = len(body)
+        bi = 0
+
+        while bi < bn:
+            ch = body[bi]
+
+            if ch.isspace():
+                bi += 1
+                continue
+
+            # Single-line comment: -- ...
+            if ch == '-' and bi + 1 < bn and body[bi + 1] == '-':
+                newline_pos = body.find('\n', bi + 2)
+                if newline_pos == -1:
+                    break
+                bi = newline_pos + 1
+                continue
+
+            # Block comment: /* ... */
+            if ch == '/' and bi + 1 < bn and body[bi + 1] == '*':
+                end_comment = body.find('*/', bi + 2)
+                if end_comment == -1:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated block comment inside table body.")
+                bi = end_comment + 2
+                continue
+
+            # Single-quoted string: '...'
+            if ch == "'":
+                bi += 1
+                while bi < bn:
+                    if body[bi] == "'":
+                        if bi + 1 < bn and body[bi + 1] == "'":
+                            bi += 2
+                        else:
+                            bi += 1
+                            break
+                    else:
+                        bi += 1
+                else:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated string literal inside table body.")
+                continue
+
+            # Double-quoted identifier: "..."
+            if ch == '"':
+                bi += 1
+                while bi < bn:
+                    if body[bi] == '"':
+                        if bi + 1 < bn and body[bi + 1] == '"':
+                            bi += 2
+                        else:
+                            bi += 1
+                            break
+                    else:
+                        bi += 1
+                else:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated double-quoted identifier inside table body.")
+                continue
+
+            # Backtick-quoted identifier: `...`
+            if ch == '`':
+                bi += 1
+                while bi < bn:
+                    if body[bi] == '`':
+                        if bi + 1 < bn and body[bi + 1] == '`':
+                            bi += 2
+                        else:
+                            bi += 1
+                            break
+                    else:
+                        bi += 1
+                else:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated backtick identifier inside table body.")
+                continue
+
+            # Bracket-quoted identifier: [...]
+            if ch == '[':
+                close_bracket = body.find(']', bi + 1)
+                if close_bracket == -1:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated bracket identifier inside table body.")
+                bi = close_bracket + 1
+                continue
+
+            # Unquoted word / identifier
+            if ch.isalpha() or ch == '_':
+                start_word = bi
+                while bi < bn and (body[bi].isalnum() or body[bi] == '_'):
+                    bi += 1
+                word = body[start_word:bi]
+
+                if word.upper() == "CHECK":
+                    # Must be followed by optional whitespace / comments, then '('
+                    check_pos = bi
+                    while check_pos < bn:
+                        c = body[check_pos]
+                        if c.isspace():
+                            check_pos += 1
+                            continue
+                        if c == '-' and check_pos + 1 < bn and body[check_pos + 1] == '-':
+                            nl = body.find('\n', check_pos + 2)
+                            if nl == -1:
+                                check_pos = bn
+                                break
+                            check_pos = nl + 1
+                            continue
+                        if c == '/' and check_pos + 1 < bn and body[check_pos + 1] == '*':
+                            ec = body.find('*/', check_pos + 2)
+                            if ec == -1:
+                                raise SchemaIntegrityError("DDL lexical analysis failure: unterminated block comment after CHECK keyword.")
+                            check_pos = ec + 2
+                            continue
+                        break
+
+                    if check_pos >= bn or body[check_pos] != '(':
+                        raise SchemaIntegrityError("DDL lexical analysis failure: CHECK keyword not followed by opening parenthesis '('.")
+
+                    # Found opening paren of CHECK constraint
+                    open_paren = check_pos
+                    expr_depth = 1
+                    ei = open_paren + 1
+
+                    while ei < bn and expr_depth > 0:
+                        ech = body[ei]
+
+                        # Single-line comment inside check
+                        if ech == '-' and ei + 1 < bn and body[ei + 1] == '-':
+                            nl = body.find('\n', ei + 2)
+                            if nl == -1:
+                                ei = bn
+                                break
+                            ei = nl + 1
+                            continue
+
+                        # Block comment inside check
+                        if ech == '/' and ei + 1 < bn and body[ei + 1] == '*':
+                            ec = body.find('*/', ei + 2)
+                            if ec == -1:
+                                raise SchemaIntegrityError("DDL lexical analysis failure: unterminated block comment inside CHECK expression.")
+                            ei = ec + 2
+                            continue
+
+                        # String literal inside check
+                        if ech == "'":
+                            ei += 1
+                            while ei < bn:
+                                if body[ei] == "'":
+                                    if ei + 1 < bn and body[ei + 1] == "'":
+                                        ei += 2
+                                    else:
+                                        ei += 1
+                                        break
+                                else:
+                                    ei += 1
+                            else:
+                                raise SchemaIntegrityError("DDL lexical analysis failure: unterminated string literal inside CHECK expression.")
+                            continue
+
+                        # Double-quoted identifier inside check
+                        if ech == '"':
+                            ei += 1
+                            while ei < bn:
+                                if body[ei] == '"':
+                                    if ei + 1 < bn and body[ei + 1] == '"':
+                                        ei += 2
+                                    else:
+                                        ei += 1
+                                        break
+                                else:
+                                    ei += 1
+                            else:
+                                raise SchemaIntegrityError("DDL lexical analysis failure: unterminated double-quoted identifier inside CHECK expression.")
+                            continue
+
+                        # Backtick identifier inside check
+                        if ech == '`':
+                            ei += 1
+                            while ei < bn:
+                                if body[ei] == '`':
+                                    if ei + 1 < bn and body[ei + 1] == '`':
+                                        ei += 2
+                                    else:
+                                        ei += 1
+                                        break
+                                else:
+                                    ei += 1
+                            else:
+                                raise SchemaIntegrityError("DDL lexical analysis failure: unterminated backtick identifier inside CHECK expression.")
+                            continue
+
+                        # Bracket identifier inside check
+                        if ech == '[':
+                            cb = body.find(']', ei + 1)
+                            if cb == -1:
+                                raise SchemaIntegrityError("DDL lexical analysis failure: unterminated bracket identifier inside CHECK expression.")
+                            ei = cb + 1
+                            continue
+
+                        # Parentheses inside check
+                        if ech == '(':
+                            expr_depth += 1
+                            ei += 1
+                            continue
+
+                        if ech == ')':
+                            expr_depth -= 1
+                            if expr_depth == 0:
+                                raw_expr = body[open_paren + 1:ei].strip()
+                                checks.append(raw_expr)
+                                bi = ei + 1
+                                break
+                            ei += 1
+                            continue
+
+                        ei += 1
+
+                    if expr_depth != 0:
+                        raise SchemaIntegrityError("DDL lexical analysis failure: unbalanced parentheses inside CHECK expression.")
+                    continue
+
+                continue
+
+            bi += 1
 
         return checks
 
     @staticmethod
     def tokenize_sql_expression(expr: str) -> List[str]:
         """
-        Tokenizes an SQL expression into canonical tokens.
-        Preserves string literals, standardizes SQL keywords to uppercase,
-        and standardizes identifiers/column names to lowercase.
+        Hardened tokenizer for SQL CHECK expressions.
+        Preserves string literals verbatim. Standardizes SQL keywords to uppercase.
+        Standardizes identifiers (including quoted identifiers) to lowercase.
+        Strips single-line and block comments.
+        Strictly fail-closed: raises SchemaIntegrityError on unterminated quotes,
+        unterminated block comments, or unbalanced parentheses.
         """
         SQL_KEYWORDS = {
             "AND", "OR", "NOT", "GLOB", "LIKE", "IN", "IS", "NULL",
@@ -1199,6 +1501,7 @@ class SchemaMigrator:
         tokens: List[str] = []
         i = 0
         n = len(expr)
+        paren_depth = 0
 
         while i < n:
             ch = expr[i]
@@ -1208,30 +1511,103 @@ class SchemaMigrator:
                 i += 1
                 continue
 
-            # String literal
+            # Single-line comment: -- ...
+            if ch == '-' and i + 1 < n and expr[i + 1] == '-':
+                newline_pos = expr.find('\n', i + 2)
+                if newline_pos == -1:
+                    break
+                i = newline_pos + 1
+                continue
+
+            # Block comment: /* ... */
+            if ch == '/' and i + 1 < n and expr[i + 1] == '*':
+                end_comment = expr.find('*/', i + 2)
+                if end_comment == -1:
+                    raise SchemaIntegrityError("CHECK expression lexical failure: unterminated block comment.")
+                i = end_comment + 2
+                continue
+
+            # Single-quoted string literal: '...'
             if ch == "'":
                 start = i
                 i += 1
                 while i < n:
                     if expr[i] == "'":
-                        if i + 1 < n and expr[i+1] == "'":
-                            i += 2  # Escaped quote
+                        if i + 1 < n and expr[i + 1] == "'":
+                            i += 2  # Escaped single quote
                         else:
                             i += 1
                             break
                     else:
                         i += 1
+                else:
+                    raise SchemaIntegrityError("CHECK expression lexical failure: unterminated string literal.")
                 tokens.append(expr[start:i])
                 continue
 
+            # Double-quoted identifier: "..."
+            if ch == '"':
+                start = i + 1
+                i += 1
+                while i < n:
+                    if expr[i] == '"':
+                        if i + 1 < n and expr[i + 1] == '"':
+                            i += 2  # Escaped double quote
+                        else:
+                            break
+                    else:
+                        i += 1
+                else:
+                    raise SchemaIntegrityError("CHECK expression lexical failure: unterminated double-quoted identifier.")
+                ident = expr[start:i].replace('""', '"')
+                i += 1
+                tokens.append(ident.lower())
+                continue
+
+            # Backtick-quoted identifier: `...`
+            if ch == '`':
+                start = i + 1
+                i += 1
+                while i < n:
+                    if expr[i] == '`':
+                        if i + 1 < n and expr[i + 1] == '`':
+                            i += 2
+                        else:
+                            break
+                    else:
+                        i += 1
+                else:
+                    raise SchemaIntegrityError("CHECK expression lexical failure: unterminated backtick identifier.")
+                ident = expr[start:i].replace('``', '`')
+                i += 1
+                tokens.append(ident.lower())
+                continue
+
+            # Bracket-quoted identifier: [...]
+            if ch == '[':
+                start = i + 1
+                close_bracket = expr.find(']', i + 1)
+                if close_bracket == -1:
+                    raise SchemaIntegrityError("CHECK expression lexical failure: unterminated bracket identifier.")
+                ident = expr[start:close_bracket]
+                i = close_bracket + 1
+                tokens.append(ident.lower())
+                continue
+
             # Multi-character operators
-            if i + 1 < n and expr[i:i+2] in ("<=", ">=", "!=", "<>"):
-                tokens.append(expr[i:i+2])
+            if i + 1 < n and expr[i:i + 2] in ("<=", ">=", "!=", "<>"):
+                tokens.append(expr[i:i + 2])
                 i += 2
                 continue
 
             # Single-character operators and punctuation
             if ch in "()=<>+-*/,":
+                if ch == '(':
+                    paren_depth += 1
+                elif ch == ')':
+                    paren_depth -= 1
+                    if paren_depth < 0:
+                        raise SchemaIntegrityError("CHECK expression lexical failure: unbalanced closing parenthesis.")
                 tokens.append(ch)
                 i += 1
                 continue
@@ -1249,9 +1625,12 @@ class SchemaMigrator:
                     tokens.append(word.lower())
                 continue
 
-            # Any other character
+            # Unexpected character
             tokens.append(ch)
             i += 1
+
+        if paren_depth != 0:
+            raise SchemaIntegrityError("CHECK expression lexical failure: unbalanced parentheses.")
 
         return tokens
 
