@@ -38,7 +38,21 @@ from python.tool_registry import (
     TRUSTED_SYSTEM_ROLES,
 )
 
+__all__ = [
+    "CashRepository",
+    "PositionRepository",
+    "WatchlistRepository",
+]
+
 _MUTATION_KEY = object()
+_SUPPORTED_MUTATION_OPERATIONS = frozenset({
+    "set_cash_balance",
+    "delete_cash",
+    "upsert_position",
+    "delete_position",
+    "upsert_watchlist_item",
+    "remove_watchlist_item",
+})
 
 
 class _FinancialMutationCapability:
@@ -64,6 +78,8 @@ class _FinancialMutationCapability:
             raise PermissionError("Direct instantiation of _FinancialMutationCapability is prohibited.")
         if connection is None:
             raise ValueError("Connection cannot be None")
+        if operation_name not in _SUPPORTED_MUTATION_OPERATIONS:
+            raise ValidationError(f"Unsupported mutation operation: '{operation_name}'")
         self.connection = connection
         self.correlation_id = correlation_id
         self.actor_role = actor_role
@@ -83,39 +99,6 @@ class _FinancialMutationCapability:
         if self._consumed:
             raise IntegrityConflictError("Mutation capability has already been consumed.")
         self._consumed = True
-
-
-def _record_changelog(
-    conn: sqlite3.Connection,
-    correlation_id: str,
-    actor_role: str,
-    operation_name: str,
-    target_resource: str,
-    approval_digest: Optional[str],
-    before_state: Optional[Dict[str, Any]],
-    after_state: Optional[Dict[str, Any]],
-    timestamp_utc: str,
-) -> FinancialChangelogEntry:
-    """Inserts an immutable audit entry into financial_changelog via trusted mutation capability (R1)."""
-    from python.database.repositories.audit import FinancialChangelogRepository
-
-    if not conn.in_transaction:
-        raise RepositoryError("Cannot record financial changelog: connection is not in an active transaction.")
-
-    capability = _FinancialMutationCapability(
-        key=_MUTATION_KEY,
-        connection=conn,
-        correlation_id=correlation_id,
-        actor_role=actor_role,
-        operation_name=operation_name,
-        target_resource=target_resource,
-        before_state=before_state,
-        after_state=after_state,
-        approval_digest=approval_digest,
-        timestamp_utc=timestamp_utc,
-    )
-    repo = FinancialChangelogRepository(conn)
-    return repo.append_entry(mutation_capability=capability)
 
 
 def _resolve_effective_actor(caller_role: Optional[str] = None) -> str:
@@ -292,18 +275,22 @@ class CashRepository(BaseRepository):
                 (norm_account, norm_currency, amount_str, timestamp_utc),
             )
 
-            # R1: Mandatory changelog insertion on the same transaction
-            _record_changelog(
-                conn=self._conn,
+            # R1.2: Construct capability directly from validated local state and append changelog
+            from python.database.repositories.audit import FinancialChangelogRepository
+
+            cap = _FinancialMutationCapability(
+                key=_MUTATION_KEY,
+                connection=self._conn,
                 correlation_id=cid,
                 actor_role=effective_actor,
                 operation_name="set_cash_balance",
                 target_resource=target_resource,
-                approval_digest=approval_digest,
                 before_state=before_state,
                 after_state=after_state,
+                approval_digest=approval_digest,
                 timestamp_utc=timestamp_utc,
             )
+            FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
 
             if owns_tx:
                 self._conn.execute("COMMIT;")
@@ -382,18 +369,22 @@ class CashRepository(BaseRepository):
                 (norm_account, norm_currency),
             )
 
-            # R1: Mandatory changelog recording
-            _record_changelog(
-                conn=self._conn,
+            # R1.2: Construct capability directly from validated local state and append changelog
+            from python.database.repositories.audit import FinancialChangelogRepository
+
+            cap = _FinancialMutationCapability(
+                key=_MUTATION_KEY,
+                connection=self._conn,
                 correlation_id=cid,
                 actor_role=effective_actor,
                 operation_name="delete_cash",
                 target_resource=target_resource,
-                approval_digest=approval_digest,
                 before_state=before_state,
                 after_state=None,
+                approval_digest=approval_digest,
                 timestamp_utc=timestamp_utc,
             )
+            FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
 
             if owns_tx:
                 self._conn.execute("COMMIT;")
@@ -582,18 +573,22 @@ class PositionRepository(BaseRepository):
                 (norm_account, norm_ticker, shares_str, wac_eur_str, wac_usd_str, timestamp_utc),
             )
 
-            # R1: Mandatory changelog insertion on the same transaction
-            _record_changelog(
-                conn=self._conn,
+            # R1.2: Construct capability directly from validated local state and append changelog
+            from python.database.repositories.audit import FinancialChangelogRepository
+
+            cap = _FinancialMutationCapability(
+                key=_MUTATION_KEY,
+                connection=self._conn,
                 correlation_id=cid,
                 actor_role=effective_actor,
                 operation_name="upsert_position",
                 target_resource=target_resource,
-                approval_digest=approval_digest,
                 before_state=before_state,
                 after_state=after_state,
+                approval_digest=approval_digest,
                 timestamp_utc=timestamp_utc,
             )
+            FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
 
             if owns_tx:
                 self._conn.execute("COMMIT;")
@@ -676,18 +671,22 @@ class PositionRepository(BaseRepository):
                 (norm_account, norm_ticker),
             )
 
-            # R1: Mandatory changelog recording
-            _record_changelog(
-                conn=self._conn,
+            # R1.2: Construct capability directly from validated local state and append changelog
+            from python.database.repositories.audit import FinancialChangelogRepository
+
+            cap = _FinancialMutationCapability(
+                key=_MUTATION_KEY,
+                connection=self._conn,
                 correlation_id=cid,
                 actor_role=effective_actor,
                 operation_name="delete_position",
                 target_resource=target_resource,
-                approval_digest=approval_digest,
                 before_state=before_state,
                 after_state=None,
+                approval_digest=approval_digest,
                 timestamp_utc=timestamp_utc,
             )
+            FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
 
             if owns_tx:
                 self._conn.execute("COMMIT;")
@@ -811,17 +810,22 @@ class WatchlistRepository(BaseRepository):
             cid = correlation_id or uuid.uuid4().hex
             approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
-            _record_changelog(
-                conn=self._conn,
+            # R1.2: Construct capability directly from validated local state and append changelog
+            from python.database.repositories.audit import FinancialChangelogRepository
+
+            cap = _FinancialMutationCapability(
+                key=_MUTATION_KEY,
+                connection=self._conn,
                 correlation_id=cid,
                 actor_role=effective_actor,
                 operation_name="upsert_watchlist_item",
                 target_resource=target_resource,
-                approval_digest=approval_digest,
                 before_state=before_state,
                 after_state=after_state,
+                approval_digest=approval_digest,
                 timestamp_utc=timestamp_utc,
             )
+            FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
 
             if owns_tx:
                 self._conn.execute("COMMIT;")
@@ -889,8 +893,12 @@ class WatchlistRepository(BaseRepository):
             cid = correlation_id or uuid.uuid4().hex
             approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
-            _record_changelog(
-                conn=self._conn,
+            # R1.2: Construct capability directly from validated local state and append changelog
+            from python.database.repositories.audit import FinancialChangelogRepository
+
+            cap = _FinancialMutationCapability(
+                key=_MUTATION_KEY,
+                connection=self._conn,
                 correlation_id=cid,
                 actor_role=effective_actor,
                 operation_name="remove_watchlist_item",
@@ -900,6 +908,7 @@ class WatchlistRepository(BaseRepository):
                 after_state=None,
                 timestamp_utc=timestamp_utc,
             )
+            FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
 
             if owns_tx:
                 self._conn.execute("COMMIT;")

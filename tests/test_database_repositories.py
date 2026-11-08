@@ -71,6 +71,7 @@ from python.database.repositories import (
     UnitOfWork,
     RepositoryFactory,
     validate_decimal,
+    utc_now_iso,
 )
 from python.tool_registry import (
     execution_role_context,
@@ -1897,7 +1898,7 @@ class TestR1FinancialMutationCapabilityBoundary(BaseRepositoryTestCase):
                 operation_name="set_cash_balance",
                 target_resource="portfolio_cash/PRIMARY/EUR",
                 before_state=None,
-                after_state={"amount": "100.00"},
+                after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"},
                 approval_digest=None,
                 timestamp_utc="2026-11-09T00:00:00Z",
             )
@@ -1928,7 +1929,7 @@ class TestR1FinancialMutationCapabilityBoundary(BaseRepositoryTestCase):
                     operation_name="set_cash_balance",
                     target_resource="portfolio_cash/PRIMARY/EUR",
                     before_state=None,
-                    after_state={"amount": "100.00"},
+                    after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"},
                     approval_digest=None,
                     timestamp_utc="2026-11-09T00:00:00Z",
                 )
@@ -2268,6 +2269,435 @@ class TestR2SavepointRollbackFailureIntegrity(BaseRepositoryTestCase):
             self.assertFalse(conn.in_transaction)
             self.assertIsNotNone(repo.get_bar("UNRELATED_1", "2026-01-02"))
             self.assertIsNotNone(repo.get_bar("UNRELATED_2", "2026-01-02"))
+
+
+# ===========================================================================
+# 18. Stage 1.4.1.3: Capability Minting Closure & Mutation-State Verification
+# ===========================================================================
+
+class TestStage1413FinancialChangelogClosureAndStateVerification(BaseRepositoryTestCase):
+    """
+    Dedicated adversarial test suite for Stage 1.4.1.3:
+    Verifies total closure of capability minting bypasses and fail-closed state verification.
+    """
+
+    def test_1_record_changelog_not_importable_or_callable(self):
+        """1. _record_changelog() is no longer an importable general-purpose capability-minting route."""
+        # Attempt direct import from financial.py
+        with self.assertRaises(ImportError):
+            from python.database.repositories.financial import _record_changelog  # type: ignore
+
+        # Inspect module attributes
+        import python.database.repositories.financial as fin_mod
+        self.assertFalse(hasattr(fin_mod, "_record_changelog"))
+
+        import python.database.repositories as repo_pkg
+        self.assertFalse(hasattr(repo_pkg, "_record_changelog"))
+
+    def test_2_removed_public_factory_and_exports_remain_absent(self):
+        """2. The removed public factory and public capability exports remain absent."""
+        with self.assertRaises(ImportError):
+            from python.database.repositories.base import create_mutation_capability  # type: ignore
+        with self.assertRaises(ImportError):
+            from python.database.repositories import create_mutation_capability  # type: ignore
+        with self.assertRaises(ImportError):
+            from python.database.repositories.financial import create_mutation_capability  # type: ignore
+
+        import python.database.repositories as repo_pkg
+        self.assertNotIn("_FinancialMutationCapability", repo_pkg.__all__)
+        self.assertNotIn("create_mutation_capability", repo_pkg.__all__)
+
+    def test_3_cannot_fabricate_changelog_from_existing_cash_balance(self):
+        """3. A caller cannot fabricate a changelog entry by supplying an existing cash balance as after_state."""
+        with self.core_manager.connection() as conn:
+            # Genuine setup: cash balance already exists in database
+            cash_repo = CashRepository(conn)
+            cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("1000.00"), correlation_id="INITIAL_SETUP")
+
+            changelog_repo = FinancialChangelogRepository(conn)
+            initial_count = len(changelog_repo.list_entries())
+
+            # Caller in an active transaction attempts to append a fabricated changelog entry
+            # claiming that a mutation occurred setting cash to the already-existing 1000.00 EUR
+            conn.execute("BEGIN IMMEDIATE;")
+            with self.assertRaises(PermissionError) as ctx:
+                changelog_repo.append_entry(
+                    correlation_id="FABRICATED_FORGERY",
+                    actor_role="System",
+                    operation_name="set_cash_balance",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "500.00"},
+                    after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "1000.00"},
+                )
+            self.assertIn("Direct insertion into financial_changelog via public repository API is prohibited", str(ctx.exception))
+
+            # Attempting to construct capability directly without internal key fails closed
+            from python.database.repositories.financial import _FinancialMutationCapability
+            with self.assertRaises(PermissionError):
+                _FinancialMutationCapability(
+                    key="INVALID_KEY",
+                    connection=conn,
+                    correlation_id="FAKE_CAP",
+                    actor_role="System",
+                    operation_name="set_cash_balance",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state=None,
+                    after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "1000.00"},
+                    approval_digest=None,
+                    timestamp_utc=utc_now_iso(),
+                )
+
+            conn.execute("ROLLBACK;")
+            # Confirm no changelog entries were added
+            self.assertEqual(len(changelog_repo.list_entries()), initial_count)
+
+    def test_4_unsupported_operation_name_rejected(self):
+        """4. A caller cannot fabricate entries for an unsupported operation name."""
+        from python.database.repositories.financial import _FinancialMutationCapability, _MUTATION_KEY
+        with self.core_manager.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            repo = FinancialChangelogRepository(conn)
+
+            # Capability construction itself rejects unsupported operations
+            with self.assertRaises(ValidationError) as ctx:
+                _FinancialMutationCapability(
+                    key=_MUTATION_KEY,
+                    connection=conn,
+                    correlation_id="OP_TEST",
+                    actor_role="System",
+                    operation_name="grant_special_dividend",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state=None,
+                    after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"},
+                    approval_digest=None,
+                    timestamp_utc=utc_now_iso(),
+                )
+            self.assertIn("Unsupported mutation operation", str(ctx.exception))
+
+            # Even if capability was somehow constructed with unsupported op, append_entry fails closed
+            fake_cap = _FinancialMutationCapability(
+                key=_MUTATION_KEY,
+                connection=conn,
+                correlation_id="OP_TEST_2",
+                actor_role="System",
+                operation_name="set_cash_balance",
+                target_resource="portfolio_cash/PRIMARY/EUR",
+                before_state=None,
+                after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"},
+                approval_digest=None,
+                timestamp_utc=utc_now_iso(),
+            )
+            fake_cap.operation_name = "unauthorized_transfer"
+            with self.assertRaises(ValidationError) as ctx2:
+                repo.append_entry(mutation_capability=fake_cap)
+            self.assertIn("Unsupported financial mutation operation", str(ctx2.exception))
+            conn.execute("ROLLBACK;")
+
+    def test_5_malformed_target_path_fails_closed(self):
+        """5. A malformed target path fails closed."""
+        from python.database.repositories.financial import _FinancialMutationCapability, _MUTATION_KEY
+        with self.core_manager.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            repo = FinancialChangelogRepository(conn)
+
+            malformed_paths = [
+                ("set_cash_balance", "portfolio_cash"),
+                ("set_cash_balance", "portfolio_cash/PRIMARY"),
+                ("set_cash_balance", "portfolio_cash/PRIMARY/EUR/EXTRA"),
+                ("set_cash_balance", "wrong_table/PRIMARY/EUR"),
+                ("upsert_position", "portfolio_positions/AAPL"),
+                ("upsert_position", "portfolio_positions/PRIMARY/AAPL/EXTRA"),
+                ("upsert_watchlist_item", "watchlist"),
+                ("upsert_watchlist_item", "watchlist/AAPL/EXTRA"),
+                ("upsert_watchlist_item", "invalid_table/AAPL"),
+            ]
+            for op, bad_target in malformed_paths:
+                cap = _FinancialMutationCapability(
+                    key=_MUTATION_KEY,
+                    connection=conn,
+                    correlation_id=f"BAD_TARGET_{uuid.uuid4().hex[:6]}",
+                    actor_role="System",
+                    operation_name=op,
+                    target_resource=bad_target,
+                    before_state=None,
+                    after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"},
+                    approval_digest=None,
+                    timestamp_utc=utc_now_iso(),
+                )
+                with self.assertRaises(ValidationError, msg=f"Should reject {op} with {bad_target}") as ctx:
+                    repo.append_entry(mutation_capability=cap)
+                self.assertIn("Malformed target_resource", str(ctx.exception))
+            conn.execute("ROLLBACK;")
+
+    def test_6_partial_or_mismatched_cash_after_state_rejected(self):
+        """6. Partial or mismatched cash after-state is rejected."""
+        from python.database.repositories.financial import _FinancialMutationCapability, _MUTATION_KEY
+        with self.core_manager.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) VALUES ('PRIMARY', 'EUR', '500.00', '2026-11-09T00:00:00Z')"
+            )
+            repo = FinancialChangelogRepository(conn)
+
+            invalid_after_states = [
+                {"account_id": "PRIMARY", "currency": "EUR"},  # missing amount
+                {"currency": "EUR", "amount": "500.00"},  # missing account_id
+                {"account_id": "PRIMARY", "amount": "500.00"},  # missing currency
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "999.00"},  # mismatched amount
+                {"account_id": "SECONDARY", "currency": "EUR", "amount": "500.00"},  # mismatched account
+                {"account_id": "PRIMARY", "currency": "USD", "amount": "500.00"},  # mismatched currency
+                None,  # None after_state for non-delete
+                "not_a_dict",  # non-dict
+            ]
+            for bad_after in invalid_after_states:
+                cap = _FinancialMutationCapability(
+                    key=_MUTATION_KEY,
+                    connection=conn,
+                    correlation_id=f"BAD_CASH_{uuid.uuid4().hex[:6]}",
+                    actor_role="System",
+                    operation_name="set_cash_balance",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state=None,
+                    after_state=bad_after,  # type: ignore
+                    approval_digest=None,
+                    timestamp_utc=utc_now_iso(),
+                )
+                with self.assertRaises(IntegrityConflictError, msg=f"Should reject bad after_state: {bad_after}"):
+                    repo.append_entry(mutation_capability=cap)
+            conn.execute("ROLLBACK;")
+
+    def test_7_partial_or_mismatched_position_after_state_rejected_including_wac_usd(self):
+        """7. Partial or mismatched position after-state is rejected, including WAC USD."""
+        from python.database.repositories.financial import _FinancialMutationCapability, _MUTATION_KEY
+        with self.core_manager.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute(
+                """
+                INSERT INTO portfolio_positions (account_id, ticker, shares, wac_eur, wac_usd, last_updated_at_utc)
+                VALUES ('PRIMARY', 'AAPL', '10.0000', '150.0000', '165.0000', '2026-11-09T00:00:00Z')
+                """
+            )
+            repo = FinancialChangelogRepository(conn)
+
+            invalid_position_states = [
+                # missing shares
+                {"account_id": "PRIMARY", "ticker": "AAPL", "wac_eur": "150.0000", "wac_usd": "165.0000"},
+                # missing wac_eur
+                {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "10.0000", "wac_usd": "165.0000"},
+                # mismatched shares
+                {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "15.0000", "wac_eur": "150.0000", "wac_usd": "165.0000"},
+                # mismatched wac_eur
+                {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "10.0000", "wac_eur": "140.0000", "wac_usd": "165.0000"},
+                # mismatched wac_usd
+                {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "10.0000", "wac_eur": "150.0000", "wac_usd": "199.0000"},
+                # missing wac_usd when db has 165.0000
+                {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "10.0000", "wac_eur": "150.0000", "wac_usd": None},
+                # mismatched account
+                {"account_id": "OTHER", "ticker": "AAPL", "shares": "10.0000", "wac_eur": "150.0000", "wac_usd": "165.0000"},
+                # mismatched ticker
+                {"account_id": "PRIMARY", "ticker": "MSFT", "shares": "10.0000", "wac_eur": "150.0000", "wac_usd": "165.0000"},
+            ]
+            for bad_pos in invalid_position_states:
+                cap = _FinancialMutationCapability(
+                    key=_MUTATION_KEY,
+                    connection=conn,
+                    correlation_id=f"BAD_POS_{uuid.uuid4().hex[:6]}",
+                    actor_role="System",
+                    operation_name="upsert_position",
+                    target_resource="portfolio_positions/PRIMARY/AAPL",
+                    before_state=None,
+                    after_state=bad_pos,
+                    approval_digest=None,
+                    timestamp_utc=utc_now_iso(),
+                )
+                with self.assertRaises(IntegrityConflictError, msg=f"Should reject bad pos: {bad_pos}"):
+                    repo.append_entry(mutation_capability=cap)
+            conn.execute("ROLLBACK;")
+
+    def test_8_partial_or_mismatched_watchlist_after_state_rejected_including_notes(self):
+        """8. Partial or mismatched watchlist after-state is rejected, including notes."""
+        from python.database.repositories.financial import _FinancialMutationCapability, _MUTATION_KEY
+        with self.core_manager.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute(
+                "INSERT INTO watchlist (ticker, status, added_at_utc, notes) VALUES ('NVDA', 'ACTIVE', '2026-11-09T00:00:00Z', 'AI momentum leader')"
+            )
+            repo = FinancialChangelogRepository(conn)
+
+            invalid_wl_states = [
+                # missing status
+                {"ticker": "NVDA", "notes": "AI momentum leader"},
+                # missing ticker
+                {"status": "ACTIVE", "notes": "AI momentum leader"},
+                # mismatched status
+                {"ticker": "NVDA", "status": "PAUSED", "notes": "AI momentum leader"},
+                # mismatched notes
+                {"ticker": "NVDA", "status": "ACTIVE", "notes": "Completely different notes"},
+                # None notes when db has notes
+                {"ticker": "NVDA", "status": "ACTIVE", "notes": None},
+                # mismatched ticker
+                {"ticker": "AMD", "status": "ACTIVE", "notes": "AI momentum leader"},
+            ]
+            for bad_wl in invalid_wl_states:
+                cap = _FinancialMutationCapability(
+                    key=_MUTATION_KEY,
+                    connection=conn,
+                    correlation_id=f"BAD_WL_{uuid.uuid4().hex[:6]}",
+                    actor_role="System",
+                    operation_name="upsert_watchlist_item",
+                    target_resource="watchlist/NVDA",
+                    before_state=None,
+                    after_state=bad_wl,
+                    approval_digest=None,
+                    timestamp_utc=utc_now_iso(),
+                )
+                with self.assertRaises(IntegrityConflictError, msg=f"Should reject bad wl: {bad_wl}"):
+                    repo.append_entry(mutation_capability=cap)
+            conn.execute("ROLLBACK;")
+
+    def test_9_genuine_mutations_produce_correct_changelog(self):
+        """9. Genuine cash, position and watchlist mutations still produce correct changelog entries."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            pos_repo = PositionRepository(conn)
+            wl_repo = WatchlistRepository(conn)
+            changelog_repo = FinancialChangelogRepository(conn)
+
+            # 1. Cash set & delete
+            cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("1250.50"), correlation_id="CID_CASH_SET")
+            e1 = changelog_repo.list_entries(correlation_id="CID_CASH_SET")
+            self.assertEqual(len(e1), 1)
+            self.assertEqual(e1[0].operation_name, "set_cash_balance")
+            self.assertEqual(e1[0].after_state["amount"], "1250.50")
+            self.assertEqual(e1[0].after_state["currency"], "EUR")
+            self.assertEqual(e1[0].after_state["account_id"], "PRIMARY")
+
+            cash_repo.delete_cash("PRIMARY", "EUR", correlation_id="CID_CASH_DEL")
+            e2 = changelog_repo.list_entries(correlation_id="CID_CASH_DEL")
+            self.assertEqual(len(e2), 1)
+            self.assertEqual(e2[0].operation_name, "delete_cash")
+            self.assertIsNone(e2[0].after_state)
+
+            # 2. Position upsert & delete
+            pos_repo.upsert_position("PRIMARY", "AAPL", Decimal("10"), Decimal("150.25"), Decimal("165.50"), correlation_id="CID_POS_UP")
+            e3 = changelog_repo.list_entries(correlation_id="CID_POS_UP")
+            self.assertEqual(len(e3), 1)
+            self.assertEqual(e3[0].operation_name, "upsert_position")
+            self.assertEqual(e3[0].after_state["shares"], "10")
+            self.assertEqual(e3[0].after_state["wac_eur"], "150.25")
+            self.assertEqual(e3[0].after_state["wac_usd"], "165.50")
+
+            pos_repo.delete_position("PRIMARY", "AAPL", correlation_id="CID_POS_DEL")
+            e4 = changelog_repo.list_entries(correlation_id="CID_POS_DEL")
+            self.assertEqual(len(e4), 1)
+            self.assertEqual(e4[0].operation_name, "delete_position")
+            self.assertIsNone(e4[0].after_state)
+
+            # 3. Watchlist upsert & remove
+            wl_repo.upsert_watchlist_item("MSFT", "ACTIVE", "Q3 earnings setup", correlation_id="CID_WL_UP")
+            e5 = changelog_repo.list_entries(correlation_id="CID_WL_UP")
+            self.assertEqual(len(e5), 1)
+            self.assertEqual(e5[0].operation_name, "upsert_watchlist_item")
+            self.assertEqual(e5[0].after_state["ticker"], "MSFT")
+            self.assertEqual(e5[0].after_state["status"], "ACTIVE")
+            self.assertEqual(e5[0].after_state["notes"], "Q3 earnings setup")
+
+            wl_repo.remove_watchlist_item("MSFT", correlation_id="CID_WL_DEL")
+            e6 = changelog_repo.list_entries(correlation_id="CID_WL_DEL")
+            self.assertEqual(len(e6), 1)
+            self.assertEqual(e6[0].operation_name, "remove_watchlist_item")
+            self.assertIsNone(e6[0].after_state)
+
+    def test_10_changelog_failure_rolls_back_associated_mutation(self):
+        """10. Changelog insertion failure rolls back the associated mutation."""
+        with self.core_manager.connection() as conn:
+            conn.execute("DROP TABLE financial_changelog;")
+            cash_repo = CashRepository(conn)
+            pos_repo = PositionRepository(conn)
+            wl_repo = WatchlistRepository(conn)
+
+            # Cash mutation fails and rolls back
+            with self.assertRaises(sqlite3.OperationalError):
+                cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("999.00"))
+            self.assertIsNone(cash_repo.get_cash("PRIMARY", "EUR"))
+
+            # Position mutation fails and rolls back
+            with self.assertRaises(sqlite3.OperationalError):
+                pos_repo.upsert_position("PRIMARY", "TSLA", Decimal("5"), Decimal("200.00"))
+            self.assertIsNone(pos_repo.get_position("PRIMARY", "TSLA"))
+
+            # Watchlist mutation fails and rolls back
+            with self.assertRaises(sqlite3.OperationalError):
+                wl_repo.upsert_watchlist_item("TSLA", "ACTIVE", "EV leader")
+            self.assertIsNone(wl_repo.get_watchlist_item("TSLA"))
+
+    def test_11_capability_replay_and_cross_connection_rejected(self):
+        """11. Capability replay and cross-connection use remain rejected."""
+        from python.database.repositories.financial import _FinancialMutationCapability, _MUTATION_KEY
+        with self.core_manager.connection() as conn1:
+            with self.core_manager.connection() as conn2:
+                conn1.execute("BEGIN IMMEDIATE;")
+                conn1.execute(
+                    "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) VALUES ('PRIMARY', 'EUR', '100.00', '2026-11-09T00:00:00Z')"
+                )
+                cap = _FinancialMutationCapability(
+                    key=_MUTATION_KEY,
+                    connection=conn1,
+                    correlation_id="REPLAY_CROSS_TEST",
+                    actor_role="System",
+                    operation_name="set_cash_balance",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state=None,
+                    after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"},
+                    approval_digest=None,
+                    timestamp_utc=utc_now_iso(),
+                )
+
+                # Cross connection consumption rejected
+                repo2 = FinancialChangelogRepository(conn2)
+                with self.assertRaises(PermissionError) as ctx_cross:
+                    repo2.append_entry(mutation_capability=cap)
+                self.assertIn("bound to a different database connection", str(ctx_cross.exception))
+
+                # Legitimate consumption on connection 1 succeeds
+                repo1 = FinancialChangelogRepository(conn1)
+                repo1.append_entry(mutation_capability=cap)
+                self.assertTrue(cap.is_consumed)
+
+                # Replay on connection 1 rejected
+                with self.assertRaises(IntegrityConflictError) as ctx_replay:
+                    repo1.append_entry(mutation_capability=cap)
+                self.assertIn("already been consumed", str(ctx_replay.exception))
+                conn1.execute("ROLLBACK;")
+
+    def test_12_uow_multi_repo_transactions_continue_to_work(self):
+        """12. Existing UnitOfWork multi-repository transactions continue to work."""
+        # Multi-repo atomic commit
+        with UnitOfWork(self.core_manager, auto_commit=True) as uow:
+            uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("2000.00"))
+            uow.positions.upsert_position("PRIMARY", "SPY", Decimal("10"), Decimal("500.00"))
+            uow.watchlist.upsert_watchlist_item("SPY", "ACTIVE", "Core ETF")
+
+        with self.core_manager.connection() as conn:
+            changelog_repo = FinancialChangelogRepository(conn)
+            self.assertEqual(len(changelog_repo.list_entries()), 3)
+            self.assertIsNotNone(CashRepository(conn).get_cash("PRIMARY", "EUR"))
+            self.assertIsNotNone(PositionRepository(conn).get_position("PRIMARY", "SPY"))
+            self.assertIsNotNone(WatchlistRepository(conn).get_watchlist_item("SPY"))
+
+        # Multi-repo rollback on failure
+        try:
+            with UnitOfWork(self.core_manager, auto_commit=True) as uow:
+                uow.cash.set_cash_balance("PRIMARY", "USD", Decimal("5000.00"))
+                raise RuntimeError("Simulated failure inside UnitOfWork")
+        except RuntimeError:
+            pass
+
+        with self.core_manager.connection() as conn:
+            # USD balance was rolled back
+            self.assertIsNone(CashRepository(conn).get_cash("PRIMARY", "USD"))
+            # Changelog count remains 3 (zero partial entries recorded)
+            self.assertEqual(len(FinancialChangelogRepository(conn).list_entries()), 3)
 
 
 if __name__ == "__main__":

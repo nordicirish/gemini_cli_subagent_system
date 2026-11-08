@@ -296,9 +296,14 @@ class FinancialChangelogRepository(BaseRepository):
             )
 
         # R3: Enforce financial mutation authorization boundary
+        target_res = (
+            mutation_capability.target_resource
+            if mutation_capability is not None and hasattr(mutation_capability, "target_resource")
+            else (target_resource or "portfolio_cash/PRIMARY/EUR")
+        )
         authorize_financial_mutation(
-            operation_name=operation_name or "update_ssot",
-            target_resource=target_resource or "portfolio_cash/PRIMARY/EUR",
+            operation_name="update_ssot",
+            target_resource=target_res,
             caller_role=active_role,
         )
 
@@ -339,62 +344,143 @@ class FinancialChangelogRepository(BaseRepository):
             else "{}"
         )
 
-        # State verification: verify that a genuine mutation occurred in the target table on this connection
+        # R1.3: Fail-closed state verification: accept only the six explicitly supported mutation operations
+        SUPPORTED_OPERATIONS = frozenset({
+            "set_cash_balance",
+            "delete_cash",
+            "upsert_position",
+            "delete_position",
+            "upsert_watchlist_item",
+            "remove_watchlist_item",
+        })
+        if norm_op not in SUPPORTED_OPERATIONS:
+            raise ValidationError(
+                f"Unsupported financial mutation operation: '{norm_op}'. "
+                f"Must be one of: {sorted(SUPPORTED_OPERATIONS)}"
+            )
+
         cur = self._conn.cursor()
+        parts = norm_target.split("/")
+
         if norm_op == "set_cash_balance":
-            parts = norm_target.split("/")
-            if len(parts) == 3 and parts[0] == "portfolio_cash":
-                cur.execute(
-                    "SELECT amount FROM portfolio_cash WHERE account_id = ? AND currency = ?",
-                    (parts[1], parts[2]),
-                )
-                row = cur.fetchone()
-                if row is None or (mutation_capability.after_state and row[0] != mutation_capability.after_state.get("amount")):
-                    raise IntegrityConflictError("State verification failed: database state does not match changelog after_state.")
+            if len(parts) != 3 or parts[0] != "portfolio_cash" or not parts[1] or not parts[2]:
+                raise ValidationError(f"Malformed target_resource for cash operation '{norm_op}': '{norm_target}'")
+            account_id, currency = parts[1], parts[2]
+            after = mutation_capability.after_state
+            if not isinstance(after, dict):
+                raise IntegrityConflictError("State verification failed: set_cash_balance after_state must be a dictionary.")
+            if "account_id" not in after or "currency" not in after or "amount" not in after:
+                raise IntegrityConflictError("State verification failed: cash after_state missing required fields (account_id, currency, amount).")
+            if after["account_id"] != account_id or after["currency"] != currency:
+                raise IntegrityConflictError("State verification failed: cash after_state does not match target_resource.")
+            cur.execute(
+                "SELECT account_id, currency, amount FROM portfolio_cash WHERE account_id = ? AND currency = ?",
+                (account_id, currency),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise IntegrityConflictError(f"State verification failed: cash balance record does not exist for '{norm_target}'.")
+            if row[0] != after["account_id"] or row[1] != after["currency"] or row[2] != after["amount"]:
+                raise IntegrityConflictError("State verification failed: database cash state does not match changelog after_state.")
+
         elif norm_op == "delete_cash":
-            parts = norm_target.split("/")
-            if len(parts) == 3 and parts[0] == "portfolio_cash":
-                cur.execute(
-                    "SELECT 1 FROM portfolio_cash WHERE account_id = ? AND currency = ?",
-                    (parts[1], parts[2]),
-                )
-                if cur.fetchone() is not None:
-                    raise IntegrityConflictError("State verification failed: cash balance record was not deleted.")
+            if len(parts) != 3 or parts[0] != "portfolio_cash" or not parts[1] or not parts[2]:
+                raise ValidationError(f"Malformed target_resource for cash operation '{norm_op}': '{norm_target}'")
+            account_id, currency = parts[1], parts[2]
+            if mutation_capability.after_state is not None and mutation_capability.after_state != {}:
+                raise IntegrityConflictError("State verification failed: delete_cash after_state must be None.")
+            cur.execute(
+                "SELECT 1 FROM portfolio_cash WHERE account_id = ? AND currency = ?",
+                (account_id, currency),
+            )
+            if cur.fetchone() is not None:
+                raise IntegrityConflictError(f"State verification failed: cash balance record was not deleted for '{norm_target}'.")
+
         elif norm_op == "upsert_position":
-            parts = norm_target.split("/")
-            if len(parts) == 3 and parts[0] == "portfolio_positions":
-                cur.execute(
-                    "SELECT shares, wac_eur FROM portfolio_positions WHERE account_id = ? AND ticker = ?",
-                    (parts[1], parts[2]),
+            if len(parts) != 3 or parts[0] != "portfolio_positions" or not parts[1] or not parts[2]:
+                raise ValidationError(f"Malformed target_resource for position operation '{norm_op}': '{norm_target}'")
+            account_id, ticker = parts[1], parts[2]
+            after = mutation_capability.after_state
+            if not isinstance(after, dict):
+                raise IntegrityConflictError("State verification failed: upsert_position after_state must be a dictionary.")
+            required_keys = {"account_id", "ticker", "shares", "wac_eur"}
+            if not required_keys.issubset(after.keys()):
+                raise IntegrityConflictError(
+                    f"State verification failed: position after_state missing required fields {required_keys - set(after.keys())}."
                 )
-                row = cur.fetchone()
-                if row is None:
-                    raise IntegrityConflictError("State verification failed: position record does not exist.")
-                if mutation_capability.after_state:
-                    if row[0] != mutation_capability.after_state.get("shares") or row[1] != mutation_capability.after_state.get("wac_eur"):
-                        raise IntegrityConflictError("State verification failed: position values do not match after_state.")
+            if after["account_id"] != account_id or after["ticker"] != ticker:
+                raise IntegrityConflictError("State verification failed: position after_state does not match target_resource.")
+            cur.execute(
+                "SELECT account_id, ticker, shares, wac_eur, wac_usd FROM portfolio_positions WHERE account_id = ? AND ticker = ?",
+                (account_id, ticker),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise IntegrityConflictError(f"State verification failed: position record does not exist for '{norm_target}'.")
+            if (
+                row[0] != after["account_id"]
+                or row[1] != after["ticker"]
+                or row[2] != after["shares"]
+                or row[3] != after["wac_eur"]
+                or row[4] != after.get("wac_usd")
+            ):
+                raise IntegrityConflictError("State verification failed: database position values do not match after_state.")
+
         elif norm_op == "delete_position":
-            parts = norm_target.split("/")
-            if len(parts) == 3 and parts[0] == "portfolio_positions":
-                cur.execute(
-                    "SELECT 1 FROM portfolio_positions WHERE account_id = ? AND ticker = ?",
-                    (parts[1], parts[2]),
-                )
-                if cur.fetchone() is not None:
-                    raise IntegrityConflictError("State verification failed: position record was not deleted.")
+            if len(parts) != 3 or parts[0] != "portfolio_positions" or not parts[1] or not parts[2]:
+                raise ValidationError(f"Malformed target_resource for position operation '{norm_op}': '{norm_target}'")
+            account_id, ticker = parts[1], parts[2]
+            if mutation_capability.after_state is not None and mutation_capability.after_state != {}:
+                raise IntegrityConflictError("State verification failed: delete_position after_state must be None.")
+            cur.execute(
+                "SELECT 1 FROM portfolio_positions WHERE account_id = ? AND ticker = ?",
+                (account_id, ticker),
+            )
+            if cur.fetchone() is not None:
+                raise IntegrityConflictError(f"State verification failed: position record was not deleted for '{norm_target}'.")
+
         elif norm_op == "upsert_watchlist_item":
-            parts = norm_target.split("/")
-            if len(parts) == 2 and parts[0] == "watchlist":
-                cur.execute("SELECT status FROM watchlist WHERE ticker = ?", (parts[1],))
-                row = cur.fetchone()
-                if row is None or (mutation_capability.after_state and row[0] != mutation_capability.after_state.get("status")):
-                    raise IntegrityConflictError("State verification failed: watchlist state does not match after_state.")
+            if len(parts) != 2 or parts[0] != "watchlist" or not parts[1]:
+                raise ValidationError(f"Malformed target_resource for watchlist operation '{norm_op}': '{norm_target}'")
+            ticker = parts[1]
+            after = mutation_capability.after_state
+            if not isinstance(after, dict):
+                raise IntegrityConflictError("State verification failed: upsert_watchlist_item after_state must be a dictionary.")
+            required_keys = {"ticker", "status"}
+            if not required_keys.issubset(after.keys()):
+                raise IntegrityConflictError(
+                    f"State verification failed: watchlist after_state missing required fields {required_keys - set(after.keys())}."
+                )
+            if after["ticker"] != ticker:
+                raise IntegrityConflictError("State verification failed: watchlist after_state does not match target_resource.")
+            cur.execute(
+                "SELECT ticker, status, notes FROM watchlist WHERE ticker = ?",
+                (ticker,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise IntegrityConflictError(f"State verification failed: watchlist item does not exist for '{norm_target}'.")
+            if (
+                row[0] != after["ticker"]
+                or row[1] != after["status"]
+                or row[2] != after.get("notes")
+            ):
+                raise IntegrityConflictError("State verification failed: database watchlist state does not match after_state.")
+
         elif norm_op == "remove_watchlist_item":
-            parts = norm_target.split("/")
-            if len(parts) == 2 and parts[0] == "watchlist":
-                cur.execute("SELECT 1 FROM watchlist WHERE ticker = ?", (parts[1],))
-                if cur.fetchone() is not None:
-                    raise IntegrityConflictError("State verification failed: watchlist item was not removed.")
+            if len(parts) != 2 or parts[0] != "watchlist" or not parts[1]:
+                raise ValidationError(f"Malformed target_resource for watchlist operation '{norm_op}': '{norm_target}'")
+            ticker = parts[1]
+            if mutation_capability.after_state is not None and mutation_capability.after_state != {}:
+                raise IntegrityConflictError("State verification failed: remove_watchlist_item after_state must be None.")
+            cur.execute(
+                "SELECT 1 FROM watchlist WHERE ticker = ?",
+                (ticker,),
+            )
+            if cur.fetchone() is not None:
+                raise IntegrityConflictError(f"State verification failed: watchlist item was not removed for '{norm_target}'.")
+        else:
+            raise ValidationError(f"Unsupported financial mutation operation: '{norm_op}'")
 
         try:
             cur.execute(
