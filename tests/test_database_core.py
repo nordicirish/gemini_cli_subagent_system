@@ -250,7 +250,7 @@ class TestDatabaseSchema(unittest.TestCase):
             conn.execute(
                 """
                 CREATE TABLE portfolio_cash (
-                    account_id TEXT NOT NULL,
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
                     currency TEXT NOT NULL,
                     amount REAL NOT NULL,
                     last_updated_at_utc TEXT NOT NULL,
@@ -272,7 +272,7 @@ class TestDatabaseSchema(unittest.TestCase):
             conn.execute(
                 """
                 CREATE TABLE portfolio_cash (
-                    account_id TEXT NOT NULL,
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
                     currency TEXT NOT NULL,
                     amount TEXT NOT NULL,
                     last_updated_at_utc TEXT NOT NULL,
@@ -363,6 +363,398 @@ class TestDatabaseSchema(unittest.TestCase):
                     "INSERT INTO portfolio_positions VALUES ('PRIMARY', '', '10.0000', '500.0000', NULL, ?);",
                     (now,),
                 )
+
+    def test_cash_scale_constraint_removal_rejected(self):
+        """E1: Verify that removing the <= 2 decimal scale check from portfolio_cash raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                    amount TEXT NOT NULL CHECK (
+                        amount NOT GLOB '*[^0-9.]*'
+                        AND amount NOT GLOB '*.*.*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("missing mandatory constraint pattern", str(ctx.exception))
+            self.assertIn("amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2", str(ctx.exception))
+
+    def test_shares_scale_constraint_removal_rejected(self):
+        """E1: Verify that removing the <= 4 decimal scale check from portfolio_positions raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_positions;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_positions (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    ticker TEXT NOT NULL CHECK (ticker = UPPER(TRIM(ticker)) AND length(ticker) > 0),
+                    shares TEXT NOT NULL CHECK (
+                        shares NOT GLOB '*[^0-9.]*'
+                        AND shares NOT GLOB '*.*.*'
+                        AND shares NOT LIKE '%.%.%'
+                        AND shares NOT GLOB '.*'
+                        AND shares NOT GLOB '*.'
+                        AND shares NOT GLOB '0[0-9]*'
+                        AND length(shares) > 0
+                    ),
+                    wac_eur TEXT NOT NULL CHECK (
+                        wac_eur NOT GLOB '*[^0-9.]*'
+                        AND wac_eur NOT GLOB '*.*.*'
+                        AND wac_eur NOT LIKE '%.%.%'
+                        AND wac_eur NOT GLOB '.*'
+                        AND wac_eur NOT GLOB '*.'
+                        AND wac_eur NOT GLOB '0[0-9]*'
+                        AND length(wac_eur) > 0
+                        AND (wac_eur NOT LIKE '%.%' OR length(substr(wac_eur, instr(wac_eur, '.') + 1)) <= 4)
+                    ),
+                    wac_usd TEXT CHECK (
+                        wac_usd IS NULL OR (
+                            wac_usd NOT GLOB '*[^0-9.]*'
+                            AND wac_usd NOT GLOB '*.*.*'
+                            AND wac_usd NOT LIKE '%.%.%'
+                            AND wac_usd NOT GLOB '.*'
+                            AND wac_usd NOT GLOB '*.'
+                            AND wac_usd NOT GLOB '0[0-9]*'
+                            AND length(wac_usd) > 0
+                            AND (wac_usd NOT LIKE '%.%' OR length(substr(wac_usd, instr(wac_usd, '.') + 1)) <= 4)
+                        )
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, ticker)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("missing mandatory constraint pattern", str(ctx.exception))
+            self.assertIn("shares NOT LIKE '%.%' OR length(substr(shares, instr(shares, '.') + 1)) <= 4", str(ctx.exception))
+
+    def test_ohlc_scale_constraint_removal_rejected(self):
+        """E1: Verify that removing the <= 4 decimal scale check from daily_bars.open raises SchemaIntegrityError."""
+        cache_path = os.path.join(self.temp_dir.name, "cache_ohlc_integrity.db")
+        cache_mgr = DatabaseManager(cache_path, profile=MARKET_DATA_CACHE_PROFILE)
+        with cache_mgr.connection() as conn:
+            SchemaMigrator.initialize_cache_schema(conn)
+            conn.execute("DROP TABLE daily_bars;")
+            conn.execute(
+                """
+                CREATE TABLE daily_bars (
+                    ticker TEXT NOT NULL CHECK (ticker = UPPER(TRIM(ticker)) AND length(ticker) > 0),
+                    bar_date TEXT NOT NULL CHECK (length(bar_date) = 10),
+                    open TEXT NOT NULL CHECK (
+                        open NOT GLOB '*[^0-9.]*'
+                        AND open NOT GLOB '*.*.*'
+                        AND open NOT LIKE '%.%.%'
+                        AND open NOT GLOB '.*'
+                        AND open NOT GLOB '*.'
+                        AND open NOT GLOB '0[0-9]*'
+                        AND length(open) > 0
+                    ),
+                    high TEXT NOT NULL,
+                    low TEXT NOT NULL,
+                    close TEXT NOT NULL,
+                    volume INTEGER NOT NULL CHECK (volume >= 0),
+                    indicators_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (ticker, bar_date)
+                );
+                """
+            )
+            conn.execute("CREATE INDEX idx_bars_ticker ON daily_bars(ticker);")
+            conn.execute("CREATE INDEX idx_bars_date ON daily_bars(bar_date);")
+
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_cache_schema_integrity(conn)
+            self.assertIn("missing mandatory constraint pattern", str(ctx.exception))
+            self.assertIn("open NOT LIKE '%.%' OR length(substr(open, instr(open, '.') + 1)) <= 4", str(ctx.exception))
+
+    def test_multi_dot_constraint_removal_rejected(self):
+        """E1: Verify that removing amount NOT GLOB '*.*.*' raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                    amount TEXT NOT NULL CHECK (
+                        amount NOT GLOB '*[^0-9.]*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                        AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("amount NOT GLOB '*.*.*'", str(ctx.exception))
+
+    def test_malformed_decimal_constraint_removal_rejected(self):
+        """E1: Verify that removing amount NOT GLOB '*[^0-9.]*' raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                    amount TEXT NOT NULL CHECK (
+                        amount NOT GLOB '*.*.*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                        AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("amount NOT GLOB '*[^0-9.]*'", str(ctx.exception))
+
+    def test_unexpected_foreign_key_rejected(self):
+        """E2: Verify that an unexpected foreign key added to a table raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_positions;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_positions (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    ticker TEXT NOT NULL CHECK (ticker = UPPER(TRIM(ticker)) AND length(ticker) > 0),
+                    shares TEXT NOT NULL CHECK (
+                        shares NOT GLOB '*[^0-9.]*'
+                        AND shares NOT GLOB '*.*.*'
+                        AND shares NOT LIKE '%.%.%'
+                        AND shares NOT GLOB '.*'
+                        AND shares NOT GLOB '*.'
+                        AND shares NOT GLOB '0[0-9]*'
+                        AND length(shares) > 0
+                        AND (shares NOT LIKE '%.%' OR length(substr(shares, instr(shares, '.') + 1)) <= 4)
+                    ),
+                    wac_eur TEXT NOT NULL CHECK (
+                        wac_eur NOT GLOB '*[^0-9.]*'
+                        AND wac_eur NOT GLOB '*.*.*'
+                        AND wac_eur NOT LIKE '%.%.%'
+                        AND wac_eur NOT GLOB '.*'
+                        AND wac_eur NOT GLOB '*.'
+                        AND wac_eur NOT GLOB '0[0-9]*'
+                        AND length(wac_eur) > 0
+                        AND (wac_eur NOT LIKE '%.%' OR length(substr(wac_eur, instr(wac_eur, '.') + 1)) <= 4)
+                    ),
+                    wac_usd TEXT CHECK (
+                        wac_usd IS NULL OR (
+                            wac_usd NOT GLOB '*[^0-9.]*'
+                            AND wac_usd NOT GLOB '*.*.*'
+                            AND wac_usd NOT LIKE '%.%.%'
+                            AND wac_usd NOT GLOB '.*'
+                            AND wac_usd NOT GLOB '*.'
+                            AND wac_usd NOT GLOB '0[0-9]*'
+                            AND length(wac_usd) > 0
+                            AND (wac_usd NOT LIKE '%.%' OR length(substr(wac_usd, instr(wac_usd, '.') + 1)) <= 4)
+                        )
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, ticker),
+                    FOREIGN KEY (ticker) REFERENCES watchlist (ticker)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("foreign-key mismatch", str(ctx.exception))
+
+    def test_empty_foreign_key_inventory_verified(self):
+        """E2: Verify that expected foreign-key inventories for Core and Cache are explicit and empty."""
+        from database.schema import EXPECTED_CORE_FOREIGN_KEYS, EXPECTED_CACHE_FOREIGN_KEYS
+        for tbl, fks in EXPECTED_CORE_FOREIGN_KEYS.items():
+            self.assertEqual(fks, [], f"Core table '{tbl}' should have empty expected foreign keys")
+        for tbl, fks in EXPECTED_CACHE_FOREIGN_KEYS.items():
+            self.assertEqual(fks, [], f"Cache table '{tbl}' should have empty expected foreign keys")
+
+    def test_unexpected_column_rejected(self):
+        """E3: Verify that an unexpected additional column on an exact table raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("ALTER TABLE portfolio_cash ADD COLUMN unauthorized_column TEXT;")
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("unexpected column", str(ctx.exception))
+            self.assertIn("unauthorized_column", str(ctx.exception))
+
+    def test_column_ordering_mismatch_rejected(self):
+        """E3: Verify that reordered columns raise SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    amount TEXT NOT NULL CHECK (
+                        amount NOT GLOB '*[^0-9.]*'
+                        AND amount NOT GLOB '*.*.*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                        AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("column ordering mismatch", str(ctx.exception))
+
+    def test_column_notnull_mismatch_rejected(self):
+        """E3: Verify that missing NOT NULL on a required column raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL DEFAULT 'PRIMARY',
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                    amount TEXT CHECK (
+                        amount NOT GLOB '*[^0-9.]*'
+                        AND amount NOT GLOB '*.*.*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                        AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("NOT NULL mismatch", str(ctx.exception))
+
+    def test_column_pk_mismatch_rejected(self):
+        """E3: Verify that incorrect primary key composition raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL PRIMARY KEY DEFAULT 'PRIMARY',
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                    amount TEXT NOT NULL CHECK (
+                        amount NOT GLOB '*[^0-9.]*'
+                        AND amount NOT GLOB '*.*.*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                        AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)
+                    ),
+                    last_updated_at_utc TEXT NOT NULL
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("primary key mismatch", str(ctx.exception))
+
+    def test_column_default_value_mismatch_rejected(self):
+        """E3: Verify that missing or altered default value raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP TABLE portfolio_cash;")
+            conn.execute(
+                """
+                CREATE TABLE portfolio_cash (
+                    account_id TEXT NOT NULL,
+                    currency TEXT NOT NULL CHECK (currency IN ('EUR', 'USD')),
+                    amount TEXT NOT NULL CHECK (
+                        amount NOT GLOB '*[^0-9.]*'
+                        AND amount NOT GLOB '*.*.*'
+                        AND amount NOT LIKE '%.%.%'
+                        AND amount NOT GLOB '.*'
+                        AND amount NOT GLOB '*.'
+                        AND amount NOT GLOB '0[0-9]*'
+                        AND length(amount) > 0
+                        AND (amount NOT LIKE '%.%' OR length(substr(amount, instr(amount, '.') + 1)) <= 2)
+                    ),
+                    last_updated_at_utc TEXT NOT NULL,
+                    PRIMARY KEY (account_id, currency)
+                );
+                """
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("default value mismatch", str(ctx.exception))
+
+    def test_index_uniqueness_mismatch_rejected(self):
+        """E4: Verify that substituting a UNIQUE index for a non-unique index raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP INDEX idx_decision_session;")
+            conn.execute("CREATE UNIQUE INDEX idx_decision_session ON decision_log(session_id);")
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("uniqueness mismatch", str(ctx.exception))
+
+    def test_partial_index_substitution_rejected(self):
+        """E4: Verify that substituting a partial index for a full index raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("DROP INDEX idx_audit_timestamp;")
+            conn.execute(
+                "CREATE INDEX idx_audit_timestamp ON audit_events(timestamp_utc) WHERE action_category = 'FINANCIAL';"
+            )
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("partial status mismatch", str(ctx.exception))
+
+    def test_unexpected_index_rejected(self):
+        """E4: Verify that an unexpected user index on a core table raises SchemaIntegrityError."""
+        with self.manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("CREATE INDEX idx_cash_amount ON portfolio_cash(amount);")
+            with self.assertRaises(SchemaIntegrityError) as ctx:
+                SchemaMigrator.verify_core_schema_integrity(conn)
+            self.assertIn("unexpected user index", str(ctx.exception))
+            self.assertIn("idx_cash_amount", str(ctx.exception))
 
 
 class TestFinancialDecimalConstraints(unittest.TestCase):
