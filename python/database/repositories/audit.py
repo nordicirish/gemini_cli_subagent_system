@@ -25,11 +25,11 @@ from python.database.repositories.base import (
     ValidationError,
     AppendOnlyViolationError,
     RepositoryError,
-    _FinancialMutationCapability,
     validate_event_id,
     validate_identifier,
     utc_now_iso,
 )
+from python.database.repositories.financial import _FinancialMutationCapability
 from python.tool_registry import (
     authorize_financial_mutation,
     get_active_caller_role,
@@ -339,7 +339,63 @@ class FinancialChangelogRepository(BaseRepository):
             else "{}"
         )
 
+        # State verification: verify that a genuine mutation occurred in the target table on this connection
         cur = self._conn.cursor()
+        if norm_op == "set_cash_balance":
+            parts = norm_target.split("/")
+            if len(parts) == 3 and parts[0] == "portfolio_cash":
+                cur.execute(
+                    "SELECT amount FROM portfolio_cash WHERE account_id = ? AND currency = ?",
+                    (parts[1], parts[2]),
+                )
+                row = cur.fetchone()
+                if row is None or (mutation_capability.after_state and row[0] != mutation_capability.after_state.get("amount")):
+                    raise IntegrityConflictError("State verification failed: database state does not match changelog after_state.")
+        elif norm_op == "delete_cash":
+            parts = norm_target.split("/")
+            if len(parts) == 3 and parts[0] == "portfolio_cash":
+                cur.execute(
+                    "SELECT 1 FROM portfolio_cash WHERE account_id = ? AND currency = ?",
+                    (parts[1], parts[2]),
+                )
+                if cur.fetchone() is not None:
+                    raise IntegrityConflictError("State verification failed: cash balance record was not deleted.")
+        elif norm_op == "upsert_position":
+            parts = norm_target.split("/")
+            if len(parts) == 3 and parts[0] == "portfolio_positions":
+                cur.execute(
+                    "SELECT shares, wac_eur FROM portfolio_positions WHERE account_id = ? AND ticker = ?",
+                    (parts[1], parts[2]),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise IntegrityConflictError("State verification failed: position record does not exist.")
+                if mutation_capability.after_state:
+                    if row[0] != mutation_capability.after_state.get("shares") or row[1] != mutation_capability.after_state.get("wac_eur"):
+                        raise IntegrityConflictError("State verification failed: position values do not match after_state.")
+        elif norm_op == "delete_position":
+            parts = norm_target.split("/")
+            if len(parts) == 3 and parts[0] == "portfolio_positions":
+                cur.execute(
+                    "SELECT 1 FROM portfolio_positions WHERE account_id = ? AND ticker = ?",
+                    (parts[1], parts[2]),
+                )
+                if cur.fetchone() is not None:
+                    raise IntegrityConflictError("State verification failed: position record was not deleted.")
+        elif norm_op == "upsert_watchlist_item":
+            parts = norm_target.split("/")
+            if len(parts) == 2 and parts[0] == "watchlist":
+                cur.execute("SELECT status FROM watchlist WHERE ticker = ?", (parts[1],))
+                row = cur.fetchone()
+                if row is None or (mutation_capability.after_state and row[0] != mutation_capability.after_state.get("status")):
+                    raise IntegrityConflictError("State verification failed: watchlist state does not match after_state.")
+        elif norm_op == "remove_watchlist_item":
+            parts = norm_target.split("/")
+            if len(parts) == 2 and parts[0] == "watchlist":
+                cur.execute("SELECT 1 FROM watchlist WHERE ticker = ?", (parts[1],))
+                if cur.fetchone() is not None:
+                    raise IntegrityConflictError("State verification failed: watchlist item was not removed.")
+
         try:
             cur.execute(
                 """

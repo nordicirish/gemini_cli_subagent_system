@@ -17,6 +17,7 @@ from python.database.repositories.base import (
     ValidationError,
     ConcurrencyConflictError,
     AppendOnlyViolationError,
+    TransactionIntegrityError,
     CashBalance,
     PositionRecord,
     WatchlistItem,
@@ -75,6 +76,7 @@ __all__ = [
     "ValidationError",
     "ConcurrencyConflictError",
     "AppendOnlyViolationError",
+    "TransactionIntegrityError",
     # Domain Models
     "CashBalance",
     "PositionRecord",

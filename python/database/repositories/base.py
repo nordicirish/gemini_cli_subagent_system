@@ -60,6 +60,15 @@ class AppendOnlyViolationError(RepositoryError):
     pass
 
 
+class TransactionIntegrityError(RepositoryError):
+    """
+    Raised when a transaction rollback or savepoint operation fails,
+    leaving the database connection in an uncertain or unsafe state.
+    Callers must NOT commit the transaction and must perform full rollback or abort.
+    """
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Immutable Domain Models (Frozen Dataclasses)
 # ---------------------------------------------------------------------------
@@ -339,81 +348,6 @@ def decimal_to_canonical_str(d: Decimal) -> str:
 # ---------------------------------------------------------------------------
 # Base Repository Class
 # ---------------------------------------------------------------------------
-
-_MUTATION_CAPABILITY_KEY = object()
-
-
-class _FinancialMutationCapability:
-    """
-    Internal capability token coupling financial changelog entries to trusted mutations (R1).
-    Cannot be instantiated directly by callers without the internal _MUTATION_CAPABILITY_KEY.
-    """
-
-    def __init__(
-        self,
-        key: object,
-        connection: sqlite3.Connection,
-        correlation_id: str,
-        actor_role: str,
-        operation_name: str,
-        target_resource: str,
-        before_state: Optional[Dict[str, Any]],
-        after_state: Optional[Dict[str, Any]],
-        approval_digest: Optional[str],
-        timestamp_utc: str,
-    ):
-        if key is not _MUTATION_CAPABILITY_KEY:
-            raise PermissionError("Direct instantiation of _FinancialMutationCapability is prohibited.")
-        if connection is None:
-            raise ValueError("Connection cannot be None")
-        self.connection = connection
-        self.correlation_id = correlation_id
-        self.actor_role = actor_role
-        self.operation_name = operation_name
-        self.target_resource = target_resource
-        self.before_state = before_state
-        self.after_state = after_state
-        self.approval_digest = approval_digest
-        self.timestamp_utc = timestamp_utc
-        self._consumed = False
-
-    @property
-    def is_consumed(self) -> bool:
-        return self._consumed
-
-    def mark_consumed(self) -> None:
-        if self._consumed:
-            raise IntegrityConflictError("Mutation capability has already been consumed.")
-        self._consumed = True
-
-
-def create_mutation_capability(
-    connection: sqlite3.Connection,
-    correlation_id: str,
-    actor_role: str,
-    operation_name: str,
-    target_resource: str,
-    before_state: Optional[Dict[str, Any]],
-    after_state: Optional[Dict[str, Any]],
-    approval_digest: Optional[str],
-    timestamp_utc: str,
-) -> _FinancialMutationCapability:
-    """Mints an internal mutation capability bound to an active transaction (R1)."""
-    if not connection.in_transaction:
-        raise RepositoryError("Cannot create mutation capability: connection is not in an active transaction.")
-    return _FinancialMutationCapability(
-        key=_MUTATION_CAPABILITY_KEY,
-        connection=connection,
-        correlation_id=correlation_id,
-        actor_role=actor_role,
-        operation_name=operation_name,
-        target_resource=target_resource,
-        before_state=before_state,
-        after_state=after_state,
-        approval_digest=approval_digest,
-        timestamp_utc=timestamp_utc,
-    )
-
 
 class BaseRepository:
     """

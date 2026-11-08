@@ -26,7 +26,6 @@ from python.database.repositories.base import (
     IntegrityConflictError,
     ValidationError,
     RepositoryError,
-    create_mutation_capability,
     validate_decimal,
     decimal_to_canonical_str,
     validate_identifier,
@@ -38,6 +37,52 @@ from python.tool_registry import (
     compute_payload_digest,
     TRUSTED_SYSTEM_ROLES,
 )
+
+_MUTATION_KEY = object()
+
+
+class _FinancialMutationCapability:
+    """
+    Internal capability token coupling financial changelog entries to trusted mutations (R1).
+    Cannot be instantiated directly by callers without the internal _MUTATION_KEY.
+    """
+
+    def __init__(
+        self,
+        key: object,
+        connection: sqlite3.Connection,
+        correlation_id: str,
+        actor_role: str,
+        operation_name: str,
+        target_resource: str,
+        before_state: Optional[Dict[str, Any]],
+        after_state: Optional[Dict[str, Any]],
+        approval_digest: Optional[str],
+        timestamp_utc: str,
+    ):
+        if key is not _MUTATION_KEY:
+            raise PermissionError("Direct instantiation of _FinancialMutationCapability is prohibited.")
+        if connection is None:
+            raise ValueError("Connection cannot be None")
+        self.connection = connection
+        self.correlation_id = correlation_id
+        self.actor_role = actor_role
+        self.operation_name = operation_name
+        self.target_resource = target_resource
+        self.before_state = before_state
+        self.after_state = after_state
+        self.approval_digest = approval_digest
+        self.timestamp_utc = timestamp_utc
+        self._consumed = False
+
+    @property
+    def is_consumed(self) -> bool:
+        return self._consumed
+
+    def mark_consumed(self) -> None:
+        if self._consumed:
+            raise IntegrityConflictError("Mutation capability has already been consumed.")
+        self._consumed = True
 
 
 def _record_changelog(
@@ -54,7 +99,11 @@ def _record_changelog(
     """Inserts an immutable audit entry into financial_changelog via trusted mutation capability (R1)."""
     from python.database.repositories.audit import FinancialChangelogRepository
 
-    capability = create_mutation_capability(
+    if not conn.in_transaction:
+        raise RepositoryError("Cannot record financial changelog: connection is not in an active transaction.")
+
+    capability = _FinancialMutationCapability(
+        key=_MUTATION_KEY,
         connection=conn,
         correlation_id=correlation_id,
         actor_role=actor_role,

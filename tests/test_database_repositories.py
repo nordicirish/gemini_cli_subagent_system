@@ -47,6 +47,7 @@ from python.database.repositories import (
     ValidationError,
     ConcurrencyConflictError,
     AppendOnlyViolationError,
+    TransactionIntegrityError,
     CashBalance,
     PositionRecord,
     WatchlistItem,
@@ -1518,7 +1519,7 @@ class TestR1FinancialChangelogIntegrity(BaseRepositoryTestCase):
 
     def test_capability_direct_instantiation_and_tampering_rejected(self):
         """_FinancialMutationCapability cannot be instantiated directly and cannot be reused."""
-        from python.database.repositories.base import _FinancialMutationCapability
+        from python.database.repositories.financial import _FinancialMutationCapability
         with self.assertRaises(PermissionError) as ctx:
             _FinancialMutationCapability(
                 key=object(),  # Invalid key
@@ -1796,6 +1797,469 @@ class TestR3DailyBarNestedBatchAtomicity(BaseRepositoryTestCase):
                 repo.upsert_bars_batch(invalid_batch)
             self.assertFalse(conn.in_transaction)
             self.assertIsNone(repo.get_bar("SAP.DE", "2026-01-05"))
+
+
+# ===========================================================================
+# 21. Stage 1.4.1.2 R1: Financial Mutation Capability Boundary Tests
+# ===========================================================================
+
+class TestR1FinancialMutationCapabilityBoundary(BaseRepositoryTestCase):
+    """
+    Verifies that the financial mutation capability cannot be minted through
+    any public repository interface, preventing callers from fabricating changelogs.
+    """
+
+    def test_a_direct_factory_bypass(self):
+        """
+        Test A — Direct factory bypass:
+        - Attempt to import and invoke the former public factory.
+        - Confirm that the supported public repository interface cannot mint a valid capability.
+        - Confirm that an active SQLite transaction alone is insufficient.
+        """
+        # 1. Former factory must not exist in base.py or repositories package
+        import python.database.repositories.base as repo_base
+        import python.database.repositories as repo_pkg
+        self.assertFalse(hasattr(repo_base, "create_mutation_capability"))
+        self.assertFalse(hasattr(repo_pkg, "create_mutation_capability"))
+        self.assertFalse(hasattr(repo_base, "_MUTATION_CAPABILITY_KEY"))
+
+        with self.core_manager.connection() as conn:
+            # 2. Active transaction alone is insufficient
+            conn.execute("BEGIN IMMEDIATE;")
+            self.assertTrue(conn.in_transaction)
+
+            # Public repository interface provides no capability minting route
+            changelog_repo = FinancialChangelogRepository(conn)
+            with self.assertRaises(PermissionError) as ctx:
+                changelog_repo.append_entry(
+                    correlation_id="FORGE_TX",
+                    actor_role="System",
+                    operation_name="update_ssot",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state=None,
+                    after_state={"amount": "500000.00"},
+                )
+            self.assertIn("Direct insertion into financial_changelog via public repository API is prohibited", str(ctx.exception))
+
+    def test_b_fabricated_changelog(self):
+        """
+        Test B — Fabricated changelog:
+        - Use default System execution context.
+        - Attempt to fabricate a changelog entry with arbitrary before/after state and actor attribution.
+        - Confirm that the attempt is rejected.
+        """
+        with self.core_manager.connection() as conn:
+            repo = FinancialChangelogRepository(conn)
+            with self.assertRaises(PermissionError):
+                repo.append_entry(
+                    correlation_id="FABRICATE_01",
+                    actor_role="System",
+                    operation_name="update_ssot",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state={"amount": "100.00"},
+                    after_state={"amount": "9999999.00"},
+                )
+
+    def test_c_genuine_financial_mutation(self):
+        """
+        Test C — Genuine financial mutation:
+        - Perform a legitimate authorized Cash mutation.
+        - Confirm that its changelog entry is created correctly.
+        """
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            changelog_repo = FinancialChangelogRepository(conn)
+
+            cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("4200.00"), correlation_id="CID_GENUINE_01")
+            entries = changelog_repo.list_entries(correlation_id="CID_GENUINE_01")
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].operation_name, "set_cash_balance")
+            self.assertEqual(entries[0].target_resource, "portfolio_cash/PRIMARY/EUR")
+            self.assertEqual(entries[0].after_state["amount"], "4200.00")
+
+    def test_d_capability_replay(self):
+        """
+        Test D — Capability replay:
+        - Attempt to reuse a consumed capability.
+        - Confirm rejection.
+        """
+        from python.database.repositories.financial import _FinancialMutationCapability, _MUTATION_KEY
+        with self.core_manager.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) VALUES ('PRIMARY', 'EUR', '100.00', '2026-11-09T00:00:00Z')"
+            )
+            cap = _FinancialMutationCapability(
+                key=_MUTATION_KEY,
+                connection=conn,
+                correlation_id="REPLAY_TEST",
+                actor_role="System",
+                operation_name="set_cash_balance",
+                target_resource="portfolio_cash/PRIMARY/EUR",
+                before_state=None,
+                after_state={"amount": "100.00"},
+                approval_digest=None,
+                timestamp_utc="2026-11-09T00:00:00Z",
+            )
+            repo = FinancialChangelogRepository(conn)
+            repo.append_entry(mutation_capability=cap)
+            self.assertTrue(cap.is_consumed)
+
+            # Replay attempt must raise IntegrityConflictError
+            with self.assertRaises(IntegrityConflictError) as ctx:
+                repo.append_entry(mutation_capability=cap)
+            self.assertIn("already been consumed", str(ctx.exception))
+
+    def test_e_connection_binding(self):
+        """
+        Test E — Connection binding:
+        - Attempt to consume a capability using a different SQLite connection.
+        - Confirm rejection.
+        """
+        from python.database.repositories.financial import _FinancialMutationCapability, _MUTATION_KEY
+        with self.core_manager.connection() as conn1:
+            with self.core_manager.connection() as conn2:
+                conn1.execute("BEGIN IMMEDIATE;")
+                cap = _FinancialMutationCapability(
+                    key=_MUTATION_KEY,
+                    connection=conn1,
+                    correlation_id="CONN_BIND_TEST",
+                    actor_role="System",
+                    operation_name="set_cash_balance",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state=None,
+                    after_state={"amount": "100.00"},
+                    approval_digest=None,
+                    timestamp_utc="2026-11-09T00:00:00Z",
+                )
+                repo2 = FinancialChangelogRepository(conn2)
+                with self.assertRaises(PermissionError) as ctx:
+                    repo2.append_entry(mutation_capability=cap)
+                self.assertIn("bound to a different database connection", str(ctx.exception))
+
+    def test_f_transactional_rollback(self):
+        """
+        Test F — Transactional rollback:
+        - Force changelog insertion to fail during a legitimate financial mutation.
+        - Confirm that the associated financial mutation is rolled back.
+        """
+        with self.core_manager.connection() as conn:
+            conn.execute("DROP TABLE financial_changelog;")
+            cash_repo = CashRepository(conn)
+
+            with self.assertRaises(sqlite3.OperationalError):
+                cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("8888.88"))
+
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM portfolio_cash WHERE currency = 'EUR'")
+            self.assertIsNone(cur.fetchone())
+
+    def test_g_existing_repository_compatibility(self):
+        """
+        Test G — Existing repository compatibility:
+        - Verify legitimate Position and Watchlist mutation paths continue to create correct changelog entries.
+        - Confirm existing authorisation and actor-attribution behaviour is unchanged.
+        """
+        with self.core_manager.connection() as conn:
+            pos_repo = PositionRepository(conn)
+            watch_repo = WatchlistRepository(conn)
+            changelog_repo = FinancialChangelogRepository(conn)
+
+            with execution_role_context("Terminal Orchestrator"):
+                pos_repo.upsert_position(
+                    "PRIMARY", "SAP.DE", Decimal("30.0000"), Decimal("170.0000"), correlation_id="CID_POS_G"
+                )
+                watch_repo.upsert_watchlist_item("SAP.DE", status="ACTIVE", correlation_id="CID_WATCH_G")
+
+            entries_pos = changelog_repo.list_entries(correlation_id="CID_POS_G")
+            self.assertEqual(len(entries_pos), 1)
+            self.assertEqual(entries_pos[0].actor_role, "Terminal Orchestrator")
+            self.assertEqual(entries_pos[0].operation_name, "upsert_position")
+
+            entries_watch = changelog_repo.list_entries(correlation_id="CID_WATCH_G")
+            self.assertEqual(len(entries_watch), 1)
+            self.assertEqual(entries_watch[0].actor_role, "Terminal Orchestrator")
+            self.assertEqual(entries_watch[0].operation_name, "upsert_watchlist_item")
+
+
+# ===========================================================================
+# 22. Stage 1.4.1.2 R2: Savepoint Rollback Failure Integrity Tests
+# ===========================================================================
+
+class TestR2SavepointRollbackFailureIntegrity(BaseRepositoryTestCase):
+    """
+    Verifies that savepoint rollback and release failures are never silently suppressed,
+    raising explicit TransactionIntegrityError while preserving original batch exceptions.
+    """
+
+    def test_a_nested_batch_failure_with_successful_rollback(self):
+        """
+        Test A — Nested batch failure with successful rollback:
+        - Begin a caller-owned transaction.
+        - Insert an unrelated valid record.
+        - Execute a batch containing valid rows followed by an invalid row.
+        - Confirm no rows from the failed batch remain.
+        - Confirm the unrelated record remains available.
+        - Confirm the caller retains control of the transaction.
+        """
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+            conn.execute("BEGIN IMMEDIATE;")
+
+            # Unrelated valid record
+            repo.upsert_bar("AAPL", "2026-01-02", "150.00", "155.00", "149.00", "154.00", 50000)
+
+            batch = [
+                {
+                    "ticker": "MSFT",
+                    "bar_date": "2026-01-02",
+                    "open": "200.00",
+                    "high": "205.00",
+                    "low": "199.00",
+                    "close": "204.00",
+                    "volume": 20000,
+                },
+                {
+                    "ticker": "MSFT",
+                    "bar_date": "2026-02-30",  # Calendar invalid
+                    "open": "204.00",
+                    "high": "210.00",
+                    "low": "203.00",
+                    "close": "209.00",
+                    "volume": 25000,
+                },
+            ]
+            with self.assertRaises(ValidationError):
+                repo.upsert_bars_batch(batch)
+
+            # Assert transaction still open and no MSFT rows remain
+            self.assertTrue(conn.in_transaction)
+            self.assertEqual(len(repo.list_bars("MSFT")), 0)
+
+            # Unrelated AAPL record remains available
+            self.assertIsNotNone(repo.get_bar("AAPL", "2026-01-02"))
+
+            # Caller can still commit cleanly
+            conn.execute("COMMIT;")
+            self.assertFalse(conn.in_transaction)
+            self.assertIsNotNone(repo.get_bar("AAPL", "2026-01-02"))
+
+    def test_b_nested_batch_success(self):
+        """
+        Test B — Nested batch success:
+        - Begin a caller-owned transaction.
+        - Execute a valid batch.
+        - Confirm all batch rows are visible inside the transaction.
+        - Confirm the repository has not committed the caller's transaction.
+        - Confirm the caller can subsequently commit or roll back.
+        """
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+            conn.execute("BEGIN IMMEDIATE;")
+
+            batch = [
+                {
+                    "ticker": "NVDA",
+                    "bar_date": "2026-01-02",
+                    "open": "100.00",
+                    "high": "105.00",
+                    "low": "99.00",
+                    "close": "104.00",
+                    "volume": 30000,
+                }
+            ]
+            count = repo.upsert_bars_batch(batch)
+            self.assertEqual(count, 1)
+
+            # Repository must not commit caller's transaction
+            self.assertTrue(conn.in_transaction)
+            self.assertEqual(len(repo.list_bars("NVDA")), 1)
+
+            # Caller rolls back
+            conn.execute("ROLLBACK;")
+            self.assertFalse(conn.in_transaction)
+            self.assertEqual(len(repo.list_bars("NVDA")), 0)
+
+    def test_c_injected_rollback_failure(self):
+        """
+        Test C — Injected rollback failure:
+        - Exercise the rollback failure path using controlled fault injection.
+        - Confirm the rollback failure is surfaced explicitly via TransactionIntegrityError.
+        - Confirm the original batch failure is preserved as diagnostic context (__cause__).
+        - Confirm the exception clearly identifies the transaction as potentially unsafe to commit.
+        """
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+            conn.execute("BEGIN IMMEDIATE;")
+
+            original_execute = conn.execute
+
+            def faulty_execute(sql, *args, **kwargs):
+                if isinstance(sql, str) and sql.strip().startswith("ROLLBACK TO SAVEPOINT"):
+                    raise sqlite3.OperationalError("Simulated disk I/O error during savepoint rollback")
+                return original_execute(sql, *args, **kwargs)
+
+            conn.execute = faulty_execute
+
+            batch = [
+                {
+                    "ticker": "FAIL_TEST",
+                    "bar_date": "2026-01-02",
+                    "open": "100.00",
+                    "high": "105.00",
+                    "low": "99.00",
+                    "close": "104.00",
+                    "volume": 1000,
+                },
+                {
+                    "ticker": "FAIL_TEST",
+                    "bar_date": "2026-02-30",  # Triggers ValidationError
+                    "open": "100.00",
+                    "high": "105.00",
+                    "low": "99.00",
+                    "close": "104.00",
+                    "volume": 1000,
+                },
+            ]
+
+            try:
+                with self.assertRaises(TransactionIntegrityError) as ctx:
+                    repo.upsert_bars_batch(batch)
+
+                err_msg = str(ctx.exception)
+                self.assertIn("CRITICAL: Failed to roll back savepoint", err_msg)
+                self.assertIn("MUST NOT be committed", err_msg)
+                # Confirm original batch failure is preserved as cause
+                self.assertIsNotNone(ctx.exception.__cause__)
+                self.assertIsInstance(ctx.exception.__cause__, ValidationError)
+            finally:
+                conn.execute = original_execute
+                try:
+                    conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+
+    def test_d_savepoint_release_failure(self):
+        """
+        Test D — Savepoint release failure:
+        - Exercise a controlled savepoint release failure.
+        - Confirm that the failure is not silently suppressed.
+        - Confirm the resulting transaction-integrity state is reported accurately.
+        """
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+            conn.execute("BEGIN IMMEDIATE;")
+
+            original_execute = conn.execute
+
+            def faulty_execute(sql, *args, **kwargs):
+                if isinstance(sql, str) and sql.strip().startswith("RELEASE SAVEPOINT"):
+                    raise sqlite3.OperationalError("Simulated I/O failure during savepoint release")
+                return original_execute(sql, *args, **kwargs)
+
+            conn.execute = faulty_execute
+
+            batch = [
+                {
+                    "ticker": "RELEASE_TEST",
+                    "bar_date": "2026-01-02",
+                    "open": "100.00",
+                    "high": "105.00",
+                    "low": "99.00",
+                    "close": "104.00",
+                    "volume": 1000,
+                }
+            ]
+
+            try:
+                with self.assertRaises(TransactionIntegrityError) as ctx:
+                    repo.upsert_bars_batch(batch)
+
+                err_msg = str(ctx.exception)
+                self.assertIn("CRITICAL: Failed to release savepoint", err_msg)
+                self.assertIn("MUST NOT be committed", err_msg)
+            finally:
+                conn.execute = original_execute
+                try:
+                    conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+
+    def test_e_repository_owned_transaction(self):
+        """Test E — Standalone repository-owned batch success and failure."""
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+
+            # Success commits cleanly
+            count = repo.upsert_bars_batch([
+                {
+                    "ticker": "STANDALONE",
+                    "bar_date": "2026-01-02",
+                    "open": "50.00",
+                    "high": "55.00",
+                    "low": "49.00",
+                    "close": "54.00",
+                    "volume": 5000,
+                }
+            ])
+            self.assertEqual(count, 1)
+            self.assertFalse(conn.in_transaction)
+            self.assertIsNotNone(repo.get_bar("STANDALONE", "2026-01-02"))
+
+            # Failure rolls back cleanly
+            with self.assertRaises(ValidationError):
+                repo.upsert_bars_batch([
+                    {
+                        "ticker": "STANDALONE",
+                        "bar_date": "2026-02-30",
+                        "open": "50.00",
+                        "high": "55.00",
+                        "low": "49.00",
+                        "close": "54.00",
+                        "volume": 5000,
+                    }
+                ])
+            self.assertFalse(conn.in_transaction)
+
+    def test_f_existing_transaction_preservation(self):
+        """
+        Test F — Existing transaction preservation:
+        - Confirm that unrelated caller-owned work is not silently committed or discarded during normal batch rollback.
+        """
+        with self.cache_manager.connection() as conn:
+            repo = DailyBarRepository(conn)
+            conn.execute("BEGIN IMMEDIATE;")
+
+            # 2 unrelated records
+            repo.upsert_bar("UNRELATED_1", "2026-01-02", "10.00", "11.00", "9.00", "10.50", 100)
+            repo.upsert_bar("UNRELATED_2", "2026-01-02", "20.00", "21.00", "19.00", "20.50", 200)
+
+            # Failed batch
+            with self.assertRaises(ValidationError):
+                repo.upsert_bars_batch([
+                    {
+                        "ticker": "BAD_BATCH",
+                        "bar_date": "2026-02-30",
+                        "open": "100.00",
+                        "high": "105.00",
+                        "low": "99.00",
+                        "close": "104.00",
+                        "volume": 1000,
+                    }
+                ])
+
+            # Transaction still open
+            self.assertTrue(conn.in_transaction)
+
+            # Both unrelated records still available
+            self.assertIsNotNone(repo.get_bar("UNRELATED_1", "2026-01-02"))
+            self.assertIsNotNone(repo.get_bar("UNRELATED_2", "2026-01-02"))
+
+            # Commit persists them durably
+            conn.execute("COMMIT;")
+            self.assertFalse(conn.in_transaction)
+            self.assertIsNotNone(repo.get_bar("UNRELATED_1", "2026-01-02"))
+            self.assertIsNotNone(repo.get_bar("UNRELATED_2", "2026-01-02"))
 
 
 if __name__ == "__main__":

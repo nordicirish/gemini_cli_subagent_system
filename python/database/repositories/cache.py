@@ -21,6 +21,7 @@ from python.database.repositories.base import (
     EntityNotFoundError,
     IntegrityConflictError,
     ValidationError,
+    TransactionIntegrityError,
     RepositoryError,
     validate_decimal,
     decimal_to_canonical_str,
@@ -366,33 +367,49 @@ class DailyBarRepository(BaseRepository):
             if owns_tx:
                 self._conn.execute("COMMIT;")
             else:
-                self._conn.execute(f"RELEASE SAVEPOINT {sp_name};")
+                try:
+                    self._conn.execute(f"RELEASE SAVEPOINT {sp_name};")
+                except Exception as release_err:
+                    raise TransactionIntegrityError(
+                        f"CRITICAL: Failed to release savepoint '{sp_name}' after successful batch: {release_err}. "
+                        f"The caller-owned transaction is in an uncertain state and MUST NOT be committed."
+                    ) from release_err
         except sqlite3.IntegrityError as e:
             if owns_tx:
                 try:
                     self._conn.execute("ROLLBACK;")
                 except Exception:
                     pass
+                raise IntegrityConflictError(f"Integrity violation in batch daily bar upsert: {e}") from e
             else:
                 try:
                     self._conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name};")
                     self._conn.execute(f"RELEASE SAVEPOINT {sp_name};")
-                except Exception:
-                    pass
-            raise IntegrityConflictError(f"Integrity violation in batch daily bar upsert: {e}") from e
-        except Exception:
+                except Exception as rollback_err:
+                    raise TransactionIntegrityError(
+                        f"CRITICAL: Failed to roll back savepoint '{sp_name}' during batch failure: {rollback_err}. "
+                        f"The caller-owned transaction is in an uncertain state and MUST NOT be committed. "
+                        f"Full transaction rollback or connection termination is required."
+                    ) from e
+                raise IntegrityConflictError(f"Integrity violation in batch daily bar upsert: {e}") from e
+        except Exception as batch_err:
             if owns_tx:
                 try:
                     self._conn.execute("ROLLBACK;")
                 except Exception:
                     pass
+                raise
             else:
                 try:
                     self._conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name};")
                     self._conn.execute(f"RELEASE SAVEPOINT {sp_name};")
-                except Exception:
-                    pass
-            raise
+                except Exception as rollback_err:
+                    raise TransactionIntegrityError(
+                        f"CRITICAL: Failed to roll back savepoint '{sp_name}' during batch failure: {rollback_err}. "
+                        f"The caller-owned transaction is in an uncertain state and MUST NOT be committed. "
+                        f"Full transaction rollback or connection termination is required."
+                    ) from batch_err
+                raise
 
         return inserted_count
 
