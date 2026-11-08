@@ -172,7 +172,7 @@ def main():
     # ---------------------------------------------------------------------------
     print("\n" + "=" * 60)
     print("💎 GEM CLI ORCHESTRATOR READY 💎")
-    print(f"   Version : v11.54-Legislative-Audit-Harmonization-Sync")
+    print(f"   Version : v11.56-Pure-Antigravity-Engine-Cloud-Decoupled")
     print(f"   Agents  : {len(sub_agent_configs)} loaded")
     print(f"   Rules   : {'✅ Attached' if os.path.exists(rules_path) else '⚠️  Missing'}")
     antigravity_path = os.path.join(".agents", "rules", "antigravity.md")
@@ -188,35 +188,12 @@ def main():
     try:
         import fetch_stocks
         fetch_stocks.compile_master_document()
-        sync_daemon = cloud_sync.CloudSyncDaemon(framework.client)
-        sync_files = [
-            "scratch/master_trading_knowledge.md",
-            "context/decision_log.json",
-            "context/trade_lessons.json",
-            "context/ssot.json"
-        ]
-        sync_thread = threading.Thread(target=sync_daemon.start_background_sync, args=(sync_files,), daemon=True)
-        sync_thread.start()
     except Exception as e:
-        print(f"Failed to start Cloud Sync Daemon: {e}")
+        print(f"Failed to compile master document: {e}")
 
     sys_instruction = framework._get_sys_instruction(terminal_instruction)
 
-    chat = framework.client.chats.create(
-        model=orchestrator_model,
-        config=agent_framework.types.GenerateContentConfig(
-            system_instruction=sys_instruction,
-            temperature=1.0,
-            tools=terminal_tools,
-            automatic_function_calling={"disable": True},
-            safety_settings=[
-                agent_framework.types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
-                agent_framework.types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),
-                agent_framework.types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT",  threshold="BLOCK_NONE"),
-                agent_framework.types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT",  threshold="BLOCK_NONE"),
-            ]
-        ),
-    )
+    chat = framework.create_chat_session(sys_instruction, terminal_tools, orchestrator_model)
 
     while True:
         try:
@@ -248,77 +225,12 @@ def main():
                         pass
 
             payload_to_send = [*chart_parts, current_message] if chart_parts else current_message
-            MODEL_FALLBACK_CASCADE = [
-                "gemini-3.7-flash",
-                "gemini-3.5-flash",
-                "gemini-3.1-pro-preview",
-                "gemini-2.5-pro",
-                "gemini-2.5-flash",
-                "gemini-2.0-flash",
-                "gemini-1.5-flash"
-            ]
 
             try:
                 response = chat.send_message(payload_to_send)
             except Exception as exc:
-                from google.genai.errors import APIError
-                exc_str = str(exc).upper()
-                is_transient = (
-                    isinstance(exc, APIError) or
-                    "503" in exc_str or "UNAVAILABLE" in exc_str or
-                    "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str or
-                    "500" in exc_str or "502" in exc_str or "504" in exc_str or
-                    "404" in exc_str or "NOT_FOUND" in exc_str
-                )
-                if is_transient:
-                    current_idx = -1
-                    for idx, m_cand in enumerate(MODEL_FALLBACK_CASCADE):
-                        if m_cand == orchestrator_model:
-                            current_idx = idx
-                            break
-                    if current_idx != -1:
-                        candidates = MODEL_FALLBACK_CASCADE[current_idx + 1:] + MODEL_FALLBACK_CASCADE[:current_idx]
-                    else:
-                        candidates = [m for m in MODEL_FALLBACK_CASCADE if m != orchestrator_model]
-
-                    recovered = False
-                    last_exc = exc
-                    for fallback_model in candidates:
-                        framework.log(f"[Cascading Failover] Model {orchestrator_model} failed ({exc}). Auto-falling back to next model: {fallback_model}...")
-                        try:
-                            orchestrator_model = fallback_model
-                            sys_instruction = framework._get_sys_instruction(terminal_instruction)
-                            chat = framework.client.chats.create(
-                                model=orchestrator_model,
-                                config=agent_framework.types.GenerateContentConfig(
-                                    system_instruction=sys_instruction,
-                                    temperature=1.0,
-                                    tools=terminal_tools,
-                                    automatic_function_calling={"disable": True},
-                                    safety_settings=[
-                                        agent_framework.types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
-                                        agent_framework.types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),
-                                        agent_framework.types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT",  threshold="BLOCK_NONE"),
-                                        agent_framework.types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT",  threshold="BLOCK_NONE"),
-                                    ]
-                                ),
-                            )
-                            active_model_str = f"[ACTIVE_MODEL]: {orchestrator_model}\n"
-                            current_message = f"{active_model_str}[USER_QUERY]: {user_input}"
-                            failover_payload = [*chart_parts, current_message] if chart_parts else current_message
-                            response = chat.send_message(failover_payload)
-                            framework.log(f"[Cascading Failover] Successfully recovered on {orchestrator_model}!")
-                            recovered = True
-                            break
-                        except Exception as fb_exc:
-                            framework.log(f"[Cascading Failover] Fallback to {fallback_model} failed ({fb_exc}). Continuing cascade...")
-                            last_exc = fb_exc
-                            continue
-
-                    if not recovered:
-                        raise last_exc
-                else:
-                    raise exc
+                framework.log(f"[Orchestrator Error] Antigravity chat session failed: {exc}")
+                raise exc
 
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 raw_prompt_tokens = response.usage_metadata.prompt_token_count or 0
@@ -330,7 +242,7 @@ def main():
                 framework.turn_usage['candidates_tokens'] += c_tokens
                 framework.turn_usage['cached_tokens'] += cached_tokens
                 
-                call_cost = framework._calculate_call_cost(orchestrator_model, "Primary Key", p_tokens, c_tokens, cached_tokens)
+                call_cost = framework._calculate_call_cost(orchestrator_model, "Antigravity Local", p_tokens, c_tokens, cached_tokens)
                 framework.turn_usage['estimated_cost'] += call_cost
                 framework.session_cost += call_cost
 
@@ -349,9 +261,4 @@ def main():
 
 
 if __name__ == "__main__":
-    if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
-        print("ERROR: GEMINI_API_KEY or GOOGLE_API_KEY environment variable is not set.")
-        print("Please set it before running this CLI.")
-        sys.exit(1)
-
     main()

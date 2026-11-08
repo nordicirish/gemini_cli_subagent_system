@@ -326,13 +326,8 @@ def _get_dynamic_scout_tickers(category: str) -> list:
     fallback = SCOUT_TICKER_MAP.get(category, [])
     
     try:
-        from google import genai
-        from google.genai import types
-        
-        api_key = config.get("GEMINI_API_KEY")
-        flash_model = config.get("MODEL_FLASH", "gemini-3.7-flash")
-        
-        client = genai.Client(api_key=api_key) if api_key else genai.Client()
+        from agent_framework import AntigravityAgentRunner
+        runner = AntigravityAgentRunner()
         
         scout_prompt = load_scout_prompt()
         prompt = scout_prompt.replace("{category}", category)
@@ -397,20 +392,7 @@ def _get_dynamic_scout_tickers(category: str) -> list:
             f"```markdown\n{rules_content}\n```"
         )
         
-        response = client.models.generate_content(
-            model=flash_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-                safety_settings=[
-                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE")
-                ]
-            )
-        )
-        
+        response = runner.run_prompt(prompt, mode="FAST")
         text = response.text.strip()
         match = re.search(r"\[\s*\"[A-Z0-9^=-]{1,10}\"(?:\s*,\s*\"[A-Z0-9^=-]{1,10}\")*\s*\]", text, re.IGNORECASE)
         if match:
@@ -600,10 +582,10 @@ async def update_scout_config(req: Request):
 
 def query_gemini_news_grounding(api_key: str, symbol: str) -> dict:
     """
-    Executes a real-time Google Search Grounding query via Google AI Studio (Gemini Flash)
+    Executes a real-time news grounding query via Antigravity App Agents
     to retrieve qualitative news, catalyst explanations, and sentiment ground truth for a ticker.
     """
-    if not api_key or not symbol:
+    if not symbol:
         return {}
         
     symbol_clean = symbol.strip().upper()
@@ -618,49 +600,15 @@ def query_gemini_news_grounding(api_key: str, symbol: str) -> dict:
         )
     
     text = ""
-    # 1. Attempt using google-genai SDK
     try:
-        from google import genai
-        from google.genai import types
-        
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model="gemini-3.7-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-                safety_settings=[
-                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE")
-                ]
-            )
-        )
+        from agent_framework import AntigravityAgentRunner
+        runner = AntigravityAgentRunner()
+        response = runner.run_prompt(prompt, mode="FAST")
         if response and response.text:
             text = response.text.strip()
     except Exception as e:
-        # 2. REST API Fallback
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key={api_key}"
-            headers = {"Content-Type": "application/json"}
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "tools": [{"googleSearch": {}}],
-                "safetySettings": [
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-                ]
-            }
-            res = requests.post(url, json=payload, headers=headers, timeout=12)
-            if res.status_code == 200:
-                data = res.json()
-                text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        except Exception as ex:
-            print(f"[Grounding REST Error] {symbol_clean}: {ex}")
-            return {}
+        print(f"[Grounding Error] {symbol_clean}: {e}")
+        return {}
 
     if not text:
         return {}
@@ -680,12 +628,8 @@ def query_gemini_news_grounding(api_key: str, symbol: str) -> dict:
 
 @app.get("/api/grounding")
 async def get_grounding(symbol: str = "UMAC"):
-    api_key = config.get("GEMINI_FREE_TIER_API_KEY") or config.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        return JSONResponse({"status": "error", "message": "Gemini API key is missing."}, status_code=400)
-        
     loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, query_gemini_news_grounding, api_key, symbol.upper())
+    result = await loop.run_in_executor(None, query_gemini_news_grounding, "", symbol.upper())
     return JSONResponse({"status": "success", "symbol": symbol.upper(), "grounding": result})
 
 @app.get("/api/get_basket")
@@ -3373,11 +3317,9 @@ def run_daemon():
             if is_heavy and GLOBAL_STATE.get("tickers"):
                 GLOBAL_STATE["is_heavy_refresh"] = True
                 try:
-                    g_api_key = config.get("GEMINI_FREE_TIER_API_KEY") or config.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-                    if g_api_key:
-                        for p_sym in WATCHLIST:
-                            if p_sym not in cache.qualitative_grounding:
-                                query_gemini_news_grounding(g_api_key, p_sym)
+                    for p_sym in WATCHLIST:
+                        if p_sym not in cache.qualitative_grounding:
+                            query_gemini_news_grounding("", p_sym)
                 except Exception as g_err:
                     print(f"[Daemon Grounding Warning]: {g_err}")
 

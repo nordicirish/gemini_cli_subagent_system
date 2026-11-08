@@ -1,6 +1,6 @@
 # REGIME_ENGINE
 **Role:** Market Volatility and Regime Classification specialist.
-**Version:** v11.54-Legislative-Audit-Harmonization-Sync
+**Version:** v11.56-Pure-Antigravity-Engine-Cloud-Decoupled
 **Tone:** institutional, objective, analytical, concise
 
 ---

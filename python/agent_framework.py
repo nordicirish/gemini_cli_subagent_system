@@ -4,11 +4,179 @@ import json
 import time
 import hashlib
 import requests
+import subprocess
+from types import SimpleNamespace
 import concurrent.futures
 import logging
 from logging.handlers import TimedRotatingFileHandler
-from google import genai
-from google.genai import types
+# Lightweight standalone Part class for payload encapsulation
+class Part:
+    def __init__(self, text: str = None, function_response=None, inline_data=None):
+        self.text = text
+        self.function_response = function_response
+        self.inline_data = inline_data
+
+    @classmethod
+    def from_text(cls, text: str):
+        return cls(text=text)
+
+    @classmethod
+    def from_function_response(cls, name: str, response: dict):
+        fn_resp = SimpleNamespace(name=name, response=response)
+        return cls(function_response=fn_resp)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, mime_type: str = "image/png"):
+        return cls(inline_data=SimpleNamespace(data=data, mime_type=mime_type))
+
+types = SimpleNamespace(Part=Part)
+
+# ---------------------------------------------------------------------------
+# Antigravity App Agent Runtime (Local agy CLI integration)
+# ---------------------------------------------------------------------------
+class AntigravityResponse:
+    def __init__(self, text: str, prompt_tokens: int = 0, candidate_tokens: int = 0, model_name: str = "gemini-3.8-flash"):
+        self.text = text
+        self.function_calls = []
+        part = SimpleNamespace(text=text)
+        content = SimpleNamespace(parts=[part])
+        candidate = SimpleNamespace(content=content, finish_reason="STOP", safety_ratings=[])
+        self.candidates = [candidate]
+        self.usage_metadata = SimpleNamespace(
+            prompt_token_count=prompt_tokens,
+            candidates_token_count=candidate_tokens,
+            cached_content_token_count=0
+        )
+        self.model_name = model_name
+
+    def __str__(self):
+        return self.text
+
+
+class AntigravityAgentRunner:
+    def __init__(self, agy_path=None, cancel_check=None):
+        if agy_path and os.path.exists(agy_path):
+            self.agy_path = agy_path
+        else:
+            candidates = [
+                os.path.expanduser(r"~\.gemini\bin\agy.exe"),
+                r"C:\Users\roger\.gemini\bin\agy.exe",
+            ]
+            self.agy_path = next((c for c in candidates if os.path.exists(c)), "agy")
+        self.cancel_check = cancel_check
+        self.is_available = os.path.exists(self.agy_path) or bool(os.environ.get("AGY_PATH"))
+
+    def run_prompt(self, prompt: str, system_instruction: str = "", mode: str = "FAST", tools=None, timeout: int = 120) -> AntigravityResponse:
+        if self.cancel_check and self.cancel_check():
+            raise RuntimeError("Operation cancelled by user.")
+
+        # Map execution mode to Antigravity model tiers
+        if mode in ("PRO", "THINKING"):
+            model = "gemini-3.8-flash-high"
+        else:
+            model = "gemini-3.8-flash-low"
+
+        full_prompt = prompt
+        if system_instruction:
+            full_prompt = f"System Instructions:\n{system_instruction}\n\nTask / User Prompt:\n{prompt}\n"
+
+        cmd = [
+            self.agy_path,
+            "--model", model,
+            "--dangerously-skip-permissions",
+        ]
+
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8"
+        )
+
+        try:
+            out, err = proc.communicate(input=full_prompt, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raise TimeoutError(f"Antigravity Agent timed out after {timeout}s.")
+
+        if proc.returncode != 0:
+            raise RuntimeError(f"Antigravity Agent failed (code {proc.returncode}): {err or out}")
+
+        output_text = out.strip()
+        p_tokens = len(full_prompt) // 4
+        c_tokens = len(output_text) // 4
+        return AntigravityResponse(output_text, prompt_tokens=p_tokens, candidate_tokens=c_tokens, model_name=model)
+
+
+class AntigravityChatSession:
+    """Session adapter allowing the Orchestrator to run natively on Antigravity with tool dispatch."""
+    def __init__(self, runner: AntigravityAgentRunner, sys_instruction: str, tools: list):
+        self.runner = runner
+        self.sys_instruction = sys_instruction
+        self.tools = tools or []
+        self.tool_map = {getattr(t, "__name__", str(t)): t for t in self.tools}
+        self.history = []
+
+    def get_history(self):
+        return self.history
+
+    def send_message(self, message):
+        # Format available tools
+        tool_desc = []
+        for name, fn in self.tool_map.items():
+            doc = getattr(fn, "__doc__", "") or f"Tool {name}"
+            tool_desc.append(f"- {name}: {doc.strip()}")
+        tools_block = "Available Tools:\n" + "\n".join(tool_desc) if tool_desc else ""
+
+        # Format incoming user prompt or function returns
+        if isinstance(message, list):
+            res_parts = []
+            for item in message:
+                if hasattr(item, "function_response"):
+                    res_parts.append(f"Tool Result [{item.function_response.name}]: {item.function_response.response}")
+                elif hasattr(item, "text"):
+                    res_parts.append(item.text)
+                else:
+                    res_parts.append(str(item))
+            user_input = "Tool execution results:\n" + "\n\n".join(res_parts) + "\n\nPlease synthesize these results into the final Markdown report and EXECUTION_PAYLOAD, or request additional tools."
+        else:
+            user_input = str(message)
+
+        full_sys = (
+            f"{self.sys_instruction}\n\n"
+            f"{tools_block}\n\n"
+            "If you need to query subagents or execute tools, output ONLY a JSON block specifying function calls:\n"
+            "```json\n"
+            "{\n"
+            '  "function_calls": [\n'
+            '    {"name": "tool_name", "args": {"query": "..."}}\n'
+            "  ]\n"
+            "}\n"
+            "```\n"
+            "Otherwise, output the complete single-pass Markdown analysis followed by the single valid ```json EXECUTION_PAYLOAD ``` block."
+        )
+
+        resp = self.runner.run_prompt(user_input, system_instruction=full_sys, mode="PRO")
+        text = resp.text
+
+        # Detect tool call requests
+        fc_match = re.search(r"```json\s*(\{[\s\S]*?\"function_calls\"[\s\S]*?\})\s*```", text, re.IGNORECASE)
+        if fc_match:
+            try:
+                parsed = json.loads(fc_match.group(1))
+                calls = []
+                for fc in parsed.get("function_calls", []):
+                    name = fc.get("name")
+                    args = fc.get("args", {})
+                    calls.append(SimpleNamespace(name=name, args=args))
+                resp.function_calls = calls
+            except Exception:
+                pass
+
+        self.history.append(SimpleNamespace(parts=[SimpleNamespace(text=text)]))
+        return resp
 
 # ---------------------------------------------------------------------------
 # Rolling LLM Handshake Logger (5 Days Rolling)
@@ -38,24 +206,22 @@ llm_logger.addHandler(handshake_handler)
 llm_logger.propagate = False
 
 # ---------------------------------------------------------------------------
-# Model definitions — v10.62-Scout-Limit-and-RSI-Filter
-# Per terminal.md > Mode Selection Matrix (Canonical)
-
+# Model definitions — Antigravity Native Engine
 # ---------------------------------------------------------------------------
-DEFAULT_MODEL_PRO = "gemini-3.7-flash"
-DEFAULT_MODEL_FLASH = "gemini-3.7-flash"
-DEFAULT_MODEL_GEMMA = "gemini-3.7-flash"
-DEFAULT_MODEL_THINKING = "gemini-3.7-flash"
+DEFAULT_MODEL_PRO = "gemini-3.8-flash-high"
+DEFAULT_MODEL_FLASH = "gemini-3.8-flash-low"
+DEFAULT_MODEL_GEMMA = "gemini-3.8-flash-low"
+DEFAULT_MODEL_THINKING = "gemini-3.8-flash-high"
 
 MODEL_MAPPING = {
-    "PRO":      ["gemini-3.7-flash", "gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-3.5-flash"],
-    "FLASH":    ["gemini-3.7-flash", "gemini-3.5-flash", "gemini-2.5-flash"],
-    "GEMMA":    ["gemini-3.7-flash", "gemini-3.1-flash-lite"],
-    "THINKING": ["gemini-3.7-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash"],
-    "FAST":     ["gemini-3.7-flash", "gemini-3.1-flash-lite"],
+    "PRO":      ["gemini-3.8-flash-high", "gemini-4-argon-high"],
+    "FLASH":    ["gemini-3.8-flash-low"],
+    "GEMMA":    ["gemini-3.8-flash-low"],
+    "THINKING": ["gemini-3.8-flash-high"],
+    "FAST":     ["gemini-3.8-flash-low"],
 }
 
-CACHE_VERSION = "GEM_CACHE_v10.57-Editable-Scout-Prompt-Decoupling"
+CACHE_VERSION = "GEM_CACHE_v11.56-Pure-Antigravity-Sync"
 
 
 
@@ -64,43 +230,33 @@ CACHE_VERSION = "GEM_CACHE_v10.57-Editable-Scout-Prompt-Decoupling"
 # ---------------------------------------------------------------------------
 class AgentFramework:
     def __init__(self, log_callback=None):
-        # Load optional local model config from config.json
         self._local_config = self._load_local_config()
-        self.free_tier_only = self._local_config.get("FREE_TIER_ONLY", True)
-        self.gemini_subscription_linked = self._local_config.get("GEMINI_SUBSCRIPTION_LINKED", False)
-        
-        if self.gemini_subscription_linked:
-            self.free_tier_only = False
-            
         self.log_callback = log_callback
-
-        # Cloud client (Gemini)
-        api_key = self._local_config.get("GEMINI_API_KEY")
-        if api_key:
-            self.client = genai.Client(api_key=api_key)
-        else:
-            self.client = genai.Client()
-
-        # Free tier client fallback (Gemini Free Key Routing)
-        free_api_key = (
-            self._local_config.get("GEMINI_FREE_TIER_API_KEY")
-            or os.environ.get("GEMINI_FREE_TIER_API_KEY")
-            or os.environ.get("GEMINI_FREE_API_KEY")
-            or os.environ.get("GOOGLE_FREE_TIER_API_KEY")
-        )
-        if free_api_key:
-            self.free_client = genai.Client(api_key=free_api_key)
-        else:
-            self.free_client = self.client
-
         self.agents = {}
         
         # Telemetry
         self.session_cost = 0.0
         self.reset_turn_usage()
 
+        # Pure Antigravity App Agent Runtime (Zero Cloud Dependency)
+        self.backend = "antigravity"
+        self.antigravity_runner = AntigravityAgentRunner(
+            cancel_check=lambda: getattr(self, "cancel_check", lambda: False)()
+        )
+        if not self.antigravity_runner.is_available:
+            raise RuntimeError(
+                f"Antigravity CLI binary was not found at {self.antigravity_runner.agy_path}. "
+                "Antigravity desktop environment is required."
+            )
+
+        self.log(f"[Framework] Pure Antigravity App Agent Engine active: {self.antigravity_runner.agy_path} (Cloud Gemini completely decoupled)")
+
+    def create_chat_session(self, sys_instruction: str, tools: list, model_name: str = None):
+        """Creates an AntigravityChatSession for the Master Orchestrator."""
+        return AntigravityChatSession(self.antigravity_runner, sys_instruction, tools)
+
     def load_chart_parts(self) -> list:
-        """Load latest 1-minute chart screenshots from context/charts/ as multimodal types.Part instances."""
+        """Load latest 1-minute chart screenshots from context/charts/ as multimodal Part instances."""
         import glob
         chart_parts = []
         chart_dir = "context/charts"
@@ -118,65 +274,8 @@ class AgentFramework:
         return chart_parts
 
     def _resolve_orchestrator(self) -> str:
-        """
-        Dynamically probe available models, filter for 'antigravity',
-        and return the latest version alphabetically that supports function calling.
-        Falls back to 'gemini-3.7-flash-extended' on failure or empty match.
-        """
-        try:
-            available_models = []
-            for m in self.client.models.list():
-                name = getattr(m, "name", "").replace("models/", "")
-                available_models.append(name)
-            
-            antigravity_models = [name for name in available_models if "antigravity" in name.lower()]
-            if antigravity_models:
-                antigravity_models.sort()
-                
-                # Verify each starting from the latest (alphabetically)
-                for resolved in reversed(antigravity_models):
-                    if not hasattr(self, "_model_capability_cache"):
-                        self._model_capability_cache = {}
-                    
-                    if resolved not in self._model_capability_cache:
-                        self.log(f"[Dynamic Discovery] Probing {resolved} for tool/function calling support...")
-                        def dummy_tool() -> str:
-                            """A dummy tool to test tool support."""
-                            return "ok"
-                        try:
-                            # Use a tiny prompt and minimal output to verify function calling
-                            cfg = types.GenerateContentConfig(
-                                tools=[dummy_tool],
-                                max_output_tokens=1,
-                                temperature=0.0,
-                            )
-                            self.client.models.generate_content(
-                                model=resolved,
-                                contents="test",
-                                config=cfg
-                            )
-                            self._model_capability_cache[resolved] = True
-                            self.log(f"[Dynamic Discovery] Verified {resolved} supports function calling.")
-                        except Exception as e:
-                            err_str = str(e).lower()
-                            if "function calling" in err_str or "tool" in err_str or "invalid" in err_str:
-                                self.log(f"[Dynamic Discovery] Model {resolved} does not support function calling: {e}")
-                                self._model_capability_cache[resolved] = False
-                            else:
-                                self.log(f"[Dynamic Discovery] Verification call for {resolved} failed with unexpected error: {e}")
-                                # Do not cache as False permanently for transient connection errors, but skip for this resolution
-                                continue
-
-                    if self._model_capability_cache.get(resolved):
-                        self.log(f"[Dynamic Discovery] Resolved primary orchestrator: {resolved}")
-                        return resolved
-                    else:
-                        self.log(f"[Dynamic Discovery] Skipping {resolved} due to lack of tool/function calling support.")
-        except Exception as e:
-            self.log(f"[Dynamic Discovery Warning] Failed to dynamically list/probe models: {e}")
-        
-        self.log("[Dynamic Discovery] Defaulting primary orchestrator to gemini-3.7-flash")
-        return "gemini-3.7-flash"
+        """Returns the primary Antigravity Orchestrator model."""
+        return self._local_config.get("ANTIGRAVITY_MODEL_PRO", "gemini-3.8-flash-high")
 
     def _minify_payload(self, text: str) -> str:
         # Strip HTML/Markdown comments
@@ -292,10 +391,6 @@ class AgentFramework:
         except Exception:
             return {}
 
-    def _get_cloud_models(self, mode: str) -> list:
-        """Return the list of models for a cloud mode."""
-        return MODEL_MAPPING.get(mode, ["gemini-3.5-flash"])
-
     def load_system_instruction(self, file_path: str) -> str:
         """Loads a file and formats it as a string for the system prompt.
         Prefers .md directly; falls back .json → .md if needed."""
@@ -325,164 +420,32 @@ class AgentFramework:
 
 
     # -----------------------------------------------------------------------
-    # Core generation method
+    # Core generation method — Pure Antigravity App Agent Engine
     # -----------------------------------------------------------------------
     def generate_response_with_fallback(self, prompt, instruction, mode, tools=None):
-        """Generate a response, routing to Gemini (cloud modes) with fallback and hybrid execution."""
+        """Generate a response using the local Antigravity App Agent runtime."""
         if getattr(self, "cancel_check", None) and self.cancel_check():
             self.log("[Framework] Cancel signal active before starting call.")
             raise RuntimeError("Operation cancelled by user.")
 
-        models = self._get_cloud_models(mode)
-        last_error = None
+        target_model = "gemini-3.8-flash-high" if mode in ("PRO", "THINKING") else "gemini-3.8-flash-low"
+        self.log(f"[Antigravity App Agent] Delegating turn with model: {target_model} (mode: {mode})...")
+        start_time = time.time()
+        try:
+            self._log_handshake("REQUEST", target_model, "Antigravity Local", prompt, None)
+            resp = self.antigravity_runner.run_prompt(prompt, system_instruction=instruction, mode=mode, tools=tools)
+            elapsed = time.time() - start_time
+            self._log_handshake("RESPONSE", target_model, "Antigravity Local", prompt, None, response=resp, latency=elapsed)
 
-        for model_name in models:
-            if getattr(self, "cancel_check", None) and self.cancel_check():
-                self.log("[Framework] Cancel signal active. Aborting fallback loop.")
-                raise RuntimeError("Operation cancelled by user.")
-
-            self.log(f"[Cloud Execution] Attempting with model: {model_name}...")
-
-            final_tools = []
-            if tools:
-                for t in tools:
-                    if isinstance(t, dict) and "google_search" in t:
-                        final_tools.append(types.Tool(google_search=types.GoogleSearch()))
-                    else:
-                        final_tools.append(t)
-
-            # Determine clients to try based on hybrid execution
-            if model_name == "gemini-3.1-flash-lite":
-                clients_to_try = [("Free-Tier Key", self.free_client)]
-            else:
-                clients_to_try = [("Primary Key", self.client)]
-
-            for client_label, active_client in clients_to_try:
-                # Check if we should use JIT caching
-                cache_to_use = getattr(self, "active_cache_name", None)
-                cache_target_model = getattr(self, "active_cache_target_model", None)
-                
-                if cache_to_use and cache_target_model and model_name == cache_target_model and not final_tools:
-                    client_cache = cache_to_use
-                    client_system_instruction = None
-                    if instruction:
-                        prompt = f"System Instruction:\n{instruction}\n\nUser Prompt:\n{prompt}"
-                else:
-                    client_cache = None
-                    client_system_instruction = self._get_sys_instruction(instruction) if instruction else self._get_sys_instruction("")
-
-                config = types.GenerateContentConfig(
-                    system_instruction=client_system_instruction,
-                    temperature=1.0,
-                    max_output_tokens=8192,
-                    tools=final_tools if final_tools else None,
-                    automatic_function_calling={"disable": True},
-                    cached_content=client_cache, # Inject JIT cache name if applicable
-                    safety_settings=[
-                        types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
-                        types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),
-                        types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT",  threshold="BLOCK_NONE"),
-                        types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT",  threshold="BLOCK_NONE"),
-                    ],
-                )
-
-                def attempt_call(client_instance, client_config, p_content):
-                    if getattr(self, "cancel_check", None) and self.cancel_check():
-                        self.log("[Framework] Cancel signal active before starting API call.")
-                        raise RuntimeError("Operation cancelled by user.")
-                    if final_tools:
-                        chat = client_instance.chats.create(model=model_name, config=client_config)
-                        res = chat.send_message(p_content)
-                    else:
-                        res = client_instance.models.generate_content(
-                            model=model_name, contents=p_content, config=client_config
-                        )
-                    
-                    if hasattr(res, 'usage_metadata') and res.usage_metadata:
-                        raw_prompt_tokens = res.usage_metadata.prompt_token_count or 0
-                        cached_tokens = getattr(res.usage_metadata, 'cached_content_token_count', 0) or 0
-                        p_tokens = raw_prompt_tokens - cached_tokens
-                        c_tokens = res.usage_metadata.candidates_token_count or 0
-                        
-                        self.turn_usage['prompt_tokens'] += p_tokens
-                        self.turn_usage['candidates_tokens'] += c_tokens
-                        self.turn_usage['cached_tokens'] += cached_tokens
-                        
-                        call_cost = self._calculate_call_cost(model_name, client_label, p_tokens, c_tokens, cached_tokens)
-                        self.turn_usage['estimated_cost'] += call_cost
-                        self.session_cost += call_cost
-                    return res
-
-                try:
-                    self._log_handshake("REQUEST", model_name, client_label, prompt, config)
-                    start_time = time.time()
-                    res = attempt_call(active_client, config, prompt)
-                    elapsed = time.time() - start_time
-                    self._log_handshake("RESPONSE", model_name, client_label, prompt, config, response=res, latency=elapsed)
-                    return res
-                except Exception as e:
-                    error_msg = str(e)
-                    last_error = e
-                    elapsed = time.time() - start_time
-                    self._log_handshake("ERROR", model_name, client_label, prompt, config, error=error_msg, latency=elapsed)
-                    self.log(f"[Warning] Call failed using {client_label} for model {model_name}: {error_msg}")
-
-                    is_daily_limit = any(term in error_msg.lower() for term in ["daily", "limit exceeded", "exhausted", "free tier", "quota"])
-
-                    if "429" in error_msg or "quota" in error_msg.lower():
-                        if is_daily_limit:
-                            self._log_handshake("WARNING", model_name, client_label, prompt, config, error=f"Daily limit reached. Instantly skipping: {error_msg}")
-                            self.log(f"[System] Daily quota/limit hit for {model_name}. Skipping retry wait, instantly falling back to next available model...")
-                            continue
-
-                        import re
-                        wait_time = 32
-                        match = re.search(r"retry in (\d+(?:\.\d+)?)s", error_msg, re.IGNORECASE)
-                        if match:
-                            wait_time = int(float(match.group(1))) + 1
-                            
-                        self._log_handshake("WARNING", model_name, client_label, prompt, config, error=f"Rate limit hit. Waiting {wait_time}s to retry...")
-                        self.log(f"[System] Rate limit hit for {model_name}. Waiting {wait_time}s...")
-                        time.sleep(wait_time)
-                        try:
-                            self._log_handshake("REQUEST", model_name, client_label, prompt, config)
-                            start_time = time.time()
-                            res = attempt_call(active_client, config, prompt)
-                            elapsed = time.time() - start_time
-                            self._log_handshake("RESPONSE", model_name, client_label, prompt, config, response=res, latency=elapsed)
-                            return res
-                        except Exception as retry_e:
-                            last_error = retry_e
-                            elapsed = time.time() - start_time
-                            self._log_handshake("ERROR", model_name, client_label, prompt, config, error=f"Retry attempt failed: {retry_e}", latency=elapsed)
-                            continue
-
-                    elif "503" in error_msg or "502" in error_msg or "unavailable" in error_msg.lower() or "bad gateway" in error_msg.lower():
-                        self._log_handshake("WARNING", model_name, client_label, prompt, config, error=f"{error_msg}. Retrying in 5s...")
-                        self.log(f"[System] {error_msg} for {model_name}. Retrying in 5s...")
-                        time.sleep(5)
-                        try:
-                            self._log_handshake("REQUEST", model_name, client_label, prompt, config)
-                            start_time = time.time()
-                            res = attempt_call(active_client, config, prompt)
-                            elapsed = time.time() - start_time
-                            self._log_handshake("RESPONSE", model_name, client_label, prompt, config, response=res, latency=elapsed)
-                            return res
-                        except Exception as retry_e:
-                            last_error = retry_e
-                            elapsed = time.time() - start_time
-                            self._log_handshake("ERROR", model_name, client_label, prompt, config, error=f"Retry after 502/503 failed: {retry_e}", latency=elapsed)
-                            pass
-                        continue
-
-                    elif "not found" in error_msg.lower() or "404" in error_msg or "not supported" in error_msg.lower() or "interactions api" in error_msg.lower():
-                        self._log_handshake("WARNING", model_name, client_label, prompt, config, error=f"Model not supported / returned 404: {error_msg}")
-                        continue
-                    else:
-                        self.log(f"[System] Warning: {model_name} failed with error: {e}")
-                        raise e
-
-        raise RuntimeError(f"All models for mode {mode} failed. Last error: {last_error}")
+            # Zero marginal cost for local Antigravity sessions
+            self.turn_usage['prompt_tokens'] += resp.usage_metadata.prompt_token_count
+            self.turn_usage['candidates_tokens'] += resp.usage_metadata.candidates_token_count
+            return resp
+        except Exception as e:
+            elapsed = time.time() - start_time
+            self._log_handshake("ERROR", target_model, "Antigravity Local", prompt, None, error=str(e), latency=elapsed)
+            self.log(f"[Antigravity Error] Agent call failed: {e}")
+            raise e
 
     def load_temporal_anchor_prompt(self, ny_iso: str, current_year: int) -> str:
         """Loads the temporal anchor prompt from prompts/temporal_anchor_prompt.txt and templates the parameters."""
@@ -600,68 +563,19 @@ class AgentFramework:
 
     def execute_ephemeral_batch(self, shared_ssot_base: str, parallel_tasks: dict) -> dict:
         """
-        Executes a batch of parallel sub-agent tasks. If the shared_ssot_base exceeds
-        32,768 tokens, it is cached dynamically using self.client.caches.create.
-        Otherwise, tasks are executed in parallel without caching.
+        Executes a batch of parallel sub-agent tasks concurrently via ThreadPoolExecutor on Antigravity.
         """
-        try:
-            model = self._resolve_orchestrator()
-            token_count = self.client.models.count_tokens(model=model, contents=shared_ssot_base).total_tokens
-        except Exception as e:
-            self.log(f"[Warning] Token count failed: {e}. Estimating via length.")
-            token_count = len(shared_ssot_base) // 4
-            
-        use_cache = token_count > 32768
-        
-        if not use_cache:
-            self.log(f"[Ephemeral Batch] Base size ({token_count} tokens) <= 32768. Running without cache.")
-            results = {}
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(parallel_tasks)) as executor:
-                future_to_agent = {executor.submit(task): name for name, task in parallel_tasks.items()}
-                for future in concurrent.futures.as_completed(future_to_agent):
-                    agent_name = future_to_agent[future]
-                    try:
-                        results[agent_name] = future.result()
-                    except Exception as exc:
-                        results[agent_name] = f"Error: {exc}"
-            return results
-            
-        cache_target_model = MODEL_MAPPING.get('PRO', [DEFAULT_MODEL_PRO])[0]
-        self.active_cache_target_model = cache_target_model
-        
-        self.log(f"[Ephemeral Batch] Base size ({token_count} tokens) > 32768. Target Cache Model: {cache_target_model}. Initializing ephemeral JIT cache...")
-        cache = None
-        try:
-            cache = self.client.caches.create(
-                model=cache_target_model,
-                config=types.CreateCachedContentConfig(
-                    contents=[types.Content(role="user", parts=[types.Part(text=shared_ssot_base)])],
-                    ttl="900s"
-                )
-            )
-            self.active_cache_name = cache.name
-            self.log(f"[Ephemeral Batch] Created ephemeral JIT cache: {cache.name}")
-            
-            results = {}
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(parallel_tasks)) as executor:
-                future_to_agent = {executor.submit(task): name for name, task in parallel_tasks.items()}
-                for future in concurrent.futures.as_completed(future_to_agent):
-                    agent_name = future_to_agent[future]
-                    try:
-                        results[agent_name] = future.result()
-                    except Exception as exc:
-                        results[agent_name] = f"Error: {exc}"
-            return results
-        finally:
-            if cache:
+        self.log(f"[Antigravity Parallel Batch] Executing {len(parallel_tasks)} tasks concurrently via Antigravity Agents...")
+        results = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(parallel_tasks), 8)) as executor:
+            future_to_agent = {executor.submit(task): name for name, task in parallel_tasks.items()}
+            for future in concurrent.futures.as_completed(future_to_agent):
+                agent_name = future_to_agent[future]
                 try:
-                    self.log(f"[Ephemeral Batch] Deleting ephemeral JIT cache: {cache.name}")
-                    self.client.caches.delete(name=cache.name)
-                except Exception as e:
-                    self.log(f"[Warning] Failed to delete JIT cache {cache.name}: {e}")
-                finally:
-                    self.active_cache_name = None
-                    self.active_cache_target_model = None
+                    results[agent_name] = future.result()
+                except Exception as exc:
+                    results[agent_name] = f"Error: {exc}"
+        return results
 
     def create_parallel_council_tool(self, agents_dict):
         def ask_council(queries_json: str) -> str:

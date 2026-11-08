@@ -1,10 +1,10 @@
 # 💎 GEM Investment Portfolio Agent Framework
 
-**An autonomous, API-driven multi-agent investment portfolio intelligence platform powered exclusively by Google Gemini.**
+**An autonomous multi-agent investment portfolio intelligence platform powered by Antigravity App Agents.**
 
 Each Markdown file (`.md`) in `engine_instructions/` defines the system instruction, behavioral bounds, and output schemas for a dedicated AI sub-agent. Together, these engines form a deliberative multi-agent council that analyzes live market data, enforces quantitative risk protocols, and compiles consensus-driven portfolio execution directives — accessible via an asynchronous Web Dashboard (`python/web_server.py`) or interactive CLI (`python/main.py`).
 
-> **Pure Google Gemini Architecture.** Powered exclusively by Google Gemini. All structural, quantitative, and deliberative nodes operate natively on Google Gemini model tiers: **PRO / THINKING** (`gemini-3.7-flash`, `gemini-2.5-pro`, `gemini-3.1-pro-preview`) and **FAST / UTILITY** (`gemini-3.7-flash`, `gemini-3.1-flash-lite`, `gemini-2.5-flash`), with high-speed utility and background scout workflows isolated to the free-tier API client.
+> **Pure Antigravity App Agent Architecture.** Powered natively by local Antigravity App Agents (`agy` CLI runtime with active desktop session authentication: `gemini-3.8-flash-high`, `gemini-3.8-flash-low`, `gemini-4-argon-high`). External Google Gemini Cloud calls, API key dependencies, and cloud fallback cascades are completely decoupled. Mountable directly as an Antigravity Sidecar UI panel (`sidecar://gem-dashboard/`) or accessible via standard browser at `http://localhost:8000`.
 
 ---
 
@@ -22,8 +22,7 @@ Each Markdown file (`.md`) in `engine_instructions/` defines the system instruct
 ### Prerequisites
 
 - Python 3.10+
-- Google AI Studio API Key (`GEMINI_API_KEY`)
-- Optional Free-Tier API Key (`GEMINI_FREE_TIER_API_KEY`) for isolated utility and scout routing
+- Google Antigravity Desktop Environment (provides local `agy` CLI binary pre-authenticated via active user session)
 - Optional market data API keys (`FINNHUB_API_KEY`, `POLYGON_API_KEY`, `ALPHA_ADVANTAGE_API_KEY`)
 
 ### Installation
@@ -413,6 +412,30 @@ Located in the project root:
 ---
 
 ## 📋 Changelog
+
+### v11.56-Pure-Antigravity-Engine-Cloud-Decoupled *(2026-11-08)*
+- **Complete Decoupling of Google Gemini Cloud:**
+  - Fully eliminated all external Google Gemini Cloud API network requests, `google.genai.Client` instances, and API key dependencies across `agent_framework.py`, `tools.py`, `fetch_stocks.py`, `web_server.py`, and `main.py`.
+  - Replaced `google.genai.types` with a lightweight, standalone `Part` and `types` encapsulation in `agent_framework.py`, enabling complete independence from cloud SDK networking while maintaining full multimodal and tool-call response compatibility.
+  - Purged all cloud retry loops, 429 backoffs, and `MODEL_FALLBACK_CASCADE` failovers across `chat_endpoint` and CLI loops, routing all agent operations through the local Antigravity runtime (`C:\Users\roger\.gemini\bin\agy.exe`).
+- **Autonomous Tool & Scout Execution via Antigravity:**
+  - Migrated `perform_web_forensic_search` in `tools.py` to execute directly through `AntigravityAgentRunner` in `FAST` mode, removing external cloud search grounding dependencies.
+  - Migrated `_get_dynamic_scout_tickers` and `query_gemini_news_grounding` in `fetch_stocks.py` to run via `AntigravityAgentRunner`, decoupling qualitative news extraction and AI Scout scanning from cloud API quotas.
+- **Dynamic Model Listing Parity:**
+  - Updated `/api/list_models` and `check_model_validity` in `web_server.py` to natively serve verified Antigravity App Agent models (`gemini-3.8-flash-high`, `gemini-3.8-flash-low`, `gemini-4-argon-high`, `claude-opus-5-5-high`, `gpt-oss-120b-medium`) without probing cloud endpoints.
+- **Global Parity Versioning (MANDATE_29):** Synchronized version string `v11.56-Pure-Antigravity-Engine-Cloud-Decoupled` across all 23 scope files.
+
+### v11.55-Antigravity-Agent-Engine-and-Sidecar-Sync *(2026-11-08)*
+- **Antigravity App Agent Runtime Integration (`python/agent_framework.py`):**
+  - Integrated `AntigravityAgentRunner` to execute local Antigravity application agents via `agy.exe` (`gemini-3.8-flash-high` and `gemini-3.8-flash-low`), authenticating directly through the active Antigravity desktop session without requiring external Google AI Studio API calls or per-token billing.
+  - Implemented `AntigravityChatSession` adapter, providing session parity with `get_history()` and `send_message()` tool-dispatching loops for the Master Orchestrator.
+  - Added configurable backend selection in `config.json` (`EXECUTION_BACKEND: "antigravity"` vs `"gemini_cloud"`) with graceful cascading fallback to cloud APIs if the local binary is unavailable.
+  - Streamlined `execute_ephemeral_batch` for local Antigravity execution via `ThreadPoolExecutor` while preserving Gemini Cloud JIT caching paths for cloud executions.
+- **Antigravity Sidecar UI Auxiliary Pane (`sidecar.json` & `scripts/launch_sidecar.py`):**
+  - Registered the GEM Trading Council Dashboard as an Antigravity Sidecar (`~/.gemini/config/sidecars/gem-dashboard/sidecar.json`), enabling one-click embedding into the Antigravity auxiliary side pane.
+  - Developed `scripts/launch_sidecar.py` with dynamic port binding and reverse-proxying from `ANTIGRAVITY_SIDECAR_WEB_PORT` to active server instances.
+  - Updated `install.ps1` to automatically scaffold the sidecar configuration directory and JSON definition on fresh setup runs.
+  - Updated `python/web_server.py` to prioritize `ANTIGRAVITY_SIDECAR_WEB_PORT` when started by the Antigravity host.
 
 ### v11.54-Legislative-Audit-Harmonization-Sync *(2026-10-14)*
 - **Harmonized 9-Day RSI Triggers (AG-01):** Calibrated all 9-day oscillator triggers across SSoT Section 1 and Section 2 engines. Aligned `MANDATE_36 / ENH_104` trailing stop telemetry to `RSI > 70` (or VWAP extension > 2.0% or active holding), `MANDATE_37 / ENH_110` sympathy bypass to `RSI > 75`, `MANDATE_38` overbought timer to crossing `75 RSI`, `ENH_111` gamma flicker preemption to `RSI > 75`, and `MANDATE_40` parabolic gravity to `RSI > 85`.

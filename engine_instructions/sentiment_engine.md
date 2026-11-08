@@ -1,7 +1,7 @@
 # Sentiment Engine Rules & Configuration
 
 - **role**: Sentiment Engine
-- **version**: v11.54-Legislative-Audit-Harmonization-Sync
+- **version**: v11.56-Pure-Antigravity-Engine-Cloud-Decoupled
 - **id**: SENTIMENT_ENGINE
 
 ## Tone

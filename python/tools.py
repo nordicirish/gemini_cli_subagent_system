@@ -343,36 +343,10 @@ def perform_web_forensic_search(query: str) -> str:
     news catalysts, or structural data. Use this for forensic verification.
     """
     try:
-        from google import genai
-        from google.genai import types
-        import agent_framework
-        
-        # Load config for model tier and API Key
-        api_key = None
-        flash_model = agent_framework.DEFAULT_MODEL_FLASH # Default
-        if os.path.exists("context/config.json"):
-            with open("context/config.json", "r") as f:
-                config = json.load(f)
-                api_key = config.get("GEMINI_API_KEY")
-                flash_model = config.get("MODEL_FLASH", flash_model)
-        
-        client = genai.Client(api_key=api_key) if api_key else genai.Client()
-        
+        from agent_framework import AntigravityAgentRunner
+        runner = AntigravityAgentRunner()
         prompt = load_forensic_search_prompt(query)
-        # Use a stable flash model for the search-only retrieval
-        response = client.models.generate_content(
-            model=flash_model, 
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-                safety_settings=[
-                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
-                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE")
-                ]
-            )
-        )
+        response = runner.run_prompt(prompt, mode="FAST")
         return response.text
     except Exception as e:
         return f"Error performing web search: {str(e)}"

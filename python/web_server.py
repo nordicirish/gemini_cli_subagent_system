@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, JSONResponse
 import threading
 import glob
-from google.genai import types
+from agent_framework import types, Part
 
 from agent_framework import AgentFramework
 import agent_framework
@@ -355,34 +355,10 @@ active_model_warning = None
 
 def check_model_validity(model_name: str) -> str:
     """
-    Checks if the model is supported by the active API key.
-    Returns a descriptive warning string if invalid/deprecated, or None.
+    Antigravity App Agent execution model validity check.
+    All registered Antigravity models are valid locally.
     """
-    try:
-        available_names = []
-        try:
-            # Dynamically fetch models from active client
-            for m in framework.client.models.list():
-                available_names.append(getattr(m, "name", "").replace("models/", ""))
-        except Exception:
-            # If primary listing fails, try free tier client list
-            try:
-                if getattr(framework, "free_client", None) and framework.free_client is not framework.client:
-                    for m in framework.free_client.models.list():
-                        available_names.append(getattr(m, "name", "").replace("models/", ""))
-            except Exception:
-                pass
-
-        # Check for officially deprecated model
-        if "gemini-2.0-flash-thinking-exp" in model_name:
-            return "⚠️ Warning: Selected model 'gemini-2.0-flash-thinking-exp' is officially deprecated. We recommend migrating to a modern stable Flash model."
-
-        if available_names and model_name not in available_names:
-            return f"⚠️ Warning: Selected model '{model_name}' is not in the list of models supported by your API key. Gemini may throw 404/400 errors. We recommend switching to a supported Flash or Pro model."
-            
-        return None
-    except Exception as e:
-        return f"⚠️ Warning: Model validation exception: {e}"
+    return None
 
 active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
 if active_model_warning:
@@ -393,23 +369,7 @@ if active_model_warning:
 def create_new_session():
     global ORCHESTRATOR_MODEL
     sys_instruction = framework._get_sys_instruction(terminal_instruction)
-
-    return framework.client.chats.create(
-        model=ORCHESTRATOR_MODEL,
-        config=agent_framework.types.GenerateContentConfig(
-            system_instruction=sys_instruction,
-            temperature=1.0,
-            max_output_tokens=8192,
-            tools=terminal_tools,
-            automatic_function_calling={"disable": True},
-            safety_settings=[
-                agent_framework.types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH",       threshold="BLOCK_NONE"),
-                agent_framework.types.SafetySetting(category="HARM_CATEGORY_HARASSMENT",         threshold="BLOCK_NONE"),
-                agent_framework.types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT",  threshold="BLOCK_NONE"),
-                agent_framework.types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT",  threshold="BLOCK_NONE"),
-            ]
-        )
-    )
+    return framework.create_chat_session(sys_instruction, terminal_tools, ORCHESTRATOR_MODEL)
 
 global_chat_session = create_new_session()
 _session_hydrated = False # Global flag for tracking memory hydration
@@ -463,66 +423,15 @@ def get_news_scan_prompt():
 
 @app.get("/api/list_models")
 def list_models_endpoint():
-    """Dynamically pull authorized models from Google GenAI with defensive canonical fallbacks."""
+    """Return authorized Antigravity App Agent models for local execution."""
     try:
-        models = []
-        
-        # Exclude legacy, specialized (image/audio/tts), and niche non-text models
-        BLACKLIST_KEYWORDS = [
-            "image", "audio", "tts", "live", "embedding", "aqa", 
-            "robotics", "veo", "imagen", "lyria", "computer-use", 
-            "banana", "clip", "customtools", "1.5", "-001", "lite-001"
+        models = [
+            {"name": "gemini-3.8-flash-high", "label": "GEMINI-3.8-FLASH-HIGH (ANTIGRAVITY PRO/THINKING)"},
+            {"name": "gemini-3.8-flash-low", "label": "GEMINI-3.8-FLASH-LOW (ANTIGRAVITY FAST)"},
+            {"name": "gemini-4-argon-high", "label": "GEMINI-4-ARGON-HIGH (ANTIGRAVITY EXPERT)"},
+            {"name": "claude-opus-5-5-high", "label": "CLAUDE-OPUS-5.5-HIGH (ANTIGRAVITY REASONING)"},
+            {"name": "gpt-oss-120b-medium", "label": "GPT-OSS-120B-MEDIUM (ANTIGRAVITY OPEN)"},
         ]
-        
-        try:
-            for m in framework.client.models.list():
-                supported = getattr(m, 'supported_methods', getattr(m, 'supported_generation_methods', getattr(m, 'supported_actions', [])))
-                name = getattr(m, "name", "").replace("models/", "")
-                
-                if any(kw in name.lower() for kw in BLACKLIST_KEYWORDS):
-                    continue
-                
-                if not supported or "generateContent" in supported or "generate_content" in supported or "gemini" in name.lower():
-                    label = name.upper()
-                    if "pro" in name: label += " (PRO)"
-                    elif "thinking" in name: label += " (THINKING)"
-                    elif "flash" in name: label += " (FLASH)"
-                    models.append({"name": name, "label": label})
-        except Exception as le:
-            framework.log(f"[Warning] Failed to dynamically list models from API: {le}. Proceeding with canonical injection.")
-
-        # Ensure key canonical modern models are ALWAYS present
-        guaranteed_models = [
-            {"name": "gemini-3.7-flash", "label": "GEMINI-3.7-FLASH (FLASH)"},
-            {"name": "gemini-3.5-flash", "label": "GEMINI-3.5-FLASH (FLASH)"},
-            {"name": "gemini-3.1-pro-preview", "label": "GEMINI-3.1-PRO-PREVIEW (PRO)"},
-            {"name": "gemini-2.5-pro", "label": "GEMINI-2.5-PRO (PRO)"},
-            {"name": "gemini-2.5-flash", "label": "GEMINI-2.5-FLASH (FLASH)"},
-            {"name": "gemini-2.0-flash", "label": "GEMINI-2.0-FLASH (FLASH)"}
-        ]
-        
-        existing_names = {m["name"] for m in models}
-        for gm in guaranteed_models:
-            if gm["name"] not in existing_names:
-                models.append(gm)
-
-        # Sort so Thinking is first, followed by Pro, then Flash, and highest versions are listed first
-        def sort_key(x):
-            name = x["name"].lower()
-            tier = 2
-            if "thinking" in name:
-                tier = 0
-            elif "pro" in name:
-                tier = 1
-                
-            import re
-            match = re.search(r"(\d+\.\d+)", name)
-            version = float(match.group(1)) if match else 0.0
-            
-            # Sort by tier ascending, then version descending, then name ascending
-            return (tier, -version, name)
-
-        models.sort(key=sort_key)
         global active_model_warning
         active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
         return {"status": "success", "models": models, "current_model": ORCHESTRATOR_MODEL, "warning": active_model_warning}
@@ -733,16 +642,6 @@ def chat_endpoint(req: ChatRequest):
             prompt_prefix = auto_data_block + history_context + load_history_recovery_footer_prompt()
             _session_hydrated = True
 
-        MODEL_FALLBACK_CASCADE = [
-            "gemini-3.7-flash",
-            "gemini-3.5-flash",
-            "gemini-3.1-pro-preview",
-            "gemini-2.5-pro",
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash"
-        ]
-
         active_model_str = f"[ACTIVE_MODEL]: {ORCHESTRATOR_MODEL}\n"
         current_message = f"{active_model_str}{prompt_prefix}[SYSTEM_TIME (NEW YORK / ET): {current_iso}] [USER_QUERY]: {req.message}"
         
@@ -782,55 +681,8 @@ def chat_endpoint(req: ChatRequest):
             try:
                 response = session.send_message(payload_to_send)
             except Exception as exc:
-                from google.genai.errors import APIError
-                exc_str = str(exc).upper()
-                is_transient = (
-                    isinstance(exc, APIError) or
-                    "503" in exc_str or "UNAVAILABLE" in exc_str or
-                    "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str or
-                    "500" in exc_str or "502" in exc_str or "504" in exc_str or
-                    "404" in exc_str or "NOT_FOUND" in exc_str
-                )
-                if is_transient:
-                    # Build ordered candidate fallback models
-                    current_idx = -1
-                    for idx, m_cand in enumerate(MODEL_FALLBACK_CASCADE):
-                        if m_cand == ORCHESTRATOR_MODEL:
-                            current_idx = idx
-                            break
-                    
-                    if current_idx != -1:
-                        candidates = MODEL_FALLBACK_CASCADE[current_idx + 1:] + MODEL_FALLBACK_CASCADE[:current_idx]
-                    else:
-                        candidates = [m for m in MODEL_FALLBACK_CASCADE if m != ORCHESTRATOR_MODEL]
-
-                    recovered = False
-                    last_exc = exc
-                    for fallback_model in candidates:
-                        framework.log(f"[Cascading Failover] Model {ORCHESTRATOR_MODEL} failed ({exc}). Auto-falling back to next model: {fallback_model}...")
-                        try:
-                            ORCHESTRATOR_MODEL = fallback_model
-                            session = create_new_session()
-                            global_chat_session = session
-                            _session_hydrated = True
-                            active_model_str = f"[ACTIVE_MODEL]: {ORCHESTRATOR_MODEL}\n"
-                            if isinstance(current_message, str):
-                                current_message = f"{active_model_str}{prompt_prefix}[SYSTEM_TIME (NEW YORK / ET): {current_iso}] [USER_QUERY]: {req.message}"
-                            failover_payload = [*chart_parts, current_message] if (turn_count == 1 and chart_parts and isinstance(current_message, str)) else current_message
-                            response = session.send_message(failover_payload)
-                            framework.log(f"[Cascading Failover] Successfully recovered on {ORCHESTRATOR_MODEL}!")
-                            recovered = True
-                            fallback_occurred = True
-                            break
-                        except Exception as fb_exc:
-                            framework.log(f"[Cascading Failover] Fallback to {fallback_model} failed ({fb_exc}). Continuing cascade...")
-                            last_exc = fb_exc
-                            continue
-
-                    if not recovered:
-                        raise last_exc
-                else:
-                    raise exc
+                framework.log(f"[Orchestrator Error] Antigravity chat session failed: {exc}")
+                raise exc
             
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 raw_prompt_tokens = response.usage_metadata.prompt_token_count or 0
@@ -1596,16 +1448,23 @@ if __name__ == "__main__":
         os.makedirs("static")
     app.mount("/", StaticFiles(directory="static", html=True), name="static")
     
-    # Auto-select an available port starting from 8000
+    # Prioritize Antigravity sidecar port if provided, otherwise auto-select starting from 8000
     import socket
-    port = 8000
-    while True:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(("127.0.0.1", port))
-                break  # Port is available
-            except OSError:
-                port += 1
+    sidecar_port_env = os.environ.get("ANTIGRAVITY_SIDECAR_WEB_PORT")
+    if sidecar_port_env:
+        try:
+            port = int(sidecar_port_env)
+        except ValueError:
+            port = 8000
+    else:
+        port = 8000
+        while True:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind(("127.0.0.1", port))
+                    break  # Port is available
+                except OSError:
+                    port += 1
 
     print(f"Starting Web Server on http://localhost:{port}")
     

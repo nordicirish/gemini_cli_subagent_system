@@ -1,7 +1,7 @@
 # Context Engine Rules & Configuration
 
 - **role**: Context Engine
-- **version**: v11.54-Legislative-Audit-Harmonization-Sync
+- **version**: v11.56-Pure-Antigravity-Engine-Cloud-Decoupled
 - **id**: CONTEXT_ENGINE
 
 ## Prefix

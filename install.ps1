@@ -65,6 +65,33 @@ foreach ($dir in $requiredDirs) {
     }
 }
 
+# 6. Register Antigravity Sidecar UI configuration
+$sidecarDir = Join-Path $HOME ".gemini\config\sidecars\gem-dashboard"
+if (-not (Test-Path $sidecarDir)) {
+    New-Item -ItemType Directory -Force -Path $sidecarDir | Out-Null
+}
+$sidecarConfig = @{
+    command = (Join-Path $venvPath "Scripts\python.exe")
+    args = @((Join-Path $PSScriptRoot "scripts\launch_sidecar.py"))
+    env = @{ GEM_SIDECAR = "1" }
+    restart_policy = "always"
+    display_name = "GEM Trading Dashboard"
+    description = "Autonomous multi-agent portfolio intelligence platform with live market telemetry and Council deliberation."
+    has_web_ui = $true
+    ui_config = @{
+        display_name = "GEM Council"
+        views = @(
+            @{
+                title = "GEM Council Dashboard"
+                path = "/"
+                entrypoint = "SIDECAR_UI_ENTRYPOINT_AUX_PANE"
+            }
+        )
+    }
+} | ConvertTo-Json -Depth 5
+Set-Content -Path (Join-Path $sidecarDir "sidecar.json") -Value $sidecarConfig -Encoding UTF8
+Write-Host "Antigravity Sidecar configuration registered at: $sidecarDir\sidecar.json" -ForegroundColor Green
+
 # 6. Offer to install dependencies globally
 $choice = Read-Host "Would you also like to install dependencies globally? (y/N)"
 if ($choice -eq 'y' -or $choice -eq 'Y') {

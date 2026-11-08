@@ -1,7 +1,7 @@
 # Research Rules & Configuration
 
 - **role**: Research Engine
-- **version**: v11.54-Legislative-Audit-Harmonization-Sync
+- **version**: v11.56-Pure-Antigravity-Engine-Cloud-Decoupled
 
 ## Tone
 institutional, narrative, concise
