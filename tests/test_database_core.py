@@ -2033,6 +2033,65 @@ class TestCheckExtractorSqlLexicalIntegrity(unittest.TestCase):
             SchemaMigrator.extract_check_expressions(ddl)
         self.assertIn("CHECK keyword not followed by opening parenthesis", str(ctx.exception))
 
+    # -------------------------------------------------------------------------
+    # Stage 1.3.1.5.1: Trailing DDL lexical validation
+    # -------------------------------------------------------------------------
+    def test_unterminated_backtick_in_trailing_ddl_fails_closed(self):
+        """
+        R3.1: Verify that an unterminated backtick identifier occurring after the
+        closing table-body parenthesis raises SchemaIntegrityError fail-closed.
+        """
+        ddl = "CREATE TABLE t ( id INT PRIMARY KEY ) `unterminated"
+        with self.assertRaises(SchemaIntegrityError) as ctx:
+            SchemaMigrator.extract_check_expressions(ddl)
+        self.assertIn("unterminated backtick identifier in trailing DDL", str(ctx.exception))
+
+    def test_unterminated_bracket_in_trailing_ddl_fails_closed(self):
+        """
+        R3.2: Verify that an unterminated bracket identifier occurring after the
+        closing table-body parenthesis raises SchemaIntegrityError fail-closed.
+        """
+        ddl = "CREATE TABLE t ( id INT PRIMARY KEY ) [unterminated"
+        with self.assertRaises(SchemaIntegrityError) as ctx:
+            SchemaMigrator.extract_check_expressions(ddl)
+        self.assertIn("unterminated bracket identifier in trailing DDL", str(ctx.exception))
+
+    def test_properly_terminated_backtick_in_trailing_ddl_accepted(self):
+        """
+        R3.3: Verify that properly terminated backtick identifiers in trailing DDL
+        (e.g. table options like `WITHOUT` `ROWID`) are recognized without error,
+        and genuine CHECK expressions in the body are extracted.
+        """
+        ddl = "CREATE TABLE t ( id INT PRIMARY KEY CHECK (id = 1) ) `WITHOUT` `ROWID`;"
+        checks = SchemaMigrator.extract_check_expressions(ddl)
+        self.assertEqual(checks, ["id = 1"])
+
+    def test_properly_terminated_bracket_in_trailing_ddl_accepted(self):
+        """
+        R3.4: Verify that properly terminated bracket identifiers in trailing DDL
+        (e.g. [WITHOUT] [ROWID]) are recognized without error, and genuine CHECK
+        expressions in the body are extracted.
+        """
+        ddl = "CREATE TABLE t ( id INT PRIMARY KEY CHECK (id = 1) ) [WITHOUT] [ROWID];"
+        checks = SchemaMigrator.extract_check_expressions(ddl)
+        self.assertEqual(checks, ["id = 1"])
+
+    def test_escaped_backticks_in_trailing_ddl_handling(self):
+        """
+        Verify that escaped backticks (``) in trailing DDL are correctly handled
+        and that odd/unterminated backticks fail closed.
+        """
+        # Properly terminated escaped backtick
+        ddl_valid = "CREATE TABLE t ( id INT PRIMARY KEY CHECK (id = 1) ) `opt``name`;"
+        checks = SchemaMigrator.extract_check_expressions(ddl_valid)
+        self.assertEqual(checks, ["id = 1"])
+
+        # Unterminated escaped backtick (odd number of backticks)
+        ddl_invalid = "CREATE TABLE t ( id INT PRIMARY KEY ) `opt``"
+        with self.assertRaises(SchemaIntegrityError) as ctx:
+            SchemaMigrator.extract_check_expressions(ddl_invalid)
+        self.assertIn("unterminated backtick identifier in trailing DDL", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

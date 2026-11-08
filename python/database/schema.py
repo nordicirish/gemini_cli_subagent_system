@@ -1,6 +1,6 @@
 """
 Database Schema Definitions and Versioned Migration Infrastructure
-Governed by Stage 1.3 Directive and Stage 1.2.1 / 1.3.1 / 1.3.1.2 / 1.3.1.3 / 1.3.1.4 / 1.3.1.5 Architecture Corrections.
+Governed by Stage 1.3 Directive and Stage 1.2.1 / 1.3.1 / 1.3.1.2 / 1.3.1.3 / 1.3.1.4 / 1.3.1.5 / 1.3.1.5.1 Architecture Corrections.
 
 Provides canonical DDL definitions, table constraints, index definitions,
 and versioned schema initialisation for GEM's embedded SQLite persistence layer.
@@ -1251,6 +1251,26 @@ class SchemaMigrator:
                 raise SchemaIntegrityError("DDL lexical analysis failure: unexpected or unterminated string literal in trailing DDL.")
             if ch == '"':
                 raise SchemaIntegrityError("DDL lexical analysis failure: unexpected or unterminated double-quoted identifier in trailing DDL.")
+            if ch == '`':
+                i += 1
+                while i < n:
+                    if ddl_sql[i] == '`':
+                        if i + 1 < n and ddl_sql[i + 1] == '`':
+                            i += 2  # Escaped backtick ``
+                        else:
+                            i += 1
+                            break
+                    else:
+                        i += 1
+                else:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated backtick identifier in trailing DDL.")
+                continue
+            if ch == '[':
+                close_bracket = ddl_sql.find(']', i + 1)
+                if close_bracket == -1:
+                    raise SchemaIntegrityError("DDL lexical analysis failure: unterminated bracket identifier in trailing DDL.")
+                i = close_bracket + 1
+                continue
             if ch in '()':
                 raise SchemaIntegrityError("DDL lexical analysis failure: unbalanced parenthesis in trailing DDL.")
             i += 1
