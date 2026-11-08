@@ -2088,18 +2088,23 @@ class TestR2SavepointRollbackFailureIntegrity(BaseRepositoryTestCase):
         - Confirm the original batch failure is preserved as diagnostic context (__cause__).
         - Confirm the exception clearly identifies the transaction as potentially unsafe to commit.
         """
-        with self.cache_manager.connection() as conn:
-            repo = DailyBarRepository(conn)
-            conn.execute("BEGIN IMMEDIATE;")
+        with self.cache_manager.connection() as raw_conn:
+            raw_conn.execute("BEGIN IMMEDIATE;")
 
-            original_execute = conn.execute
+            class FaultyRollbackProxy:
+                def __init__(self, target):
+                    self._target = target
 
-            def faulty_execute(sql, *args, **kwargs):
-                if isinstance(sql, str) and sql.strip().startswith("ROLLBACK TO SAVEPOINT"):
-                    raise sqlite3.OperationalError("Simulated disk I/O error during savepoint rollback")
-                return original_execute(sql, *args, **kwargs)
+                def __getattr__(self, name):
+                    return getattr(self._target, name)
 
-            conn.execute = faulty_execute
+                def execute(self, sql, *args, **kwargs):
+                    if isinstance(sql, str) and sql.strip().startswith("ROLLBACK TO SAVEPOINT"):
+                        raise sqlite3.OperationalError("Simulated disk I/O error during savepoint rollback")
+                    return self._target.execute(sql, *args, **kwargs)
+
+            proxy_conn = FaultyRollbackProxy(raw_conn)
+            repo = DailyBarRepository(proxy_conn)
 
             batch = [
                 {
@@ -2133,9 +2138,8 @@ class TestR2SavepointRollbackFailureIntegrity(BaseRepositoryTestCase):
                 self.assertIsNotNone(ctx.exception.__cause__)
                 self.assertIsInstance(ctx.exception.__cause__, ValidationError)
             finally:
-                conn.execute = original_execute
                 try:
-                    conn.execute("ROLLBACK;")
+                    raw_conn.execute("ROLLBACK;")
                 except Exception:
                     pass
 
@@ -2146,18 +2150,23 @@ class TestR2SavepointRollbackFailureIntegrity(BaseRepositoryTestCase):
         - Confirm that the failure is not silently suppressed.
         - Confirm the resulting transaction-integrity state is reported accurately.
         """
-        with self.cache_manager.connection() as conn:
-            repo = DailyBarRepository(conn)
-            conn.execute("BEGIN IMMEDIATE;")
+        with self.cache_manager.connection() as raw_conn:
+            raw_conn.execute("BEGIN IMMEDIATE;")
 
-            original_execute = conn.execute
+            class FaultyReleaseProxy:
+                def __init__(self, target):
+                    self._target = target
 
-            def faulty_execute(sql, *args, **kwargs):
-                if isinstance(sql, str) and sql.strip().startswith("RELEASE SAVEPOINT"):
-                    raise sqlite3.OperationalError("Simulated I/O failure during savepoint release")
-                return original_execute(sql, *args, **kwargs)
+                def __getattr__(self, name):
+                    return getattr(self._target, name)
 
-            conn.execute = faulty_execute
+                def execute(self, sql, *args, **kwargs):
+                    if isinstance(sql, str) and sql.strip().startswith("RELEASE SAVEPOINT"):
+                        raise sqlite3.OperationalError("Simulated I/O failure during savepoint release")
+                    return self._target.execute(sql, *args, **kwargs)
+
+            proxy_conn = FaultyReleaseProxy(raw_conn)
+            repo = DailyBarRepository(proxy_conn)
 
             batch = [
                 {
@@ -2179,9 +2188,8 @@ class TestR2SavepointRollbackFailureIntegrity(BaseRepositoryTestCase):
                 self.assertIn("CRITICAL: Failed to release savepoint", err_msg)
                 self.assertIn("MUST NOT be committed", err_msg)
             finally:
-                conn.execute = original_execute
                 try:
-                    conn.execute("ROLLBACK;")
+                    raw_conn.execute("ROLLBACK;")
                 except Exception:
                     pass
 

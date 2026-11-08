@@ -374,6 +374,8 @@ class DailyBarRepository(BaseRepository):
                         f"CRITICAL: Failed to release savepoint '{sp_name}' after successful batch: {release_err}. "
                         f"The caller-owned transaction is in an uncertain state and MUST NOT be committed."
                     ) from release_err
+        except TransactionIntegrityError:
+            raise
         except sqlite3.IntegrityError as e:
             if owns_tx:
                 try:
