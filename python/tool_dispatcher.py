@@ -8,10 +8,10 @@ role authorization, and structured audit logging for CLI, Web, and Subagents.
 import time
 import json
 import hashlib
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional, Callable, Set
 from dataclasses import dataclass
 
-from tool_registry import ToolRegistry, GLOBAL_TOOL_REGISTRY
+from tool_registry import ToolRegistry, GLOBAL_TOOL_REGISTRY, execution_role_context
 from audit_logger import AuditLogger, AuditEvent, GLOBAL_AUDIT_LOGGER
 
 MAX_TOOL_TURNS = 5
@@ -44,10 +44,10 @@ class ToolDispatcher:
         tool_name: str,
         args: Dict[str, Any],
         agent_role: str,
-        approval_token: Optional[str] = None,
         task_id: str = "default-task",
         agent_id: str = "default-agent",
         cancel_check: Optional[Callable[[], bool]] = None,
+        allowed_tool_names: Optional[Set[str]] = None,
     ) -> ToolExecutionResult:
         """Validates and executes a single tool call with audit logging."""
         if cancel_check and cancel_check():
@@ -58,12 +58,35 @@ class ToolDispatcher:
                 error="Operation cancelled by user.",
             )
 
+        # 0. Optional session/subagent-scoped tool allowlist check
+        if allowed_tool_names is not None and tool_name not in allowed_tool_names:
+            reason = f"Tool '{tool_name}' is not in the assigned toolset for agent '{agent_role}'."
+            self.audit_logger.log_event(
+                AuditEvent(
+                    action_category="TOOL_CALL",
+                    status="DENIED",
+                    agent_role=agent_role,
+                    agent_id=agent_id,
+                    task_id=task_id,
+                    tool_name=tool_name,
+                    permission_decision="DENIED",
+                    approval_status="NOT_REQUIRED",
+                    error_classification="PERMISSION_DENIED",
+                    details={"args": args, "rejection_reason": reason},
+                )
+            )
+            return ToolExecutionResult(
+                tool_name=tool_name,
+                args=args,
+                success=False,
+                error=reason,
+            )
+
         # 1. Validation & Permission Check
         is_valid, reason = self.registry.validate_call(
             tool_name=tool_name,
             agent_role=agent_role,
             args=args,
-            approval_token=approval_token,
         )
 
         tool_def = self.registry.get(tool_name)
@@ -80,7 +103,7 @@ class ToolDispatcher:
                     task_id=task_id,
                     tool_name=tool_name,
                     permission_decision="DENIED",
-                    approval_status="UNAPPROVED" if "approval" in (reason or "").lower() else "NOT_REQUIRED",
+                    approval_status="UNAPPROVED" if "confirmation" in (reason or "").lower() or "approval" in (reason or "").lower() else "NOT_REQUIRED",
                     error_classification="PERMISSION_DENIED",
                     details={"args": args, "rejection_reason": reason},
                 )
@@ -102,7 +125,7 @@ class ToolDispatcher:
                 task_id=task_id,
                 tool_name=tool_name,
                 permission_decision="GRANTED",
-                approval_status="APPROVED" if approval_token else "NOT_REQUIRED",
+                approval_status="APPROVED" if (tool_def and tool_def.requires_human_approval) else "NOT_REQUIRED",
                 details={"args": args},
             )
         )
@@ -113,7 +136,6 @@ class ToolDispatcher:
                 tool_name=tool_name,
                 agent_role=agent_role,
                 args=args,
-                approval_token=approval_token,
             )
             elapsed = time.time() - start_time
 
@@ -161,13 +183,14 @@ class ToolDispatcher:
         initial_message: Any,
         part_factory: Any,
         agent_role: str = "Terminal Orchestrator",
-        approval_token: Optional[str] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         log_callback: Optional[Callable[[str], None]] = None,
+        allowed_tool_names: Optional[Set[str]] = None,
+        max_turns_override: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Executes a multi-turn conversation turn with cycle detection,
-        bounded loop limits (MAX_TOOL_TURNS), cancellation checks,
+        bounded loop limits (MAX_TOOL_TURNS or max_turns_override), cancellation checks,
         and unified tool dispatching.
         """
         def log(msg: str):
@@ -177,6 +200,7 @@ class ToolDispatcher:
                 except Exception:
                     pass
 
+        effective_max_turns = max_turns_override if max_turns_override is not None else self.max_turns
         current_message = initial_message
         all_text: List[str] = []
         turn_count = 0
@@ -192,12 +216,13 @@ class ToolDispatcher:
                 }
 
             turn_count += 1
-            if turn_count > self.max_turns:
-                log(f"[ToolDispatcher] Warning: Maximum tool turns reached ({self.max_turns}). Halting loop.")
+            if turn_count > effective_max_turns:
+                log(f"[ToolDispatcher] Warning: Maximum tool turns reached ({effective_max_turns}). Halting loop.")
                 break
 
-            log(f"[ToolDispatcher] Starting turn {turn_count}/{self.max_turns}...")
-            response = session.send_message(current_message)
+            log(f"[ToolDispatcher] Starting turn {turn_count}/{effective_max_turns}...")
+            with execution_role_context(agent_role):
+                response = session.send_message(current_message)
 
             # Capture text content
             if hasattr(response, "text") and response.text:
@@ -249,8 +274,8 @@ class ToolDispatcher:
                     tool_name=name,
                     args=args,
                     agent_role=agent_role,
-                    approval_token=approval_token,
                     cancel_check=cancel_check,
+                    allowed_tool_names=allowed_tool_names,
                 )
 
                 if exec_result.success:

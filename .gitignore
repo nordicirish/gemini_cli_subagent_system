@@ -48,5 +48,6 @@ cache/
 
 # Logs
 *.log
+*.lock
 
 cache/daily_history_cache.json

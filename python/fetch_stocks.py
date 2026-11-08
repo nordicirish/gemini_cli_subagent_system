@@ -12,6 +12,9 @@ except Exception as e:
     sys.stderr.write(f"[Warning] Failed to monkeypatch curl_cffi: {e}\n")
 
 import yfinance as yf
+import warnings
+# Silence yfinance internal inplace deprecation warnings triggered by Pandas 3.1+ (PDEP-8)
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"^yfinance")
 import pandas as pd
 import numpy as np
 import requests
@@ -28,7 +31,8 @@ import math
 from scipy.stats import norm
 from yfinance.data import YfData
 import threading
-from atomic_io import atomic_write_json, atomic_read_json
+from atomic_io import atomic_write_json, atomic_read_json, atomic_update_json
+from tool_registry import authorize_financial_mutation
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
@@ -652,10 +656,8 @@ async def save_basket(req: Request):
     global TICKERS, ALL_TICKERS
     try:
         basket = await req.json()
+        authorize_financial_mutation("update_ssot", "context/ssot.json", payload=basket)
         if os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r") as f:
-                data = json.load(f)
-            
             new_snapshot = []
             for item in basket:
                 if item.get("shares", 0) > 0:
@@ -664,18 +666,24 @@ async def save_basket(req: Request):
                         "shares": item["shares"],
                         "wac": item["wac"]
                     })
-            
-            if "mutable_state" in data:
-                data["mutable_state"]["portfolio_snapshot"] = new_snapshot
-            else:
-                data["portfolio_snapshot"] = new_snapshot
-            
-            atomic_write_json("context/ssot.json", data)
-            
+
+            def _update_basket(data):
+                if not isinstance(data, dict):
+                    data = {}
+                if "mutable_state" in data:
+                    data["mutable_state"]["portfolio_snapshot"] = new_snapshot
+                else:
+                    data["portfolio_snapshot"] = new_snapshot
+                return data
+
+            atomic_update_json("context/ssot.json", _update_basket, default_factory=dict)
+
             # Reload TICKERS
             TICKERS = _load_ssot_tickers()
             ALL_TICKERS = TICKERS + MACRO_TICKERS
             return JSONResponse({"status": "success"})
+    except PermissionError:
+        raise
     except Exception as e:
         print(f"Basket Sync Failed: {e}")
     return JSONResponse({"status": "error"})
@@ -688,20 +696,21 @@ def get_watch_list():
             with open("context/config.json", "r") as f:
                 cfg = json.load(f)
                 watchlist = cfg.get("WATCHLIST", [])
-                
+
         # Make sure ssot.json is in sync
         if os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r") as f:
-                data = json.load(f)
-            ms = data.get("mutable_state", data)
-            if ms.get("watched_tickers") != watchlist:
-                if "mutable_state" in data:
-                    data["mutable_state"]["watched_tickers"] = watchlist
-                else:
-                    data["watched_tickers"] = watchlist
-                with open("context/ssot.json", "w") as f:
-                    json.dump(data, f, indent=2)
-                    
+            def _sync_watchlist(data):
+                if not isinstance(data, dict):
+                    data = {}
+                ms = data.get("mutable_state", data)
+                if ms.get("watched_tickers") != watchlist:
+                    if "mutable_state" in data:
+                        data["mutable_state"]["watched_tickers"] = watchlist
+                    else:
+                        data["watched_tickers"] = watchlist
+                return data
+            atomic_update_json("context/ssot.json", _sync_watchlist, default_factory=dict)
+
         return JSONResponse(watchlist)
     except: pass
     return JSONResponse([])
@@ -711,7 +720,8 @@ async def save_watch_list(req: Request):
     global TICKERS, ALL_TICKERS
     try:
         payload = await req.json()
-        
+        authorize_financial_mutation("update_ssot", "context/ssot.json", payload=payload)
+
         # Robustly handle both list payloads and dict payloads
         if isinstance(payload, dict):
             new_list = payload.get("watchlist", [])
@@ -719,33 +729,36 @@ async def save_watch_list(req: Request):
             new_list = payload
         else:
             new_list = []
-            
+
         new_list = [w.strip().upper() for w in new_list if isinstance(w, str) and w.strip()]
-        
+
         # 1. Update config.json (ENH_83)
         if os.path.exists("context/config.json"):
-            with open("context/config.json", "r") as f:
-                cfg = json.load(f)
-            cfg["WATCHLIST"] = new_list
-            with open("context/config.json", "w") as f:
-                json.dump(cfg, f, indent=2)
-                
+            def _update_cfg_wl(cfg):
+                if not isinstance(cfg, dict):
+                    cfg = {}
+                cfg["WATCHLIST"] = new_list
+                return cfg
+            atomic_update_json("context/config.json", _update_cfg_wl, default_factory=dict)
+
         # 2. Update ssot.json
         if os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r") as f:
-                data = json.load(f)
-            
-            if "mutable_state" in data:
-                data["mutable_state"]["watched_tickers"] = new_list
-            else:
-                data["watched_tickers"] = new_list
-                
-            atomic_write_json("context/ssot.json", data)
-            
+            def _update_ssot_wl(data):
+                if not isinstance(data, dict):
+                    data = {}
+                if "mutable_state" in data:
+                    data["mutable_state"]["watched_tickers"] = new_list
+                else:
+                    data["watched_tickers"] = new_list
+                return data
+            atomic_update_json("context/ssot.json", _update_ssot_wl, default_factory=dict)
+
             # Reload TICKERS
             TICKERS = _load_ssot_tickers()
             ALL_TICKERS = TICKERS + MACRO_TICKERS
             return JSONResponse({"status": "success"})
+    except PermissionError:
+        raise
     except Exception as e:
         print(f"Watch List Sync Failed: {e}")
     return JSONResponse({"status": "error"})
@@ -967,9 +980,19 @@ def _process_deletions(state, delete_list):
 
 @app.post("/api/paste")
 async def handle_paste(req: Request):
+    clip_data = ""
     try:
-        body = await req.json()
-        clip_data = body.get("payload", "")
+        authorize_financial_mutation(
+            operation_name="update_ssot",
+            target_resource="context/ssot.json",
+        )
+        if isinstance(req, str):
+            clip_data = req
+        elif isinstance(req, dict):
+            clip_data = req.get("payload", json.dumps(req))
+        else:
+            body = await req.json()
+            clip_data = body.get("payload", "")
         
         # Process the clipboard data string
         if "```" in clip_data:
@@ -1089,143 +1112,131 @@ async def handle_paste(req: Request):
                     else:
                         target_container[k] = source_data[k]
 
-        # Merge local ssot
-        existing_ssot = {}
-        if os.path.exists('context/ssot.json'):
-            try:
-                with open('context/ssot.json', 'r') as f:
-                    existing_ssot = json.load(f)
-            except: pass
-            
-        # Check if existing SSoT uses the v4.9x Layer Model
-        has_layer_model = "mutable_state" in existing_ssot
-        
-        # If payload provides naked keys but existing uses Layer Model, wrap the payload in mutable_state
-        if has_layer_model and "mutable_state" not in payload and "immutable_background" not in payload:
-            payload = {"mutable_state": payload}
+        # Merge local ssot under a single read-modify-write lock (Stage 1.1 R6)
+        raw_payload = payload
 
-        if existing_ssot:
-            existing_portfolio = existing_ssot.get("mutable_state", {}).get("portfolio_snapshot", []) if has_layer_model else existing_ssot.get("portfolio_snapshot", [])
-            
-            # Check if portfolio_snapshot is explicitly specified in the payload (to handle empty arrays properly)
-            # Default to None to distinguish between 'missing in payload' and 'explicitly empty'
-            has_payload_portfolio = False
-            payload_portfolio = None
-            if has_layer_model:
-                if "mutable_state" in payload and isinstance(payload["mutable_state"], dict) and "portfolio_snapshot" in payload["mutable_state"]:
-                    payload_portfolio = payload["mutable_state"]["portfolio_snapshot"]
-                    has_payload_portfolio = True
-            else:
-                if "portfolio_snapshot" in payload:
-                    payload_portfolio = payload["portfolio_snapshot"]
-                    has_payload_portfolio = True
+        def _merge_ssot_state(existing_ssot):
+            if not isinstance(existing_ssot, dict):
+                existing_ssot = {}
+            local_payload = _deep_merge({}, raw_payload)
 
-            # If payload contains a portfolio_snapshot (even if empty) or if both exist
-            if has_payload_portfolio:
-                if not payload_portfolio and existing_portfolio:
-                    # Incoming payload has an empty portfolio snapshot, but we have existing holdings.
-                    # Per MERGE_BY_TICKER_PRESERVE_UNTOUCHED_TICKERS, do NOT wipe the existing portfolio!
-                    # Preserve existing holdings unless explicitly deleted via DELETE_FIELD.
-                    merged_portfolio = existing_portfolio
+            # Check if existing SSoT uses the v4.9x Layer Model
+            has_layer_model = "mutable_state" in existing_ssot
+
+            # If payload provides naked keys but existing uses Layer Model, wrap the payload in mutable_state
+            if has_layer_model and "mutable_state" not in local_payload and "immutable_background" not in local_payload:
+                local_payload = {"mutable_state": local_payload}
+
+            if existing_ssot:
+                existing_portfolio = existing_ssot.get("mutable_state", {}).get("portfolio_snapshot", []) if has_layer_model else existing_ssot.get("portfolio_snapshot", [])
+
+                has_payload_portfolio = False
+                payload_portfolio = None
+                if has_layer_model:
+                    if "mutable_state" in local_payload and isinstance(local_payload["mutable_state"], dict) and "portfolio_snapshot" in local_payload["mutable_state"]:
+                        payload_portfolio = local_payload["mutable_state"]["portfolio_snapshot"]
+                        has_payload_portfolio = True
                 else:
-                    if ep_source is not None:
-                        # Directives Supremacy (ENH_31-P): Overwrite active state fields with payload counterparts to maintain zero-drift
-                        # However, we must preserve read-only local database properties (WAC and historical_context) from the existing state
-                        # to prevent "state amnesia" or silent data loss on ingestion.
-                        existing_by_ticker = {}
-                        for item in existing_portfolio:
-                            if isinstance(item, dict) and item.get("ticker"):
-                                existing_by_ticker[item["ticker"].upper()] = item
-                        
-                        for item in payload_portfolio:
-                            if isinstance(item, dict) and item.get("ticker"):
-                                ticker_upper = item["ticker"].upper()
-                                if ticker_upper in existing_by_ticker:
-                                    existing_item = existing_by_ticker[ticker_upper]
-                                    # If the payload item does not have 'wac' or it is 0/None, carry it forward from existing
-                                    if ("wac" not in item or item.get("wac") in (0, 0.0, None)) and "wac" in existing_item:
-                                        item["wac"] = existing_item["wac"]
-                                    # Carry forward 'historical_context' if not present in the payload
-                                    if ("historical_context" not in item or not item.get("historical_context")) and "historical_context" in existing_item:
-                                        item["historical_context"] = existing_item["historical_context"]
-                        merged_portfolio = payload_portfolio
+                    if "portfolio_snapshot" in local_payload:
+                        payload_portfolio = local_payload["portfolio_snapshot"]
+                        has_payload_portfolio = True
+
+                if has_payload_portfolio:
+                    if not payload_portfolio and existing_portfolio:
+                        merged_portfolio = existing_portfolio
                     else:
-                        merged_portfolio = _merge_portfolio(existing_portfolio, payload_portfolio)
-                
-                payload_without_portfolio = _deep_merge({}, payload)
-                if has_layer_model:
-                    if "portfolio_snapshot" in payload_without_portfolio.get("mutable_state", {}):
-                        payload_without_portfolio["mutable_state"].pop("portfolio_snapshot")
+                        if ep_source is not None:
+                            existing_by_ticker = {}
+                            for item in existing_portfolio:
+                                if isinstance(item, dict) and item.get("ticker"):
+                                    existing_by_ticker[item["ticker"].upper()] = item
+
+                            for item in payload_portfolio:
+                                if isinstance(item, dict) and item.get("ticker"):
+                                    ticker_upper = item["ticker"].upper()
+                                    if ticker_upper in existing_by_ticker:
+                                        existing_item = existing_by_ticker[ticker_upper]
+                                        if ("wac" not in item or item.get("wac") in (0, 0.0, None)) and "wac" in existing_item:
+                                            item["wac"] = existing_item["wac"]
+                                        if ("historical_context" not in item or not item.get("historical_context")) and "historical_context" in existing_item:
+                                            item["historical_context"] = existing_item["historical_context"]
+                            merged_portfolio = payload_portfolio
+                        else:
+                            merged_portfolio = _merge_portfolio(existing_portfolio, payload_portfolio)
+
+                    payload_without_portfolio = _deep_merge({}, local_payload)
+                    if has_layer_model:
+                        if "portfolio_snapshot" in payload_without_portfolio.get("mutable_state", {}):
+                            payload_without_portfolio["mutable_state"].pop("portfolio_snapshot")
+                    else:
+                        payload_without_portfolio.pop("portfolio_snapshot", None)
+
+                    merged_ssot = _deep_merge(existing_ssot, payload_without_portfolio)
+
+                    if has_layer_model:
+                        if "mutable_state" not in merged_ssot:
+                            merged_ssot["mutable_state"] = {}
+                        merged_ssot["mutable_state"]["portfolio_snapshot"] = merged_portfolio
+                    else:
+                        merged_ssot["portfolio_snapshot"] = merged_portfolio
                 else:
-                    payload_without_portfolio.pop("portfolio_snapshot", None)
-                    
-                merged_ssot = _deep_merge(existing_ssot, payload_without_portfolio)
-                
-                if has_layer_model:
-                    if "mutable_state" not in merged_ssot: merged_ssot["mutable_state"] = {}
-                    merged_ssot["mutable_state"]["portfolio_snapshot"] = merged_portfolio
-                else:
-                    merged_ssot["portfolio_snapshot"] = merged_portfolio
+                    merged_ssot = _deep_merge(existing_ssot, local_payload)
             else:
-                # portfolio_snapshot is missing entirely from incoming payload, so preserve existing portfolio
-                merged_ssot = _deep_merge(existing_ssot, payload)
-        else:
-            merged_ssot = payload
-            
-        # Strip trade_lessons keys from ROOT, MUTABLE_STATE, and EXECUTION_PAYLOAD — they are routed to trade_lessons.json
-        for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons", "rule_mutations", "trade_lessons_revision"):
-            merged_ssot.pop(tl_key, None)
-            if "mutable_state" in merged_ssot:
-                merged_ssot["mutable_state"].pop(tl_key, None)
-            if "EXECUTION_PAYLOAD" in merged_ssot:
-                merged_ssot["EXECUTION_PAYLOAD"].pop(tl_key, None)
+                merged_ssot = local_payload
 
-        # SSoT schema validation — prune non-canonical top-level keys to prevent drift
-        CANONICAL_SSOT_KEYS = {
-            "state_context", "portfolio_snapshot", "proposed_portfolio_snapshot", "forensic_intelligence",
-            "runtime_flags", "macro_calendar_shield", "active_orders",
-            "fin_account_gate", "registry_pointers", "overnight_posture",
-            "strategy_timing", "lesson_integration", "immutable_background", "mutable_state",
-            "unallocated_cash_eur", "unallocated_cash_usd", 
-            "portfolio_total_value_usd", "portfolio_total_value_eur", "base_currency", "exchange_rate",
-            "scouted_assets_tracked", "risk_metrics", "directive", "EXECUTION_PAYLOAD", "_meta"
-        }
-        
-        # Prune from root
-        non_canonical = [k for k in merged_ssot if k not in CANONICAL_SSOT_KEYS]
-        for k in non_canonical:
-            merged_ssot.pop(k)
-            
-        # Prune from mutable_state if using Layer Model
-        if has_layer_model and "mutable_state" in merged_ssot and isinstance(merged_ssot["mutable_state"], dict):
-            non_canonical_mutable = [k for k in merged_ssot["mutable_state"] if k not in CANONICAL_SSOT_KEYS]
-            for k in non_canonical_mutable:
-                merged_ssot["mutable_state"].pop(k)
+            # Strip trade_lessons keys from ROOT, MUTABLE_STATE, and EXECUTION_PAYLOAD — they are routed to trade_lessons.json
+            for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons", "rule_mutations", "trade_lessons_revision"):
+                merged_ssot.pop(tl_key, None)
+                if "mutable_state" in merged_ssot:
+                    merged_ssot["mutable_state"].pop(tl_key, None)
+                if "EXECUTION_PAYLOAD" in merged_ssot:
+                    merged_ssot["EXECUTION_PAYLOAD"].pop(tl_key, None)
 
-        # Process Explicit Deletions
-        del_list = payload.get("DELETE_FIELD", [])
-        if not del_list and "mutable_state" in payload:
-            del_list = payload["mutable_state"].get("DELETE_FIELD", [])
-        if "DELETE_FIELD (optional)" in payload: del_list.extend(payload["DELETE_FIELD (optional)"])
-        if isinstance(del_list, list) and len(del_list) > 0:
-            target_state = merged_ssot.get("mutable_state", merged_ssot) if has_layer_model else merged_ssot
-            _process_deletions(target_state, del_list)
-            # Remove the literal deletion arrays from state if they merged over
-            if has_layer_model and "mutable_state" in merged_ssot:
-                merged_ssot["mutable_state"].pop("DELETE_FIELD", None)
-                merged_ssot["mutable_state"].pop("DELETE_FIELD (optional)", None)
-            merged_ssot.pop("DELETE_FIELD", None)
-            merged_ssot.pop("DELETE_FIELD (optional)", None)
+            # SSoT schema validation — prune non-canonical top-level keys to prevent drift
+            CANONICAL_SSOT_KEYS = {
+                "state_context", "portfolio_snapshot", "proposed_portfolio_snapshot", "forensic_intelligence",
+                "runtime_flags", "macro_calendar_shield", "active_orders",
+                "fin_account_gate", "registry_pointers", "overnight_posture",
+                "strategy_timing", "lesson_integration", "immutable_background", "mutable_state",
+                "unallocated_cash_eur", "unallocated_cash_usd",
+                "portfolio_total_value_usd", "portfolio_total_value_eur", "base_currency", "exchange_rate",
+                "scouted_assets_tracked", "risk_metrics", "directive", "EXECUTION_PAYLOAD", "_meta"
+            }
 
-        atomic_write_json('context/ssot.json', merged_ssot)
-            
+            non_canonical = [k for k in merged_ssot if k not in CANONICAL_SSOT_KEYS]
+            for k in non_canonical:
+                merged_ssot.pop(k)
+
+            if has_layer_model and "mutable_state" in merged_ssot and isinstance(merged_ssot["mutable_state"], dict):
+                non_canonical_mutable = [k for k in merged_ssot["mutable_state"] if k not in CANONICAL_SSOT_KEYS]
+                for k in non_canonical_mutable:
+                    merged_ssot["mutable_state"].pop(k)
+
+            # Process Explicit Deletions
+            del_list = local_payload.get("DELETE_FIELD", [])
+            if not del_list and "mutable_state" in local_payload:
+                del_list = local_payload["mutable_state"].get("DELETE_FIELD", [])
+            if "DELETE_FIELD (optional)" in local_payload:
+                del_list.extend(local_payload["DELETE_FIELD (optional)"])
+            if isinstance(del_list, list) and len(del_list) > 0:
+                target_state = merged_ssot.get("mutable_state", merged_ssot) if has_layer_model else merged_ssot
+                _process_deletions(target_state, del_list)
+                if has_layer_model and "mutable_state" in merged_ssot:
+                    merged_ssot["mutable_state"].pop("DELETE_FIELD", None)
+                    merged_ssot["mutable_state"].pop("DELETE_FIELD (optional)", None)
+                merged_ssot.pop("DELETE_FIELD", None)
+                merged_ssot.pop("DELETE_FIELD (optional)", None)
+
+            return merged_ssot
+
+        atomic_update_json('context/ssot.json', _merge_ssot_state, default_factory=dict)
+
         def _normalize_lessons(lessons_list):
             normalized = []
             for i, item in enumerate(lessons_list):
                 if isinstance(item, str):
                     normalized.append({"id": i + 1, "rule": item})
                 elif isinstance(item, dict):
-                    # Keep existing keys (like context or rule), just ensure id is set/updated
                     new_item = item.copy()
                     new_item["id"] = i + 1
                     if "rule" not in new_item and "lesson" in new_item:
@@ -1246,124 +1257,119 @@ async def handle_paste(req: Request):
             incoming_lessons.extend(extracted_trade_lessons)
 
         if incoming_lessons:
-            existing_lessons = []
-            existing_data = None
-            if os.path.exists(lessons_file):
-                try:
-                    with open(lessons_file, 'r') as f:
-                        existing_data = json.load(f)
-                        if isinstance(existing_data, dict):
-                            existing_lessons = existing_data.get("trade_lessons", [])
-                        elif isinstance(existing_data, list):
-                            existing_lessons = existing_data
-                except json.JSONDecodeError:
-                    pass
-            
-            # Build lookup of existing lessons by id for upsert
-            # Build lookup of existing lessons by id and text
-            existing_by_id = {}
-            existing_by_text = {}
-            for idx, lesson in enumerate(existing_lessons):
-                if isinstance(lesson, dict):
-                    if "id" in lesson:
-                        existing_by_id[lesson["id"]] = lesson
-                    rule_text = lesson.get("rule", lesson.get("lesson", "")).strip().lower()
-                    if rule_text: existing_by_text[rule_text] = lesson
-                elif isinstance(lesson, str):
-                    rule_text = lesson.strip().lower()
-                    if rule_text: existing_by_text[rule_text] = lesson
-            
-            kept_ids = set()
-            new_compiled_lessons = []
+            authorize_financial_mutation(
+                operation_name="update_trade_lessons",
+                target_resource=lessons_file,
+                payload=incoming_lessons,
+            )
 
-            for item in incoming_lessons:
-                if isinstance(item, str):
-                    match = re.match(r'^(\d+)-(\d+).*PERMANENT', item, re.IGNORECASE)
-                    if match:
-                        start_id = int(match.group(1))
-                        end_id = int(match.group(2))
-                        kept_ids.update(range(start_id, end_id + 1))
-                    else:
-                        rule_text = item.strip().lower()
+            def _merge_lessons_state(existing_data):
+                existing_lessons = []
+                if isinstance(existing_data, dict):
+                    existing_lessons = list(existing_data.get("trade_lessons", []))
+                elif isinstance(existing_data, list):
+                    existing_lessons = list(existing_data)
+
+                existing_by_id = {}
+                existing_by_text = {}
+                for lesson in existing_lessons:
+                    if isinstance(lesson, dict):
+                        if "id" in lesson:
+                            existing_by_id[lesson["id"]] = lesson
+                        rule_text = lesson.get("rule", lesson.get("lesson", "")).strip().lower()
+                        if rule_text:
+                            existing_by_text[rule_text] = lesson
+                    elif isinstance(lesson, str):
+                        rule_text = lesson.strip().lower()
+                        if rule_text:
+                            existing_by_text[rule_text] = lesson
+
+                kept_ids = set()
+                new_compiled_lessons = []
+
+                for item in incoming_lessons:
+                    if isinstance(item, str):
+                        match = re.match(r'^(\d+)-(\d+).*PERMANENT', item, re.IGNORECASE)
+                        if match:
+                            start_id = int(match.group(1))
+                            end_id = int(match.group(2))
+                            kept_ids.update(range(start_id, end_id + 1))
+                        else:
+                            rule_text = item.strip().lower()
+                            if rule_text and rule_text in existing_by_text:
+                                continue
+                            new_compiled_lessons.append(item)
+                            if rule_text:
+                                existing_by_text[rule_text] = item
+                    elif isinstance(item, dict):
+                        item_id = item.get("id")
+                        rule_text = item.get("rule", item.get("lesson", "")).strip().lower()
+
+                        if item_id is not None:
+                            kept_ids.add(item_id)
+                            if item_id in existing_by_id:
+                                existing_by_id[item_id].update(item)
+                                new_compiled_lessons.append(existing_by_id[item_id])
+                                if rule_text:
+                                    existing_by_text[rule_text] = existing_by_id[item_id]
+                                continue
+
                         if rule_text and rule_text in existing_by_text:
+                            existing = existing_by_text[rule_text]
+                            if isinstance(existing, dict):
+                                orig_id = existing.get("id")
+                                existing.update(item)
+                                if orig_id is not None:
+                                    existing["id"] = orig_id
                             continue
+
                         new_compiled_lessons.append(item)
-                        if rule_text: existing_by_text[rule_text] = item
-                elif isinstance(item, dict):
-                    item_id = item.get("id")
-                    rule_text = item.get("rule", item.get("lesson", "")).strip().lower()
-                    
-                    if item_id is not None:
-                        kept_ids.add(item_id)
-                        if item_id in existing_by_id:
-                            # Upsert by ID
-                            existing_by_id[item_id].update(item)
-                            new_compiled_lessons.append(existing_by_id[item_id])
-                            
-                            # Update text registry too
-                            if rule_text: existing_by_text[rule_text] = existing_by_id[item_id]
-                            continue
-                            
-                    # If no ID match, check by text
-                    if rule_text and rule_text in existing_by_text:
-                        # Existing lesson found by text match
-                        existing = existing_by_text[rule_text]
-                        if isinstance(existing, dict):
-                            # Restore its original ID to prevent disruption
-                            orig_id = existing.get("id")
-                            existing.update(item)
-                            if orig_id is not None:
-                                existing["id"] = orig_id
-                        continue
-                        
-                    # It's completely new
-                    new_compiled_lessons.append(item)
-                    if rule_text: existing_by_text[rule_text] = item
-                else:
-                    new_compiled_lessons.append(item)
+                        if rule_text:
+                            existing_by_text[rule_text] = item
+                    else:
+                        new_compiled_lessons.append(item)
 
-            # Re-inject preserved lessons that were NOT explicitly updated
-            preserved_lessons = []
-            for lesson in existing_lessons:
-                if isinstance(lesson, dict):
-                    lid = lesson.get("id")
-                    updated = False
-                    if lid is not None:
-                        for new_lesson in new_compiled_lessons:
-                            if isinstance(new_lesson, dict) and new_lesson.get("id") == lid:
-                                updated = True
-                                break
-                    if not updated:
+                preserved_lessons = []
+                for lesson in existing_lessons:
+                    if isinstance(lesson, dict):
+                        lid = lesson.get("id")
+                        updated = False
+                        if lid is not None:
+                            for new_lesson in new_compiled_lessons:
+                                if isinstance(new_lesson, dict) and new_lesson.get("id") == lid:
+                                    updated = True
+                                    break
+                        if not updated:
+                            preserved_lessons.append(lesson)
+                    elif isinstance(lesson, str):
                         preserved_lessons.append(lesson)
-                elif isinstance(lesson, str):
-                    preserved_lessons.append(lesson)
 
-            # Combine preserved lessons with newly updated/added ones
-            existing_lessons = preserved_lessons + new_compiled_lessons
-            
-            final_normalized = _normalize_lessons(existing_lessons)
-                
-            if isinstance(existing_data, dict):
-                existing_data["trade_lessons"] = final_normalized
-                output_data = existing_data
-            else:
-                output_data = {"trade_lessons": final_normalized}
-                
-            with open(lessons_file, 'w') as f:
-                json.dump(output_data, f, indent=2)
-        # Rule mutations
+                combined_lessons = preserved_lessons + new_compiled_lessons
+                final_normalized = _normalize_lessons(combined_lessons)
+
+                if isinstance(existing_data, dict):
+                    out = dict(existing_data)
+                    out["trade_lessons"] = final_normalized
+                    return out
+                return {"trade_lessons": final_normalized}
+
+            atomic_update_json(lessons_file, _merge_lessons_state, default_factory=dict)
+
+        # Rule mutations require explicit owner approval (Stage 1.1 R2 & R3)
         if extracted_mutations and isinstance(extracted_mutations, list):
             rules_file = os.path.join('gem_trading_rules', 'rules.json')
+            authorize_financial_mutation(
+                operation_name="update_rules",
+                target_resource=rules_file,
+                payload=extracted_mutations,
+                requires_owner_approval=True,
+            )
             if os.path.exists(rules_file):
-                try:
-                    with open(rules_file, 'r') as f:
-                        current_rules = json.load(f)
-                except:
-                    current_rules = None
-                    
-                if current_rules:
+                def _apply_rule_mutations(current_rules):
+                    if not isinstance(current_rules, dict):
+                        return current_rules
                     applied_patches = 0
-                    for mutation in payload["rule_mutations"]:
+                    for mutation in extracted_mutations:
                         if isinstance(mutation, dict) and "path" in mutation and "value" in mutation:
                             path = mutation["path"]
                             val = mutation["value"]
@@ -1379,13 +1385,15 @@ async def handle_paste(req: Request):
                                 if valid_path:
                                     target[path[-1]] = val
                                     applied_patches += 1
-                                    
                     if applied_patches > 0:
-                        with open(rules_file, 'w') as f:
-                            json.dump(current_rules, f, indent=4)
                         print(f"⚠️ RULES MUTATED LOCALLY ({applied_patches} patches applied).")
-                        
+                    return current_rules
+
+                atomic_update_json(rules_file, _apply_rule_mutations, default_factory=dict, indent=4)
+
         return JSONResponse({"status": "success", "message": "Payload ingested successfully"})
+    except PermissionError:
+        raise
     except Exception as e:
         print(f"PASTE ERROR: {e}")
         print(f"RAW PAYLOAD TYPE: {type(clip_data)}, LENGTH: {len(clip_data)}")

@@ -56,6 +56,9 @@ def main():
     print("Initializing GEM Trading CLI Subagent System...")
     initialize_context_files()
 
+    from tool_registry import GLOBAL_OWNER_APPROVAL
+    GLOBAL_OWNER_APPROVAL.interactive_cli_enabled = True
+
     # Initialize the Framework
     framework = AgentFramework()
 
@@ -170,6 +173,7 @@ def main():
     # ---------------------------------------------------------------------------
     # Startup banner
     # ---------------------------------------------------------------------------
+    rules_path = os.path.join("gem_trading_rules", "rules.md")
     print("\n" + "=" * 60)
     print("💎 GEM CLI ORCHESTRATOR READY 💎")
     print(f"   Version : v11.56-Pure-Antigravity-Engine-Cloud-Decoupled")

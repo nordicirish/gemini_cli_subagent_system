@@ -76,18 +76,24 @@ class AntigravityAgentRunner:
         else:
             model = "gemini-3.8-flash-low"
 
-        runtime_guard = (
-            "CRITICAL RUNTIME GUARD: You are an analytical financial intelligence engine. "
+        # Output-formatting instruction (NOT a security control).
+        # Actual execution restrictions are enforced by CLI flags (--sandbox,
+        # --disable-slash-commands), headless permission auto-denial, and Python
+        # ToolRegistry / authorize_financial_mutation boundaries.
+        analytical_output_instruction = (
+            "ANALYTICAL OUTPUT INSTRUCTION: You are an analytical financial intelligence engine. "
             "Do NOT attempt to execute host shell commands, local workspace edits, or terminal tasks. "
             "Output all analyses, reasoning, and JSON payloads directly as text."
         )
 
-        full_prompt = f"{runtime_guard}\n\nTask / User Prompt:\n{prompt}\n"
+        full_prompt = f"{analytical_output_instruction}\n\nTask / User Prompt:\n{prompt}\n"
         if system_instruction:
-            full_prompt = f"{runtime_guard}\n\nSystem Instructions:\n{system_instruction}\n\nTask / User Prompt:\n{prompt}\n"
+            full_prompt = f"{analytical_output_instruction}\n\nSystem Instructions:\n{system_instruction}\n\nTask / User Prompt:\n{prompt}\n"
 
         cmd = [
             self.agy_path,
+            "--sandbox",
+            "--disable-slash-commands",
             "--model", model,
         ]
 
@@ -118,13 +124,27 @@ class AntigravityAgentRunner:
         return AntigravityResponse(output_text, prompt_tokens=p_tokens, candidate_tokens=c_tokens, model_name=model)
 
 
+MAX_SUBAGENT_TOOL_TURNS = 3
+
+
 class AntigravityChatSession:
-    """Session adapter allowing the Orchestrator to run natively on Antigravity with tool dispatch."""
-    def __init__(self, runner: AntigravityAgentRunner, sys_instruction: str, tools: list):
+    """Session adapter allowing the Orchestrator and Subagents to run natively on Antigravity with bounded multi-turn tool dispatch."""
+    def __init__(
+        self,
+        runner: AntigravityAgentRunner,
+        sys_instruction: str,
+        tools: list,
+        mode: str = "PRO",
+        generate_fn=None,
+        is_subagent: bool = False,
+    ):
         self.runner = runner
         self.sys_instruction = sys_instruction
         self.tools = tools or []
         self.tool_map = {getattr(t, "__name__", str(t)): t for t in self.tools}
+        self.mode = mode
+        self.generate_fn = generate_fn
+        self.is_subagent = is_subagent
         self.history = []
 
     def get_history(self):
@@ -148,9 +168,26 @@ class AntigravityChatSession:
                     res_parts.append(item.text)
                 else:
                     res_parts.append(str(item))
-            user_input = "Tool execution results:\n" + "\n\n".join(res_parts) + "\n\nPlease synthesize these results into the final Markdown report and EXECUTION_PAYLOAD, or request additional tools."
+            if self.is_subagent:
+                user_input = (
+                    "Sub-tool execution results:\n"
+                    + "\n\n".join(res_parts)
+                    + "\n\nPlease synthesize these results into your final analysis, or request additional tools if required."
+                )
+            else:
+                user_input = (
+                    "Tool execution results:\n"
+                    + "\n\n".join(res_parts)
+                    + "\n\nPlease synthesize these results into the final Markdown report and EXECUTION_PAYLOAD, or request additional tools."
+                )
         else:
             user_input = str(message)
+
+        closing_instruction = (
+            "Otherwise, output your synthesized text analysis directly."
+            if self.is_subagent
+            else "Otherwise, output the complete single-pass Markdown analysis followed by the single valid ```json EXECUTION_PAYLOAD ``` block."
+        )
 
         full_sys = (
             f"{self.sys_instruction}\n\n"
@@ -163,11 +200,28 @@ class AntigravityChatSession:
             "  ]\n"
             "}\n"
             "```\n"
-            "Otherwise, output the complete single-pass Markdown analysis followed by the single valid ```json EXECUTION_PAYLOAD ``` block."
+            f"{closing_instruction}"
         )
 
-        resp = self.runner.run_prompt(user_input, system_instruction=full_sys, mode="PRO")
-        text = resp.text
+        if self.generate_fn is not None:
+            resp = self.generate_fn(user_input, full_sys, self.mode)
+        else:
+            resp = self.runner.run_prompt(user_input, system_instruction=full_sys, mode=self.mode)
+
+        text = ""
+        if hasattr(resp, "text") and resp.text:
+            text = resp.text
+        elif getattr(resp, "candidates", None):
+            try:
+                for part in resp.candidates[0].content.parts:
+                    if getattr(part, "text", None):
+                        text += part.text
+            except Exception:
+                pass
+        if not hasattr(resp, "text") or not resp.text:
+            resp.text = text
+        if not hasattr(resp, "function_calls"):
+            resp.function_calls = []
 
         # Detect tool call requests
         fc_match = re.search(r"```json\s*(\{[\s\S]*?\"function_calls\"[\s\S]*?\})\s*```", text, re.IGNORECASE)
@@ -549,23 +603,54 @@ class AgentFramework:
             except Exception as e:
                 self.log(f"[Warning] Slicing failure: {e}")
 
-            sub_instruction = final_instruction
             if agent_tools:
-                tool_lines = []
-                for t in agent_tools:
-                    t_name = getattr(t, "__name__", str(t))
-                    t_doc = (getattr(t, "__doc__", "") or "").strip()
-                    tool_lines.append(f"- {t_name}: {t_doc}")
-                sub_instruction += (
-                    "\n\nAvailable Sub-Tools:\n" + "\n".join(tool_lines) +
-                    "\n\nIf you need to query tools, output ONLY a JSON block:\n"
-                    "```json\n{\n  \"function_calls\": [\n    {\"name\": \"tool_name\", \"args\": {...}}\n  ]\n}\n```\n"
-                    "Otherwise, output your synthesized text analysis directly."
+                from tool_dispatcher import GLOBAL_TOOL_DISPATCHER
+                allowed_tool_names = {getattr(t, "__name__", str(t)) for t in agent_tools}
+                sub_session = AntigravityChatSession(
+                    runner=self.antigravity_runner,
+                    sys_instruction=final_instruction,
+                    tools=agent_tools,
+                    mode=mode,
+                    generate_fn=lambda p, sys_inst, m: self.generate_response_with_fallback(
+                        prompt=p,
+                        instruction=sys_inst,
+                        mode=m,
+                        tools=agent_tools,
+                    ),
+                    is_subagent=True,
                 )
+                dispatch_res = GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session(
+                    session=sub_session,
+                    initial_message=f"[SYSTEM_TIME (NEW YORK / ET): {ny_iso}] {sliced_query}",
+                    part_factory=types.Part,
+                    agent_role=name,
+                    cancel_check=lambda: getattr(self, "cancel_check", lambda: False)(),
+                    log_callback=self.log,
+                    allowed_tool_names=allowed_tool_names,
+                    max_turns_override=MAX_SUBAGENT_TOOL_TURNS,
+                )
+                if dispatch_res.get("status") == "cancelled":
+                    return dispatch_res.get("response", "[OFFLINE] Session terminated by user interrupt.")
+
+                captured_text = dispatch_res.get("captured_text", [])
+                non_fc_texts = []
+                for txt in captured_text:
+                    stripped = re.sub(
+                        r"```json\s*(\{[\s\S]*?\"function_calls\"[\s\S]*?\})\s*```",
+                        "",
+                        txt,
+                        flags=re.IGNORECASE,
+                    ).strip()
+                    if stripped:
+                        non_fc_texts.append(stripped)
+
+                if non_fc_texts:
+                    return "\n\n---\n\n".join(non_fc_texts)
+                return dispatch_res.get("response", "")
 
             response = self.generate_response_with_fallback(
                 prompt=f"[SYSTEM_TIME (NEW YORK / ET): {ny_iso}] {sliced_query}",
-                instruction=sub_instruction,
+                instruction=final_instruction,
                 mode=mode,
                 tools=agent_tools,
             )
@@ -577,39 +662,6 @@ class AgentFramework:
             except Exception:
                 if hasattr(response, "text"):
                     res_text = response.text
-
-            # Check if sub-agent requested tools
-            fc_match = re.search(r"```json\s*(\{[\s\S]*?\"function_calls\"[\s\S]*?\})\s*```", res_text, re.IGNORECASE)
-            if fc_match and agent_tools:
-                try:
-                    from tool_dispatcher import GLOBAL_TOOL_DISPATCHER
-                    parsed = json.loads(fc_match.group(1))
-                    calls = parsed.get("function_calls", [])
-                    tool_map = {getattr(t, "__name__", str(t)): t for t in agent_tools}
-                    tool_results = []
-                    for c in calls:
-                        fn_name = c.get("name")
-                        fn_args = c.get("args", {})
-                        if fn_name in tool_map:
-                            res = GLOBAL_TOOL_DISPATCHER.dispatch_single_tool(
-                                tool_name=fn_name,
-                                args=fn_args,
-                                agent_role=name,
-                            )
-                            tool_results.append(f"Sub-Tool [{fn_name}]: {res.result if res.success else res.error}")
-                    if tool_results:
-                        followup_prompt = (
-                            f"Sub-tool execution results:\n" + "\n".join(tool_results) +
-                            "\n\nPlease provide your final analysis incorporating these results."
-                        )
-                        second_resp = self.generate_response_with_fallback(
-                            prompt=followup_prompt,
-                            instruction=final_instruction,
-                            mode=mode,
-                        )
-                        res_text = getattr(second_resp, "text", str(second_resp))
-                except Exception as sub_err:
-                    self.log(f"[Warning] Sub-agent tool dispatch failed: {sub_err}")
 
             return res_text or str(response)
 

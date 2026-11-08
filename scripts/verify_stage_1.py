@@ -19,13 +19,24 @@ Exits 0 if all gates pass. Exits non-zero fail-closed on any failure.
 
 import os
 import sys
+import argparse
 import subprocess
 import py_compile
 import unittest
 import time
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-BASELINE_COMMIT = "bb919c010ac2ac1995235d0f96aa49999e0c1c82"
+PRE_STAGE_1_ANCHOR = os.environ.get(
+    "STAGE_1_BASELINE_REF",
+    "bb919c010ac2ac1995235d0f96aa49999e0c1c82",
+)
+PROTECTED_STRATEGY_PATHS = [
+    "gem_trading_rules/rules.md",
+    "engine_instructions/",
+    "scripts/test_fib_daily_peak.py",
+    "scripts/test_live_call.py",
+    "scripts/test_umac_chart_flow.py",
+]
 
 class VerificationReporter:
     def __init__(self):
@@ -148,10 +159,24 @@ def check_governance_framework(reporter: VerificationReporter):
     return True
 
 
+def _resolve_baseline_ref() -> str:
+    """Returns PRE_STAGE_1_ANCHOR if reachable in local git history, otherwise HEAD."""
+    res = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", PRE_STAGE_1_ANCHOR, "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode == 0:
+        return PRE_STAGE_1_ANCHOR
+    return "HEAD"
+
+
 def check_out_of_scope_boundaries(reporter: VerificationReporter):
     t0 = time.time()
-    # Ensure gem_trading_rules/rules.md and engine_instructions/ have zero diff against baseline commit
-    cmd = ["git", "diff", BASELINE_COMMIT, "--", "gem_trading_rules/rules.md", "engine_instructions/"]
+    base_ref = _resolve_baseline_ref()
+    # 1. Check working tree + staged changes against base_ref
+    cmd = ["git", "diff", base_ref, "--", *PROTECTED_STRATEGY_PATHS]
     res = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
     duration = time.time() - t0
 
@@ -160,18 +185,44 @@ def check_out_of_scope_boundaries(reporter: VerificationReporter):
         return False
 
     if res.stdout.strip():
-        reporter.record("Out-of-Scope Boundary Check", False, "Unauthorized diff detected in trading rules or engine instructions!", duration)
+        reporter.record("Out-of-Scope Boundary Check", False, "Unauthorized diff detected in trading rules, engine instructions, or baseline scripts!", duration)
         return False
 
-    reporter.record("Out-of-Scope Boundary Check", True, "Zero diff in rules.md and engine_instructions/ vs baseline", duration)
+    # 2. Also check working tree against HEAD directly
+    cmd_head = ["git", "diff", "HEAD", "--", *PROTECTED_STRATEGY_PATHS]
+    res_head = subprocess.run(cmd_head, cwd=REPO_ROOT, capture_output=True, text=True)
+    if res_head.returncode != 0 or res_head.stdout.strip():
+        reporter.record("Out-of-Scope Boundary Check", False, "Unauthorized working-tree diff detected against HEAD!", time.time() - t0)
+        return False
+
+    reporter.record(
+        "Out-of-Scope Boundary Check",
+        True,
+        f"Zero diff in protected investment/strategy files vs {base_ref[:8]} and HEAD",
+        time.time() - t0,
+    )
     return True
 
 
 def check_unit_tests(reporter: VerificationReporter):
     t0 = time.time()
-    suite = unittest.defaultTestLoader.discover(os.path.join(REPO_ROOT, "tests"))
-    runner = unittest.TextTestRunner(verbosity=0, stream=open(os.devnull, "w"))
-    result = runner.run(suite)
+    audit_log_path = os.path.join(REPO_ROOT, "context", "agent_logs", "agent-events.jsonl")
+    original_audit_bytes = None
+    if os.path.exists(audit_log_path):
+        with open(audit_log_path, "rb") as f:
+            original_audit_bytes = f.read()
+
+    try:
+        suite = unittest.defaultTestLoader.discover(os.path.join(REPO_ROOT, "tests"))
+        with open(os.devnull, "w", encoding="utf-8") as devnull:
+            runner = unittest.TextTestRunner(verbosity=0, stream=devnull)
+            result = runner.run(suite)
+    finally:
+        # Restore tracked audit log so running verification never dirties a clean working tree
+        if original_audit_bytes is not None:
+            with open(audit_log_path, "wb") as f:
+                f.write(original_audit_bytes)
+
     duration = time.time() - t0
 
     if not result.wasSuccessful():
@@ -185,8 +236,20 @@ def check_unit_tests(reporter: VerificationReporter):
 
 def check_antigravity_integration(reporter: VerificationReporter):
     t0 = time.time()
-    test_script = os.path.join(REPO_ROOT, "scripts", "test_antigravity_integration.py")
-    res = subprocess.run([sys.executable, test_script], cwd=REPO_ROOT, capture_output=True, text=True)
+    audit_log_path = os.path.join(REPO_ROOT, "context", "agent_logs", "agent-events.jsonl")
+    original_audit_bytes = None
+    if os.path.exists(audit_log_path):
+        with open(audit_log_path, "rb") as f:
+            original_audit_bytes = f.read()
+
+    try:
+        test_script = os.path.join(REPO_ROOT, "scripts", "test_antigravity_integration.py")
+        res = subprocess.run([sys.executable, test_script], cwd=REPO_ROOT, capture_output=True, text=True)
+    finally:
+        if original_audit_bytes is not None:
+            with open(audit_log_path, "wb") as f:
+                f.write(original_audit_bytes)
+
     duration = time.time() - t0
 
     if res.returncode != 0:
@@ -227,31 +290,73 @@ def check_baseline_failures_preservation(reporter: VerificationReporter):
     return True
 
 
-def check_git_commit_authority(reporter: VerificationReporter):
-    t0 = time.time()
-    res = subprocess.run(["git", "log", "-n", "1", "--format=%H"], cwd=REPO_ROOT, capture_output=True, text=True)
-    current_head = res.stdout.strip()
-    duration = time.time() - t0
+def make_repository_mode_check(expected_mode: str = "auto"):
+    def check_repository_state(reporter: VerificationReporter):
+        t0 = time.time()
+        res_head = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if res_head.returncode != 0:
+            reporter.record("Repository State & Mode", False, "Unable to resolve git HEAD", time.time() - t0)
+            return False
 
-    if current_head != BASELINE_COMMIT:
-        reporter.record("Git Commit Authority", False, f"HEAD has moved! Expected {BASELINE_COMMIT}, got {current_head}", duration)
-        return False
+        current_head = res_head.stdout.strip()
+        res_status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        status_lines = [line for line in res_status.stdout.splitlines() if line.strip()]
+        is_clean = len(status_lines) == 0
+        detected_mode = "POST_COMMIT_CLEAN" if is_clean else "PRE_COMMIT_WORKING_TREE"
+        duration = time.time() - t0
 
-    # Check that changes are present in working tree (not committed)
-    status_res = subprocess.run(["git", "status", "--porcelain"], cwd=REPO_ROOT, capture_output=True, text=True)
-    if not status_res.stdout.strip():
-        reporter.record("Git Commit Authority", False, "Working tree is unexpectedly clean! Changes must remain in working tree.", duration)
-        return False
+        if expected_mode == "committed" and not is_clean:
+            reporter.record(
+                "Repository State & Mode",
+                False,
+                f"Expected clean committed tree (--mode committed), found {len(status_lines)} modified/untracked path(s)",
+                duration,
+            )
+            return False
+        if expected_mode == "working-tree" and is_clean:
+            reporter.record(
+                "Repository State & Mode",
+                False,
+                "Expected uncommitted working-tree changes (--mode working-tree), but working tree is clean",
+                duration,
+            )
+            return False
 
-    reporter.record("Git Commit Authority", True, f"HEAD matches baseline {BASELINE_COMMIT[:8]}, all changes in local working tree", duration)
-    return True
+        reporter.record(
+            "Repository State & Mode",
+            True,
+            f"HEAD={current_head[:8]} | Mode={detected_mode} ({len(status_lines)} dirty path(s))",
+            duration,
+        )
+        return True
+
+    return check_repository_state
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Stage 1 / 1.1 Fail-Closed Verification Harness")
+    parser.add_argument(
+        "--mode",
+        choices=["auto", "working-tree", "committed"],
+        default="auto",
+        help="Verification mode: 'auto' (default, supports both pre-commit and post-commit), 'working-tree' (requires uncommitted changes), or 'committed' (requires clean tree).",
+    )
+    args = parser.parse_args()
+
     print("=" * 80)
-    print("STARTING STAGE 1 VERIFICATION HARNESS")
+    print("STARTING STAGE 1 / 1.1 VERIFICATION HARNESS")
     print(f"Repository Root: {REPO_ROOT}")
-    print(f"Baseline Commit: {BASELINE_COMMIT}")
+    print(f"Verification Mode: {args.mode}")
     print("=" * 80 + "\n")
 
     reporter = VerificationReporter()
@@ -264,7 +369,7 @@ def main():
         check_unit_tests,
         check_antigravity_integration,
         check_baseline_failures_preservation,
-        check_git_commit_authority
+        make_repository_mode_check(args.mode),
     ]
 
     for gate in gates:

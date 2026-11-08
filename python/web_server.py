@@ -668,8 +668,6 @@ def chat_endpoint(req: ChatRequest):
         if not full_response:
             framework.log("[Orchestrator] WARNING: No text captured across all turns.")
             return {"status": "success", "response": "_[The model performed its internal reasoning and tools but did not emit a final text summary. Please try again or check system logs.]_"}
-
-        full_response = "\n\n---\n\n".join(all_text)
         
         # Intercept and process EXECUTION_PAYLOAD dynamically (purging it from user display)
         full_response_original = full_response
@@ -856,6 +854,13 @@ class DecisionLogRequest(BaseModel):
 @app.post("/api/save_decision_log")
 def save_decision_log(req: DecisionLogRequest):
     """Auto-write a new lesson entry to decision_log.json from the AI Council."""
+    from tool_registry import authorize_financial_mutation
+    from atomic_io import atomic_update_json
+    authorize_financial_mutation(
+        operation_name="update_decision_log",
+        target_resource="context/decision_log.json",
+        payload=req.dict(),
+    )
     try:
         import datetime
         entry = {
@@ -866,18 +871,17 @@ def save_decision_log(req: DecisionLogRequest):
             "source": "AI_COUNCIL_AUTO"
         }
         lessons_file = "context/decision_log.json"
-        existing = []
-        if os.path.exists(lessons_file):
-            try:
-                with open(lessons_file, "r", encoding="utf-8") as f:
-                    td = json.load(f)
-                    existing = td.get("decision_log", td) if isinstance(td, dict) else td
-            except: pass
-        existing.insert(0, entry)
-        with open(lessons_file, "w", encoding="utf-8") as f:
-            json.dump({"decision_log": existing}, f, indent=2)
+
+        def _prepend_entry(td):
+            existing = list(td.get("decision_log", td)) if isinstance(td, dict) else (list(td) if isinstance(td, list) else [])
+            existing.insert(0, entry)
+            return {"decision_log": existing}
+
+        atomic_update_json(lessons_file, _prepend_entry, default_factory=dict)
         framework.log(f"[System] Decision log saved: {req.ticker} — {req.lesson[:60]}...")
         return {"status": "success", "entry": entry}
+    except PermissionError:
+        raise
     except Exception as e:
         framework.log(f"[Error] Decision log save failed: {e}")
         return {"status": "error", "message": str(e)}
@@ -885,11 +889,19 @@ def save_decision_log(req: DecisionLogRequest):
 @app.post("/api/clear_decision_log")
 def clear_decision_log():
     """Wipe decision_log.json — all entries removed."""
+    from tool_registry import authorize_financial_mutation
+    from atomic_io import atomic_write_json
+    authorize_financial_mutation(
+        operation_name="update_decision_log",
+        target_resource="context/decision_log.json",
+        payload={"decision_log": []},
+    )
     try:
-        with open("context/decision_log.json", "w", encoding="utf-8") as f:
-            json.dump({"decision_log": []}, f, indent=2)
+        atomic_write_json("context/decision_log.json", {"decision_log": []})
         framework.log("[System] Decision log cleared.")
         return {"status": "success"}
+    except PermissionError:
+        raise
     except Exception as e:
         framework.log(f"[Error] Decision log clear failed: {e}")
         return {"status": "error", "message": str(e)}
@@ -1041,6 +1053,13 @@ def get_basket():
 
 @app.post("/api/basket")
 def save_basket(req: BasketSaveRequest):
+    from tool_registry import authorize_financial_mutation
+    from atomic_io import atomic_update_json
+    authorize_financial_mutation(
+        operation_name="update_ssot",
+        target_resource="context/ssot.json",
+        payload=req.dict(),
+    )
     try:
         # Validate portfolio symbols before saving (only active holdings with shares > 0)
         symbols = [item.ticker for item in req.portfolio if item.shares > 0]
@@ -1052,8 +1071,6 @@ def save_basket(req: BasketSaveRequest):
             )
 
         if os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r", encoding="utf-8") as f:
-                data = json.load(f)
             new_snapshot = []
             for item in req.portfolio:
                 if item.shares > 0:
@@ -1062,23 +1079,26 @@ def save_basket(req: BasketSaveRequest):
             import fetch_stocks
             rate = fetch_stocks.cache.prices.get("EURUSD=X", 1.08)
             usd_val = req.unallocated_cash_usd if req.unallocated_cash_usd > 0.0 else round(req.unallocated_cash_eur * rate, 2)
-            
-            data["portfolio_snapshot"] = new_snapshot
-            data["unallocated_cash_eur"] = req.unallocated_cash_eur
-            data["unallocated_cash_usd"] = usd_val
 
-            if "mutable_state" in data and isinstance(data["mutable_state"], dict):
-                data["mutable_state"]["portfolio_snapshot"] = new_snapshot
-                data["mutable_state"]["unallocated_cash_eur"] = req.unallocated_cash_eur
-                data["mutable_state"]["unallocated_cash_usd"] = usd_val
+            def _update_basket_ssot(data):
+                if not isinstance(data, dict):
+                    data = {}
+                data["portfolio_snapshot"] = new_snapshot
+                data["unallocated_cash_eur"] = req.unallocated_cash_eur
+                data["unallocated_cash_usd"] = usd_val
 
-            if "EXECUTION_PAYLOAD" in data and isinstance(data["EXECUTION_PAYLOAD"], dict):
-                data["EXECUTION_PAYLOAD"]["portfolio_snapshot"] = new_snapshot
-                data["EXECUTION_PAYLOAD"]["unallocated_cash_eur"] = req.unallocated_cash_eur
-                data["EXECUTION_PAYLOAD"]["unallocated_cash_usd"] = usd_val
-                
-            with open("context/ssot.json", "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+                if "mutable_state" in data and isinstance(data["mutable_state"], dict):
+                    data["mutable_state"]["portfolio_snapshot"] = new_snapshot
+                    data["mutable_state"]["unallocated_cash_eur"] = req.unallocated_cash_eur
+                    data["mutable_state"]["unallocated_cash_usd"] = usd_val
+
+                if "EXECUTION_PAYLOAD" in data and isinstance(data["EXECUTION_PAYLOAD"], dict):
+                    data["EXECUTION_PAYLOAD"]["portfolio_snapshot"] = new_snapshot
+                    data["EXECUTION_PAYLOAD"]["unallocated_cash_eur"] = req.unallocated_cash_eur
+                    data["EXECUTION_PAYLOAD"]["unallocated_cash_usd"] = usd_val
+                return data
+
+            data = atomic_update_json("context/ssot.json", _update_basket_ssot, default_factory=dict)
             framework.log(f"[System] SSoT Basket & Cash updated: {len(new_snapshot)} holding(s). Cash: {req.unallocated_cash_eur} EUR | {req.unallocated_cash_usd} USD")
             
             # Hot-reload TICKERS in fetch_stocks so the scanning daemon immediately registers changes
@@ -1104,6 +1124,8 @@ def save_basket(req: BasketSaveRequest):
                 framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
                 
             return {"status": "success", "portfolio": new_snapshot}
+    except PermissionError:
+        raise
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -1113,25 +1135,25 @@ def save_basket(req: BasketSaveRequest):
 @app.get("/api/watchlist")
 def get_watch_list():
     try:
+        from atomic_io import atomic_read_json, atomic_update_json
         watchlist = []
         # Load from config.json if it exists (ENH_83)
         if os.path.exists("context/config.json"):
-            with open("context/config.json", "r") as f:
-                cfg = json.load(f)
-                watchlist = cfg.get("WATCHLIST", [])
+            cfg = atomic_read_json("context/config.json", default={})
+            watchlist = cfg.get("WATCHLIST", [])
         
         # Make sure ssot.json is in sync
         if os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r") as f:
-                data = json.load(f)
+            data = atomic_read_json("context/ssot.json", default={})
             ms = data.get("mutable_state", data)
             if ms.get("watched_tickers") != watchlist:
-                if "mutable_state" in data:
-                    data["mutable_state"]["watched_tickers"] = watchlist
-                else:
-                    data["watched_tickers"] = watchlist
-                with open("context/ssot.json", "w") as f:
-                    json.dump(data, f, indent=2)
+                def _sync_wl(d):
+                    if "mutable_state" in d and isinstance(d["mutable_state"], dict):
+                        d["mutable_state"]["watched_tickers"] = watchlist
+                    else:
+                        d["watched_tickers"] = watchlist
+                    return d
+                atomic_update_json("context/ssot.json", _sync_wl, default_factory=dict)
                     
         return watchlist
     except Exception as e:
@@ -1142,8 +1164,15 @@ from fastapi import Request
 
 @app.post("/api/watchlist")
 async def save_watch_list(req: Request):
+    from tool_registry import authorize_financial_mutation
+    from atomic_io import atomic_update_json
     try:
         payload = await req.json()
+        authorize_financial_mutation(
+            operation_name="update_ssot",
+            target_resource="context/ssot.json",
+            payload=payload,
+        )
         
         # Robustly handle both list payloads and dict payloads
         if isinstance(payload, dict):
@@ -1166,24 +1195,25 @@ async def save_watch_list(req: Request):
 
         # 1. Update config.json (ENH_83 SSoT active asset tracking)
         if os.path.exists("context/config.json"):
-            with open("context/config.json", "r") as f:
-                cfg = json.load(f)
-            cfg["WATCHLIST"] = watch_list
-            with open("context/config.json", "w") as f:
-                json.dump(cfg, f, indent=2)
+            def _update_cfg_wl(cfg):
+                if not isinstance(cfg, dict):
+                    cfg = {}
+                cfg["WATCHLIST"] = watch_list
+                return cfg
+            atomic_update_json("context/config.json", _update_cfg_wl, default_factory=dict)
                 
         # 2. Update ssot.json
+        data = {}
         if os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r") as f:
-                data = json.load(f)
-            
-            if "mutable_state" in data:
-                data["mutable_state"]["watched_tickers"] = watch_list
-            else:
-                data["watched_tickers"] = watch_list
-                
-            with open("context/ssot.json", "w") as f:
-                json.dump(data, f, indent=2)
+            def _update_ssot_wl(d):
+                if not isinstance(d, dict):
+                    d = {}
+                if "mutable_state" in d and isinstance(d["mutable_state"], dict):
+                    d["mutable_state"]["watched_tickers"] = watch_list
+                else:
+                    d["watched_tickers"] = watch_list
+                return d
+            data = atomic_update_json("context/ssot.json", _update_ssot_wl, default_factory=dict)
             framework.log("[System] Watch list updated in ssot.json and config.json.")
             
         # FORCE HOT-RELOAD OF DAEMON TICKERS
@@ -1198,6 +1228,8 @@ async def save_watch_list(req: Request):
             framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
             
         return {"status": "success"}
+    except PermissionError:
+        raise
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -1312,22 +1344,26 @@ def reload_scout_tickers_task():
 @app.post("/api/scout_categories")
 def save_scout_categories(categories: List[str], background_tasks: BackgroundTasks):
     try:
+        from tool_registry import authorize_financial_mutation
+        from atomic_io import atomic_update_json
+        authorize_financial_mutation("update_ssot", "context/ssot.json", payload=categories)
         if os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r") as f:
-                data = json.load(f)
-                
-            if "mutable_state" in data:
-                data["mutable_state"]["scout_categories"] = categories
-            else:
-                data["scout_categories"] = categories
-                
-            with open("context/ssot.json", "w") as f:
-                json.dump(data, f, indent=2)
+            def _update_scouts(data):
+                if not isinstance(data, dict):
+                    data = {}
+                if "mutable_state" in data:
+                    data["mutable_state"]["scout_categories"] = categories
+                else:
+                    data["scout_categories"] = categories
+                return data
+            atomic_update_json("context/ssot.json", _update_scouts, default_factory=dict)
             framework.log("[System] Scout categories updated.")
             
             # Queue the heavy Dynamic Search yfinance reload logic in the background
             background_tasks.add_task(reload_scout_tickers_task)
                 
+    except PermissionError:
+        raise
     except Exception as e:
         framework.log(f"[Error] Scout Categories Save Failed: {e}")
     return {"status": "success", "categories": categories}
