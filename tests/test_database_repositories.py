@@ -31,6 +31,8 @@ import sqlite3
 import tempfile
 import unittest
 import uuid
+from typing import Any, Dict, Optional
+from unittest.mock import patch
 
 from python.database.manager import (
     DatabaseManager,
@@ -78,6 +80,40 @@ from python.tool_registry import (
     GLOBAL_OWNER_APPROVAL,
     compute_payload_digest,
 )
+
+
+def _mint_test_capability(
+    connection: sqlite3.Connection,
+    correlation_id: str,
+    actor_role: str,
+    operation_name: str,
+    target_resource: str,
+    before_state: Optional[Dict[str, Any]] = None,
+    after_state: Optional[Dict[str, Any]] = None,
+    approval_digest: Optional[str] = None,
+    timestamp_utc: Optional[str] = None,
+):
+    """
+    Test-local helper strictly for test suites to construct _FinancialMutationCapability
+    when testing fail-closed validation in append_entry.
+    Uses unittest.mock.patch to satisfy internal credential validation strictly within
+    test scope. No test seams exist in production code.
+    """
+    from python.database.repositories.financial import _FinancialMutationCapability
+
+    with patch("python.database.repositories.financial._validate_credential", return_value=True):
+        return _FinancialMutationCapability(
+            credential="test_fixture_credential",
+            connection=connection,
+            correlation_id=correlation_id,
+            actor_role=actor_role,
+            operation_name=operation_name,
+            target_resource=target_resource,
+            before_state=before_state,
+            after_state=after_state,
+            approval_digest=approval_digest,
+            timestamp_utc=timestamp_utc or utc_now_iso(),
+        )
 
 
 class BaseRepositoryTestCase(unittest.TestCase):
@@ -2330,14 +2366,13 @@ class TestStage1413FinancialChangelogClosureAndStateVerification(BaseRepositoryT
 
     def test_4_unsupported_operation_name_rejected(self):
         """4. A caller cannot fabricate entries for an unsupported operation name."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             repo = FinancialChangelogRepository(conn)
 
             # Test seam construction itself rejects unsupported operations
             with self.assertRaises(ValidationError) as ctx:
-                _test_seam_mint_capability(
+                _mint_test_capability(
                     connection=conn,
                     correlation_id="OP_TEST",
                     actor_role="System",
@@ -2351,7 +2386,7 @@ class TestStage1413FinancialChangelogClosureAndStateVerification(BaseRepositoryT
             self.assertIn("Unsupported mutation operation", str(ctx.exception))
 
             # Even if capability was somehow constructed with unsupported op, append_entry fails closed
-            fake_cap = _test_seam_mint_capability(
+            fake_cap = _mint_test_capability(
                 connection=conn,
                 correlation_id="OP_TEST_2",
                 actor_role="System",
@@ -2370,7 +2405,6 @@ class TestStage1413FinancialChangelogClosureAndStateVerification(BaseRepositoryT
 
     def test_5_malformed_target_path_fails_closed(self):
         """5. A malformed target path fails closed."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             repo = FinancialChangelogRepository(conn)
@@ -2387,7 +2421,7 @@ class TestStage1413FinancialChangelogClosureAndStateVerification(BaseRepositoryT
                 ("upsert_watchlist_item", "invalid_table/AAPL"),
             ]
             for op, bad_target in malformed_paths:
-                cap = _test_seam_mint_capability(
+                cap = _mint_test_capability(
                     connection=conn,
                     correlation_id=f"BAD_TARGET_{uuid.uuid4().hex[:6]}",
                     actor_role="System",
@@ -2405,7 +2439,6 @@ class TestStage1413FinancialChangelogClosureAndStateVerification(BaseRepositoryT
 
     def test_6_partial_or_mismatched_cash_after_state_rejected(self):
         """6. Partial or mismatched cash after-state is rejected."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -2425,7 +2458,7 @@ class TestStage1413FinancialChangelogClosureAndStateVerification(BaseRepositoryT
             ]
             for bad_after in invalid_after_states:
                 if isinstance(bad_after, dict):
-                    cap = _test_seam_mint_capability(
+                    cap = _mint_test_capability(
                         connection=conn,
                         correlation_id=f"BAD_CASH_{uuid.uuid4().hex[:6]}",
                         actor_role="System",
@@ -2438,7 +2471,7 @@ class TestStage1413FinancialChangelogClosureAndStateVerification(BaseRepositoryT
                     )
                 else:
                     # Non-dict after_state tested via test seam
-                    cap = _test_seam_mint_capability(
+                    cap = _mint_test_capability(
                         connection=conn,
                         correlation_id=f"BAD_CASH_{uuid.uuid4().hex[:6]}",
                         actor_role="System",
@@ -2456,7 +2489,6 @@ class TestStage1413FinancialChangelogClosureAndStateVerification(BaseRepositoryT
 
     def test_7_partial_or_mismatched_position_after_state_rejected_including_wac_usd(self):
         """7. Partial or mismatched position after-state is rejected, including WAC USD."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -2486,7 +2518,7 @@ class TestStage1413FinancialChangelogClosureAndStateVerification(BaseRepositoryT
                 {"account_id": "PRIMARY", "ticker": "MSFT", "shares": "10.0000", "wac_eur": "150.0000", "wac_usd": "165.0000"},
             ]
             for bad_pos in invalid_position_states:
-                cap = _test_seam_mint_capability(
+                cap = _mint_test_capability(
                     connection=conn,
                     correlation_id=f"BAD_POS_{uuid.uuid4().hex[:6]}",
                     actor_role="System",
@@ -2503,7 +2535,6 @@ class TestStage1413FinancialChangelogClosureAndStateVerification(BaseRepositoryT
 
     def test_8_partial_or_mismatched_watchlist_after_state_rejected_including_notes(self):
         """8. Partial or mismatched watchlist after-state is rejected, including notes."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -2526,7 +2557,7 @@ class TestStage1413FinancialChangelogClosureAndStateVerification(BaseRepositoryT
                 {"ticker": "AMD", "status": "ACTIVE", "notes": "AI momentum leader"},
             ]
             for bad_wl in invalid_wl_states:
-                cap = _test_seam_mint_capability(
+                cap = _mint_test_capability(
                     connection=conn,
                     correlation_id=f"BAD_WL_{uuid.uuid4().hex[:6]}",
                     actor_role="System",
@@ -2877,7 +2908,6 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
 
     def test_r2_position_missing_wac_usd_rejected(self):
         """R2.1: Position after-state missing wac_usd key is rejected fail-closed (even when DB row has NULL)."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -2895,7 +2925,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 "shares": "10.0000",
                 "wac_eur": "100.0000",
             }
-            cap = _test_seam_mint_capability(
+            cap = _mint_test_capability(
                 connection=conn,
                 correlation_id="POS_MISSING_WAC_USD",
                 actor_role="System",
@@ -2912,7 +2942,6 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
 
     def test_r2_position_present_wac_usd_none_accepted(self):
         """R2.2: Position after-state with explicit wac_usd=None is accepted when DB row has NULL."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -2930,7 +2959,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 "wac_eur": "100.0000",
                 "wac_usd": None,
             }
-            cap = _test_seam_mint_capability(
+            cap = _mint_test_capability(
                 connection=conn,
                 correlation_id="POS_EXPLICIT_NONE_WAC_USD",
                 actor_role="System",
@@ -2945,7 +2974,6 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
 
     def test_r2_position_mismatched_wac_usd_rejected(self):
         """R2.3: Position after-state with mismatched wac_usd is rejected."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -2964,7 +2992,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 "wac_eur": "100.0000",
                 "wac_usd": "110.0000",
             }
-            cap = _test_seam_mint_capability(
+            cap = _mint_test_capability(
                 connection=conn,
                 correlation_id="POS_MISMATCHED_WAC_USD",
                 actor_role="System",
@@ -2980,7 +3008,6 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
 
     def test_r2_watchlist_missing_notes_rejected(self):
         """R2.4: Watchlist after-state missing notes key is rejected fail-closed (even when DB row has NULL)."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -2993,7 +3020,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 "ticker": "WL_TEST1",
                 "status": "ACTIVE",
             }
-            cap = _test_seam_mint_capability(
+            cap = _mint_test_capability(
                 connection=conn,
                 correlation_id="WL_MISSING_NOTES",
                 actor_role="System",
@@ -3010,7 +3037,6 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
 
     def test_r2_watchlist_present_notes_none_accepted(self):
         """R2.5: Watchlist after-state with explicit notes=None is accepted when DB row has NULL."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -3023,7 +3049,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 "status": "ACTIVE",
                 "notes": None,
             }
-            cap = _test_seam_mint_capability(
+            cap = _mint_test_capability(
                 connection=conn,
                 correlation_id="WL_EXPLICIT_NONE_NOTES",
                 actor_role="System",
@@ -3038,7 +3064,6 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
 
     def test_r2_watchlist_mismatched_notes_rejected(self):
         """R2.6: Watchlist after-state with mismatched notes is rejected."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -3052,7 +3077,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 "status": "ACTIVE",
                 "notes": "Some unexpected note",
             }
-            cap = _test_seam_mint_capability(
+            cap = _mint_test_capability(
                 connection=conn,
                 correlation_id="WL_MISMATCHED_NOTES",
                 actor_role="System",
@@ -3068,7 +3093,6 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
 
     def test_r2_unexpected_additional_fields_rejected_cash(self):
         """R2.7: Cash after-state with unexpected extra fields is rejected."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -3082,7 +3106,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 "amount": "100.00",
                 "extra_field": "unauthorized",
             }
-            cap = _test_seam_mint_capability(
+            cap = _mint_test_capability(
                 connection=conn,
                 correlation_id="CASH_EXTRA_KEY",
                 actor_role="System",
@@ -3098,7 +3122,6 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
 
     def test_r2_unexpected_additional_fields_rejected_position(self):
         """R2.8: Position after-state with unexpected extra fields is rejected."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -3117,7 +3140,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 "wac_usd": "110.0000",
                 "extra_field": "unauthorized",
             }
-            cap = _test_seam_mint_capability(
+            cap = _mint_test_capability(
                 connection=conn,
                 correlation_id="POS_EXTRA_KEY",
                 actor_role="System",
@@ -3133,7 +3156,6 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
 
     def test_r2_unexpected_additional_fields_rejected_watchlist(self):
         """R2.9: Watchlist after-state with unexpected extra fields is rejected."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -3147,7 +3169,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 "notes": "ok",
                 "extra_field": "unauthorized",
             }
-            cap = _test_seam_mint_capability(
+            cap = _mint_test_capability(
                 connection=conn,
                 correlation_id="WL_EXTRA_KEY",
                 actor_role="System",
@@ -3163,7 +3185,6 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
 
     def test_r2_missing_mandatory_fields_rejected_across_all_targets(self):
         """R2.10: Missing mandatory fields for cash, position, and watchlist are rejected."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             conn.execute(
@@ -3181,7 +3202,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
             cl_repo = FinancialChangelogRepository(conn)
 
             # Cash missing amount
-            cap_cash = _test_seam_mint_capability(
+            cap_cash = _mint_test_capability(
                 connection=conn,
                 correlation_id="CASH_NO_AMT",
                 actor_role="System",
@@ -3194,7 +3215,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 cl_repo.append_entry(mutation_capability=cap_cash)
 
             # Position missing shares
-            cap_pos = _test_seam_mint_capability(
+            cap_pos = _mint_test_capability(
                 connection=conn,
                 correlation_id="POS_NO_SHARES",
                 actor_role="System",
@@ -3207,7 +3228,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 cl_repo.append_entry(mutation_capability=cap_pos)
 
             # Watchlist missing status
-            cap_wl = _test_seam_mint_capability(
+            cap_wl = _mint_test_capability(
                 connection=conn,
                 correlation_id="WL_NO_STATUS",
                 actor_role="System",
@@ -3223,7 +3244,6 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
 
     def test_r2_exact_deletion_verification(self):
         """R2.11: Deletion operations verify that the exact row is absent, failing if row persists."""
-        from python.database.repositories.financial import _test_seam_mint_capability
         with self.core_manager.connection() as conn:
             conn.execute("BEGIN IMMEDIATE;")
             # Row actually persists in DB
@@ -3233,7 +3253,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
             cl_repo = FinancialChangelogRepository(conn)
 
             # Attempting delete_cash changelog when row was NOT deleted raises IntegrityConflictError
-            cap = _test_seam_mint_capability(
+            cap = _mint_test_capability(
                 connection=conn,
                 correlation_id="FAKE_DELETE",
                 actor_role="System",
@@ -3246,6 +3266,250 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 cl_repo.append_entry(mutation_capability=cap)
             self.assertIn("record was not deleted", str(ctx.exception))
             conn.execute("ROLLBACK;")
+
+
+class TestStage14132TestSeamRemovalAndCredentialBoundary(BaseRepositoryTestCase):
+    """
+    Dedicated test suite for Stage 1.4.1.3.2:
+    - Complete removal of _test_seam_mint_capability() from production code.
+    - Elimination of all caller-module-name inspection (tests. / test_ prefixes) in production code.
+    - Strict restriction of capability minting to caller bytecode and repository instances.
+    - Verification that test fixtures cannot be abused from production and test mocks are strictly test-local.
+    """
+
+    def test_r1_test_seam_mint_capability_completely_absent(self):
+        """R1.1: _test_seam_mint_capability is absent from python.database.repositories.financial and repositories."""
+        import python.database.repositories.financial as fin_mod
+        self.assertFalse(hasattr(fin_mod, "_test_seam_mint_capability"))
+        self.assertNotIn("_test_seam_mint_capability", dir(fin_mod))
+
+        import python.database.repositories as repo_pkg
+        self.assertFalse(hasattr(repo_pkg, "_test_seam_mint_capability"))
+
+    def test_r1_no_module_name_or_test_prefix_checks_in_production(self):
+        """R1.2: Production code does not contain module-name checks like tests. or test_ prefixes."""
+        fin_path = Path(__file__).parent.parent / "python" / "database" / "repositories" / "financial.py"
+        source = fin_path.read_text(encoding="utf-8")
+        self.assertNotIn("_test_seam_mint_capability", source)
+        self.assertNotIn('startswith("tests.")', source)
+        self.assertNotIn('startswith("test_")', source)
+        self.assertNotIn("caller_mod", source)
+
+    def test_r1_ordinary_caller_cannot_acquire_mutation_credential(self):
+        """R1.3: Calling _acquire_mutation_credential directly from ordinary code raises PermissionError."""
+        from python.database.repositories.financial import _acquire_mutation_credential
+        with self.assertRaises(PermissionError) as ctx:
+            _acquire_mutation_credential()
+        self.assertIn("Unauthorized attempt to acquire financial mutation credential", str(ctx.exception))
+
+    def test_r1_spoofed_module_name_cannot_acquire_mutation_credential(self):
+        """R1.4: Code executing under a module named test_something or tests.something cannot acquire credential."""
+        from python.database.repositories.financial import _acquire_mutation_credential
+        import types
+
+        # Create a module with a test-like name
+        fake_module = types.ModuleType("test_adversarial_exploit")
+        code = compile(
+            """
+from python.database.repositories.financial import _acquire_mutation_credential
+def exploit():
+    return _acquire_mutation_credential()
+""",
+            "<exploit>",
+            "exec",
+        )
+        exec(code, fake_module.__dict__)
+        with self.assertRaises(PermissionError) as ctx:
+            fake_module.exploit()
+        self.assertIn("Unauthorized attempt to acquire financial mutation credential", str(ctx.exception))
+
+        fake_module2 = types.ModuleType("tests.unit.adversarial")
+        code2 = compile(
+            """
+from python.database.repositories.financial import _acquire_mutation_credential
+def exploit():
+    return _acquire_mutation_credential()
+""",
+            "<exploit2>",
+            "exec",
+        )
+        exec(code2, fake_module2.__dict__)
+        with self.assertRaises(PermissionError) as ctx2:
+            fake_module2.exploit()
+        self.assertIn("Unauthorized attempt to acquire financial mutation credential", str(ctx2.exception))
+
+    def test_r1_spoofed_method_bytecode_without_repository_instance_fails(self):
+        """R1.5: Method named set_cash_balance on a non-CashRepository class raises PermissionError."""
+        from python.database.repositories.financial import _acquire_mutation_credential
+
+        class FakeRepository:
+            def set_cash_balance(self):
+                return _acquire_mutation_credential()
+
+        fake_repo = FakeRepository()
+        with self.assertRaises(PermissionError) as ctx:
+            fake_repo.set_cash_balance()
+        self.assertIn("Unauthorized attempt to acquire financial mutation credential", str(ctx.exception))
+
+    def test_r1_direct_capability_construction_without_credential_fails(self):
+        """R1.6: _FinancialMutationCapability direct instantiation fails closed without valid credential."""
+        from python.database.repositories.financial import _FinancialMutationCapability
+        with self.core_manager.connection() as conn:
+            with self.assertRaises(PermissionError) as ctx:
+                _FinancialMutationCapability(
+                    credential=None,
+                    connection=conn,
+                    correlation_id="NO_CRED",
+                    actor_role="System",
+                    operation_name="set_cash_balance",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state=None,
+                    after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"},
+                    timestamp_utc=utc_now_iso(),
+                )
+            self.assertIn("Direct instantiation of _FinancialMutationCapability is prohibited", str(ctx.exception))
+
+            with self.assertRaises(PermissionError):
+                _FinancialMutationCapability(
+                    credential="unauthorized_token",
+                    connection=conn,
+                    correlation_id="BAD_CRED",
+                    actor_role="System",
+                    operation_name="set_cash_balance",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state=None,
+                    after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"},
+                    timestamp_utc=utc_now_iso(),
+                )
+
+    def test_r1_merely_opening_transaction_does_not_permit_capability_creation(self):
+        """R1.7: An active transaction does not permit unauthorized capability creation."""
+        from python.database.repositories.financial import _FinancialMutationCapability
+        with self.core_manager.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            with self.assertRaises(PermissionError):
+                _FinancialMutationCapability(
+                    credential=None,
+                    connection=conn,
+                    correlation_id="TX_OPEN",
+                    actor_role="System",
+                    operation_name="set_cash_balance",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state=None,
+                    after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"},
+                    timestamp_utc=utc_now_iso(),
+                )
+            conn.execute("ROLLBACK;")
+
+    def test_r1_test_local_mock_does_not_persist_or_affect_production(self):
+        """R1.8: Outside the test-local mock scope, _validate_credential remains fully enforced."""
+        from python.database.repositories.financial import _FinancialMutationCapability, _validate_credential
+        with self.core_manager.connection() as conn:
+            # 1. Inside test-local helper, capability is minted
+            cap = _mint_test_capability(
+                connection=conn,
+                correlation_id="TEST_HELPER",
+                actor_role="System",
+                operation_name="set_cash_balance",
+                target_resource="portfolio_cash/PRIMARY/EUR",
+                before_state=None,
+                after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"},
+            )
+            self.assertIsNotNone(cap)
+
+            # 2. Immediately outside, validation fails for arbitrary credentials
+            self.assertFalse(_validate_credential("test_fixture_credential"))
+            self.assertFalse(_validate_credential(None))
+            self.assertFalse(_validate_credential(12345))
+
+            # 3. Direct instantiation fails
+            with self.assertRaises(PermissionError):
+                _FinancialMutationCapability(
+                    credential="test_fixture_credential",
+                    connection=conn,
+                    correlation_id="TEST_ESCAPE",
+                    actor_role="System",
+                    operation_name="set_cash_balance",
+                    target_resource="portfolio_cash/PRIMARY/EUR",
+                    before_state=None,
+                    after_state={"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"},
+                    timestamp_utc=utc_now_iso(),
+                )
+
+    def test_r1_all_six_genuine_mutations_create_exactly_one_changelog(self):
+        """R1.9: All six genuine mutation methods mint valid capabilities and record changelog entries."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            pos_repo = PositionRepository(conn)
+            wl_repo = WatchlistRepository(conn)
+            cl_repo = FinancialChangelogRepository(conn)
+
+            initial_count = len(cl_repo.list_entries())
+
+            # 1. set_cash_balance
+            cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("250.00"), correlation_id="GEN_1")
+            self.assertEqual(len(cl_repo.list_entries()), initial_count + 1)
+            self.assertTrue(cash_repo._last_mutation_capability.is_consumed)
+
+            # 2. delete_cash
+            cash_repo.delete_cash("PRIMARY", "EUR", correlation_id="GEN_2")
+            self.assertEqual(len(cl_repo.list_entries()), initial_count + 2)
+            self.assertTrue(cash_repo._last_mutation_capability.is_consumed)
+
+            # 3. upsert_position
+            pos_repo.upsert_position("PRIMARY", "MSFT", Decimal("5"), Decimal("300.00"), Decimal("330.00"), correlation_id="GEN_3")
+            self.assertEqual(len(cl_repo.list_entries()), initial_count + 3)
+            self.assertTrue(pos_repo._last_mutation_capability.is_consumed)
+
+            # 4. delete_position
+            pos_repo.delete_position("PRIMARY", "MSFT", correlation_id="GEN_4")
+            self.assertEqual(len(cl_repo.list_entries()), initial_count + 4)
+            self.assertTrue(pos_repo._last_mutation_capability.is_consumed)
+
+            # 5. upsert_watchlist_item
+            wl_repo.upsert_watchlist_item("GOOGL", "ACTIVE", "Search & AI", correlation_id="GEN_5")
+            self.assertEqual(len(cl_repo.list_entries()), initial_count + 5)
+            self.assertTrue(wl_repo._last_mutation_capability.is_consumed)
+
+            # 6. remove_watchlist_item
+            wl_repo.remove_watchlist_item("GOOGL", correlation_id="GEN_6")
+            self.assertEqual(len(cl_repo.list_entries()), initial_count + 6)
+            self.assertTrue(wl_repo._last_mutation_capability.is_consumed)
+
+    def test_r1_consumed_capabilities_cannot_be_replayed(self):
+        """R1.10: Replay of an already-consumed capability is rejected fail-closed."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("500.00"), correlation_id="NO_REPLAY")
+            consumed_cap = cash_repo._last_mutation_capability
+            self.assertTrue(consumed_cap.is_consumed)
+
+            cl_repo = FinancialChangelogRepository(conn)
+            with self.assertRaises(IntegrityConflictError) as ctx:
+                cl_repo.append_entry(mutation_capability=consumed_cap)
+            self.assertIn("already been consumed", str(ctx.exception))
+
+    def test_r1_genuine_capabilities_remain_connection_bound(self):
+        """R1.11: Capabilities minted on one connection cannot be used on another connection."""
+        with self.core_manager.connection() as conn1:
+            with self.core_manager.connection() as conn2:
+                cash_repo = CashRepository(conn1)
+                cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("500.00"), correlation_id="CROSS_CONN")
+                cap = cash_repo._last_mutation_capability
+
+                cl_repo2 = FinancialChangelogRepository(conn2)
+                with self.assertRaises(PermissionError) as ctx:
+                    cl_repo2.append_entry(mutation_capability=cap)
+                self.assertIn("bound to a different database connection", str(ctx.exception))
+
+    def test_r1_changelog_failure_rolls_back_associated_mutation(self):
+        """R1.12: If changelog append fails, the associated financial mutation is completely rolled back."""
+        with self.core_manager.connection() as conn:
+            conn.execute("DROP TABLE financial_changelog;")
+            cash_repo = CashRepository(conn)
+            with self.assertRaises(sqlite3.OperationalError):
+                cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("999.00"))
+            self.assertIsNone(cash_repo.get_cash("PRIMARY", "EUR"))
 
 
 if __name__ == "__main__":

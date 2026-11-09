@@ -81,13 +81,6 @@ def _create_credential_closure():
         elif method_name in ("upsert_watchlist_item", "remove_watchlist_item"):
             if isinstance(caller_self, WatchlistRepository) and getattr(WatchlistRepository, method_name).__code__ is code:
                 return _private_token
-        elif method_name == "_test_seam_mint_capability":
-            caller_module = frame.f_globals.get("__name__", "")
-            if caller_module == __name__:
-                outer_frame = sys._getframe(2)
-                outer_module = outer_frame.f_globals.get("__name__", "")
-                if outer_module.startswith("tests.") or outer_module.startswith("test_"):
-                    return _private_token
 
         raise PermissionError(
             f"Unauthorized attempt to acquire financial mutation credential from '{method_name}'."
@@ -146,37 +139,6 @@ class _FinancialMutationCapability:
         if self._consumed:
             raise IntegrityConflictError("Mutation capability has already been consumed.")
         self._consumed = True
-
-
-def _test_seam_mint_capability(
-    connection: sqlite3.Connection,
-    correlation_id: str,
-    actor_role: str,
-    operation_name: str,
-    target_resource: str,
-    before_state: Optional[Dict[str, Any]],
-    after_state: Optional[Dict[str, Any]],
-    approval_digest: Optional[str] = None,
-    timestamp_utc: Optional[str] = None,
-) -> _FinancialMutationCapability:
-    """Narrowly scoped test seam for adversarial verification of changelog append_entry fail-closed rules."""
-    frame = sys._getframe(1)
-    caller_mod = frame.f_globals.get("__name__", "")
-    if not (caller_mod.startswith("tests.") or caller_mod.startswith("test_")):
-        raise PermissionError("Test seam is only accessible within automated test suites.")
-    cred = _acquire_mutation_credential()
-    return _FinancialMutationCapability(
-        credential=cred,
-        connection=connection,
-        correlation_id=correlation_id,
-        actor_role=actor_role,
-        operation_name=operation_name,
-        target_resource=target_resource,
-        before_state=before_state,
-        after_state=after_state,
-        approval_digest=approval_digest,
-        timestamp_utc=timestamp_utc or utc_now_iso(),
-    )
 
 
 def _resolve_effective_actor(caller_role: Optional[str] = None) -> str:
