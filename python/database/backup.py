@@ -12,8 +12,31 @@ import sys
 import ctypes
 import sqlite3
 import datetime
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any, List
+
+if sys.platform == "win32":
+    import msvcrt
+    from ctypes import wintypes
+
+    class _OVERLAPPED(ctypes.Structure):
+        _fields_ = [
+            ("Internal", ctypes.c_ulong),
+            ("InternalHigh", ctypes.c_ulong),
+            ("Offset", wintypes.DWORD),
+            ("OffsetHigh", wintypes.DWORD),
+            ("hEvent", wintypes.HANDLE),
+        ]
+else:
+    class _OVERLAPPED(ctypes.Structure):
+        _fields_ = [
+            ("Internal", ctypes.c_ulong),
+            ("InternalHigh", ctypes.c_ulong),
+            ("Offset", ctypes.c_ulong),
+            ("OffsetHigh", ctypes.c_ulong),
+            ("hEvent", ctypes.c_void_p),
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +59,12 @@ class BackupIntegrityError(BackupError):
 
 
 class BackupQuiescenceError(BackupError):
-    """Raised when target database quiescence cannot be established (R3)."""
+    """Raised when target database quiescence cannot be established (R1, R2, R3)."""
+    pass
+
+
+class RestoreLockBusyError(BackupError):
+    """Raised when the database is locked by an active backup restore operation (R3)."""
     pass
 
 
@@ -49,19 +77,300 @@ class BackupRecoveryError(BackupError):
 
 
 class BackupCleanupError(BackupError):
-    """Raised when cleanup of temporary files or preserved fallback backups fails (R4)."""
-    pass
+    """Raised when cleanup of temporary files, handles, or preserved fallback backups fails (R4)."""
+    def __init__(self, message: str, cleanup_errors: Optional[List[Exception]] = None):
+        super().__init__(message)
+        self.cleanup_errors = cleanup_errors or []
 
 
 # ---------------------------------------------------------------------------
-# Exclusive Target Locking Helpers (R3)
+# Coordinated Restore Locking Infrastructure (R1, R2, R3, R4)
+# ---------------------------------------------------------------------------
+
+class DatabaseRestoreLockToken:
+    """Active lock token representing an acquired exclusive or shared restore lock (R3/R4)."""
+
+    def __init__(
+        self,
+        db_path: str,
+        lock_path: str,
+        f,
+        handle,
+        is_exclusive: bool,
+        fileno: int = -1,
+    ):
+        self.db_path = db_path
+        self.lock_path = lock_path
+        self._f = f
+        self._handle = handle
+        self._fileno = fileno
+        self.is_exclusive = is_exclusive
+        self._is_held = True
+        self._ov = _OVERLAPPED() if sys.platform == "win32" else None
+
+    @property
+    def is_held(self) -> bool:
+        return self._is_held
+
+    def release(self, unlink_on_release: bool = False) -> None:
+        """
+        Releases the held lock without silently suppressing errors (R4).
+        Raises BackupCleanupError if unlock or close fails.
+        """
+        if not self._is_held:
+            return
+
+        cleanup_errors: List[str] = []
+
+        if sys.platform == "win32":
+            if self.is_exclusive and self._f is not None and not self._f.closed:
+                try:
+                    self._f.seek(0)
+                    self._f.truncate(0)
+                    self._f.flush()
+                except Exception as e:
+                    cleanup_errors.append(f"truncate failed: {e}")
+
+            res = ctypes.windll.kernel32.UnlockFileEx(
+                self._handle, 0, 0xFFFFFFFF, 0xFFFFFFFF, ctypes.byref(self._ov)
+            )
+            if res == 0:
+                err = ctypes.windll.kernel32.GetLastError()
+                cleanup_errors.append(f"UnlockFileEx failed (WinError {err})")
+        else:
+            import fcntl
+            if self.is_exclusive and self._f is not None and not self._f.closed:
+                try:
+                    self._f.seek(0)
+                    self._f.truncate(0)
+                    self._f.flush()
+                except Exception as e:
+                    cleanup_errors.append(f"truncate failed: {e}")
+
+            try:
+                fcntl.flock(self._fileno, fcntl.LOCK_UN)
+            except Exception as e:
+                cleanup_errors.append(f"fcntl.flock(LOCK_UN) failed: {e}")
+
+        self._is_held = False
+
+        if self._f is not None:
+            try:
+                self._f.close()
+            except Exception as e:
+                cleanup_errors.append(f"file close failed: {e}")
+            self._f = None
+        self._handle = None
+
+        if unlink_on_release and os.path.exists(self.lock_path):
+            try:
+                os.unlink(self.lock_path)
+            except Exception as e:
+                cleanup_errors.append(f"unlink failed: {e}")
+
+        if cleanup_errors:
+            raise BackupCleanupError(
+                f"Failed to cleanly release restore lock for '{self.db_path}': {'; '.join(cleanup_errors)}"
+            )
+
+
+class DatabaseRestoreLock:
+    """
+    Coordinated cross-process restore lock for SQLite databases (R1, R2, R3).
+
+    Eliminates TOCTOU connection-restoration races by establishing an unambiguous,
+    OS-enforced reader-writer lock between DatabaseManager connection creation (shared)
+    and BackupManager offline restoration (exclusive).
+    """
+
+    @classmethod
+    def get_lock_path(cls, db_path: str) -> str:
+        return f"{os.path.abspath(db_path)}.restore_lock"
+
+    @classmethod
+    @contextmanager
+    def shared_gate(cls, db_path: str):
+        """
+        Shared acquisition gate for database connection creation (R3).
+        Guarantees that new connection creation cannot race with active restoration.
+        Raises RestoreLockBusyError if restoration is currently active or lock cannot be acquired.
+        """
+        if db_path == ":memory:" or str(db_path).startswith("file:"):
+            yield None
+            return
+
+        lock_path = cls.get_lock_path(db_path)
+
+        # 1. Compatibility check: if active restore lock has metadata on disk, restoration is active
+        if os.path.exists(lock_path) and os.path.getsize(lock_path) > 0:
+            raise RestoreLockBusyError(
+                f"Database '{db_path}' is locked: currently undergoing offline backup restoration."
+            )
+
+        lock_dir = os.path.dirname(lock_path)
+        if lock_dir and not os.path.exists(lock_dir):
+            try:
+                os.makedirs(lock_dir, exist_ok=True)
+            except OSError as e:
+                raise BackupError(
+                    f"Failed to create directory for restore lock '{lock_dir}': {e}"
+                ) from e
+
+        token = None
+        if sys.platform == "win32":
+            import msvcrt
+            f = None
+            try:
+                f = open(lock_path, "a+b")
+                h = msvcrt.get_osfhandle(f.fileno())
+                ov = _OVERLAPPED()
+                # SHARED lock: LOCKFILE_FAIL_IMMEDIATELY without LOCKFILE_EXCLUSIVE_LOCK
+                ok = ctypes.windll.kernel32.LockFileEx(
+                    h, 0x00000001, 0, 0xFFFFFFFF, 0xFFFFFFFF, ctypes.byref(ov)
+                )
+                if not ok:
+                    err = ctypes.windll.kernel32.GetLastError()
+                    f.close()
+                    raise RestoreLockBusyError(
+                        f"Database '{db_path}' is locked: currently undergoing offline backup restoration (WinError {err})."
+                    )
+                token = DatabaseRestoreLockToken(db_path, lock_path, f, h, is_exclusive=False)
+            except (OSError, RestoreLockBusyError) as e:
+                if f is not None and not f.closed:
+                    try:
+                        f.close()
+                    except Exception:
+                        pass
+                if isinstance(e, RestoreLockBusyError):
+                    raise
+                raise RestoreLockBusyError(
+                    f"Database '{db_path}' is locked: currently undergoing offline backup restoration: {e}"
+                ) from e
+        else:
+            import fcntl
+            f = None
+            try:
+                f = open(lock_path, "a+b")
+                fileno = f.fileno()
+                fcntl.flock(fileno, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                token = DatabaseRestoreLockToken(db_path, lock_path, f, None, is_exclusive=False, fileno=fileno)
+            except (IOError, OSError) as e:
+                if f is not None and not f.closed:
+                    try:
+                        f.close()
+                    except Exception:
+                        pass
+                raise RestoreLockBusyError(
+                    f"Database '{db_path}' is locked: currently undergoing offline backup restoration: {e}"
+                ) from e
+
+        # Double check after acquiring shared lock: did a restore write into it right before our lock?
+        if os.path.exists(lock_path) and os.path.getsize(lock_path) > 0:
+            token.release(unlink_on_release=False)
+            raise RestoreLockBusyError(
+                f"Database '{db_path}' is locked: currently undergoing offline backup restoration."
+            )
+
+        try:
+            yield token
+        finally:
+            if token is not None and token.is_held:
+                try:
+                    token.release(unlink_on_release=False)
+                except Exception:
+                    pass
+                # If lock file is 0 bytes, attempt clean removal
+                try:
+                    if os.path.exists(lock_path) and os.path.getsize(lock_path) == 0:
+                        os.unlink(lock_path)
+                except Exception:
+                    pass
+
+    @classmethod
+    def acquire_exclusive(cls, db_path: str) -> DatabaseRestoreLockToken:
+        """
+        Acquires an exclusive restore lock across processes and threads (R1, R2, R3).
+        Raises BackupQuiescenceError if target database is currently in use or undergoing restoration.
+        """
+        lock_path = cls.get_lock_path(db_path)
+        lock_dir = os.path.dirname(lock_path)
+        if lock_dir and not os.path.exists(lock_dir):
+            try:
+                os.makedirs(lock_dir, exist_ok=True)
+            except OSError as e:
+                raise BackupError(f"Failed to create directory for restore lock '{lock_dir}': {e}") from e
+
+        if sys.platform == "win32":
+            import msvcrt
+            f = None
+            try:
+                f = open(lock_path, "a+b")
+                h = msvcrt.get_osfhandle(f.fileno())
+                ov = _OVERLAPPED()
+                # EXCLUSIVE lock: LOCKFILE_FAIL_IMMEDIATELY | LOCKFILE_EXCLUSIVE_LOCK
+                ok = ctypes.windll.kernel32.LockFileEx(
+                    h, 0x00000001 | 0x00000002, 0, 0xFFFFFFFF, 0xFFFFFFFF, ctypes.byref(ov)
+                )
+                if not ok:
+                    err = ctypes.windll.kernel32.GetLastError()
+                    f.close()
+                    raise BackupQuiescenceError(
+                        f"Database '{db_path}' cannot be safely restored: "
+                        f"Restore coordination lock is currently held by an active connection or restore process (WinError {err})."
+                    )
+                f.seek(0)
+                f.truncate(0)
+                f.write(
+                    f"pid={os.getpid()}\nutc={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n".encode("utf-8")
+                )
+                f.flush()
+                return DatabaseRestoreLockToken(db_path, lock_path, f, h, is_exclusive=True)
+            except (OSError, BackupQuiescenceError) as e:
+                if f is not None and not f.closed:
+                    try:
+                        f.close()
+                    except Exception:
+                        pass
+                if isinstance(e, BackupQuiescenceError):
+                    raise
+                raise BackupQuiescenceError(
+                    f"Database '{db_path}' cannot be safely restored: Failed to acquire exclusive restore lock: {e}"
+                ) from e
+        else:
+            import fcntl
+            f = None
+            try:
+                f = open(lock_path, "a+b")
+                fileno = f.fileno()
+                fcntl.flock(fileno, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                f.seek(0)
+                f.truncate(0)
+                f.write(
+                    f"pid={os.getpid()}\nutc={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n".encode("utf-8")
+                )
+                f.flush()
+                return DatabaseRestoreLockToken(db_path, lock_path, f, None, is_exclusive=True, fileno=fileno)
+            except (IOError, OSError) as e:
+                if f is not None and not f.closed:
+                    try:
+                        f.close()
+                    except Exception:
+                        pass
+                raise BackupQuiescenceError(
+                    f"Database '{db_path}' cannot be safely restored: "
+                    f"Restore coordination lock is held by another process: {e}"
+                ) from e
+
+
+# ---------------------------------------------------------------------------
+# Exclusive Target Locking Helpers (R1, R2, R4)
 # ---------------------------------------------------------------------------
 
 def _acquire_exclusive_target_lock(file_path: str):
     """
-    Acquires an exclusive OS-level file handle to verify quiescence and block concurrent access (R3).
+    Acquires an exclusive OS-level file handle to verify quiescence and block concurrent access (R2).
     On Windows: uses kernel32.CreateFileW with FILE_SHARE_DELETE (blocking read/write while allowing rename).
-    On POSIX: uses fcntl.flock(LOCK_EX | LOCK_NB).
+    On POSIX: uses fcntl.flock(LOCK_EX | LOCK_NB). Note: advisory on POSIX (R1).
     Raises BackupQuiescenceError if the file is in use by any active/idle process.
     Returns opaque handle or file object that must be closed to release.
     """
@@ -106,21 +415,30 @@ def _acquire_exclusive_target_lock(file_path: str):
 
 
 def _close_exclusive_target_lock(handle) -> None:
-    """Closes an acquired exclusive OS file handle."""
+    """
+    Closes an acquired exclusive OS file handle without suppressing errors (R4).
+    Raises BackupCleanupError if handle release fails.
+    """
     if handle is None:
         return
     if sys.platform == "win32":
-        try:
-            ctypes.windll.kernel32.CloseHandle(handle)
-        except Exception:
-            pass
+        res = ctypes.windll.kernel32.CloseHandle(handle)
+        if res == 0:
+            err = ctypes.windll.kernel32.GetLastError()
+            raise BackupCleanupError(f"Failed to close exclusive target lock handle: WinError {err}")
     else:
+        import fcntl
+        errs: List[str] = []
         try:
-            import fcntl
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except Exception as e:
+            errs.append(f"flock(LOCK_UN) failed: {e}")
+        try:
             handle.close()
-        except Exception:
-            pass
+        except Exception as e:
+            errs.append(f"close failed: {e}")
+        if errs:
+            raise BackupCleanupError(f"Failed to release exclusive target lock on POSIX: {'; '.join(errs)}")
 
 
 # ---------------------------------------------------------------------------
@@ -270,27 +588,33 @@ class BackupManager:
             )
 
         except Exception as e:
+            cleanup_errors = []
             # Clean up destination connection and temporary file on error
             if dst_conn is not None:
                 try:
                     dst_conn.close()
-                except Exception:
-                    pass
+                except Exception as ce:
+                    cleanup_errors.append(ce)
             if os.path.exists(tmp_dest):
                 try:
                     os.unlink(tmp_dest)
-                except Exception:
-                    pass
+                except Exception as ce:
+                    cleanup_errors.append(ce)
+            if cleanup_errors:
+                setattr(e, "cleanup_errors", cleanup_errors)
             if isinstance(e, BackupError):
                 raise
             raise BackupError(f"Backup operation failed: {e}") from e
 
         finally:
-            if owns_source_conn:
+            if owns_source_conn and src_conn is not None:
                 try:
                     src_conn.close()
-                except Exception:
-                    pass
+                except Exception as ce:
+                    if 'e' not in locals():
+                        raise BackupCleanupError(
+                            f"Backup succeeded but source connection cleanup failed: {ce}"
+                        ) from ce
 
     @staticmethod
     def verify_backup(backup_path: str) -> bool:
@@ -378,19 +702,23 @@ class BackupManager:
                 raise BackupError(f"Failed to create target directory '{target_dir}': {e}") from e
 
         target_exists = os.path.exists(target_db_path)
-        wal_path = f"{target_db_path}-wal"
-        shm_path = f"{target_db_path}-shm"
-        restore_lock_path = f"{target_db_path}.restore_lock"
 
-        # Create coordinated restore lock file to signal DatabaseManager.connect()
-        try:
-            with open(restore_lock_path, "w") as f:
-                f.write(f"pid={os.getpid()}\nutc={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n")
-        except OSError as e:
-            raise BackupError(f"Failed to create coordinated restore lock '{restore_lock_path}': {e}") from e
+        # R1 (Option B): Restoration over an existing target on POSIX is strictly refused
+        if target_exists and sys.platform != "win32":
+            raise BackupQuiescenceError(
+                f"Restoration over an existing target database '{target_db_path}' is not supported on POSIX: "
+                f"operating system advisory locking cannot guarantee exclusive connection exclusion against "
+                f"concurrent SQLite access. Restore to a new target path instead."
+            )
+
+        # Acquire coordinated exclusive restore lock across processes and threads (R1, R2, R3)
+        restore_lock_token = DatabaseRestoreLock.acquire_exclusive(target_db_path)
 
         h_target = None
-        cleanup_errors = []
+        cleanup_errors: List[Exception] = []
+        lock_state_uncertain = False
+        wal_path = f"{target_db_path}-wal"
+        shm_path = f"{target_db_path}-shm"
 
         try:
             # 2. If target exists, establish and verify target quiescence fail-closed
@@ -536,7 +864,11 @@ class BackupManager:
                         # Verify final placed database
                         cls.verify_backup(target_db_path)
                         # Verified! Safely release lock and unlink backup
-                        _close_exclusive_target_lock(h_target)
+                        try:
+                            _close_exclusive_target_lock(h_target)
+                        except Exception as ce:
+                            cleanup_errors.append(ce)
+                            lock_state_uncertain = True
                         h_target = None
                         try:
                             os.unlink(target_bak)
@@ -545,8 +877,13 @@ class BackupManager:
                             cleanup_errors.append(unlink_err)
                     except Exception as replace_err:
                         # Release lock if still held before recovery
-                        _close_exclusive_target_lock(h_target)
-                        h_target = None
+                        if h_target is not None:
+                            try:
+                                _close_exclusive_target_lock(h_target)
+                            except Exception as ce:
+                                cleanup_errors.append(ce)
+                                lock_state_uncertain = True
+                            h_target = None
 
                         # Rollback swap: recover original target from target_bak
                         if target_bak is not None and os.path.exists(target_bak):
@@ -556,23 +893,40 @@ class BackupManager:
                                 target_bak = None
                             except Exception as rec_err:
                                 # Recovery failed! Do NOT unlink target_bak!
-                                raise BackupRecoveryError(
+                                rec_exc = BackupRecoveryError(
                                     f"CRITICAL: Replacement failed ({replace_err}) and recovery of original target "
                                     f"from '{target_bak}' also failed ({rec_err}). Original target is preserved at '{target_bak}'.",
                                     target_path=target_db_path,
                                     fallback_path=target_bak,
-                                ) from rec_err
-                            raise BackupError(
+                                )
+                                rec_exc.cleanup_errors = cleanup_errors
+                                rec_exc.lock_state_uncertain = lock_state_uncertain
+                                raise rec_exc from rec_err
+                            recovery_exc = BackupError(
                                 f"Restore operation failed: {replace_err}. Original target database successfully recovered."
-                            ) from replace_err
+                            )
+                            if cleanup_errors:
+                                recovery_exc.cleanup_errors = cleanup_errors
+                            if lock_state_uncertain:
+                                recovery_exc.lock_state_uncertain = True
+                            raise recovery_exc from replace_err
                         raise
                 else:
                     os.replace(tmp_restore, target_db_path)
                     cls.verify_backup(target_db_path)
 
+                # Release exclusive restore lock before verifying final result
+                try:
+                    restore_lock_token.release(unlink_on_release=True)
+                except Exception as ce:
+                    cleanup_errors.append(ce)
+                    lock_state_uncertain = True
+                restore_lock_token = None
+
                 if cleanup_errors:
                     raise BackupCleanupError(
-                        f"Restoration succeeded but non-fatal cleanup errors occurred: {cleanup_errors}"
+                        f"Restoration succeeded but non-fatal cleanup errors occurred: {[str(ce) for ce in cleanup_errors]}",
+                        cleanup_errors=cleanup_errors,
                     )
 
                 restored_size = os.path.getsize(target_db_path)
@@ -587,8 +941,13 @@ class BackupManager:
                 )
 
             except Exception as e:
-                _close_exclusive_target_lock(h_target)
-                h_target = None
+                if h_target is not None:
+                    try:
+                        _close_exclusive_target_lock(h_target)
+                    except Exception as ce:
+                        cleanup_errors.append(ce)
+                        lock_state_uncertain = True
+                    h_target = None
 
                 if dst_conn is not None:
                     try:
@@ -619,13 +978,28 @@ class BackupManager:
                         cleanup_errors.append(ce)
 
                 if isinstance(e, BackupError):
+                    if cleanup_errors:
+                        setattr(e, "cleanup_errors", cleanup_errors)
+                    if lock_state_uncertain:
+                        setattr(e, "lock_state_uncertain", True)
                     raise
-                raise BackupError(f"Restore operation failed: {e}") from e
+                err = BackupError(f"Restore operation failed: {e}")
+                if cleanup_errors:
+                    setattr(err, "cleanup_errors", cleanup_errors)
+                if lock_state_uncertain:
+                    setattr(err, "lock_state_uncertain", True)
+                raise err from e
 
         finally:
-            _close_exclusive_target_lock(h_target)
-            if os.path.exists(restore_lock_path):
+            if h_target is not None:
                 try:
-                    os.unlink(restore_lock_path)
-                except Exception:
-                    pass
+                    _close_exclusive_target_lock(h_target)
+                except Exception as ce:
+                    cleanup_errors.append(ce)
+                    lock_state_uncertain = True
+            if restore_lock_token is not None and restore_lock_token.is_held:
+                try:
+                    restore_lock_token.release(unlink_on_release=True)
+                except Exception as ce:
+                    cleanup_errors.append(ce)
+                    lock_state_uncertain = True

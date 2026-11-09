@@ -181,8 +181,9 @@ class UnitOfWork:
             if self._owns_conn:
                 try:
                     self._conn.close()
-                except Exception:
-                    pass
+                except Exception as ce:
+                    setattr(e, "connection_close_error", ce)
+                    self._conn_unsafe = True
                 self._conn = None
             if "locked" in err_msg or "busy" in err_msg:
                 raise DatabaseBusyError(f"Database locked attempting BEGIN IMMEDIATE: {e}") from e
@@ -249,11 +250,24 @@ class UnitOfWork:
             self._clear_repositories()
 
             if self._owns_conn and self._conn is not None:
+                close_err = None
                 try:
                     self._conn.close()
-                except Exception:
-                    pass
+                except Exception as ce:
+                    close_err = ce
+                    self._conn_unsafe = True
                 self._conn = None
+                if close_err is not None:
+                    if exc_type is not None:
+                        try:
+                            setattr(exc_val, "connection_close_error", close_err)
+                        except Exception:
+                            pass
+                    else:
+                        raise TransactionIntegrityError(
+                            f"CRITICAL: Failed to close owned database connection on UnitOfWork exit: {close_err}. "
+                            f"Database connection resource release could not be confirmed."
+                        ) from close_err
 
     def commit(self) -> None:
         """Commits the current transaction (R6/R2/R1)."""

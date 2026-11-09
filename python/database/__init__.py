@@ -37,6 +37,11 @@ from .backup import (
     BackupError,
     BackupDestinationExistsError,
     BackupIntegrityError,
+    BackupQuiescenceError,
+    BackupRecoveryError,
+    BackupCleanupError,
+    RestoreLockBusyError,
+    DatabaseRestoreLock,
     BackupResult,
 )
 
@@ -92,6 +97,11 @@ __all__ = [
     "BackupError",
     "BackupDestinationExistsError",
     "BackupIntegrityError",
+    "BackupQuiescenceError",
+    "BackupRecoveryError",
+    "BackupCleanupError",
+    "RestoreLockBusyError",
+    "DatabaseRestoreLock",
     "BackupResult",
     "RepositoryError",
     "EntityNotFoundError",

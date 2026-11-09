@@ -26,6 +26,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Generator, Optional, Tuple, List, Any
 
+from python.database.backup import DatabaseRestoreLock, RestoreLockBusyError
+
 
 # ---------------------------------------------------------------------------
 # Custom Exception Hierarchy
@@ -152,43 +154,42 @@ class DatabaseManager:
                         f"Failed to create directory for database '{self.db_path}': {e}"
                     ) from e
 
-            # Check for coordinated offline restoration lock (Stage 1.5-A.2)
-            restore_lock_path = f"{self.db_path}.restore_lock"
-            if os.path.exists(restore_lock_path):
-                raise DatabaseBusyError(
-                    f"Database '{self.db_path}' is locked: currently undergoing offline backup restoration."
-                )
-
         # Python 3.12+ supports autocommit=True, allowing manual explicit transactions
         # without sqlite3 automatically beginning transactions before PRAGMA statements.
         try:
-            timeout_sec = max(1.0, self.profile.busy_timeout_ms / 1000.0)
-            conn = sqlite3.connect(
-                self.db_path,
-                timeout=timeout_sec,
-                autocommit=True,
-            )
-        except sqlite3.OperationalError as e:
-            err_msg = str(e).lower()
-            if "locked" in err_msg or "busy" in err_msg or "unable to open database file" in err_msg:
-                raise DatabaseBusyError(f"Database locked or busy '{self.db_path}': {e}") from e
-            if "malformed" in err_msg or "corrupt" in err_msg or "not a database" in err_msg:
-                raise DatabaseCorruptionError(f"Database corrupted '{self.db_path}': {e}") from e
-            raise DatabaseConnectionError(f"Failed to connect to database '{self.db_path}': {e}") from e
-        except Exception as e:
-            raise DatabaseConnectionError(f"Unexpected connection error for '{self.db_path}': {e}") from e
+            with DatabaseRestoreLock.shared_gate(self.db_path):
+                try:
+                    timeout_sec = max(1.0, self.profile.busy_timeout_ms / 1000.0)
+                    conn = sqlite3.connect(
+                        self.db_path,
+                        timeout=timeout_sec,
+                        autocommit=True,
+                    )
+                except sqlite3.OperationalError as e:
+                    err_msg = str(e).lower()
+                    if "locked" in err_msg or "busy" in err_msg or "unable to open database file" in err_msg:
+                        raise DatabaseBusyError(f"Database locked or busy '{self.db_path}': {e}") from e
+                    if "malformed" in err_msg or "corrupt" in err_msg or "not a database" in err_msg:
+                        raise DatabaseCorruptionError(f"Database corrupted '{self.db_path}': {e}") from e
+                    raise DatabaseConnectionError(f"Failed to connect to database '{self.db_path}': {e}") from e
+                except Exception as e:
+                    raise DatabaseConnectionError(f"Unexpected connection error for '{self.db_path}': {e}") from e
 
-        # Configure connection PRAGMAs and verify their effectiveness
-        try:
-            self._apply_and_verify_pragmas(conn)
-        except Exception:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            raise
+                # Configure connection PRAGMAs and verify their effectiveness
+                try:
+                    self._apply_and_verify_pragmas(conn)
+                except Exception as e:
+                    try:
+                        conn.close()
+                    except Exception as ce:
+                        setattr(e, "connection_close_error", ce)
+                    raise
 
-        return conn
+                return conn
+        except RestoreLockBusyError as e:
+            raise DatabaseBusyError(
+                f"Database '{self.db_path}' is locked: currently undergoing offline backup restoration."
+            ) from e
 
     def _apply_and_verify_pragmas(self, conn: sqlite3.Connection) -> None:
         """Applies profile PRAGMAs and verifies their effective values."""
