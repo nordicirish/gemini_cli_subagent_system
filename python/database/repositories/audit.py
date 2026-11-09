@@ -320,11 +320,11 @@ class FinancialChangelogRepository(BaseRepository):
         if mutation_capability.connection is not self._conn:
             raise PermissionError("Mutation capability is bound to a different database connection.")
 
-        if not self._conn.in_transaction:
-            raise PermissionError("Cannot append financial changelog: connection is not in an active transaction.")
-
         if mutation_capability.is_consumed:
             raise IntegrityConflictError("Mutation capability has already been consumed.")
+
+        if not self._conn.in_transaction:
+            raise PermissionError("Cannot append financial changelog: connection is not in an active transaction.")
 
         # Extract authoritative values strictly from capability - ignore any caller-supplied arguments
         norm_cid = validate_identifier(mutation_capability.correlation_id, "correlation_id")
@@ -369,8 +369,18 @@ class FinancialChangelogRepository(BaseRepository):
             after = mutation_capability.after_state
             if not isinstance(after, dict):
                 raise IntegrityConflictError("State verification failed: set_cash_balance after_state must be a dictionary.")
-            if "account_id" not in after or "currency" not in after or "amount" not in after:
-                raise IntegrityConflictError("State verification failed: cash after_state missing required fields (account_id, currency, amount).")
+            required_keys = frozenset({"account_id", "currency", "amount"})
+            if set(after.keys()) != required_keys:
+                missing = required_keys - set(after.keys())
+                extra = set(after.keys()) - required_keys
+                err_parts = []
+                if missing:
+                    err_parts.append(f"missing required fields {sorted(missing)}")
+                if extra:
+                    err_parts.append(f"unexpected extra fields {sorted(extra)}")
+                raise IntegrityConflictError(
+                    f"State verification failed: cash after_state keys invalid ({'; '.join(err_parts)})."
+                )
             if after["account_id"] != account_id or after["currency"] != currency:
                 raise IntegrityConflictError("State verification failed: cash after_state does not match target_resource.")
             cur.execute(
@@ -403,10 +413,17 @@ class FinancialChangelogRepository(BaseRepository):
             after = mutation_capability.after_state
             if not isinstance(after, dict):
                 raise IntegrityConflictError("State verification failed: upsert_position after_state must be a dictionary.")
-            required_keys = {"account_id", "ticker", "shares", "wac_eur"}
-            if not required_keys.issubset(after.keys()):
+            required_keys = frozenset({"account_id", "ticker", "shares", "wac_eur", "wac_usd"})
+            if set(after.keys()) != required_keys:
+                missing = required_keys - set(after.keys())
+                extra = set(after.keys()) - required_keys
+                err_parts = []
+                if missing:
+                    err_parts.append(f"missing required fields {sorted(missing)}")
+                if extra:
+                    err_parts.append(f"unexpected extra fields {sorted(extra)}")
                 raise IntegrityConflictError(
-                    f"State verification failed: position after_state missing required fields {required_keys - set(after.keys())}."
+                    f"State verification failed: position after_state keys invalid ({'; '.join(err_parts)})."
                 )
             if after["account_id"] != account_id or after["ticker"] != ticker:
                 raise IntegrityConflictError("State verification failed: position after_state does not match target_resource.")
@@ -422,7 +439,7 @@ class FinancialChangelogRepository(BaseRepository):
                 or row[1] != after["ticker"]
                 or row[2] != after["shares"]
                 or row[3] != after["wac_eur"]
-                or row[4] != after.get("wac_usd")
+                or row[4] != after["wac_usd"]
             ):
                 raise IntegrityConflictError("State verification failed: database position values do not match after_state.")
 
@@ -446,10 +463,17 @@ class FinancialChangelogRepository(BaseRepository):
             after = mutation_capability.after_state
             if not isinstance(after, dict):
                 raise IntegrityConflictError("State verification failed: upsert_watchlist_item after_state must be a dictionary.")
-            required_keys = {"ticker", "status"}
-            if not required_keys.issubset(after.keys()):
+            required_keys = frozenset({"ticker", "status", "notes"})
+            if set(after.keys()) != required_keys:
+                missing = required_keys - set(after.keys())
+                extra = set(after.keys()) - required_keys
+                err_parts = []
+                if missing:
+                    err_parts.append(f"missing required fields {sorted(missing)}")
+                if extra:
+                    err_parts.append(f"unexpected extra fields {sorted(extra)}")
                 raise IntegrityConflictError(
-                    f"State verification failed: watchlist after_state missing required fields {required_keys - set(after.keys())}."
+                    f"State verification failed: watchlist after_state keys invalid ({'; '.join(err_parts)})."
                 )
             if after["ticker"] != ticker:
                 raise IntegrityConflictError("State verification failed: watchlist after_state does not match target_resource.")
@@ -463,7 +487,7 @@ class FinancialChangelogRepository(BaseRepository):
             if (
                 row[0] != after["ticker"]
                 or row[1] != after["status"]
-                or row[2] != after.get("notes")
+                or row[2] != after["notes"]
             ):
                 raise IntegrityConflictError("State verification failed: database watchlist state does not match after_state.")
 

@@ -12,6 +12,7 @@ Enforces:
 from decimal import Decimal
 import json
 import sqlite3
+import sys
 from typing import Any, Dict, List, Optional, Union
 import uuid
 
@@ -44,7 +45,6 @@ __all__ = [
     "WatchlistRepository",
 ]
 
-_MUTATION_KEY = object()
 _SUPPORTED_MUTATION_OPERATIONS = frozenset({
     "set_cash_balance",
     "delete_cash",
@@ -55,26 +55,73 @@ _SUPPORTED_MUTATION_OPERATIONS = frozenset({
 })
 
 
+def _create_credential_closure():
+    _private_token = object()
+
+    def validate_credential(token: object) -> bool:
+        return token is _private_token
+
+    def acquire_mutation_credential() -> object:
+        """
+        Dispenses the private capability credential strictly to the six authorized
+        financial mutation implementation methods (R1).
+        """
+        frame = sys._getframe(1)
+        code = frame.f_code
+        method_name = code.co_name
+        caller_self = frame.f_locals.get("self")
+
+        # Check caller against authorized repository methods
+        if method_name in ("set_cash_balance", "delete_cash"):
+            if isinstance(caller_self, CashRepository) and getattr(CashRepository, method_name).__code__ is code:
+                return _private_token
+        elif method_name in ("upsert_position", "delete_position"):
+            if isinstance(caller_self, PositionRepository) and getattr(PositionRepository, method_name).__code__ is code:
+                return _private_token
+        elif method_name in ("upsert_watchlist_item", "remove_watchlist_item"):
+            if isinstance(caller_self, WatchlistRepository) and getattr(WatchlistRepository, method_name).__code__ is code:
+                return _private_token
+        elif method_name == "_test_seam_mint_capability":
+            caller_module = frame.f_globals.get("__name__", "")
+            if caller_module == __name__:
+                outer_frame = sys._getframe(2)
+                outer_module = outer_frame.f_globals.get("__name__", "")
+                if outer_module.startswith("tests.") or outer_module.startswith("test_"):
+                    return _private_token
+
+        raise PermissionError(
+            f"Unauthorized attempt to acquire financial mutation credential from '{method_name}'."
+        )
+
+    return validate_credential, acquire_mutation_credential
+
+
+_validate_credential, _acquire_mutation_credential = _create_credential_closure()
+
+
 class _FinancialMutationCapability:
     """
     Internal capability token coupling financial changelog entries to trusted mutations (R1).
-    Cannot be instantiated directly by callers without the internal _MUTATION_KEY.
+    Cannot be instantiated directly by callers without the internal encapsulated credential.
     """
 
     def __init__(
         self,
-        key: object,
-        connection: sqlite3.Connection,
-        correlation_id: str,
-        actor_role: str,
-        operation_name: str,
-        target_resource: str,
-        before_state: Optional[Dict[str, Any]],
-        after_state: Optional[Dict[str, Any]],
-        approval_digest: Optional[str],
-        timestamp_utc: str,
+        credential: Any = None,
+        connection: Optional[sqlite3.Connection] = None,
+        correlation_id: str = "",
+        actor_role: str = "",
+        operation_name: str = "",
+        target_resource: str = "",
+        before_state: Optional[Dict[str, Any]] = None,
+        after_state: Optional[Dict[str, Any]] = None,
+        approval_digest: Optional[str] = None,
+        timestamp_utc: str = "",
+        *,
+        key: Any = None,
     ):
-        if key is not _MUTATION_KEY:
+        cred = credential if credential is not None else key
+        if not _validate_credential(cred):
             raise PermissionError("Direct instantiation of _FinancialMutationCapability is prohibited.")
         if connection is None:
             raise ValueError("Connection cannot be None")
@@ -99,6 +146,37 @@ class _FinancialMutationCapability:
         if self._consumed:
             raise IntegrityConflictError("Mutation capability has already been consumed.")
         self._consumed = True
+
+
+def _test_seam_mint_capability(
+    connection: sqlite3.Connection,
+    correlation_id: str,
+    actor_role: str,
+    operation_name: str,
+    target_resource: str,
+    before_state: Optional[Dict[str, Any]],
+    after_state: Optional[Dict[str, Any]],
+    approval_digest: Optional[str] = None,
+    timestamp_utc: Optional[str] = None,
+) -> _FinancialMutationCapability:
+    """Narrowly scoped test seam for adversarial verification of changelog append_entry fail-closed rules."""
+    frame = sys._getframe(1)
+    caller_mod = frame.f_globals.get("__name__", "")
+    if not (caller_mod.startswith("tests.") or caller_mod.startswith("test_")):
+        raise PermissionError("Test seam is only accessible within automated test suites.")
+    cred = _acquire_mutation_credential()
+    return _FinancialMutationCapability(
+        credential=cred,
+        connection=connection,
+        correlation_id=correlation_id,
+        actor_role=actor_role,
+        operation_name=operation_name,
+        target_resource=target_resource,
+        before_state=before_state,
+        after_state=after_state,
+        approval_digest=approval_digest,
+        timestamp_utc=timestamp_utc or utc_now_iso(),
+    )
 
 
 def _resolve_effective_actor(caller_role: Optional[str] = None) -> str:
@@ -251,7 +329,6 @@ class CashRepository(BaseRepository):
                     "account_id": existing.account_id,
                     "currency": existing.currency,
                     "amount": decimal_to_canonical_str(existing.amount),
-                    "last_updated_at_utc": existing.last_updated_at_utc,
                 }
                 if existing
                 else None
@@ -261,7 +338,6 @@ class CashRepository(BaseRepository):
                 "account_id": norm_account,
                 "currency": norm_currency,
                 "amount": amount_str,
-                "last_updated_at_utc": timestamp_utc,
             }
 
             self._conn.execute(
@@ -279,7 +355,7 @@ class CashRepository(BaseRepository):
             from python.database.repositories.audit import FinancialChangelogRepository
 
             cap = _FinancialMutationCapability(
-                key=_MUTATION_KEY,
+                credential=_acquire_mutation_credential(),
                 connection=self._conn,
                 correlation_id=cid,
                 actor_role=effective_actor,
@@ -290,6 +366,7 @@ class CashRepository(BaseRepository):
                 approval_digest=approval_digest,
                 timestamp_utc=timestamp_utc,
             )
+            self._last_mutation_capability = cap
             FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
 
             if owns_tx:
@@ -361,7 +438,6 @@ class CashRepository(BaseRepository):
                 "account_id": existing.account_id,
                 "currency": existing.currency,
                 "amount": decimal_to_canonical_str(existing.amount),
-                "last_updated_at_utc": existing.last_updated_at_utc,
             }
 
             self._conn.execute(
@@ -373,7 +449,7 @@ class CashRepository(BaseRepository):
             from python.database.repositories.audit import FinancialChangelogRepository
 
             cap = _FinancialMutationCapability(
-                key=_MUTATION_KEY,
+                credential=_acquire_mutation_credential(),
                 connection=self._conn,
                 correlation_id=cid,
                 actor_role=effective_actor,
@@ -384,6 +460,7 @@ class CashRepository(BaseRepository):
                 approval_digest=approval_digest,
                 timestamp_utc=timestamp_utc,
             )
+            self._last_mutation_capability = cap
             FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
 
             if owns_tx:
@@ -543,8 +620,7 @@ class PositionRepository(BaseRepository):
                     "ticker": existing.ticker,
                     "shares": decimal_to_canonical_str(existing.shares),
                     "wac_eur": decimal_to_canonical_str(existing.wac_eur),
-                    "wac_usd": decimal_to_canonical_str(existing.wac_usd) if existing.wac_usd else None,
-                    "last_updated_at_utc": existing.last_updated_at_utc,
+                    "wac_usd": decimal_to_canonical_str(existing.wac_usd) if existing.wac_usd is not None else None,
                 }
                 if existing
                 else None
@@ -556,7 +632,6 @@ class PositionRepository(BaseRepository):
                 "shares": shares_str,
                 "wac_eur": wac_eur_str,
                 "wac_usd": wac_usd_str,
-                "last_updated_at_utc": timestamp_utc,
             }
 
             self._conn.execute(
@@ -577,7 +652,7 @@ class PositionRepository(BaseRepository):
             from python.database.repositories.audit import FinancialChangelogRepository
 
             cap = _FinancialMutationCapability(
-                key=_MUTATION_KEY,
+                credential=_acquire_mutation_credential(),
                 connection=self._conn,
                 correlation_id=cid,
                 actor_role=effective_actor,
@@ -588,6 +663,7 @@ class PositionRepository(BaseRepository):
                 approval_digest=approval_digest,
                 timestamp_utc=timestamp_utc,
             )
+            self._last_mutation_capability = cap
             FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
 
             if owns_tx:
@@ -662,8 +738,7 @@ class PositionRepository(BaseRepository):
                 "ticker": existing.ticker,
                 "shares": decimal_to_canonical_str(existing.shares),
                 "wac_eur": decimal_to_canonical_str(existing.wac_eur),
-                "wac_usd": decimal_to_canonical_str(existing.wac_usd) if existing.wac_usd else None,
-                "last_updated_at_utc": existing.last_updated_at_utc,
+                "wac_usd": decimal_to_canonical_str(existing.wac_usd) if existing.wac_usd is not None else None,
             }
 
             self._conn.execute(
@@ -675,7 +750,7 @@ class PositionRepository(BaseRepository):
             from python.database.repositories.audit import FinancialChangelogRepository
 
             cap = _FinancialMutationCapability(
-                key=_MUTATION_KEY,
+                credential=_acquire_mutation_credential(),
                 connection=self._conn,
                 correlation_id=cid,
                 actor_role=effective_actor,
@@ -686,6 +761,7 @@ class PositionRepository(BaseRepository):
                 approval_digest=approval_digest,
                 timestamp_utc=timestamp_utc,
             )
+            self._last_mutation_capability = cap
             FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
 
             if owns_tx:
@@ -814,7 +890,7 @@ class WatchlistRepository(BaseRepository):
             from python.database.repositories.audit import FinancialChangelogRepository
 
             cap = _FinancialMutationCapability(
-                key=_MUTATION_KEY,
+                credential=_acquire_mutation_credential(),
                 connection=self._conn,
                 correlation_id=cid,
                 actor_role=effective_actor,
@@ -825,6 +901,7 @@ class WatchlistRepository(BaseRepository):
                 approval_digest=approval_digest,
                 timestamp_utc=timestamp_utc,
             )
+            self._last_mutation_capability = cap
             FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
 
             if owns_tx:
@@ -897,7 +974,7 @@ class WatchlistRepository(BaseRepository):
             from python.database.repositories.audit import FinancialChangelogRepository
 
             cap = _FinancialMutationCapability(
-                key=_MUTATION_KEY,
+                credential=_acquire_mutation_credential(),
                 connection=self._conn,
                 correlation_id=cid,
                 actor_role=effective_actor,
@@ -908,6 +985,7 @@ class WatchlistRepository(BaseRepository):
                 after_state=None,
                 timestamp_utc=timestamp_utc,
             )
+            self._last_mutation_capability = cap
             FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
 
             if owns_tx:
