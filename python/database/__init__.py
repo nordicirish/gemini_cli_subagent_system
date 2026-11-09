@@ -43,6 +43,8 @@ from .backup import (
     BackupCleanupError,
     RestoreLockBusyError,
     DatabaseRestoreLock,
+    DatabaseRestoreLockToken,
+    LockTokenState,
     BackupResult,
 )
 
@@ -103,6 +105,8 @@ __all__ = [
     "BackupCleanupError",
     "RestoreLockBusyError",
     "DatabaseRestoreLock",
+    "DatabaseRestoreLockToken",
+    "LockTokenState",
     "BackupResult",
     "RepositoryError",
     "EntityNotFoundError",

@@ -232,14 +232,24 @@ class UnitOfWork:
                     raise tie
                 else:
                     if rollback_err is not None:
+                        attach_err = None
                         try:
                             setattr(exc_val, "rollback_error", rollback_err)
-                        except Exception:
-                            pass
-                        raise TransactionIntegrityError(
+                        except Exception as ae:
+                            attach_err = ae
+
+                        msg = (
                             f"CRITICAL: Rollback failed during poisoned transaction exit: {rollback_err}. "
-                            f"Original cause: {exc_val}"
-                        ) from exc_val
+                        )
+                        if attach_err is not None:
+                            msg += f"Diagnostic attachment failed: {attach_err}. "
+                        msg += f"Original cause: {exc_val}"
+
+                        tie = TransactionIntegrityError(msg)
+                        tie.rollback_error = rollback_err
+                        if attach_err is not None:
+                            tie.attachment_error = attach_err
+                        raise tie from exc_val
                 return False
 
             if exc_type is not None:

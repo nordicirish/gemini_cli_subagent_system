@@ -9,6 +9,7 @@ even when the source database is in active WAL mode with concurrent readers/writ
 
 import os
 import sys
+import enum
 import ctypes
 import sqlite3
 import datetime
@@ -84,11 +85,32 @@ class BackupCleanupError(BackupError):
 
 
 # ---------------------------------------------------------------------------
-# Coordinated Restore Locking Infrastructure (R1, R2, R3, R4)
+# Coordinated Restore Locking Infrastructure (R1, R2, R3, R4, Stage 1.5-A.2.2.2)
 # ---------------------------------------------------------------------------
 
+class LockTokenState(str, enum.Enum):
+    """
+    Truthful lifecycle states for DatabaseRestoreLockToken (Stage 1.5-A.2.2.2 R2).
+
+    States:
+    - HELD: The kernel lock is actively held by the open handle.
+    - UNLOCK_FAILED: The OS unlock call failed; handle remains open; kernel lock is still held.
+    - UNLOCKED_BUT_CLOSE_FAILED: OS unlock succeeded; handle close failed; kernel lock is NOT held.
+    - FULLY_RELEASED: Both OS unlock and handle close succeeded cleanly.
+    - UNCERTAIN: Release state cannot be determined with certainty; exclusion cannot be proven.
+    """
+    HELD = "HELD"
+    UNLOCK_FAILED = "UNLOCK_FAILED"
+    UNLOCKED_BUT_CLOSE_FAILED = "UNLOCKED_BUT_CLOSE_FAILED"
+    FULLY_RELEASED = "FULLY_RELEASED"
+    UNCERTAIN = "UNCERTAIN"
+
+
 class DatabaseRestoreLockToken:
-    """Active lock token representing an acquired exclusive or shared restore lock (R3/R4)."""
+    """
+    Active lock token representing an acquired exclusive or shared restore lock (R3/R4/Stage 1.5-A.2.2.2 R2).
+    Tracks a truthful lifecycle state machine across OS unlock and handle close.
+    """
 
     def __init__(
         self,
@@ -105,52 +127,132 @@ class DatabaseRestoreLockToken:
         self._handle = handle
         self._fileno = fileno
         self.is_exclusive = is_exclusive
-        self._is_held = True
+        self._state = LockTokenState.HELD
         self._ov = _OVERLAPPED() if sys.platform == "win32" else None
+        self._unlock_error: Optional[Exception] = None
+        self._close_error: Optional[Exception] = None
+
+    @property
+    def state(self) -> LockTokenState:
+        """Returns the current truthful lifecycle state of the token."""
+        return self._state
 
     @property
     def is_held(self) -> bool:
-        return self._is_held
+        """
+        Returns True if and only if the underlying OS kernel lock is established as held.
+        Returns True for HELD and UNLOCK_FAILED (where unlock failed and handle remains open).
+        Returns False once OS unlock succeeds (even if file-handle close subsequently fails).
+        Returns False for UNCERTAIN (cannot claim exclusion that cannot be proven).
+        """
+        return self._state in (LockTokenState.HELD, LockTokenState.UNLOCK_FAILED)
+
+    @property
+    def _is_held(self) -> bool:
+        """Backwards compatibility alias for is_held."""
+        return self.is_held
+
+    @property
+    def is_released(self) -> bool:
+        """Returns True if and only if both OS unlock and handle close have succeeded cleanly."""
+        return self._state == LockTokenState.FULLY_RELEASED
+
+    @property
+    def is_uncertain(self) -> bool:
+        """Returns True if the release state could not be determined with certainty."""
+        return self._state == LockTokenState.UNCERTAIN
+
+    @property
+    def unlock_error(self) -> Optional[Exception]:
+        """Returns the exception from the most recent OS unlock failure, if any."""
+        return self._unlock_error
+
+    @property
+    def close_error(self) -> Optional[Exception]:
+        """Returns the exception from the most recent file handle close failure, if any."""
+        return self._close_error
 
     def release(self, unlink_on_release: bool = False) -> None:
         """
-        Releases the held lock without silently suppressing errors (R4/R5).
+        Releases the held lock according to a truthful state machine (Stage 1.5-A.2.2.2 R2).
+
+        Distinguishes:
+        - HELD -> initial state.
+        - UNLOCK_FAILED -> OS unlock returned error; handle remains open; lock is still held.
+        - UNLOCKED_BUT_CLOSE_FAILED -> OS unlock succeeded; handle close failed; lock is NOT held.
+        - FULLY_RELEASED -> Both OS unlock and handle close succeeded cleanly.
+        - UNCERTAIN -> Release state cannot be established reliably.
+
+        Preserves open handles on failure to support safe retry and diagnostics.
+        Does NOT re-invoke OS unlock if unlock has already succeeded.
         Raises BackupCleanupError if unlock or close fails.
-        Retains persistent zero-byte lock file identity (R4).
         """
-        if not self._is_held:
+        if self._state == LockTokenState.FULLY_RELEASED:
             return
 
-        cleanup_errors: List[str] = []
+        cleanup_errors: List[Exception] = []
 
-        if sys.platform == "win32":
-            res = ctypes.windll.kernel32.UnlockFileEx(
-                self._handle, 0, 0xFFFFFFFF, 0xFFFFFFFF, ctypes.byref(self._ov)
-            )
-            if res == 0:
-                err = ctypes.windll.kernel32.GetLastError()
-                cleanup_errors.append(f"UnlockFileEx failed (WinError {err})")
-        else:
-            import fcntl
-            try:
-                fcntl.flock(self._fileno, fcntl.LOCK_UN)
-            except Exception as e:
-                cleanup_errors.append(f"fcntl.flock(LOCK_UN) failed: {e}")
+        # Step 1: OS Unlock (only if not already successfully unlocked)
+        if self._state in (LockTokenState.HELD, LockTokenState.UNLOCK_FAILED):
+            if sys.platform == "win32":
+                try:
+                    res = ctypes.windll.kernel32.UnlockFileEx(
+                        self._handle, 0, 0xFFFFFFFF, 0xFFFFFFFF, ctypes.byref(self._ov)
+                    )
+                    if res == 0:
+                        err = ctypes.windll.kernel32.GetLastError()
+                        unlock_err = OSError(f"UnlockFileEx failed (WinError {err})")
+                        self._unlock_error = unlock_err
+                        self._state = LockTokenState.UNLOCK_FAILED
+                        cleanup_errors.append(unlock_err)
+                    else:
+                        self._unlock_error = None
+                        self._state = LockTokenState.UNLOCKED_BUT_CLOSE_FAILED
+                except Exception as e:
+                    self._unlock_error = e
+                    self._state = LockTokenState.UNCERTAIN
+                    cleanup_errors.append(e)
+            else:
+                import fcntl
+                try:
+                    fcntl.flock(self._fileno, fcntl.LOCK_UN)
+                    self._unlock_error = None
+                    self._state = LockTokenState.UNLOCKED_BUT_CLOSE_FAILED
+                except Exception as e:
+                    self._unlock_error = e
+                    self._state = LockTokenState.UNLOCK_FAILED
+                    cleanup_errors.append(e)
 
-        self._is_held = False
-
-        if self._f is not None:
-            try:
-                self._f.close()
-            except Exception as e:
-                cleanup_errors.append(f"file close failed: {e}")
-            self._f = None
-        self._handle = None
-
-        if cleanup_errors:
+        # If unlock failed or is uncertain, keep handles open and fail closed immediately.
+        # Do not close the file handle if unlock failed or state is uncertain.
+        if self._state in (LockTokenState.UNLOCK_FAILED, LockTokenState.UNCERTAIN):
+            err_msg = "; ".join(str(e) for e in cleanup_errors)
             raise BackupCleanupError(
-                f"Failed to cleanly release restore lock for '{self.db_path}': {'; '.join(cleanup_errors)}"
+                f"Failed to cleanly release restore lock for '{self.db_path}': OS unlock failed: {err_msg}",
+                cleanup_errors=cleanup_errors,
             )
+
+        # Step 2: File Handle Close (unlock has succeeded)
+        if self._f is not None:
+            is_closed = getattr(self._f, "closed", False)
+            if not is_closed:
+                try:
+                    self._f.close()
+                    self._close_error = None
+                except Exception as e:
+                    self._close_error = e
+                    self._state = LockTokenState.UNLOCKED_BUT_CLOSE_FAILED
+                    cleanup_errors.append(e)
+                    err_msg = "; ".join(str(e) for e in cleanup_errors)
+                    raise BackupCleanupError(
+                        f"Failed to cleanly release restore lock for '{self.db_path}': OS unlock succeeded, but file close failed: {err_msg}",
+                        cleanup_errors=cleanup_errors,
+                    )
+
+        # Both OS unlock and file close succeeded
+        self._state = LockTokenState.FULLY_RELEASED
+        self._f = None
+        self._handle = None
 
 
 class DatabaseRestoreLock:
@@ -268,7 +370,7 @@ class DatabaseRestoreLock:
             yield token
         finally:
             exc_type, exc_val, _ = sys.exc_info()
-            if token is not None and token.is_held:
+            if token is not None and not token.is_released:
                 try:
                     token.release()
                 except Exception as re:
@@ -1031,7 +1133,7 @@ class BackupManager:
                 except Exception as ce:
                     cleanup_errors.append(ce)
                     lock_state_uncertain = True
-            if restore_lock_token is not None and restore_lock_token.is_held:
+            if restore_lock_token is not None and not restore_lock_token.is_released:
                 try:
                     restore_lock_token.release()
                 except Exception as ce:
