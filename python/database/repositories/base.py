@@ -201,8 +201,11 @@ class DailyBarRecord:
 
 _HEX_32_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Strict ISO-8601 UTC timestamp shape. Matched with fullmatch() (so a trailing
+# newline cannot slip past a '$' anchor), ASCII digits only, and only the two
+# explicit UTC designators 'Z' and '+00:00' ('-00:00' and other offsets excluded).
 _ISO_TIMESTAMP_PATTERN = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$"
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|\+00:00)"
 )
 
 
@@ -234,34 +237,42 @@ def validate_timestamp_utc(ts: Optional[str]) -> str:
     """
     Validates an ISO-8601 UTC timestamp string (R3).
     If ts is None, returns current utc_now_iso().
-    If ts is provided, strictly requires an explicit UTC designator ('Z' or +00:00 / -00:00).
-    Rejects timezone-naive timestamps, non-zero offsets, malformed dates/times,
-    empty strings, and non-string values.
-    Preserves valid historical UTC timestamp strings exactly.
+    If ts is provided, strictly requires an explicit UTC designator: only 'Z' or '+00:00'.
+    Rejects '-00:00', non-zero offsets, timezone-naive timestamps, malformed dates/times,
+    empty strings, any leading/trailing whitespace (including newlines), and non-string values.
+    A valid supplied timestamp is returned byte-for-byte unchanged: it is never stripped,
+    and 'Z' is never rewritten to '+00:00' in the returned value (that rewrite is used
+    internally for parsing only).
     """
     if ts is None:
         return utc_now_iso()
     if not isinstance(ts, str):
         raise ValidationError(f"Timestamp must be a string, got {type(ts).__name__}")
-    s = ts.strip()
-    if not s:
-        raise ValidationError("Timestamp string cannot be empty")
-    if not _ISO_TIMESTAMP_PATTERN.match(s):
-        raise ValidationError(f"Invalid ISO-8601 UTC timestamp format: '{ts}'")
+    # Do not strip or normalize supplied historical timestamps.
+    if not ts or ts != ts.strip():
+        raise ValidationError(
+            f"Timestamp must be non-empty and contain no surrounding whitespace: {ts!r}"
+        )
+    if not (ts.endswith("Z") or ts.endswith("+00:00")):
+        raise ValidationError(
+            f"Timestamp must use an explicit UTC designator ('Z' or '+00:00'): {ts!r}"
+        )
+    if not _ISO_TIMESTAMP_PATTERN.fullmatch(ts):
+        raise ValidationError(f"Invalid ISO-8601 UTC timestamp format: {ts!r}")
     try:
-        norm = s.replace("Z", "+00:00") if s.endswith("Z") else s
+        norm = ts[:-1] + "+00:00" if ts.endswith("Z") else ts
         dt = datetime.fromisoformat(norm)
     except (ValueError, TypeError) as e:
-        raise ValidationError(f"Invalid ISO-8601 timestamp '{ts}': {e}") from e
+        raise ValidationError(f"Invalid ISO-8601 timestamp {ts!r}: {e}") from e
 
-    if dt.tzinfo is None:
-        raise ValidationError(f"Timestamp must contain explicit UTC timezone designator, got naive: '{ts}'")
+    if dt.tzinfo is None or dt.utcoffset() is None:
+        raise ValidationError(f"Timestamp must contain an explicit UTC timezone: {ts!r}")
 
     offset = dt.utcoffset()
-    if offset is None or offset.total_seconds() != 0:
-        raise ValidationError(f"Timestamp must be UTC, got timezone offset {offset} in '{ts}'")
+    if offset.total_seconds() != 0:
+        raise ValidationError(f"Timestamp must be UTC, got timezone offset {offset} in {ts!r}")
 
-    return s
+    return ts
 
 
 def validate_event_id(event_id: str) -> str:

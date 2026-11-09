@@ -4112,7 +4112,8 @@ class TestStage15A1NestedTransactionAtomicityAndTimestampSafety(unittest.TestCas
     Stage 1.5-A.1 Regression Test Suite:
     - R1: Nested repository-operation atomicity via SAVEPOINTs and unified transaction management.
     - R2: Fail-closed rollback error handling without silent error suppression.
-    - R3: Strict UTC timestamp validation with explicit 'Z' or '+00:00'/'-00:00' timezone designator.
+    - R3: Strict UTC timestamp validation with explicit 'Z' or '+00:00' timezone designator
+      ('-00:00' rejected as of Stage 1.5-A.3.1).
     """
 
     def setUp(self):
@@ -4410,7 +4411,7 @@ class TestStage15A1NestedTransactionAtomicityAndTimestampSafety(unittest.TestCas
             self.assertTrue(uow._rolled_back)
 
     def test_r3_strict_utc_accepted_formats(self):
-        """R3.1: Strict UTC validation accepts explicit 'Z' and '+00:00'/'-00:00' offsets."""
+        """R3.1: Strict UTC validation accepts only explicit 'Z' and '+00:00' designators, unchanged."""
         # 'Z' suffix
         ts_z = "2024-03-15T09:30:00Z"
         self.assertEqual(validate_timestamp_utc(ts_z), ts_z)
@@ -4418,10 +4419,6 @@ class TestStage15A1NestedTransactionAtomicityAndTimestampSafety(unittest.TestCas
         # '+00:00' offset
         ts_plus = "2024-03-15T09:30:00+00:00"
         self.assertEqual(validate_timestamp_utc(ts_plus), ts_plus)
-
-        # '-00:00' offset
-        ts_minus = "2024-03-15T09:30:00-00:00"
-        self.assertEqual(validate_timestamp_utc(ts_minus), ts_minus)
 
         # Microseconds with Z
         ts_micro = "2024-03-15T09:30:00.123456Z"
@@ -4440,6 +4437,7 @@ class TestStage15A1NestedTransactionAtomicityAndTimestampSafety(unittest.TestCas
             ("2024-03-15 09:30:00Z", "space-separated datetime with Z"),
             ("2024-03-15T09:30:00+02:00", "non-zero timezone offset +02:00"),
             ("2024-03-15T09:30:00-05:00", "non-zero timezone offset -05:00"),
+            ("2024-03-15T09:30:00-00:00", "negative-zero offset -00:00"),
             ("2024-02-30T09:30:00Z", "invalid calendar date Feb 30"),
             ("2024-03-15T25:00:00Z", "invalid time hour 25"),
             ("2024-03-15T09:60:00Z", "invalid time minute 60"),
@@ -4455,6 +4453,130 @@ class TestStage15A1NestedTransactionAtomicityAndTimestampSafety(unittest.TestCas
             with self.subTest(case=desc, val=val):
                 with self.assertRaises(ValidationError):
                     validate_timestamp_utc(val)  # type: ignore
+
+    def test_r3_1_validate_timestamp_utc_rejects_negative_zero_offset(self):
+        """TS-CORR-01: '-00:00' is not an accepted UTC designator."""
+        for value in ("2026-11-09T12:30:00-00:00", "2026-11-09T12:30:00.123456-00:00"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValidationError):
+                    validate_timestamp_utc(value)
+
+    def test_r3_1_validate_timestamp_utc_rejects_nonzero_offsets(self):
+        """TS-CORR-01: Positive and negative non-zero offsets are rejected."""
+        for value in (
+            "2026-11-09T12:30:00+01:00",
+            "2026-11-09T12:30:00+00:30",
+            "2026-11-09T12:30:00-05:00",
+            "2026-11-09T12:30:00+0000",
+            "2026-11-09T12:30:00+00",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(ValidationError):
+                    validate_timestamp_utc(value)
+
+    def test_r3_1_validate_timestamp_utc_rejects_surrounding_whitespace(self):
+        """TS-CORR-01: Supplied timestamps are never stripped; surrounding whitespace is rejected."""
+        for value in (
+            " 2026-11-09T12:30:00Z",
+            "2026-11-09T12:30:00Z ",
+            "2026-11-09T12:30:00Z\n",
+            "\n2026-11-09T12:30:00Z",
+            "2026-11-09T12:30:00Z\t",
+            "2026-11-09T12:30:00+00:00 ",
+            "2026-11-09T12:30:00+00:00\n",
+        ):
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(ValidationError):
+                    validate_timestamp_utc(value)
+
+    def test_r3_1_validate_timestamp_utc_rejects_naive_and_malformed(self):
+        """TS-CORR-01: Naive, malformed, calendar-invalid, empty and non-ASCII-digit values are rejected."""
+        for value in (
+            "2026-11-09T12:30:00",
+            "2026-11-09T12:30:00.123456",
+            "2026-02-30T12:30:00Z",
+            "2026-13-01T12:30:00Z",
+            "2026-11-09T24:00:00Z",
+            "2026-11-09T12:30Z",
+            "2026-11-09T12:30:00.Z",
+            "2026-11-09T12:30:00ZZ",
+            "2026-11-09T12:30:00Z+00:00",
+            "\u0662\u0660\u0662\u0666-11-09T12:30:00Z",  # Arabic-Indic digits
+            "",
+        ):
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(ValidationError):
+                    validate_timestamp_utc(value)
+
+    def test_r3_1_validate_timestamp_utc_rejects_non_string_values(self):
+        """TS-CORR-01: Any non-string, non-None value is rejected."""
+        for value in (0, 1699533000, 1.5, True, b"2026-11-09T12:30:00Z", ["x"], {"x": 1}, object()):
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(ValidationError):
+                    validate_timestamp_utc(value)  # type: ignore
+
+    def test_r3_1_validate_timestamp_utc_preserves_original_string(self):
+        """TS-CORR-01: Valid supplied timestamps are returned byte-for-byte unchanged ('Z' is not rewritten)."""
+        valid_values = [
+            "2026-11-09T12:30:00Z",
+            "2026-11-09T12:30:00+00:00",
+            "2026-11-09T12:30:00.123456Z",
+            "2026-11-09T12:30:00.123456+00:00",
+            "2026-11-09T12:30:00.1Z",
+            "1999-12-31T23:59:59Z",
+        ]
+        for value in valid_values:
+            with self.subTest(value=value):
+                result = validate_timestamp_utc(value)
+                self.assertEqual(result, value)
+                self.assertEqual(result.encode("utf-8"), value.encode("utf-8"))
+
+    def test_r3_1_validate_timestamp_utc_none_generates_valid_utc_timestamp(self):
+        """TS-CORR-01: None still yields a current UTC timestamp that itself passes strict validation."""
+        generated = validate_timestamp_utc(None)
+        self.assertTrue(generated.endswith("Z"))
+        self.assertEqual(validate_timestamp_utc(generated), generated)
+
+    def test_r3_1_rejected_timestamp_leaves_no_partial_mutation(self):
+        """TS-CORR-01: A rejected supplied timestamp aborts the mutation with no row and no revision bump."""
+        bad_values = ("2026-11-09T12:30:00-00:00", " 2026-11-09T12:30:00Z", "2026-11-09T12:30:00Z\n")
+        for bad in bad_values:
+            with self.subTest(value=repr(bad)):
+                with self.core_manager.connection() as conn:
+                    rev_before = get_db_revision(conn)
+                    with execution_role_context("Terminal Orchestrator"):
+                        with self.assertRaises(ValidationError):
+                            CashRepository(conn).set_cash_balance("PRIMARY", "EUR", "1.00", timestamp_utc=bad)
+                    self.assertIsNone(CashRepository(conn).get_cash("PRIMARY", "EUR"))
+                    self.assertEqual(get_db_revision(conn), rev_before)
+
+    def test_r3_1_historical_timestamps_round_trip_byte_for_byte_after_persistence(self):
+        """TS-CORR-01: Supplied timestamps are identical after persistence AND retrieval via a fresh connection."""
+        ts_z = "2023-01-15T08:00:00.123456Z"
+        ts_plus = "2023-06-20T14:30:00.654321+00:00"
+
+        with self.core_manager.connection() as conn:
+            with execution_role_context("Terminal Orchestrator"):
+                CashRepository(conn).set_cash_balance("PRIMARY", "EUR", "100.00", timestamp_utc=ts_z)
+                CashRepository(conn).set_cash_balance("PRIMARY", "USD", "200.00", timestamp_utc=ts_plus)
+                PositionRepository(conn).upsert_position("PRIMARY", "AIR.PA", "10", "120.00", timestamp_utc=ts_z)
+                WatchlistRepository(conn).upsert_watchlist_item("BNP.PA", timestamp_utc=ts_plus)
+                ScoutCategoryRepository(conn).upsert_category("AERO", tickers=["AIR.PA"], timestamp_utc=ts_z)
+                TradeLessonRepository(conn).upsert_lesson("RULE_Z", "Rule directive", "MANDATE", timestamp_utc=ts_z)
+                decision = DecisionLogRepository(conn).append_decision(
+                    "S_Z", "BUY AIR.PA", "APPROVED", ticker="AIR.PA", timestamp_utc=ts_plus
+                )
+
+        with self.core_manager.connection() as conn:
+            self.assertEqual(CashRepository(conn).get_cash("PRIMARY", "EUR").last_updated_at_utc, ts_z)
+            self.assertEqual(CashRepository(conn).get_cash("PRIMARY", "USD").last_updated_at_utc, ts_plus)
+            self.assertEqual(PositionRepository(conn).get_position("PRIMARY", "AIR.PA").last_updated_at_utc, ts_z)
+            self.assertEqual(WatchlistRepository(conn).get_watchlist_item("BNP.PA").added_at_utc, ts_plus)
+            self.assertEqual(ScoutCategoryRepository(conn).get_category_by_name("AERO").updated_at_utc, ts_z)
+            lesson = TradeLessonRepository(conn).get_lesson("RULE_Z")
+            self.assertEqual(lesson.created_at_utc, ts_z)
+            self.assertEqual(lesson.last_reviewed_at_utc, ts_z)
+            self.assertEqual(DecisionLogRepository(conn).get_decision(decision.id).timestamp_utc, ts_plus)
 
     def test_r3_all_six_mutations_preserve_valid_historical_timestamps(self):
         """R3.3: All 6 core mutation operations preserve valid historical UTC timestamps exactly."""

@@ -1,5 +1,17 @@
 # Stage 1.5-A.3 — Final Repository Transaction & Authorization Hardening Closeout Assessment
 
+> [!CAUTION]
+> **CORRECTION NOTICE (Stage 1.5-A.3.1).** This report was found to be partly inaccurate. See
+> [`STAGE_1_5_A_3_1_STRICT_UTC_TIMESTAMP_CORRECTION_AND_EVIDENCE_RECONCILIATION_REPORT.md`](STAGE_1_5_A_3_1_STRICT_UTC_TIMESTAMP_CORRECTION_AND_EVIDENCE_RECONCILIATION_REPORT.md). In summary:
+> - **Git:** the source assessed was `a37a1d0`; this document itself was committed as `f5710c5`.
+> - **Timestamps:** `validate_timestamp_utc()` is in `repositories/base.py` (not `models.py`) and, at `a37a1d0`, accepted `-00:00`, `+0000` and whitespace-padded input and stripped them. Claims TS-01/TS-02 below were **not true** at that commit; they hold only after Stage 1.5-A.3.1.
+> - **Test evidence:** 29 of the 30 test-function names cited in the findings matrix do not exist in the repository. The "Test evidence" column must **not** be relied on.
+> - **Source snippets:** some quoted code (e.g. `repository_transaction` as a `@contextmanager`; `append_entry`) is not verbatim — `repository_transaction` is a class and the method is `append_decision`.
+> - **Harness:** `scripts/verify_stage_1.py` **failed** at Gate 6, so Gates 7–8 never ran; it must not be described as passing. The skipped test is `test_r5_04_posix_unlock_failure_injection`.
+> - **Verdict:** the closeout verdict below is **not adequately supported** by this report and is superseded by the Stage 1.5-A.3.1 assessment.
+>
+> The body is retained unchanged below as a historical record.
+
 **Repository:** `nordicirish/gemini_cli_subagent_system`  
 **Branch:** `main`  
 **Expected Baseline HEAD:** `a37a1d01c35fad9354689509a20ffc6bb650a0ac`  
