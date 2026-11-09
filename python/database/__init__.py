@@ -44,6 +44,8 @@ from .backup import (
     RestoreLockBusyError,
     DatabaseRestoreLock,
     DatabaseRestoreLockToken,
+    DatabaseRestoreLockQuarantine,
+    QuarantinedTokenInfo,
     LockTokenState,
     BackupResult,
 )
@@ -106,6 +108,8 @@ __all__ = [
     "RestoreLockBusyError",
     "DatabaseRestoreLock",
     "DatabaseRestoreLockToken",
+    "DatabaseRestoreLockQuarantine",
+    "QuarantinedTokenInfo",
     "LockTokenState",
     "BackupResult",
     "RepositoryError",

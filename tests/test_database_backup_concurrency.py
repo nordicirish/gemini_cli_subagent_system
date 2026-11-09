@@ -14,6 +14,7 @@ Verifies:
 """
 
 import os
+import gc
 import sys
 import time
 import ctypes
@@ -46,6 +47,8 @@ from python.database.backup import (
     RestoreLockBusyError,
     DatabaseRestoreLock,
     DatabaseRestoreLockToken,
+    DatabaseRestoreLockQuarantine,
+    QuarantinedTokenInfo,
     LockTokenState,
     _acquire_exclusive_target_lock,
     _close_exclusive_target_lock,
@@ -1788,6 +1791,347 @@ class TestStage15A222RestoreLockTokenReleaseIntegrityAndFailClosedLifecycle(unit
         ex_tok = DatabaseRestoreLock.acquire_exclusive(target_path)
         self.assertTrue(ex_tok.is_held)
         ex_tok.release()
+
+
+# ===========================================================================
+# Stage 1.5-A.2.2.3: Restore Lock Ownership Retention & Quarantine Registry
+# ===========================================================================
+
+class TestStage15A223RestoreLockQuarantineAndLifecycleIntegrity(unittest.TestCase):
+    """
+    Stage 1.5-A.2.2.3 Restore Lock Ownership Retention, Quarantine & Lifecycle Tests.
+
+    Validates:
+    - R1: restore_backup() retains token ownership on release failure without discarding references.
+    - R2: DatabaseRestoreLockQuarantine process-level registry retains failed tokens and handles.
+    - R3: Retry and recovery API operates safely, non-concurrently, and cleans up upon success.
+    - R4: Protection of all token ownership paths (restore, shared_gate, connect, ManagedConnection).
+    - R5: Failure-injection tests verifying real OS exclusion across gc.collect() cycles.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.source_db_path = os.path.join(self.temp_dir.name, "source_stage15_a223.db")
+        self.backup_path = os.path.join(self.temp_dir.name, "backup_stage15_a223.db")
+
+        # Initialize source database
+        mgr = DatabaseManager(self.source_db_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('PRIMARY', 'EUR', '500000.00', '2026-11-09T22:00:00Z');"
+            )
+
+        # Create valid verified backup
+        res = BackupManager.create_backup(self.source_db_path, self.backup_path, overwrite=False)
+        self.assertEqual(res.integrity_status, "ok")
+        DatabaseRestoreLockQuarantine.clear_for_test()
+
+    def tearDown(self):
+        DatabaseRestoreLockQuarantine.retry_all()
+        DatabaseRestoreLockQuarantine.clear_for_test()
+        self.temp_dir.cleanup()
+
+    def test_r5_01_through_04_restore_backup_unlock_failed_retains_token_survives_gc_blocks_restore(self):
+        """R5.1-R5.4: restore_backup() retains failed token in quarantine, survives gc.collect(), blocks exclusive lock."""
+        target_path = os.path.join(self.temp_dir.name, "target_r5_01.db")
+
+        # Inject failure into unlock operation during restore_backup
+        if sys.platform == "win32":
+            patch_target = patch.object(ctypes.windll.kernel32, "UnlockFileEx", return_value=0)
+        else:
+            patch_target = patch("fcntl.flock", side_effect=OSError("Injected POSIX unlock failure"))
+
+        with patch_target:
+            with self.assertRaises(BackupCleanupError) as ctx:
+                BackupManager.restore_backup(self.backup_path, target_path)
+
+            self.assertIn("OS unlock failed", str(ctx.exception))
+            self.assertTrue(hasattr(ctx.exception, "quarantined_token"))
+            token = ctx.exception.quarantined_token
+            self.assertEqual(token.state, LockTokenState.UNLOCK_FAILED)
+            self.assertTrue(token.is_held)
+
+            # R5.2: Token must be registered in DatabaseRestoreLockQuarantine
+            self.assertTrue(DatabaseRestoreLockQuarantine.is_quarantined(token))
+            self.assertEqual(DatabaseRestoreLockQuarantine.count(target_path), 1)
+
+            # R5.3: Delete local references and force garbage collection
+            token_id = id(token)
+            del token
+            del ctx
+            gc.collect()
+
+            # Verify token and file handle remain alive in quarantine registry
+            quarantined = DatabaseRestoreLockQuarantine.get_token(token_id)
+            self.assertIsNotNone(quarantined)
+            self.assertFalse(quarantined._f.closed)
+            if sys.platform == "win32":
+                self.assertIsNotNone(quarantined._handle)
+
+            # R5.4: Real OS lock verification: another handle attempting acquire_exclusive MUST be blocked
+            with self.assertRaises(BackupQuiescenceError):
+                DatabaseRestoreLock.acquire_exclusive(target_path)
+
+        # Clear patch and retry via quarantine API
+        success = DatabaseRestoreLockQuarantine.retry_release(quarantined)
+        self.assertTrue(success)
+        self.assertTrue(quarantined.is_released)
+        self.assertEqual(DatabaseRestoreLockQuarantine.count(), 0)
+
+        # Exclusive lock can now be acquired
+        ex = DatabaseRestoreLock.acquire_exclusive(target_path)
+        self.assertTrue(ex.is_held)
+        ex.release()
+
+    def test_r5_05_and_06_retry_quarantined_token_clears_failure_and_removes_from_quarantine(self):
+        """R5.5, R5.6: Successful retry of quarantined token clears failure and removes from registry."""
+        target_path = os.path.join(self.temp_dir.name, "target_r5_05.db")
+        token = DatabaseRestoreLock.acquire_exclusive(target_path)
+
+        # Trigger unlock failure to put token into quarantine
+        if sys.platform == "win32":
+            p = patch.object(ctypes.windll.kernel32, "UnlockFileEx", return_value=0)
+        else:
+            p = patch("fcntl.flock", side_effect=OSError("Injected POSIX unlock failure"))
+
+        with p:
+            with self.assertRaises(BackupCleanupError):
+                token.release()
+
+        self.assertTrue(DatabaseRestoreLockQuarantine.is_quarantined(token))
+        self.assertEqual(token.state, LockTokenState.UNLOCK_FAILED)
+
+        # Retry release without the patch
+        res = DatabaseRestoreLockQuarantine.retry_release(token)
+        self.assertTrue(res)
+        self.assertTrue(token.is_released)
+        self.assertFalse(DatabaseRestoreLockQuarantine.is_quarantined(token))
+        self.assertEqual(DatabaseRestoreLockQuarantine.count(), 0)
+
+    def test_r5_07_failed_retry_leaves_token_quarantined(self):
+        """R5.7: Failed retry preserves token in quarantine with updated error."""
+        target_path = os.path.join(self.temp_dir.name, "target_r5_07.db")
+        token = DatabaseRestoreLock.acquire_exclusive(target_path)
+
+        if sys.platform == "win32":
+            p = patch.object(ctypes.windll.kernel32, "UnlockFileEx", return_value=0)
+        else:
+            p = patch("fcntl.flock", side_effect=OSError("Injected POSIX unlock failure"))
+
+        with p:
+            with self.assertRaises(BackupCleanupError):
+                token.release()
+            self.assertTrue(DatabaseRestoreLockQuarantine.is_quarantined(token))
+
+            # Retry while still failing
+            with self.assertRaises(BackupCleanupError):
+                DatabaseRestoreLockQuarantine.retry_release(token)
+
+            # Must still be quarantined
+            self.assertTrue(DatabaseRestoreLockQuarantine.is_quarantined(token))
+            self.assertEqual(token.state, LockTokenState.UNLOCK_FAILED)
+
+        # Finally clean release
+        DatabaseRestoreLockQuarantine.retry_release(token)
+        self.assertTrue(token.is_released)
+
+    def test_r5_08_unlocked_but_close_failed_retries_close_without_second_unlock(self):
+        """R5.8: UNLOCKED_BUT_CLOSE_FAILED retries file close without duplicate OS unlock."""
+        target_path = os.path.join(self.temp_dir.name, "target_r5_08.db")
+        token = DatabaseRestoreLock.acquire_exclusive(target_path)
+
+        real_close = token._f.close
+        token._f.close = lambda: (_ for _ in ()).throw(OSError("Simulated handle close failure"))
+
+        with self.assertRaises(BackupCleanupError):
+            token.release()
+
+        self.assertEqual(token.state, LockTokenState.UNLOCKED_BUT_CLOSE_FAILED)
+        self.assertTrue(DatabaseRestoreLockQuarantine.is_quarantined(token))
+        self.assertFalse(token.is_held)  # Kernel lock is NOT held
+
+        # Restore real close; verify platform unlock is NOT called during retry
+        token._f.close = real_close
+        if sys.platform == "win32":
+            with patch.object(ctypes.windll.kernel32, "UnlockFileEx") as mock_unlock:
+                res = DatabaseRestoreLockQuarantine.retry_release(token)
+                self.assertTrue(res)
+                mock_unlock.assert_not_called()
+        else:
+            import fcntl
+            with patch("fcntl.flock") as mock_flock:
+                res = DatabaseRestoreLockQuarantine.retry_release(token)
+                self.assertTrue(res)
+                mock_flock.assert_not_called()
+
+        self.assertTrue(token.is_released)
+        self.assertFalse(DatabaseRestoreLockQuarantine.is_quarantined(token))
+
+    def test_r5_09_uncertain_tokens_remain_quarantined_not_falsely_reported(self):
+        """R5.9: UNCERTAIN tokens remain quarantined and do not claim is_held or is_released."""
+        target_path = os.path.join(self.temp_dir.name, "target_r5_09.db")
+        token = DatabaseRestoreLock.acquire_exclusive(target_path)
+
+        if sys.platform == "win32":
+            p = patch.object(ctypes.windll.kernel32, "UnlockFileEx", side_effect=TypeError("Ctypes fault"))
+        else:
+            p = patch("fcntl.flock", side_effect=TypeError("Flock fault"))
+
+        try:
+            with p:
+                with self.assertRaises(BackupCleanupError):
+                    token.release()
+
+            self.assertEqual(token.state, LockTokenState.UNCERTAIN)
+            self.assertTrue(DatabaseRestoreLockQuarantine.is_quarantined(token))
+
+            infos = DatabaseRestoreLockQuarantine.get_quarantined_tokens(target_path)
+            self.assertEqual(len(infos), 1)
+            self.assertFalse(infos[0].is_held)
+            self.assertTrue(infos[0].is_uncertain)
+            self.assertEqual(infos[0].token_state, LockTokenState.UNCERTAIN)
+        finally:
+            if token._f and not getattr(token._f, "closed", False):
+                try:
+                    token._f.close()
+                except Exception:
+                    pass
+            DatabaseRestoreLockQuarantine.clear_for_test()
+
+    def test_r5_10_normal_successful_restore_does_not_quarantine(self):
+        """R5.10: Clean restore does not register any tokens in quarantine."""
+        target_path = os.path.join(self.temp_dir.name, "target_r5_10.db")
+        res = BackupManager.restore_backup(self.backup_path, target_path)
+        self.assertEqual(res.integrity_status, "ok")
+        self.assertEqual(DatabaseRestoreLockQuarantine.count(), 0)
+
+    def test_r5_11_restore_finally_path_retains_tokens_after_destination_error(self):
+        """R5.11: Restore error during operation accompanied by lock release failure retains token in quarantine."""
+        target_path = os.path.join(self.temp_dir.name, "target_r5_11.db")
+        # Create non-empty file to trigger target handling
+        with open(target_path, "w") as f:
+            f.write("existing content")
+
+        # Make replace fail AND unlock fail
+        if sys.platform == "win32":
+            p_unlock = patch.object(ctypes.windll.kernel32, "UnlockFileEx", return_value=0)
+        else:
+            p_unlock = patch("fcntl.flock", side_effect=OSError("Injected POSIX unlock failure"))
+
+        with patch("os.replace", side_effect=OSError("Disk write error during swap")):
+            with p_unlock:
+                with self.assertRaises(BackupError) as ctx:
+                    BackupManager.restore_backup(self.backup_path, target_path)
+
+                self.assertTrue(hasattr(ctx.exception, "quarantined_token"))
+                tok = ctx.exception.quarantined_token
+                self.assertTrue(DatabaseRestoreLockQuarantine.is_quarantined(tok))
+
+        # Clear failure and retry
+        DatabaseRestoreLockQuarantine.retry_release(tok)
+        self.assertTrue(tok.is_released)
+        self.assertEqual(DatabaseRestoreLockQuarantine.count(), 0)
+
+    def test_r5_12_multiple_failed_restores_do_not_overwrite_tokens(self):
+        """R5.12: Multiple failed operations on the same target preserve all distinct quarantined tokens."""
+        target_path = os.path.join(self.temp_dir.name, "target_r5_12.db")
+
+        token1 = DatabaseRestoreLock.acquire_shared(target_path)
+        token2 = DatabaseRestoreLock.acquire_shared(target_path)
+
+        if sys.platform == "win32":
+            p = patch.object(ctypes.windll.kernel32, "UnlockFileEx", return_value=0)
+        else:
+            p = patch("fcntl.flock", side_effect=OSError("Injected POSIX unlock failure"))
+
+        with p:
+            with self.assertRaises(BackupCleanupError):
+                token1.release()
+            with self.assertRaises(BackupCleanupError):
+                token2.release()
+
+        # Both tokens must be preserved in quarantine
+        self.assertEqual(DatabaseRestoreLockQuarantine.count(target_path), 2)
+        self.assertTrue(DatabaseRestoreLockQuarantine.is_quarantined(token1))
+        self.assertTrue(DatabaseRestoreLockQuarantine.is_quarantined(token2))
+
+        # Clean up
+        DatabaseRestoreLockQuarantine.retry_release(token1)
+        DatabaseRestoreLockQuarantine.retry_release(token2)
+        self.assertEqual(DatabaseRestoreLockQuarantine.count(target_path), 0)
+
+    def test_r5_13_concurrent_retry_attempts_cannot_release_same_token_twice(self):
+        """R5.13: Concurrent retry attempts on the same quarantined token are mutually excluded."""
+        target_path = os.path.join(self.temp_dir.name, "target_r5_13.db")
+        token = DatabaseRestoreLock.acquire_exclusive(target_path)
+
+        # Force token into quarantine
+        if sys.platform == "win32":
+            p = patch.object(ctypes.windll.kernel32, "UnlockFileEx", return_value=0)
+        else:
+            p = patch("fcntl.flock", side_effect=OSError("Injected POSIX unlock failure"))
+
+        with p:
+            with self.assertRaises(BackupCleanupError):
+                token.release()
+
+        self.assertTrue(DatabaseRestoreLockQuarantine.is_quarantined(token))
+
+        # Simulate concurrent retry by holding the token's retry lock
+        with DatabaseRestoreLockQuarantine._lock:
+            entry = DatabaseRestoreLockQuarantine._registry.get(id(token))
+        self.assertIsNotNone(entry)
+
+        entry.retry_lock.acquire()
+        try:
+            # Second concurrent attempt raises BackupCleanupError
+            with self.assertRaises(BackupCleanupError) as ctx:
+                DatabaseRestoreLockQuarantine.retry_release(token)
+            self.assertIn("Retry release already in progress", str(ctx.exception))
+        finally:
+            entry.retry_lock.release()
+
+        # Normal retry succeeds
+        self.assertTrue(DatabaseRestoreLockQuarantine.retry_release(token))
+        self.assertEqual(DatabaseRestoreLockQuarantine.count(), 0)
+
+    def test_r5_14_managed_connection_and_shared_gate_quarantine_integration(self):
+        """R5.14: ManagedConnection.close() and shared_gate() quarantine tokens on release failure."""
+        target_path = os.path.join(self.temp_dir.name, "target_r5_14.db")
+
+        # 1. shared_gate quarantine on release failure
+        if sys.platform == "win32":
+            p = patch.object(ctypes.windll.kernel32, "UnlockFileEx", return_value=0)
+        else:
+            p = patch("fcntl.flock", side_effect=OSError("Injected POSIX unlock failure"))
+
+        with p:
+            with self.assertRaises(BackupCleanupError):
+                with DatabaseRestoreLock.shared_gate(target_path) as tok:
+                    pass
+
+        self.assertEqual(DatabaseRestoreLockQuarantine.count(target_path), 1)
+        DatabaseRestoreLockQuarantine.retry_all(target_path)
+        self.assertEqual(DatabaseRestoreLockQuarantine.count(target_path), 0)
+
+        # 2. ManagedConnection.close() quarantine on release failure
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        conn = mgr.connect()
+        tok2 = conn.lock_token
+
+        with p:
+            with self.assertRaises(DatabaseConnectionError):
+                conn.close()
+
+        self.assertTrue(DatabaseRestoreLockQuarantine.is_quarantined(tok2))
+        self.assertEqual(DatabaseRestoreLockQuarantine.count(target_path), 1)
+
+        # Retry close on connection cleanly releases and un-quarantines
+        conn.close()
+        self.assertTrue(conn.is_closed)
+        self.assertEqual(DatabaseRestoreLockQuarantine.count(target_path), 0)
 
 
 if __name__ == "__main__":

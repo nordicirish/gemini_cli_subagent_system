@@ -30,6 +30,7 @@ from typing import Generator, Optional, Tuple, List, Any
 from python.database.backup import (
     DatabaseRestoreLock,
     DatabaseRestoreLockToken,
+    DatabaseRestoreLockQuarantine,
     RestoreLockBusyError,
 )
 
@@ -153,11 +154,13 @@ class ManagedConnection(sqlite3.Connection):
         if self._lock_token is not None and not self._lock_token.is_released:
             try:
                 self._lock_token.release()
+                DatabaseRestoreLockQuarantine.remove(self._lock_token)
                 self._lock_token = None
                 self._last_lock_release_error = None
             except Exception as e:
                 self._last_lock_release_error = e
-                # Do NOT discard the token; retain reference so error is diagnosable and can be retried
+                # Do NOT discard the token; retain reference on self and in quarantine
+                DatabaseRestoreLockQuarantine.quarantine(self._lock_token, e)
                 if isinstance(e, DatabaseError):
                     raise e
                 raise DatabaseConnectionError(
@@ -284,6 +287,7 @@ class DatabaseManager:
                 try:
                     token.release()
                 except Exception as ce:
+                    DatabaseRestoreLockQuarantine.quarantine(token, ce)
                     setattr(e, "lock_release_error", ce)
             err_msg = str(e).lower()
             if "locked" in err_msg or "busy" in err_msg or "unable to open database file" in err_msg:
@@ -296,6 +300,7 @@ class DatabaseManager:
                 try:
                     token.release()
                 except Exception as ce:
+                    DatabaseRestoreLockQuarantine.quarantine(token, ce)
                     setattr(e, "lock_release_error", ce)
             raise DatabaseConnectionError(f"Unexpected connection error for '{self.db_path}': {e}") from e
 

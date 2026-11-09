@@ -13,9 +13,10 @@ import enum
 import ctypes
 import sqlite3
 import datetime
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Optional, Callable, Dict, Any, List
+from typing import Optional, Callable, Dict, Any, List, Union
 
 if sys.platform == "win32":
     import msvcrt
@@ -227,10 +228,12 @@ class DatabaseRestoreLockToken:
         # Do not close the file handle if unlock failed or state is uncertain.
         if self._state in (LockTokenState.UNLOCK_FAILED, LockTokenState.UNCERTAIN):
             err_msg = "; ".join(str(e) for e in cleanup_errors)
-            raise BackupCleanupError(
+            exc = BackupCleanupError(
                 f"Failed to cleanly release restore lock for '{self.db_path}': OS unlock failed: {err_msg}",
                 cleanup_errors=cleanup_errors,
             )
+            DatabaseRestoreLockQuarantine.quarantine(self, exc)
+            raise exc
 
         # Step 2: File Handle Close (unlock has succeeded)
         if self._f is not None:
@@ -244,15 +247,227 @@ class DatabaseRestoreLockToken:
                     self._state = LockTokenState.UNLOCKED_BUT_CLOSE_FAILED
                     cleanup_errors.append(e)
                     err_msg = "; ".join(str(e) for e in cleanup_errors)
-                    raise BackupCleanupError(
+                    exc = BackupCleanupError(
                         f"Failed to cleanly release restore lock for '{self.db_path}': OS unlock succeeded, but file close failed: {err_msg}",
                         cleanup_errors=cleanup_errors,
                     )
+                    DatabaseRestoreLockQuarantine.quarantine(self, exc)
+                    raise exc
 
         # Both OS unlock and file close succeeded
         self._state = LockTokenState.FULLY_RELEASED
         self._f = None
         self._handle = None
+        DatabaseRestoreLockQuarantine.remove(self)
+
+
+# ---------------------------------------------------------------------------
+# Failed Restore Lock Quarantine Registry (Stage 1.5-A.2.2.3 R2, R3, R4)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class QuarantinedTokenInfo:
+    """Read-only diagnostic snapshot of a quarantined lock token (Stage 1.5-A.2.2.3 R2)."""
+    db_path: str
+    lock_path: str
+    token_state: LockTokenState
+    is_exclusive: bool
+    is_held: bool
+    is_uncertain: bool
+    quarantined_at_utc: str
+    error_message: str
+    retry_count: int
+
+
+class _QuarantineEntry:
+    """Internal registry record holding a strong reference and retry lock for a quarantined token."""
+    def __init__(self, token: DatabaseRestoreLockToken, error: Exception):
+        self.token = token
+        self.db_path = token.db_path
+        self.lock_path = token.lock_path
+        self.error = error
+        self.quarantined_at_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self.retry_count = 0
+        self.retry_lock = threading.Lock()
+
+
+class DatabaseRestoreLockQuarantine:
+    """
+    Process-level quarantine registry for DatabaseRestoreLockTokens whose release failed (Stage 1.5-A.2.2.3).
+
+    Maintains strong references to failed tokens and their underlying file handles to prevent
+    garbage collection from silently closing the OS handle and dropping kernel locks.
+
+    Provides thread-safe registration, explicit retry mechanisms, and read-only diagnostics.
+    """
+    _registry: Dict[int, _QuarantineEntry] = {}
+    _lock: threading.Lock = threading.Lock()
+
+    @classmethod
+    def quarantine(cls, token: DatabaseRestoreLockToken, error: Exception) -> None:
+        """
+        Registers a token whose release failed into quarantine (R2, R4).
+        Maintains a strong reference to the token and its OS handle.
+        Thread-safe; prevents duplicate registration of the same token instance.
+        """
+        if token.is_released:
+            return
+
+        with cls._lock:
+            token_id = id(token)
+            if token_id not in cls._registry:
+                cls._registry[token_id] = _QuarantineEntry(token, error)
+            else:
+                entry = cls._registry[token_id]
+                entry.error = error
+
+    @classmethod
+    def remove(cls, token: DatabaseRestoreLockToken) -> bool:
+        """
+        Removes a token from quarantine if it is confirmed successfully released.
+        Returns True if removed, False otherwise.
+        """
+        if not token.is_released:
+            return False
+
+        with cls._lock:
+            token_id = id(token)
+            if token_id in cls._registry:
+                del cls._registry[token_id]
+                return True
+            return False
+
+    @classmethod
+    def is_quarantined(cls, token: DatabaseRestoreLockToken) -> bool:
+        """Returns True if the specified token instance is currently quarantined."""
+        with cls._lock:
+            return id(token) in cls._registry
+
+    @classmethod
+    def has_quarantined_tokens(cls, db_path: Optional[str] = None) -> bool:
+        """Returns True if any tokens are currently quarantined (optionally filtered by db_path)."""
+        with cls._lock:
+            if db_path is None:
+                return len(cls._registry) > 0
+            norm_target = os.path.abspath(db_path)
+            return any(os.path.abspath(entry.db_path) == norm_target for entry in cls._registry.values())
+
+    @classmethod
+    def count(cls, db_path: Optional[str] = None) -> int:
+        """Returns the number of quarantined tokens (optionally filtered by db_path)."""
+        with cls._lock:
+            if db_path is None:
+                return len(cls._registry)
+            norm_target = os.path.abspath(db_path)
+            return sum(1 for entry in cls._registry.values() if os.path.abspath(entry.db_path) == norm_target)
+
+    @classmethod
+    def get_quarantined_tokens(cls, db_path: Optional[str] = None) -> List[QuarantinedTokenInfo]:
+        """
+        Returns a read-only list of diagnostic snapshots of quarantined tokens.
+        Does not expose mutable token references directly.
+        """
+        with cls._lock:
+            results: List[QuarantinedTokenInfo] = []
+            for entry in cls._registry.values():
+                if db_path is not None and os.path.abspath(entry.db_path) != os.path.abspath(db_path):
+                    continue
+                results.append(
+                    QuarantinedTokenInfo(
+                        db_path=entry.db_path,
+                        lock_path=entry.lock_path,
+                        token_state=entry.token.state,
+                        is_exclusive=entry.token.is_exclusive,
+                        is_held=entry.token.is_held,
+                        is_uncertain=entry.token.is_uncertain,
+                        quarantined_at_utc=entry.quarantined_at_utc,
+                        error_message=str(entry.error),
+                        retry_count=entry.retry_count,
+                    )
+                )
+            return results
+
+    @classmethod
+    def get_token(cls, token_id: int) -> Optional[DatabaseRestoreLockToken]:
+        """Returns the token instance for a given token_id, if quarantined."""
+        with cls._lock:
+            entry = cls._registry.get(token_id)
+            return entry.token if entry else None
+
+    @classmethod
+    def retry_release(cls, token: DatabaseRestoreLockToken) -> bool:
+        """
+        Retries releasing a quarantined token (R3).
+        Operates on the existing token without creating replacement locks.
+        Guards against concurrent retries on the same token.
+        Removes token from quarantine only upon confirmed is_released == True.
+        Raises BackupCleanupError if retry fails, keeping token quarantined.
+        """
+        token_id = id(token)
+        entry: Optional[_QuarantineEntry] = None
+        with cls._lock:
+            entry = cls._registry.get(token_id)
+
+        if entry is None:
+            # Token is not quarantined; if already released return True, else release directly
+            if token.is_released:
+                return True
+            token.release()
+            return token.is_released
+
+        # Prevent concurrent retries on the same token
+        if not entry.retry_lock.acquire(blocking=False):
+            raise BackupCleanupError(
+                f"Retry release already in progress for quarantined token on '{entry.db_path}'."
+            )
+
+        try:
+            entry.retry_count += 1
+            try:
+                entry.token.release()
+            except Exception as e:
+                entry.error = e
+                raise
+
+            if entry.token.is_released:
+                with cls._lock:
+                    cls._registry.pop(token_id, None)
+                return True
+            return False
+        finally:
+            entry.retry_lock.release()
+
+    @classmethod
+    def retry_all(cls, db_path: Optional[str] = None) -> Dict[int, bool]:
+        """
+        Retries release for all quarantined tokens (optionally filtered by db_path).
+        Returns a dict mapping token_id to release success (True/False).
+        """
+        with cls._lock:
+            token_ids = [
+                tid for tid, entry in cls._registry.items()
+                if db_path is None or os.path.abspath(entry.db_path) == os.path.abspath(db_path)
+            ]
+
+        results: Dict[int, bool] = {}
+        for tid in token_ids:
+            with cls._lock:
+                entry = cls._registry.get(tid)
+            if entry is None:
+                continue
+            try:
+                success = cls.retry_release(entry.token)
+                results[tid] = success
+            except Exception:
+                results[tid] = False
+
+        return results
+
+    @classmethod
+    def clear_for_test(cls) -> None:
+        """Resets the quarantine registry for test suite isolation."""
+        with cls._lock:
+            cls._registry.clear()
 
 
 class DatabaseRestoreLock:
@@ -374,6 +589,7 @@ class DatabaseRestoreLock:
                 try:
                     token.release()
                 except Exception as re:
+                    DatabaseRestoreLockQuarantine.quarantine(token, re)
                     if exc_type is not None:
                         try:
                             setattr(exc_val, "lock_release_error", re)
@@ -1051,16 +1267,22 @@ class BackupManager:
                 # Release exclusive restore lock before verifying final result (R4: no unlinking)
                 try:
                     restore_lock_token.release()
+                    restore_lock_token = None
                 except Exception as ce:
                     cleanup_errors.append(ce)
                     lock_state_uncertain = True
-                restore_lock_token = None
+                    DatabaseRestoreLockQuarantine.quarantine(restore_lock_token, ce)
 
                 if cleanup_errors:
-                    raise BackupCleanupError(
+                    cleanup_err = BackupCleanupError(
                         f"Restoration succeeded but non-fatal cleanup errors occurred: {[str(ce) for ce in cleanup_errors]}",
                         cleanup_errors=cleanup_errors,
                     )
+                    if restore_lock_token is not None and not restore_lock_token.is_released:
+                        setattr(cleanup_err, "quarantined_token", restore_lock_token)
+                    if lock_state_uncertain:
+                        setattr(cleanup_err, "lock_state_uncertain", True)
+                    raise cleanup_err
 
                 restored_size = os.path.getsize(target_db_path)
                 now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -1116,17 +1338,22 @@ class BackupManager:
                 if isinstance(e, BackupError):
                     if cleanup_errors:
                         setattr(e, "cleanup_errors", cleanup_errors)
+                        if restore_lock_token is not None and not restore_lock_token.is_released:
+                            setattr(e, "quarantined_token", restore_lock_token)
                     if lock_state_uncertain:
                         setattr(e, "lock_state_uncertain", True)
                     raise
                 err = BackupError(f"Restore operation failed: {e}")
                 if cleanup_errors:
                     setattr(err, "cleanup_errors", cleanup_errors)
+                    if restore_lock_token is not None and not restore_lock_token.is_released:
+                        setattr(err, "quarantined_token", restore_lock_token)
                 if lock_state_uncertain:
                     setattr(err, "lock_state_uncertain", True)
                 raise err from e
 
         finally:
+            outer_exc_type, outer_exc_val, _ = sys.exc_info()
             if h_target is not None:
                 try:
                     _close_exclusive_target_lock(h_target)
@@ -1136,6 +1363,18 @@ class BackupManager:
             if restore_lock_token is not None and not restore_lock_token.is_released:
                 try:
                     restore_lock_token.release()
+                    restore_lock_token = None
                 except Exception as ce:
                     cleanup_errors.append(ce)
                     lock_state_uncertain = True
+                    DatabaseRestoreLockQuarantine.quarantine(restore_lock_token, ce)
+                    if outer_exc_val is not None:
+                        try:
+                            setattr(outer_exc_val, "quarantined_token", restore_lock_token)
+                        except Exception:
+                            pass
+                        if not hasattr(outer_exc_val, "cleanup_errors"):
+                            try:
+                                setattr(outer_exc_val, "cleanup_errors", cleanup_errors)
+                            except Exception:
+                                pass
