@@ -324,15 +324,20 @@ class DatabaseRestoreLockQuarantine:
     @classmethod
     def remove(cls, token: DatabaseRestoreLockToken) -> bool:
         """
-        Removes a token from quarantine if it is confirmed successfully released.
+        Removes a token from quarantine if and only if it is demonstrably FULLY_RELEASED.
         Returns True if removed, False otherwise.
         """
-        if not token.is_released:
+        if not token.is_released or token.state != LockTokenState.FULLY_RELEASED:
             return False
 
         with cls._lock:
             token_id = id(token)
-            if token_id in cls._registry:
+            entry = cls._registry.get(token_id)
+            if (
+                entry is not None
+                and entry.token.is_released
+                and entry.token.state == LockTokenState.FULLY_RELEASED
+            ):
                 del cls._registry[token_id]
                 return True
             return False
@@ -429,9 +434,8 @@ class DatabaseRestoreLockQuarantine:
                 entry.error = e
                 raise
 
-            if entry.token.is_released:
-                with cls._lock:
-                    cls._registry.pop(token_id, None)
+            if entry.token.is_released and entry.token.state == LockTokenState.FULLY_RELEASED:
+                cls.remove(entry.token)
                 return True
             return False
         finally:
@@ -465,9 +469,49 @@ class DatabaseRestoreLockQuarantine:
 
     @classmethod
     def clear_for_test(cls) -> None:
-        """Resets the quarantine registry for test suite isolation."""
+        """
+        Remove only fully released tokens from the quarantine registry.
+
+        Unreleased, uncertain, or partially released tokens must remain strongly
+        referenced. Raises RuntimeError with diagnostics if any unreleased or
+        uncertain token entries remain.
+        """
         with cls._lock:
-            cls._registry.clear()
+            released_ids = []
+            unreleased: Dict[int, _QuarantineEntry] = {}
+
+            for token_id, entry in list(cls._registry.items()):
+                token = entry.token
+                if token.is_released and token.state == LockTokenState.FULLY_RELEASED:
+                    released_ids.append(token_id)
+                else:
+                    unreleased[token_id] = entry
+
+            for token_id in released_ids:
+                current_entry = cls._registry.get(token_id)
+                if (
+                    current_entry is not None
+                    and current_entry.token.is_released
+                    and current_entry.token.state == LockTokenState.FULLY_RELEASED
+                ):
+                    del cls._registry[token_id]
+
+            if unreleased:
+                diagnostics = []
+                for token_id, entry in unreleased.items():
+                    token = entry.token
+                    state_obj = getattr(token, "state", "unknown")
+                    state_val = state_obj.value if isinstance(state_obj, enum.Enum) else str(state_obj)
+                    db_path = getattr(token, "db_path", getattr(entry, "db_path", "unknown"))
+                    diagnostics.append(
+                        f"token_id={token_id}, state={state_val}, db_path={db_path}"
+                    )
+
+                raise RuntimeError(
+                    "Cannot clear restore-lock quarantine: "
+                    f"{len(unreleased)} unreleased or uncertain token(s) remain. "
+                    + "; ".join(diagnostics)
+                )
 
 
 class DatabaseRestoreLock:
@@ -1264,26 +1308,6 @@ class BackupManager:
                     cls._atomic_no_clobber_place(tmp_restore, target_db_path)
                     cls.verify_backup(target_db_path)
 
-                # Release exclusive restore lock before verifying final result (R4: no unlinking)
-                try:
-                    restore_lock_token.release()
-                    restore_lock_token = None
-                except Exception as ce:
-                    cleanup_errors.append(ce)
-                    lock_state_uncertain = True
-                    DatabaseRestoreLockQuarantine.quarantine(restore_lock_token, ce)
-
-                if cleanup_errors:
-                    cleanup_err = BackupCleanupError(
-                        f"Restoration succeeded but non-fatal cleanup errors occurred: {[str(ce) for ce in cleanup_errors]}",
-                        cleanup_errors=cleanup_errors,
-                    )
-                    if restore_lock_token is not None and not restore_lock_token.is_released:
-                        setattr(cleanup_err, "quarantined_token", restore_lock_token)
-                    if lock_state_uncertain:
-                        setattr(cleanup_err, "lock_state_uncertain", True)
-                    raise cleanup_err
-
                 restored_size = os.path.getsize(target_db_path)
                 now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -1336,45 +1360,130 @@ class BackupManager:
                         cleanup_errors.append(ce)
 
                 if isinstance(e, BackupError):
-                    if cleanup_errors:
-                        setattr(e, "cleanup_errors", cleanup_errors)
-                        if restore_lock_token is not None and not restore_lock_token.is_released:
-                            setattr(e, "quarantined_token", restore_lock_token)
-                    if lock_state_uncertain:
-                        setattr(e, "lock_state_uncertain", True)
                     raise
                 err = BackupError(f"Restore operation failed: {e}")
-                if cleanup_errors:
-                    setattr(err, "cleanup_errors", cleanup_errors)
-                    if restore_lock_token is not None and not restore_lock_token.is_released:
-                        setattr(err, "quarantined_token", restore_lock_token)
-                if lock_state_uncertain:
-                    setattr(err, "lock_state_uncertain", True)
                 raise err from e
 
         finally:
-            outer_exc_type, outer_exc_val, _ = sys.exc_info()
+            outer_exc_type, outer_exc_val, outer_exc_tb = sys.exc_info()
+            lock_release_error: Optional[Exception] = None
+
             if h_target is not None:
                 try:
                     _close_exclusive_target_lock(h_target)
                 except Exception as ce:
                     cleanup_errors.append(ce)
                     lock_state_uncertain = True
+                h_target = None
+
             if restore_lock_token is not None and not restore_lock_token.is_released:
                 try:
                     restore_lock_token.release()
-                    restore_lock_token = None
+                    if restore_lock_token.is_released:
+                        restore_lock_token = None
                 except Exception as ce:
+                    lock_release_error = ce
                     cleanup_errors.append(ce)
                     lock_state_uncertain = True
                     DatabaseRestoreLockQuarantine.quarantine(restore_lock_token, ce)
-                    if outer_exc_val is not None:
+
+            if outer_exc_val is None:
+                if cleanup_errors:
+                    final_token_state = (
+                        restore_lock_token.state
+                        if restore_lock_token is not None
+                        else LockTokenState.FULLY_RELEASED
+                    )
+                    is_token_quarantined = (
+                        DatabaseRestoreLockQuarantine.is_quarantined(restore_lock_token)
+                        if restore_lock_token is not None
+                        else False
+                    )
+                    cleanup_err = BackupCleanupError(
+                        f"Restoration succeeded but non-fatal cleanup errors occurred: {[str(ce) for ce in cleanup_errors]}",
+                        cleanup_errors=list(cleanup_errors),
+                    )
+                    cleanup_err.lock_release_error = lock_release_error
+                    cleanup_err.token_quarantined = is_token_quarantined
+                    cleanup_err.token_state = final_token_state
+                    if restore_lock_token is not None and not restore_lock_token.is_released:
+                        cleanup_err.quarantined_token = restore_lock_token
+                    if lock_state_uncertain:
+                        cleanup_err.lock_state_uncertain = True
+                    if lock_release_error is not None:
+                        raise cleanup_err from lock_release_error
+                    raise cleanup_err from cleanup_errors[0]
+            elif cleanup_errors or lock_state_uncertain:
+                final_token_state = (
+                    restore_lock_token.state
+                    if restore_lock_token is not None
+                    else LockTokenState.FULLY_RELEASED
+                )
+                is_token_quarantined = (
+                    DatabaseRestoreLockQuarantine.is_quarantined(restore_lock_token)
+                    if restore_lock_token is not None
+                    else False
+                )
+                cleanup_summary = "; ".join(str(ce) for ce in cleanup_errors)
+                cleanup_exc = BackupCleanupError(
+                    f"Restore cleanup encountered {len(cleanup_errors)} error(s) "
+                    f"(token_quarantined={is_token_quarantined}, token_state={final_token_state.value}): {cleanup_summary}",
+                    cleanup_errors=list(cleanup_errors),
+                )
+                cleanup_exc.lock_release_error = lock_release_error
+                cleanup_exc.token_quarantined = is_token_quarantined
+                cleanup_exc.token_state = final_token_state
+                cleanup_exc.lock_state_uncertain = lock_state_uncertain
+                if restore_lock_token is not None and not restore_lock_token.is_released:
+                    cleanup_exc.quarantined_token = restore_lock_token
+                if lock_release_error is not None:
+                    cleanup_exc.__cause__ = lock_release_error
+                elif cleanup_errors:
+                    cleanup_exc.__cause__ = cleanup_errors[0]
+
+                try:
+                    setattr(outer_exc_val, "cleanup_errors", list(cleanup_errors))
+                    setattr(outer_exc_val, "cleanup_exception", cleanup_exc)
+                    setattr(outer_exc_val, "lock_release_error", lock_release_error)
+                    setattr(outer_exc_val, "token_quarantined", is_token_quarantined)
+                    setattr(outer_exc_val, "token_state", final_token_state)
+                    if lock_state_uncertain:
+                        setattr(outer_exc_val, "lock_state_uncertain", True)
+                    if restore_lock_token is not None and not restore_lock_token.is_released:
+                        setattr(outer_exc_val, "quarantined_token", restore_lock_token)
+                    if hasattr(outer_exc_val, "add_note"):
+                        outer_exc_val.add_note(f"Restore cleanup failure diagnostics: {cleanup_exc}")
+                except Exception as attr_err:
+                    wrapper_exc = BackupError(
+                        f"Restore failed ({outer_exc_val}) and attaching cleanup diagnostics failed ({attr_err}); "
+                        f"cleanup_exc={cleanup_exc}"
+                    )
+                    wrapper_exc.primary_restore_error = outer_exc_val
+                    wrapper_exc.cleanup_errors = list(cleanup_errors)
+                    wrapper_exc.cleanup_exception = cleanup_exc
+                    wrapper_exc.lock_release_error = lock_release_error
+                    wrapper_exc.token_quarantined = is_token_quarantined
+                    wrapper_exc.token_state = final_token_state
+                    wrapper_exc.attachment_error = attr_err
+                    if lock_state_uncertain:
+                        wrapper_exc.lock_state_uncertain = True
+                    if restore_lock_token is not None and not restore_lock_token.is_released:
+                        wrapper_exc.quarantined_token = restore_lock_token
+                    raise wrapper_exc from outer_exc_val
+
+                if getattr(outer_exc_val, "__cause__", None) is None:
+                    raise outer_exc_val.with_traceback(outer_exc_tb) from cleanup_exc
+                else:
+                    tail = outer_exc_val.__cause__
+                    seen = {id(outer_exc_val), id(tail)}
+                    while getattr(tail, "__cause__", None) is not None and id(tail.__cause__) not in seen:
+                        tail = tail.__cause__
+                        seen.add(id(tail))
+                    if getattr(tail, "__cause__", None) is None and tail is not cleanup_exc:
                         try:
-                            setattr(outer_exc_val, "quarantined_token", restore_lock_token)
-                        except Exception:
-                            pass
-                        if not hasattr(outer_exc_val, "cleanup_errors"):
-                            try:
-                                setattr(outer_exc_val, "cleanup_errors", cleanup_errors)
-                            except Exception:
-                                pass
+                            tail.__cause__ = cleanup_exc
+                        except Exception as chain_err:
+                            if hasattr(outer_exc_val, "add_note"):
+                                outer_exc_val.add_note(f"Chaining cleanup_exc to cause tail failed: {chain_err}")
+                            else:
+                                raise cleanup_exc from outer_exc_val

@@ -154,6 +154,10 @@ class ManagedConnection(sqlite3.Connection):
         if self._lock_token is not None and not self._lock_token.is_released:
             try:
                 self._lock_token.release()
+                if not self._lock_token.is_released:
+                    raise DatabaseConnectionError(
+                        "Restore lock token release() returned without establishing FULLY_RELEASED state."
+                    )
                 DatabaseRestoreLockQuarantine.remove(self._lock_token)
                 self._lock_token = None
                 self._last_lock_release_error = None
@@ -311,6 +315,8 @@ class DatabaseManager:
             try:
                 conn.close()
             except Exception as ce:
+                if token is not None and not token.is_released:
+                    DatabaseRestoreLockQuarantine.quarantine(token, ce)
                 setattr(e, "connection_close_error", ce)
             raise
 
