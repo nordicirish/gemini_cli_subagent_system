@@ -5365,6 +5365,385 @@ class TestStage15A2TransactionPoisoningAndRecoveryFailureEnforcement(BaseReposit
                     pass
 
 
+# ===========================================================================
+# Stage 1.5-B: Monotonic Database Revision Tracking & Coverage Hardening
+# ===========================================================================
+
+class TestStage15BMonotonicDatabaseRevisionTracking(BaseRepositoryTestCase):
+    """
+    Dedicated Stage 1.5-B test suite verifying monotonic database revision tracking
+    across the isolated SQLite persistence layer (Workstreams C, E, F).
+    """
+
+    # --- E1: Basic Revision Behaviour ---
+
+    def test_stage15b_initial_revision_value(self):
+        """E1: Initial revision in fresh core database is 0; both get_db_revision and repository return 0."""
+        with self.core_manager.connection() as conn:
+            self.assertEqual(get_db_revision(conn), 0)
+            self.assertEqual(CashRepository(conn).get_db_revision(), 0)
+            self.assertEqual(PositionRepository(conn).get_db_revision(), 0)
+
+    def test_stage15b_single_successful_mutation_increments_revision(self):
+        """E1: A single successful revision-controlled mutation advances db_revision monotonically by 1."""
+        with self.core_manager.connection() as conn:
+            initial = get_db_revision(conn)
+            cash_repo = CashRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"))
+            after = get_db_revision(conn)
+            self.assertEqual(after, initial + 1)
+
+    def test_stage15b_sequence_of_successful_mutations_monotonic(self):
+        """E1: Sequential mutations across all 7 repositories advance db_revision strictly monotonically."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            pos_repo = PositionRepository(conn)
+            wl_repo = WatchlistRepository(conn)
+            cat_repo = ScoutCategoryRepository(conn)
+            tl_repo = TradeLessonRepository(conn)
+            dec_repo = DecisionLogRepository(conn)
+            appr_repo = OwnerApprovalRepository(conn)
+
+            expected_rev = 0
+            self.assertEqual(get_db_revision(conn), expected_rev)
+
+            with execution_role_context("Terminal Orchestrator"):
+                cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"))
+                expected_rev += 1
+                self.assertEqual(get_db_revision(conn), expected_rev)
+
+                pos_repo.upsert_position("PRIMARY", "AAPL", Decimal("10"), Decimal("150.00"))
+                expected_rev += 1
+                self.assertEqual(get_db_revision(conn), expected_rev)
+
+                wl_repo.upsert_watchlist_item("MSFT")
+                expected_rev += 1
+                self.assertEqual(get_db_revision(conn), expected_rev)
+
+                cat_repo.upsert_category("Software", "Tech sector", ["MSFT", "AAPL"])
+                expected_rev += 1
+                self.assertEqual(get_db_revision(conn), expected_rev)
+
+                tl_repo.upsert_lesson("L_B_01", "Always verify invariants", "MANDATE")
+                expected_rev += 1
+                self.assertEqual(get_db_revision(conn), expected_rev)
+
+                dec_repo.append_decision("SESS_B_1", "BUY", "APPROVED")
+                expected_rev += 1
+                self.assertEqual(get_db_revision(conn), expected_rev)
+
+            with execution_role_context("Owner"):
+                appr_repo.append_approval("APP_B_01", "update_ssot", "portfolio_cash", "hash_b_1")
+                expected_rev += 1
+                self.assertEqual(get_db_revision(conn), expected_rev)
+
+                appr_repo.consume_approval("APP_B_01")
+                expected_rev += 1
+                self.assertEqual(get_db_revision(conn), expected_rev)
+
+    def test_stage15b_fresh_connection_observes_committed_revision(self):
+        """E1: A committed revision increment on one connection is immediately observed by a fresh connection."""
+        with self.core_manager.connection() as writer_conn:
+            with execution_role_context("Terminal Orchestrator"):
+                CashRepository(writer_conn).set_cash_balance("PRIMARY", "EUR", Decimal("250.00"))
+
+        with self.core_manager.connection() as reader_conn:
+            self.assertEqual(get_db_revision(reader_conn), 1)
+
+    # --- E2: No Revision Increment on Unsuccessful / No-Op Work ---
+
+    def test_stage15b_no_increment_on_input_validation_failure(self):
+        """E2: Input validation failure before SQL execution does not increment db_revision."""
+        with self.core_manager.connection() as conn:
+            initial = get_db_revision(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(ValidationError):
+                    CashRepository(conn).set_cash_balance("PRIMARY", "INVALID_CCY", Decimal("100.00"))
+            self.assertEqual(get_db_revision(conn), initial)
+
+    def test_stage15b_no_increment_on_authorization_failure(self):
+        """E2: Authorization failure before SQL execution does not increment db_revision."""
+        with self.core_manager.connection() as conn:
+            initial = get_db_revision(conn)
+            with execution_role_context("Data Analyst"):
+                with self.assertRaises(PermissionError):
+                    # Data Analyst cannot update SSOT
+                    CashRepository(conn).set_cash_balance("PRIMARY", "EUR", Decimal("100.00"))
+            self.assertEqual(get_db_revision(conn), initial)
+
+    def test_stage15b_no_increment_on_sql_integrity_failure(self):
+        """E2: Duplicate unique constraint violation in OwnerApproval does not advance db_revision."""
+        with self.core_manager.connection() as conn:
+            appr_repo = OwnerApprovalRepository(conn)
+            with execution_role_context("Owner"):
+                appr_repo.append_approval("APP_DUP_1", "update_ssot", "portfolio_cash", "h1")
+                rev_after_first = get_db_revision(conn)
+
+                with self.assertRaises(DuplicateEntityError):
+                    appr_repo.append_approval("APP_DUP_1", "update_ssot", "portfolio_cash", "h2")
+
+                self.assertEqual(get_db_revision(conn), rev_after_first)
+
+    def test_stage15b_no_increment_on_noop_deletions(self):
+        """E2: No-op deletions of non-existent entities across all repositories do not increment db_revision."""
+        with self.core_manager.connection() as conn:
+            initial = get_db_revision(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                self.assertFalse(CashRepository(conn).delete_cash("NONEXISTENT", "EUR"))
+                self.assertFalse(PositionRepository(conn).delete_position("PRIMARY", "NONEXISTENT"))
+                self.assertFalse(WatchlistRepository(conn).remove_watchlist_item("NONEXISTENT"))
+                self.assertFalse(ScoutCategoryRepository(conn).delete_category(99999))
+                self.assertFalse(TradeLessonRepository(conn).delete_lesson("NONEXISTENT_RULE"))
+            self.assertEqual(get_db_revision(conn), initial)
+
+    def test_stage15b_no_increment_on_noop_approval_consumption(self):
+        """E2: Consuming a non-existent or already consumed approval does not increment db_revision."""
+        with self.core_manager.connection() as conn:
+            appr_repo = OwnerApprovalRepository(conn)
+            initial = get_db_revision(conn)
+            # 1. Non-existent consumption
+            self.assertFalse(appr_repo.consume_approval("NON_EXISTENT_ID"))
+            self.assertEqual(get_db_revision(conn), initial)
+
+            # 2. Append and consume once
+            with execution_role_context("Owner"):
+                appr_repo.append_approval("APP_CONSUME_TEST", "update_ssot", "portfolio_cash", "h")
+                consumed = appr_repo.consume_approval("APP_CONSUME_TEST")
+                self.assertTrue(consumed)
+                rev_after_consume = get_db_revision(conn)
+
+            # 3. Second consume is a no-op
+            self.assertFalse(appr_repo.consume_approval("APP_CONSUME_TEST"))
+            self.assertEqual(get_db_revision(conn), rev_after_consume)
+
+    def test_stage15b_no_increment_on_standalone_rollback(self):
+        """E2: Standalone transaction rollback (e.g., via repository_transaction failure) preserves revision."""
+        with self.core_manager.connection() as conn:
+            initial = get_db_revision(conn)
+            with self.assertRaises(RuntimeError):
+                with repository_transaction(conn):
+                    increment_db_revision(conn)
+                    raise RuntimeError("Forced standalone rollback")
+            self.assertEqual(get_db_revision(conn), initial)
+
+    def test_stage15b_no_increment_on_unit_of_work_rollback(self):
+        """E2: Explicit or exception-triggered UnitOfWork rollback restores pre-transaction revision completely."""
+        with self.core_manager.connection() as conn:
+            with execution_role_context("Terminal Orchestrator"):
+                CashRepository(conn).set_cash_balance("PRIMARY", "EUR", Decimal("100.00"))
+            initial = get_db_revision(conn)
+            self.assertEqual(initial, 1)
+
+        # UnitOfWork exception rollback
+        try:
+            with self.factory.create_unit_of_work() as uow:
+                with execution_role_context("Terminal Orchestrator"):
+                    uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("500.00"))
+                    uow.watchlist.upsert_watchlist_item("TSLA")
+                    self.assertEqual(uow.get_db_revision(), 3)
+                    raise RuntimeError("Simulated failure inside UnitOfWork")
+        except RuntimeError:
+            pass
+
+        with self.core_manager.connection() as conn:
+            self.assertEqual(get_db_revision(conn), initial)
+            self.assertEqual(CashRepository(conn).get_cash("PRIMARY", "EUR").amount, Decimal("100.00"))
+            self.assertIsNone(WatchlistRepository(conn).get_watchlist_item("TSLA"))
+
+    # --- E3: Transaction Atomicity & Savepoint Integrity ---
+
+    def test_stage15b_mutation_and_revision_commit_atomically(self):
+        """E3: Data row mutation and database_metadata.db_revision commit together atomically."""
+        with self.core_manager.connection() as conn:
+            with execution_role_context("Terminal Orchestrator"):
+                CashRepository(conn).set_cash_balance("PRIMARY", "EUR", Decimal("1234.56"))
+
+        # Verify both table records exist and match on another connection
+        with self.core_manager.connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT amount FROM portfolio_cash WHERE account_id = 'PRIMARY' AND currency = 'EUR'")
+            self.assertEqual(cur.fetchone()[0], "1234.56")
+            cur.execute("SELECT db_revision FROM database_metadata WHERE id = 1")
+            self.assertEqual(cur.fetchone()[0], 1)
+
+    def test_stage15b_compound_operation_later_failure_rolls_back_revision(self):
+        """E3: In compound UnitOfWork work, failure at a later mutation rolls back prior uncommitted increments."""
+        with self.core_manager.connection() as conn:
+            initial = get_db_revision(conn)
+
+        try:
+            with self.factory.create_unit_of_work() as uow:
+                with execution_role_context("Terminal Orchestrator"):
+                    uow.watchlist.upsert_watchlist_item("NVDA")
+                    self.assertEqual(uow.get_db_revision(), initial + 1)
+                    # Trigger validation error on second operation
+                    uow.cash.set_cash_balance("PRIMARY", "BAD_CCY", Decimal("100.00"))
+        except ValidationError:
+            pass
+
+        with self.core_manager.connection() as conn:
+            self.assertEqual(get_db_revision(conn), initial)
+            self.assertIsNone(WatchlistRepository(conn).get_watchlist_item("NVDA"))
+
+    def test_stage15b_nested_savepoint_rollback_preserves_outer_increments(self):
+        """E3: A caught nested operation rollback restores only its own revision increment while preserving outer ones."""
+        with self.factory.create_unit_of_work() as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                # Outer operation 1
+                uow.watchlist.upsert_watchlist_item("AMZN")
+                self.assertEqual(uow.get_db_revision(), 1)
+
+                # Nested failed operation (caught)
+                try:
+                    uow.cash.set_cash_balance("PRIMARY", "BAD_CCY", Decimal("50.00"))
+                except ValidationError:
+                    pass
+
+                # Outer revision is still 1
+                self.assertEqual(uow.get_db_revision(), 1)
+
+                # Outer operation 2
+                uow.watchlist.upsert_watchlist_item("META")
+                self.assertEqual(uow.get_db_revision(), 2)
+
+            uow.commit()
+
+        with self.core_manager.connection() as conn:
+            self.assertEqual(get_db_revision(conn), 2)
+            self.assertIsNotNone(WatchlistRepository(conn).get_watchlist_item("AMZN"))
+            self.assertIsNotNone(WatchlistRepository(conn).get_watchlist_item("META"))
+
+    # --- E4: Concurrency & Serialized Writers ---
+
+    def test_stage15b_concurrent_connections_no_lost_increments(self):
+        """E4: Successive transactions across separate connections serialize cleanly without lost increments."""
+        # Using two independent connections to perform sequential revision-controlled writes
+        with self.core_manager.connection() as conn1:
+            with execution_role_context("Terminal Orchestrator"):
+                CashRepository(conn1).set_cash_balance("PRIMARY", "EUR", Decimal("100.00"))
+            self.assertEqual(get_db_revision(conn1), 1)
+
+        with self.core_manager.connection() as conn2:
+            with execution_role_context("Terminal Orchestrator"):
+                PositionRepository(conn2).upsert_position("PRIMARY", "AAPL", Decimal("10"), Decimal("150.00"))
+            self.assertEqual(get_db_revision(conn2), 2)
+
+        with self.core_manager.connection() as conn1:
+            with execution_role_context("Terminal Orchestrator"):
+                WatchlistRepository(conn1).upsert_watchlist_item("GOOGL")
+            self.assertEqual(get_db_revision(conn1), 3)
+
+        with self.core_manager.connection() as reader:
+            self.assertEqual(get_db_revision(reader), 3)
+
+    def test_stage15b_concurrent_readers_observe_consistent_revisions(self):
+        """E4: Reader connection on core DB reads committed revision consistently."""
+        with self.core_manager.connection() as writer:
+            with execution_role_context("Terminal Orchestrator"):
+                CashRepository(writer).set_cash_balance("PRIMARY", "EUR", Decimal("500.00"))
+
+        # Concurrent reader reads committed revision
+        with self.core_manager.connection() as reader:
+            self.assertEqual(get_db_revision(reader), 1)
+            self.assertEqual(CashRepository(reader).get_cash("PRIMARY", "EUR").amount, Decimal("500.00"))
+
+    # --- E5: Helper Misuse & Guard Enforcement ---
+
+    def test_stage15b_increment_db_revision_outside_transaction_raises_database_transaction_error(self):
+        """E5: Calling increment_db_revision without an active transaction raises DatabaseTransactionError."""
+        with self.core_manager.connection() as conn:
+            self.assertFalse(conn.in_transaction)
+            with self.assertRaises(DatabaseTransactionError) as ctx:
+                increment_db_revision(conn)
+            self.assertIn("requires an active transaction", str(ctx.exception))
+            self.assertEqual(get_db_revision(conn), 0)
+
+    def test_stage15b_increment_db_revision_with_none_conn_raises_value_error(self):
+        """E5: Calling increment_db_revision with conn=None raises ValueError."""
+        with self.assertRaises(ValueError) as ctx:
+            increment_db_revision(None)  # type: ignore
+        self.assertIn("Database connection cannot be None", str(ctx.exception))
+
+    def test_stage15b_increment_db_revision_with_invalid_timestamp_raises_validation_error(self):
+        """E5: Calling increment_db_revision with an invalid timestamp string raises ValidationError."""
+        with self.core_manager.connection() as conn:
+            with repository_transaction(conn):
+                with self.assertRaises(ValidationError) as ctx:
+                    increment_db_revision(conn, "2026-11-10 12:00:00")
+                self.assertIn("Timestamp must use an explicit UTC designator", str(ctx.exception))
+
+    def test_stage15b_increment_db_revision_on_cache_db_returns_zero(self):
+        """E5: Calling increment_db_revision on cache DB (no database_metadata) inside transaction returns 0."""
+        with self.cache_manager.connection() as cache_conn:
+            with repository_transaction(cache_conn):
+                rev = increment_db_revision(cache_conn)
+                self.assertEqual(rev, 0)
+
+    def test_stage15b_increment_db_revision_byte_preserves_valid_utc_timestamp(self):
+        """E5: Valid explicit UTC timestamp is preserved byte-for-byte in database_metadata.last_updated_at_utc."""
+        test_ts = "2026-11-10T12:34:56.789123Z"
+        with self.core_manager.connection() as conn:
+            with repository_transaction(conn):
+                increment_db_revision(conn, test_ts)
+
+            cur = conn.cursor()
+            cur.execute("SELECT db_revision, last_updated_at_utc FROM database_metadata WHERE id = 1")
+            row = cur.fetchone()
+            self.assertEqual(row[0], 1)
+            self.assertEqual(row[1], test_ts)
+
+    # --- E6: Preservation of Existing Financial, Audit, and Cache Controls ---
+
+    def test_stage15b_financial_changelog_atomicity_preserved(self):
+        """E6: Financial changelog entry creation remains strictly atomic with the financial mutation."""
+        with self.core_manager.connection() as conn:
+            with execution_role_context("Terminal Orchestrator"):
+                CashRepository(conn).set_cash_balance("PRIMARY", "EUR", Decimal("777.00"))
+
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM financial_changelog WHERE target_resource = 'portfolio_cash/PRIMARY/EUR'")
+            self.assertEqual(cur.fetchone()[0], 1)
+            self.assertEqual(get_db_revision(conn), 1)
+
+    def test_stage15b_audit_event_timestamp_contract_preserved_and_no_revision_increment(self):
+        """E6: AuditEventRepository.append_event enforces explicit timestamp and does not increment db_revision."""
+        with self.core_manager.connection() as conn:
+            audit_repo = AuditEventRepository(conn)
+            initial = get_db_revision(conn)
+
+            # Reject None timestamp
+            with self.assertRaises(ValidationError) as ctx:
+                audit_repo.append_event(
+                    event_id=uuid.uuid4().hex,
+                    timestamp_utc=None,  # type: ignore
+                    action_category="TOOL_EXECUTION",
+                    status="SUCCESS",
+                    agent_role="Data Analyst",
+                    permission_decision="ALLOW",
+                    approval_status="NONE",
+                    raw_event={"key": "val"},
+                )
+            self.assertIn("timestamp_utc is required", str(ctx.exception))
+            self.assertEqual(get_db_revision(conn), initial)
+
+            # Valid append succeeds without incrementing db_revision
+            ev_id = uuid.uuid4().hex
+            audit_repo.append_event(
+                event_id=ev_id,
+                timestamp_utc="2026-11-10T01:00:00Z",
+                action_category="TOOL_EXECUTION",
+                status="SUCCESS",
+                agent_role="Data Analyst",
+                permission_decision="ALLOW",
+                approval_status="NONE",
+                raw_event={"key": "val"},
+            )
+            # db_revision must remain unchanged (operational audit event is not part of SSoT state revision)
+            self.assertEqual(get_db_revision(conn), initial)
+            self.assertIsNotNone(audit_repo.get_event(ev_id))
+
+
 
 if __name__ == "__main__":
     unittest.main()

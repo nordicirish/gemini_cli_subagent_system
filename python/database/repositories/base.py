@@ -480,15 +480,23 @@ def increment_db_revision(conn: sqlite3.Connection, timestamp_utc: Optional[str]
     """
     Atomically increments database_metadata.db_revision by 1 and updates last_updated_at_utc.
     Must be executed within an active transaction on the core financial database.
+    Raises DatabaseTransactionError if conn is not in an active transaction.
+    Raises ValidationError if timestamp_utc is provided but violates centralized UTC contract.
     Returns the new incremented db_revision.
     """
+    if conn is None:
+        raise ValueError("Database connection cannot be None")
+    if not conn.in_transaction:
+        raise DatabaseTransactionError(
+            "db_revision increment requires an active transaction"
+        )
     cur = conn.cursor()
     cur.execute(
         "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='database_metadata';"
     )
     if cur.fetchone()[0] == 0:
         return 0
-    now_ts = timestamp_utc or utc_now_iso()
+    valid_ts = validate_timestamp_utc(timestamp_utc)
     cur.execute(
         """
         UPDATE database_metadata
@@ -496,7 +504,7 @@ def increment_db_revision(conn: sqlite3.Connection, timestamp_utc: Optional[str]
             last_updated_at_utc = ?
         WHERE id = 1;
         """,
-        (now_ts,),
+        (valid_ts,),
     )
     cur.execute("SELECT db_revision FROM database_metadata WHERE id = 1;")
     row = cur.fetchone()

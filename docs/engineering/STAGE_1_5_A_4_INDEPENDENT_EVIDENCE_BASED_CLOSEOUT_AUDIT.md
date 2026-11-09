@@ -360,3 +360,76 @@ The human repository owner retains exclusive authority over git commits, pushes,
 
 *Audit concluded. Antigravity assistant has halted.*
 
+---
+
+## 16. Stage 1.5-A.4 Errata / Follow-on Review (2026-11-10)
+
+During the independent human review of the Stage 1.5-A.4 audit report and the transition to Stage 1.5-B, three documentation and evidence precision issues were identified. In accordance with Workstream A of the Stage 1.5-B directive, this dated errata section is appended to preserve historical audit trail integrity while correcting the permanent record.
+
+### Erratum A1: Reclassification of Finding F-15-03
+
+**Location:** Section 3 (Table), Section 4.3, Section 12.3, and Executive Summary.  
+**Original Text / Classification:** `DEFERRED WITH ACCEPTED BOUNDARY` (deferred to Stage 1.5-B).  
+**Corrected Classification:**  
+```
+================================================================================
+PARTIALLY RESOLVED — EXISTING REVISION TRACKING PRESENT; COMPLETION AND COVERAGE HARDENING IN STAGE 1.5-B
+================================================================================
+```
+
+**Detailed Evidence & Rationale:**
+The original classification of F-15-03 as wholly deferred to Stage 1.5-B was overly broad and failed to reflect substantial revision-tracking infrastructure already implemented, tested, and operational prior to Stage 1.5-B:
+1. **Implemented Infrastructure:**
+   - `increment_db_revision(conn, timestamp_utc)` and `get_db_revision(conn)` implemented in `python/database/repositories/base.py` (lines 463–504).
+   - Atomic SQL increment pattern (`UPDATE database_metadata SET db_revision = db_revision + 1, last_updated_at_utc = ? WHERE id = 1;`).
+   - UnitOfWork revision inspection helper (`uow.get_db_revision()`).
+2. **Covered Repository Mutations:**
+   Atomic revision increments were already wired into seven core domain repositories and twelve distinct mutation paths:
+   - `CashRepository.set_cash_balance` (line 300) and `delete_cash` (line 376; conditional on row existence).
+   - `PositionRepository.upsert_position` (line 570) and `delete_position` (line 650; conditional on row existence).
+   - `WatchlistRepository.upsert_watchlist_item` (line 779) and `remove_watchlist_item` (line 846; conditional on row existence).
+   - `ScoutCategoryRepository.upsert_category` (line 170) and `delete_category` (line 218; conditional on `rowcount > 0`).
+   - `TradeLessonRepository.upsert_lesson` (line 356) and `delete_lesson` (line 391; conditional on `rowcount > 0`).
+   - `DecisionLogRepository.append_decision` (line 466).
+   - `OwnerApprovalRepository.append_approval` (line 630) and `consume_approval` (line 735; conditional on `status = 'PENDING'`).
+   - Pre-existing verified tests: `test_r5_initial_revision_is_zero`, `test_r5_individual_mutations_increment_revision`, `test_r5_unit_of_work_multiple_mutations_and_rollback`, `test_r5_noop_operations_do_not_increment_revision`, `test_r5_cache_daily_bars_do_not_increment_core_revision`.
+3. **Identified Gaps Addressed in Stage 1.5-B:**
+   - Active transaction enforcement guard: `increment_db_revision` previously permitted autocommit writes outside an active transaction.
+   - Centralized timestamp validation: `increment_db_revision` did not validate `timestamp_utc` against `validate_timestamp_utc()`.
+   - Concurrency and adversarial misuse test coverage across multiple connections.
+4. **Deferred SSoT Projection Integration:**
+   - Integration of `db_revision` into the future `SSoTProjectionGenerator` staleness-detection engine belongs to Stage 1.5-C / 1.5-D.
+
+### Erratum A2: Correction of Verification Gate 8 Identity
+
+**Location:** Section 11, Section 14.  
+**Original Text:** "Gate 8 (Code Style & Linting Baseline): PASS — No syntax or bytecode compilation errors introduced."  
+**Corrected Identity & Purpose:**  
+```
+Gate 8 — Repository State & Mode
+```
+
+**Detailed Evidence & Rationale:**
+Inspection of `scripts/verify_stage_1.py` (lines 310–345, 372) confirms that Gate 8 is created by `make_repository_mode_check(args.mode)` and recorded via `reporter.record("Repository State & Mode", ...)`. Its actual purpose is verifying working-tree clean vs. dirty status against the requested verification mode (`--mode committed` requiring a clean tree, `--mode working-tree` requiring dirty changes, or `--mode auto`). It is not a code-style or linting gate.
+
+Furthermore, a clear architectural distinction must be maintained:
+- **Gate 6 CLI Harness Status:** The legacy Stage 1.0 decoupled CLI verification script `scripts/verify_stage_1.py` fails fail-closed at Gate 6 (`check_antigravity_integration`) in non-interactive/headless execution environments due to `EOFError` on console prompts. Because the verification harness terminates immediately on the first failed gate, later gates (Gate 7 and Gate 8) were **not** executed by the CLI harness itself.
+- **Direct Test & Check Execution:** Direct independent execution of the test modules associated with baseline failure preservation (Gate 7: `test_fib_daily_peak.py`, `test_live_call.py`, `test_umac_chart_flow.py`) and direct bytecode compilation checks (`py_compile` / `compileall`) confirmed that the underlying criteria were satisfied. However, direct module execution must not be conflated with a passing execution of the legacy CLI harness.
+
+### Erratum A3: Precise Test Execution Terminology
+
+**Location:** Section 1, Section 10, Section 14, and summary counts.  
+**Original Text:** Statements describing all 472 discovered tests as having "run" or passed.  
+**Corrected Terminology:**  
+```
+472 tests discovered: 471 passed, 1 skipped, 0 failures, 0 errors.
+```
+
+**Detailed Evidence & Rationale:**
+Precise test execution accounting requires distinguishing discovered, executed, passed, and skipped tests:
+- Total discovered in unittest test suite: **472**.
+- Tests executed and passed: **471**.
+- Tests skipped: **1** (`test_r5_04_posix_unlock_failure_injection` in `tests/test_database_backup_concurrency.py`, line 281). This test is explicitly decorated with `@unittest.skipIf(sys.platform == "win32", "POSIX-specific lock injection")` and was skipped due to running on Windows 11. It must never be counted as having passed.
+- The corresponding Windows lock-injection counterpart (`test_r5_04_windows_unlock_failure_injection`) ran and passed independently.
+- Failures: **0**. Errors: **0**.
+
