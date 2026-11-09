@@ -278,7 +278,10 @@ class UnitOfWork:
                         try:
                             setattr(exc_val, "connection_close_error", close_err)
                         except Exception:
-                            pass
+                            raise TransactionIntegrityError(
+                                f"CRITICAL: Failed to close owned database connection on UnitOfWork exit: {close_err}. "
+                                f"Original error: {exc_val}"
+                            ) from exc_val
                     else:
                         raise TransactionIntegrityError(
                             f"CRITICAL: Failed to close owned database connection on UnitOfWork exit: {close_err}. "

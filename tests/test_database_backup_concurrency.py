@@ -44,6 +44,7 @@ from python.database.backup import (
     BackupCleanupError,
     RestoreLockBusyError,
     DatabaseRestoreLock,
+    DatabaseRestoreLockToken,
     _acquire_exclusive_target_lock,
     _close_exclusive_target_lock,
 )
@@ -681,7 +682,7 @@ class TestStage15A22RestoreGateLifetimeAndNoClobber(unittest.TestCase):
 
         try:
             with self.assertRaises(DatabaseConnectionError) as ctx:
-                conn.close()
+                conn.close(force_lock_release=True)
             self.assertIn("Both SQLite connection close and restore lock release failed", str(ctx.exception))
             self.assertIn("Injected connection close failure", str(ctx.exception))
             self.assertIn("Lock release failed", str(ctx.exception))
@@ -1018,6 +1019,410 @@ conn.close()
         finally:
             conn.fail_rollback = False
             conn.close()
+
+
+# ===========================================================================
+# Stage 1.5-A.2.2.1: Managed Connection Close-Failure Safety & Cleanup Integrity
+# ===========================================================================
+
+class UnattributableError(Exception):
+    """Exception that forbids arbitrary attribute assignment."""
+    def __setattr__(self, name, value):
+        raise TypeError(f"Cannot set attribute {name} on immutable exception")
+
+
+class TestStage15A221ManagedConnectionCloseSafetyAndCleanupIntegrity(unittest.TestCase):
+    """
+    Focused verification of Stage 1.5-A.2.2.1 requirements:
+    - R1: Managed SQLite connection never releases shared restore lock if SQLite close fails.
+    - R1: Distinguishes SQLite close failure, token release failure, both succeeding, and retries.
+    - R2: Failure-injection tests proving actual restore-exclusion invariant using real DB and locks.
+    - R3: UnitOfWork integration for owned and external connection close failure and state preservation.
+    - R4: Cleanup exception non-suppression in shared_gate, acquire_shared, acquire_exclusive, and fallbacks.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.source_db_path = os.path.join(self.temp_dir.name, "source_stage15_a221.db")
+        self.backup_path = os.path.join(self.temp_dir.name, "backup_stage15_a221.db")
+
+        # Initialize and populate source database
+        mgr = DatabaseManager(self.source_db_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('PRIMARY', 'EUR', '300000.00', '2026-11-09T20:00:00Z');"
+            )
+
+        # Create valid verified backup
+        res = BackupManager.create_backup(self.source_db_path, self.backup_path, overwrite=False)
+        self.assertEqual(res.integrity_status, "ok")
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    # ---------------------------------------------------------------------------
+    # R1 & R2: ManagedConnection.close() Failure Semantics & Restore Exclusion
+    # ---------------------------------------------------------------------------
+
+    def test_r1_sqlite_close_failure_retains_token_and_blocks_restore_until_succeeded(self):
+        """R1.1 / R2.1-R2.7: SQLite close failure retains restore lock; restore blocked until subsequent close succeeds."""
+        target_path = os.path.join(self.temp_dir.name, "target_close_safety.db")
+
+        # 1. Acquire real shared restore lock token on target_path
+        real_token = DatabaseRestoreLock.acquire_shared(target_path)
+        self.assertIsNotNone(real_token)
+        self.assertTrue(real_token.is_held)
+
+        # 2. Open connection using FaultyManagedConnection with close failure injected
+        conn = sqlite3.connect(target_path, autocommit=True, factory=FaultyManagedConnection)
+        conn.allow_close = False
+        conn._lock_token = real_token
+
+        try:
+            # 3. Call conn.close() -> SQLite close fails
+            with self.assertRaises(DatabaseConnectionError) as ctx:
+                conn.close()
+
+            self.assertIn("Failed to close SQLite connection", str(ctx.exception))
+            self.assertIn("Injected connection close failure", str(ctx.exception))
+
+            # 4. Verify shared token remains held and connection is NOT marked closed
+            self.assertIsNotNone(conn.lock_token)
+            self.assertTrue(conn.lock_token.is_held)
+            self.assertFalse(conn.is_sqlite_closed)
+            self.assertFalse(conn.is_closed)
+
+            # 5. Attempt DatabaseRestoreLock.acquire_exclusive() and verify restoration is REJECTED
+            with self.assertRaises(BackupQuiescenceError) as q_ctx:
+                DatabaseRestoreLock.acquire_exclusive(target_path)
+            self.assertIn("Restore coordination lock is currently held", str(q_ctx.exception))
+
+            # Also verify BackupManager.restore_backup() is rejected fail-closed
+            with self.assertRaises(BackupQuiescenceError):
+                BackupManager.restore_backup(self.backup_path, target_path)
+
+            # 6. Allow underlying SQLite close to succeed on subsequent attempt
+            conn.allow_close = True
+            conn.close()
+
+            # 7. Verify token is then released and connection is fully closed
+            self.assertIsNone(conn.lock_token)
+            self.assertTrue(conn.is_sqlite_closed)
+            self.assertTrue(conn.is_closed)
+
+            # 8. Verify exclusive restore-lock acquisition succeeds only after successful connection closure
+            exclusive_token = DatabaseRestoreLock.acquire_exclusive(target_path)
+            self.assertTrue(exclusive_token.is_held)
+            exclusive_token.release()
+
+            # 9. Verify repeated close calls remain idempotent
+            conn.close()
+            conn.close()
+            self.assertTrue(conn.is_closed)
+        finally:
+            conn._sqlite_closed = False
+            conn.allow_close = True
+            if conn.lock_token is not None:
+                try:
+                    conn.lock_token.release()
+                except Exception:
+                    pass
+                conn._lock_token = None
+            try:
+                super(FaultyManagedConnection, conn).close()
+            except Exception:
+                pass
+
+    def test_r1_sqlite_close_succeeds_but_token_release_fails_retains_token(self):
+        """R1.2 / R2.9: SQLite close succeeds but lock release fails: error reported, token retained, restore blocked."""
+        target_path = os.path.join(self.temp_dir.name, "target_lock_fail_retained.db")
+
+        real_token = DatabaseRestoreLock.acquire_shared(target_path)
+        conn = sqlite3.connect(target_path, autocommit=True, factory=FaultyManagedConnection)
+        conn.allow_close = True
+        conn._lock_token = real_token
+
+        # Inject failure into token.release
+        with patch.object(real_token, "release", side_effect=RuntimeError("Hardware unlock failure")):
+            with self.assertRaises(DatabaseConnectionError) as ctx:
+                conn.close()
+
+            self.assertIn("SQLite connection closed successfully, but restore lock release failed", str(ctx.exception))
+            self.assertIn("Hardware unlock failure", str(ctx.exception))
+
+            # Connection is sqlite-closed, but NOT fully closed, and token is NOT discarded
+            self.assertTrue(conn.is_sqlite_closed)
+            self.assertFalse(conn.is_closed)
+            self.assertIsNotNone(conn.lock_token)
+            self.assertTrue(conn.lock_token.is_held)
+
+            # Restoration remains blocked
+            with self.assertRaises(BackupQuiescenceError):
+                DatabaseRestoreLock.acquire_exclusive(target_path)
+
+        # Retry close without failure -> succeeds and releases token
+        conn.close()
+        self.assertTrue(conn.is_closed)
+        self.assertIsNone(conn.lock_token)
+
+        # Now exclusive lock succeeds
+        ex_tok = DatabaseRestoreLock.acquire_exclusive(target_path)
+        self.assertTrue(ex_tok.is_held)
+        ex_tok.release()
+
+    def test_r1_both_close_and_token_release_fail_diagnosable(self):
+        """R1.3 / R2.10: Both SQLite close and lock release fail under forced release: both errors diagnosable."""
+        target_path = os.path.join(self.temp_dir.name, "target_both_fail_diag.db")
+        conn = sqlite3.connect(target_path, autocommit=True, factory=FaultyManagedConnection)
+        conn.allow_close = False
+        mock_token = MagicMock()
+        mock_token.release.side_effect = RuntimeError("Secondary lock release error")
+        conn._lock_token = mock_token
+
+        try:
+            with self.assertRaises(DatabaseConnectionError) as ctx:
+                conn.close(force_lock_release=True)
+
+            self.assertIn("Both SQLite connection close and restore lock release failed", str(ctx.exception))
+            self.assertIn("Injected connection close failure", str(ctx.exception))
+            self.assertIn("Secondary lock release error", str(ctx.exception))
+            self.assertTrue(hasattr(ctx.exception, "lock_release_error"))
+            self.assertIn("Secondary lock release error", str(ctx.exception.lock_release_error))
+        finally:
+            conn._sqlite_closed = False
+            conn.allow_close = True
+            conn._lock_token = None
+            try:
+                super(FaultyManagedConnection, conn).close()
+            except Exception:
+                pass
+
+    # ---------------------------------------------------------------------------
+    # R3: UnitOfWork Integration
+    # ---------------------------------------------------------------------------
+
+    def test_r3_unit_of_work_owned_connection_close_failure_preserves_state_and_lock(self):
+        """R3.1: Owned connection whose close fails in UnitOfWork retains lock and marks conn_unsafe."""
+        target_path = os.path.join(self.temp_dir.name, "target_uow_owned_fail.db")
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+        created_conns = []
+
+        def faulty_connect():
+            token = DatabaseRestoreLock.acquire_shared(mgr.db_path)
+            c = sqlite3.connect(mgr.db_path, autocommit=True, factory=FaultyManagedConnection)
+            c.allow_close = False
+            c._lock_token = token
+            created_conns.append(c)
+            return c
+
+        with patch.object(mgr, "connect", side_effect=faulty_connect):
+            uow = UnitOfWork(mgr)
+            with self.assertRaises(TransactionIntegrityError) as ctx:
+                with uow:
+                    pass  # Clean exit; close() will fail in finally
+
+            self.assertIn("Failed to close owned database connection on UnitOfWork exit", str(ctx.exception))
+            self.assertTrue(uow.is_conn_unsafe)
+
+            # Restoration MUST remain blocked because the connection's restore lock was retained!
+            with self.assertRaises(BackupQuiescenceError):
+                DatabaseRestoreLock.acquire_exclusive(target_path)
+
+        # Cleanup: allow close and close the connection
+        for c in created_conns:
+            c.allow_close = True
+            c.close()
+
+        # After real cleanup, restore lock succeeds
+        ex_tok = DatabaseRestoreLock.acquire_exclusive(target_path)
+        self.assertTrue(ex_tok.is_held)
+        ex_tok.release()
+
+    def test_r3_unit_of_work_owned_connection_close_failure_with_active_exception(self):
+        """R3.2: Transaction error in UnitOfWork attaches secondary close error without suppression."""
+        target_path = os.path.join(self.temp_dir.name, "target_uow_owned_tx_fail.db")
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+        created_conns = []
+
+        def faulty_connect():
+            token = DatabaseRestoreLock.acquire_shared(mgr.db_path)
+            c = sqlite3.connect(mgr.db_path, autocommit=True, factory=FaultyManagedConnection)
+            c.allow_close = False
+            c._lock_token = token
+            created_conns.append(c)
+            return c
+
+        with patch.object(mgr, "connect", side_effect=faulty_connect):
+            uow = UnitOfWork(mgr)
+            with self.assertRaises(ValueError) as ctx:
+                with uow:
+                    raise ValueError("Domain application transaction failure")
+
+            self.assertEqual(str(ctx.exception), "Domain application transaction failure")
+            self.assertTrue(hasattr(ctx.exception, "connection_close_error"))
+            self.assertIn("Injected connection close failure", str(ctx.exception.connection_close_error))
+            self.assertTrue(uow.is_conn_unsafe)
+
+        for c in created_conns:
+            c.allow_close = True
+            c.close()
+
+    def test_r3_unit_of_work_external_connection_close_failure_preserves_caller_ownership(self):
+        """R3.3: UnitOfWork leaves external connection ownership and close responsibility to caller."""
+        target_path = os.path.join(self.temp_dir.name, "target_uow_ext_fail.db")
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+        token = DatabaseRestoreLock.acquire_shared(target_path)
+        ext_conn = sqlite3.connect(target_path, autocommit=True, factory=FaultyManagedConnection)
+        ext_conn.allow_close = False
+        ext_conn._lock_token = token
+
+        try:
+            # UoW with external connection
+            with UnitOfWork(mgr, connection=ext_conn) as uow:
+                pass
+
+            # UoW does NOT close external connection; it remains open and lock is held
+            self.assertFalse(ext_conn.is_closed)
+            self.assertTrue(ext_conn.lock_token.is_held)
+
+            with self.assertRaises(BackupQuiescenceError):
+                DatabaseRestoreLock.acquire_exclusive(target_path)
+
+            # Caller attempts close -> fails and retains lock
+            with self.assertRaises(DatabaseConnectionError):
+                ext_conn.close()
+
+            with self.assertRaises(BackupQuiescenceError):
+                DatabaseRestoreLock.acquire_exclusive(target_path)
+
+            # Caller allows close -> succeeds and releases lock
+            ext_conn.allow_close = True
+            ext_conn.close()
+            self.assertTrue(ext_conn.is_closed)
+
+            # Now restore succeeds
+            ex_tok = DatabaseRestoreLock.acquire_exclusive(target_path)
+            self.assertTrue(ex_tok.is_held)
+            ex_tok.release()
+        finally:
+            ext_conn.allow_close = True
+            if ext_conn.lock_token is not None:
+                try:
+                    ext_conn.lock_token.release()
+                except Exception:
+                    pass
+                ext_conn._lock_token = None
+            try:
+                super(FaultyManagedConnection, ext_conn).close()
+            except Exception:
+                pass
+
+    # ---------------------------------------------------------------------------
+    # R4: Cleanup Exception Non-Suppression & Diagnostic Fallbacks
+    # ---------------------------------------------------------------------------
+
+    def test_r4_shared_gate_release_failure_reported(self):
+        """R4.1: DatabaseRestoreLock.shared_gate() reports lock release failure on clean exit and active error."""
+        target_path = os.path.join(self.temp_dir.name, "target_gate_fail.db")
+        real_acquire = DatabaseRestoreLock.acquire_shared
+
+        # 1. Clean exit raises release failure
+        def faulty_acquire_clean(path):
+            tok = real_acquire(path)
+            orig_rel = tok.release
+
+            def faulty_rel():
+                orig_rel()  # Release OS lock first so no handle leak on Windows
+                raise RuntimeError("Gate release error")
+
+            tok.release = faulty_rel
+            return tok
+
+        with patch.object(DatabaseRestoreLock, "acquire_shared", side_effect=faulty_acquire_clean):
+            with self.assertRaises(RuntimeError) as ctx:
+                with DatabaseRestoreLock.shared_gate(target_path):
+                    pass
+            self.assertIn("Gate release error", str(ctx.exception))
+
+        # 2. Context exit with active error attaches lock_release_error
+        def faulty_acquire_active_err(path):
+            tok = real_acquire(path)
+            orig_rel = tok.release
+
+            def faulty_rel():
+                orig_rel()  # Release OS lock first so no handle leak on Windows
+                raise RuntimeError("Gate release error")
+
+            tok.release = faulty_rel
+            return tok
+
+        with patch.object(DatabaseRestoreLock, "acquire_shared", side_effect=faulty_acquire_active_err):
+            with self.assertRaises(ValueError) as ctx2:
+                with DatabaseRestoreLock.shared_gate(target_path):
+                    raise ValueError("Domain query error")
+            self.assertEqual(str(ctx2.exception), "Domain query error")
+            self.assertTrue(hasattr(ctx2.exception, "lock_release_error"))
+            self.assertIn("Gate release error", str(ctx2.exception.lock_release_error))
+
+    def test_r4_acquire_shared_and_exclusive_file_close_failure_attached(self):
+        """R4.2: File-close failures during lock acquisition cleanup are attached as file_close_error."""
+        target_path = os.path.join(self.temp_dir.name, "target_acq_cleanup.db")
+
+        # Make file.close fail during lock failure cleanup
+        real_open = open
+
+        def faulty_open(path, *args, **kwargs):
+            f = real_open(path, *args, **kwargs)
+            if ".restore_lock" in path:
+                f_close = f.close
+                def faulty_f_close():
+                    f_close()
+                    raise OSError("Injected lock file handle close failure")
+                f.close = faulty_f_close
+            return f
+
+        # Hold exclusive lock first so acquire_shared fails and triggers cleanup
+        ex_tok = DatabaseRestoreLock.acquire_exclusive(target_path)
+        try:
+            with patch("builtins.open", side_effect=faulty_open):
+                with self.assertRaises(RestoreLockBusyError) as ctx:
+                    DatabaseRestoreLock.acquire_shared(target_path)
+                self.assertTrue(hasattr(ctx.exception, "file_close_error"))
+                self.assertIn("Injected lock file handle close failure", str(ctx.exception.file_close_error))
+        finally:
+            ex_tok.release()
+
+    def test_r4_diagnostic_attachment_fallback_on_unattributable_exception(self):
+        """R4.3: If diagnostic attachment fails on an unattributable exception, fallback chains explicitly."""
+        target_path = os.path.join(self.temp_dir.name, "target_fallback.db")
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+        created_conns = []
+
+        def faulty_connect():
+            c = sqlite3.connect(mgr.db_path, autocommit=True, factory=FaultyManagedConnection)
+            c.allow_close = False
+            created_conns.append(c)
+            return c
+
+        try:
+            with patch.object(mgr, "connect", side_effect=faulty_connect):
+                # An exception whose type has __slots__ = () and does not allow setattr
+                with self.assertRaises(DatabaseConnectionError) as ctx:
+                    with mgr.connection():
+                        raise UnattributableError("Slots exception")
+
+                self.assertIn("Injected connection close failure", str(ctx.exception))
+                self.assertIsInstance(ctx.exception.__cause__, UnattributableError)
+        finally:
+            for c in created_conns:
+                c.allow_close = True
+                c.close()
 
 
 if __name__ == "__main__":

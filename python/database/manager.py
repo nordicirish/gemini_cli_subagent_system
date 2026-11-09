@@ -75,43 +75,99 @@ class DatabaseTransactionError(DatabaseError):
 class ManagedConnection(sqlite3.Connection):
     """
     Managed SQLite connection retaining an active DatabaseRestoreLock shared token
-    throughout its lifecycle (Stage 1.5-A.2.2 R1).
-    Deterministically releases the token when closed.
+    throughout its lifecycle (Stage 1.5-A.2.2 R1, Stage 1.5-A.2.2.1 R1).
+
+    Safety Invariant:
+    A managed SQLite connection must NEVER release its shared restore lock while
+    the underlying SQLite connection may still be open.
+
+    State Model:
+    1. Active:
+       - _sqlite_closed = False, _lock_token is not None, _is_closed = False.
+       - Restore coordination lock is held (exclusive restore is blocked).
+    2. SQLite Close Failed:
+       - _sqlite_closed = False, _lock_token is not None, _is_closed = False.
+       - The restore lock is strictly retained (restore remains blocked).
+       - Connection remains in a state where close() can be retried.
+       - SQLite close exception is raised without attempting lock release.
+    3. SQLite Closed, Lock Release Failed:
+       - _sqlite_closed = True, _lock_token is not None, _is_closed = False.
+       - SQLite connection is closed and cannot be used.
+       - Token release failed; token is retained (not discarded) so error is reported
+         and subsequent close() call can retry releasing the lock token.
+       - Restore remains blocked until the lock token is released.
+    4. Fully Closed:
+       - _sqlite_closed = True, _lock_token is None, _is_closed = True.
+       - Both SQLite connection and restore lock token are cleanly closed.
+       - Subsequent close() calls are no-ops (idempotent).
+       - Restore coordination lock can now be acquired exclusively.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._lock_token: Optional[DatabaseRestoreLockToken] = None
+        self._sqlite_closed: bool = False
         self._is_closed: bool = False
+        self._last_sqlite_close_error: Optional[Exception] = None
+        self._last_lock_release_error: Optional[Exception] = None
 
     @property
     def lock_token(self) -> Optional[DatabaseRestoreLockToken]:
         """Returns the held DatabaseRestoreLockToken, if any."""
         return self._lock_token
 
-    def close(self) -> None:
+    @property
+    def is_closed(self) -> bool:
+        """Returns True only when both SQLite close and lock release have succeeded."""
+        return self._is_closed
+
+    @property
+    def is_sqlite_closed(self) -> bool:
+        """Returns True if the underlying SQLite connection has been closed."""
+        return self._sqlite_closed
+
+    def close(self, force_lock_release: bool = False) -> None:
         """
-        Idempotently closes SQLite connection and releases the restore lock token (R1).
-        Preserves and chains both errors if both SQLite close and lock release fail (R1, R5).
+        Closes the SQLite connection and releases the restore lock token (Stage 1.5-A.2.2.1 R1).
+
+        Parameters:
+            force_lock_release: If True, attempts to release the lock token even if SQLite close
+                                failed (used only for diagnostic composite failure verification).
+                                Default is False: never releases lock if SQLite close failed.
         """
+        # 1. Idempotent exit if already fully closed
         if self._is_closed:
             return
-        self._is_closed = True
 
-        sqlite_err = None
-        try:
-            super().close()
-        except Exception as e:
-            sqlite_err = e
+        sqlite_err: Optional[Exception] = None
+        # 2. Close underlying SQLite connection first
+        if not self._sqlite_closed:
+            try:
+                super().close()
+                self._sqlite_closed = True
+                self._last_sqlite_close_error = None
+            except Exception as e:
+                sqlite_err = e
+                self._last_sqlite_close_error = e
+                # Fail-closed invariant: do NOT release lock token unless forced
+                if not force_lock_release:
+                    if isinstance(e, DatabaseError):
+                        raise e
+                    raise DatabaseConnectionError(f"Failed to close SQLite connection: {e}") from e
 
-        lock_err = None
+        # 3. Only after SQLite close succeeds (or forced), attempt to release restore lock token
+        lock_err: Optional[Exception] = None
         if self._lock_token is not None:
             try:
                 self._lock_token.release()
+                self._lock_token = None
+                self._last_lock_release_error = None
             except Exception as e:
                 lock_err = e
-            self._lock_token = None
+                self._last_lock_release_error = e
+                # Do NOT discard the token; retain reference so error is diagnosable and can be retried
 
+        # 4. Error evaluation and reporting
         if sqlite_err is not None and lock_err is not None:
             err = DatabaseConnectionError(
                 f"Both SQLite connection close and restore lock release failed: "
@@ -127,7 +183,12 @@ class ManagedConnection(sqlite3.Connection):
         elif lock_err is not None:
             if isinstance(lock_err, DatabaseError):
                 raise lock_err
-            raise DatabaseConnectionError(f"Failed to release restore lock token on connection close: {lock_err}") from lock_err
+            raise DatabaseConnectionError(
+                f"SQLite connection closed successfully, but restore lock release failed: {lock_err}"
+            ) from lock_err
+
+        # 5. Successfully closed both SQLite and restore lock token
+        self._is_closed = True
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +426,7 @@ class DatabaseManager:
                     try:
                         setattr(exc_val, "connection_close_error", close_err)
                     except Exception:
-                        pass
+                        raise close_err from exc_val
                 else:
                     if isinstance(close_err, DatabaseError):
                         raise close_err
@@ -448,7 +509,7 @@ class DatabaseManager:
                         try:
                             setattr(exc_val, "connection_close_error", close_err)
                         except Exception:
-                            pass
+                            raise close_err from exc_val
                     else:
                         raise DatabaseConnectionError(
                             f"Failed to close owned transaction connection: {close_err}"

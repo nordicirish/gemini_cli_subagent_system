@@ -204,22 +204,35 @@ class DatabaseRestoreLock:
                 )
                 if not ok:
                     err = ctypes.windll.kernel32.GetLastError()
-                    f.close()
-                    raise RestoreLockBusyError(
+                    close_ce = None
+                    try:
+                        f.close()
+                    except Exception as ce:
+                        close_ce = ce
+                    busy_err = RestoreLockBusyError(
                         f"Database '{db_path}' is locked: currently undergoing offline backup restoration (WinError {err})."
                     )
+                    if close_ce is not None:
+                        setattr(busy_err, "file_close_error", close_ce)
+                    raise busy_err
                 return DatabaseRestoreLockToken(db_path, lock_path, f, h, is_exclusive=False)
             except (OSError, RestoreLockBusyError) as e:
+                close_ce = None
                 if f is not None and not f.closed:
                     try:
                         f.close()
-                    except Exception:
-                        pass
+                    except Exception as ce:
+                        close_ce = ce
+                if close_ce is not None:
+                    setattr(e, "file_close_error", close_ce)
                 if isinstance(e, RestoreLockBusyError):
                     raise
-                raise RestoreLockBusyError(
+                busy_err = RestoreLockBusyError(
                     f"Database '{db_path}' is locked: currently undergoing offline backup restoration: {e}"
-                ) from e
+                )
+                if close_ce is not None:
+                    setattr(busy_err, "file_close_error", close_ce)
+                raise busy_err from e
         else:
             import fcntl
             f = None
@@ -229,14 +242,18 @@ class DatabaseRestoreLock:
                 fcntl.flock(fileno, fcntl.LOCK_SH | fcntl.LOCK_NB)
                 return DatabaseRestoreLockToken(db_path, lock_path, f, None, is_exclusive=False, fileno=fileno)
             except (IOError, OSError) as e:
+                close_ce = None
                 if f is not None and not f.closed:
                     try:
                         f.close()
-                    except Exception:
-                        pass
-                raise RestoreLockBusyError(
+                    except Exception as ce:
+                        close_ce = ce
+                busy_err = RestoreLockBusyError(
                     f"Database '{db_path}' is locked: currently undergoing offline backup restoration: {e}"
-                ) from e
+                )
+                if close_ce is not None:
+                    setattr(busy_err, "file_close_error", close_ce)
+                raise busy_err from e
 
     @classmethod
     @contextmanager
@@ -244,16 +261,24 @@ class DatabaseRestoreLock:
         """
         Shared acquisition gate context manager for database connection creation (R3, R4).
         Maintained for backwards-compatibility.
+        Reports lock release failures without silent suppression (Stage 1.5-A.2.2.1 R4).
         """
         token = cls.acquire_shared(db_path)
         try:
             yield token
         finally:
+            exc_type, exc_val, _ = sys.exc_info()
             if token is not None and token.is_held:
                 try:
                     token.release()
-                except Exception:
-                    pass
+                except Exception as re:
+                    if exc_type is not None:
+                        try:
+                            setattr(exc_val, "lock_release_error", re)
+                        except Exception:
+                            raise re from exc_val
+                    else:
+                        raise
 
     @classmethod
     def acquire_exclusive(cls, db_path: str) -> DatabaseRestoreLockToken:
@@ -282,23 +307,36 @@ class DatabaseRestoreLock:
                 )
                 if not ok:
                     err = ctypes.windll.kernel32.GetLastError()
-                    f.close()
-                    raise BackupQuiescenceError(
+                    close_ce = None
+                    try:
+                        f.close()
+                    except Exception as ce:
+                        close_ce = ce
+                    quiescence_err = BackupQuiescenceError(
                         f"Database '{db_path}' cannot be safely restored: "
                         f"Restore coordination lock is currently held by an active connection or restore process (WinError {err})."
                     )
+                    if close_ce is not None:
+                        setattr(quiescence_err, "file_close_error", close_ce)
+                    raise quiescence_err
                 return DatabaseRestoreLockToken(db_path, lock_path, f, h, is_exclusive=True)
             except (OSError, BackupQuiescenceError) as e:
+                close_ce = None
                 if f is not None and not f.closed:
                     try:
                         f.close()
-                    except Exception:
-                        pass
+                    except Exception as ce:
+                        close_ce = ce
+                if close_ce is not None:
+                    setattr(e, "file_close_error", close_ce)
                 if isinstance(e, BackupQuiescenceError):
                     raise
-                raise BackupQuiescenceError(
+                quiescence_err = BackupQuiescenceError(
                     f"Database '{db_path}' cannot be safely restored: Failed to acquire exclusive restore lock: {e}"
-                ) from e
+                )
+                if close_ce is not None:
+                    setattr(quiescence_err, "file_close_error", close_ce)
+                raise quiescence_err from e
         else:
             import fcntl
             f = None
@@ -308,15 +346,19 @@ class DatabaseRestoreLock:
                 fcntl.flock(fileno, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return DatabaseRestoreLockToken(db_path, lock_path, f, None, is_exclusive=True, fileno=fileno)
             except (IOError, OSError) as e:
+                close_ce = None
                 if f is not None and not f.closed:
                     try:
                         f.close()
-                    except Exception:
-                        pass
-                raise BackupQuiescenceError(
+                    except Exception as ce:
+                        close_ce = ce
+                quiescence_err = BackupQuiescenceError(
                     f"Database '{db_path}' cannot be safely restored: "
                     f"Restore coordination lock is held by another process: {e}"
-                ) from e
+                )
+                if close_ce is not None:
+                    setattr(quiescence_err, "file_close_error", close_ce)
+                raise quiescence_err from e
 
 
 # ---------------------------------------------------------------------------
