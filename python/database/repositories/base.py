@@ -17,6 +17,7 @@ import json
 import re
 import sqlite3
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+import uuid
 
 from python.database.manager import DatabaseError
 from python.tool_registry import get_active_caller_role
@@ -201,7 +202,7 @@ class DailyBarRecord:
 _HEX_32_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ISO_TIMESTAMP_PATTERN = re.compile(
-    r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$"
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$"
 )
 
 
@@ -231,10 +232,12 @@ def utc_now_iso() -> str:
 
 def validate_timestamp_utc(ts: Optional[str]) -> str:
     """
-    Validates and normalizes an ISO-8601 UTC timestamp string.
+    Validates an ISO-8601 UTC timestamp string (R3).
     If ts is None, returns current utc_now_iso().
-    If ts is provided, validates that it is a valid ISO-8601 string representing UTC.
-    Raises ValidationError if invalid, not a string, or invalid date/time.
+    If ts is provided, strictly requires an explicit UTC designator ('Z' or +00:00 / -00:00).
+    Rejects timezone-naive timestamps, non-zero offsets, malformed dates/times,
+    empty strings, and non-string values.
+    Preserves valid historical UTC timestamp strings exactly.
     """
     if ts is None:
         return utc_now_iso()
@@ -244,17 +247,19 @@ def validate_timestamp_utc(ts: Optional[str]) -> str:
     if not s:
         raise ValidationError("Timestamp string cannot be empty")
     if not _ISO_TIMESTAMP_PATTERN.match(s):
-        raise ValidationError(f"Invalid ISO-8601 timestamp format: '{ts}'")
+        raise ValidationError(f"Invalid ISO-8601 UTC timestamp format: '{ts}'")
     try:
         norm = s.replace("Z", "+00:00") if s.endswith("Z") else s
         dt = datetime.fromisoformat(norm)
     except (ValueError, TypeError) as e:
         raise ValidationError(f"Invalid ISO-8601 timestamp '{ts}': {e}") from e
 
-    if dt.tzinfo is not None:
-        offset = dt.utcoffset()
-        if offset is not None and offset.total_seconds() != 0:
-            raise ValidationError(f"Timestamp must be UTC, got timezone offset {offset} in '{ts}'")
+    if dt.tzinfo is None:
+        raise ValidationError(f"Timestamp must contain explicit UTC timezone designator, got naive: '{ts}'")
+
+    offset = dt.utcoffset()
+    if offset is None or offset.total_seconds() != 0:
+        raise ValidationError(f"Timestamp must be UTC, got timezone offset {offset} in '{ts}'")
 
     return s
 
@@ -479,4 +484,80 @@ def increment_db_revision(conn: sqlite3.Connection, timestamp_utc: Optional[str]
     cur.execute("SELECT db_revision FROM database_metadata WHERE id = 1;")
     row = cur.fetchone()
     return int(row[0]) if row else 0
+
+
+# ---------------------------------------------------------------------------
+# Repository Transaction & Savepoint Coordinator (R1 / R2)
+# ---------------------------------------------------------------------------
+
+class repository_transaction:
+    """
+    Context manager providing unified transaction ownership and SAVEPOINT atomicity (R1/R2).
+    - If conn is not in transaction (standalone): acquires BEGIN IMMEDIATE and commits on exit,
+      rolls back on exception.
+    - If conn is in an existing transaction (nested/UnitOfWork): creates a unique SAVEPOINT,
+      releases savepoint on exit, rolls back to and releases savepoint on exception.
+    - Never commits or rolls back a caller-owned outer transaction.
+    - If rollback or savepoint recovery fails, raises TransactionIntegrityError chained with original error.
+    - Preserves caller-owned UnitOfWork lifecycle and nested transaction protections.
+    """
+
+    def __init__(self, connection: sqlite3.Connection):
+        if connection is None:
+            raise ValueError("Repository connection cannot be None")
+        self._conn = connection
+        self._owns_tx = False
+        self._sp_name: Optional[str] = None
+
+    def __enter__(self) -> "repository_transaction":
+        self._owns_tx = not self._conn.in_transaction
+        if self._owns_tx:
+            self._conn.execute("BEGIN IMMEDIATE;")
+        else:
+            self._sp_name = f"sp_repo_{uuid.uuid4().hex}"
+            self._conn.execute(f"SAVEPOINT {self._sp_name};")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            if self._owns_tx:
+                try:
+                    self._conn.execute("COMMIT;")
+                except Exception as commit_err:
+                    try:
+                        self._conn.execute("ROLLBACK;")
+                    except Exception as rb_err:
+                        raise TransactionIntegrityError(
+                            f"CRITICAL: Commit failed and subsequent rollback also failed: {rb_err}. "
+                            f"Database connection is in an uncertain state."
+                        ) from commit_err
+                    raise
+            else:
+                try:
+                    self._conn.execute(f"RELEASE SAVEPOINT {self._sp_name};")
+                except Exception as release_err:
+                    raise TransactionIntegrityError(
+                        f"CRITICAL: Failed to release savepoint '{self._sp_name}' after successful operation: {release_err}. "
+                        f"The caller-owned transaction is in an uncertain state and MUST NOT be committed."
+                    ) from release_err
+        else:
+            if self._owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception as rb_err:
+                    raise TransactionIntegrityError(
+                        f"CRITICAL: Standalone rollback failed following operation error: {rb_err}. "
+                        f"Database connection is in an uncertain state."
+                    ) from exc_val
+            else:
+                try:
+                    self._conn.execute(f"ROLLBACK TO SAVEPOINT {self._sp_name};")
+                    self._conn.execute(f"RELEASE SAVEPOINT {self._sp_name};")
+                except Exception as sp_err:
+                    raise TransactionIntegrityError(
+                        f"CRITICAL: Failed to roll back savepoint '{self._sp_name}' during operation error: {sp_err}. "
+                        f"The caller-owned transaction is in an uncertain state and MUST NOT be committed."
+                    ) from exc_val
+            return False
+
 

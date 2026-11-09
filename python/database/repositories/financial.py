@@ -34,6 +34,7 @@ from python.database.repositories.base import (
     _resolve_effective_actor,
     validate_timestamp_utc,
     increment_db_revision,
+    repository_transaction,
 )
 from python.tool_registry import (
     authorize_financial_mutation,
@@ -263,78 +264,60 @@ class CashRepository(BaseRepository):
 
         approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
-        # R5: Acquire write lock BEFORE reading before-state for snapshot consistency
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
+            try:
+                # Fetch before-state under write lock inside the transaction
+                existing = self.get_cash(norm_account, norm_currency)
+                before_state = (
+                    {
+                        "account_id": existing.account_id,
+                        "currency": existing.currency,
+                        "amount": decimal_to_canonical_str(existing.amount),
+                    }
+                    if existing
+                    else None
+                )
 
-        try:
-            # Fetch before-state under write lock inside the transaction
-            existing = self.get_cash(norm_account, norm_currency)
-            before_state = (
-                {
-                    "account_id": existing.account_id,
-                    "currency": existing.currency,
-                    "amount": decimal_to_canonical_str(existing.amount),
+                after_state = {
+                    "account_id": norm_account,
+                    "currency": norm_currency,
+                    "amount": amount_str,
                 }
-                if existing
-                else None
-            )
 
-            after_state = {
-                "account_id": norm_account,
-                "currency": norm_currency,
-                "amount": amount_str,
-            }
+                self._conn.execute(
+                    """
+                    INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(account_id, currency) DO UPDATE SET
+                        amount = excluded.amount,
+                        last_updated_at_utc = excluded.last_updated_at_utc
+                    """,
+                    (norm_account, norm_currency, amount_str, valid_ts),
+                )
 
-            self._conn.execute(
-                """
-                INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(account_id, currency) DO UPDATE SET
-                    amount = excluded.amount,
-                    last_updated_at_utc = excluded.last_updated_at_utc
-                """,
-                (norm_account, norm_currency, amount_str, valid_ts),
-            )
+                # Atomically increment database revision with mutation
+                increment_db_revision(self._conn, valid_ts)
 
-            # Atomically increment database revision with mutation
-            increment_db_revision(self._conn, valid_ts)
+                # R1.2: Construct capability directly from validated local state and append changelog
+                from python.database.repositories.audit import FinancialChangelogRepository
 
-            # R1.2: Construct capability directly from validated local state and append changelog
-            from python.database.repositories.audit import FinancialChangelogRepository
-
-            cap = _FinancialMutationCapability(
-                credential=_acquire_mutation_credential(),
-                connection=self._conn,
-                correlation_id=cid,
-                actor_role=effective_actor,
-                operation_name="set_cash_balance",
-                target_resource=target_resource,
-                before_state=before_state,
-                after_state=after_state,
-                approval_digest=approval_digest,
-                timestamp_utc=valid_ts,
-            )
-            self._last_mutation_capability = cap
-            FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
-
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-        except sqlite3.IntegrityError as e:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise IntegrityConflictError(f"Integrity constraint violation setting cash balance: {e}") from e
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
+                cap = _FinancialMutationCapability(
+                    credential=_acquire_mutation_credential(),
+                    connection=self._conn,
+                    correlation_id=cid,
+                    actor_role=effective_actor,
+                    operation_name="set_cash_balance",
+                    target_resource=target_resource,
+                    before_state=before_state,
+                    after_state=after_state,
+                    approval_digest=approval_digest,
+                    timestamp_utc=valid_ts,
+                )
+                self._last_mutation_capability = cap
+                FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
+            except sqlite3.IntegrityError as e:
+                raise IntegrityConflictError(f"Integrity constraint violation setting cash balance: {e}") from e
 
         return CashBalance(
             account_id=norm_account,
@@ -372,16 +355,10 @@ class CashRepository(BaseRepository):
         cid = correlation_id or uuid.uuid4().hex
         approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
-        # R5: Acquire write lock BEFORE reading before-state
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
-
-        try:
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
             existing = self.get_cash(norm_account, norm_currency)
             if existing is None:
-                if owns_tx:
-                    self._conn.execute("COMMIT;")
                 return False
 
             before_state = {
@@ -415,17 +392,7 @@ class CashRepository(BaseRepository):
             )
             self._last_mutation_capability = cap
             FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
-
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
-        return True
+            return True
 
 
 # ---------------------------------------------------------------------------
@@ -560,85 +527,67 @@ class PositionRepository(BaseRepository):
 
         approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
-        # R5: Acquire write lock BEFORE reading before-state
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
+            try:
+                # Query before-state under write lock inside transaction
+                existing = self.get_position(norm_account, norm_ticker)
+                before_state = (
+                    {
+                        "account_id": existing.account_id,
+                        "ticker": existing.ticker,
+                        "shares": decimal_to_canonical_str(existing.shares),
+                        "wac_eur": decimal_to_canonical_str(existing.wac_eur),
+                        "wac_usd": decimal_to_canonical_str(existing.wac_usd) if existing.wac_usd is not None else None,
+                    }
+                    if existing
+                    else None
+                )
 
-        try:
-            # Query before-state under write lock inside transaction
-            existing = self.get_position(norm_account, norm_ticker)
-            before_state = (
-                {
-                    "account_id": existing.account_id,
-                    "ticker": existing.ticker,
-                    "shares": decimal_to_canonical_str(existing.shares),
-                    "wac_eur": decimal_to_canonical_str(existing.wac_eur),
-                    "wac_usd": decimal_to_canonical_str(existing.wac_usd) if existing.wac_usd is not None else None,
+                after_state = {
+                    "account_id": norm_account,
+                    "ticker": norm_ticker,
+                    "shares": shares_str,
+                    "wac_eur": wac_eur_str,
+                    "wac_usd": wac_usd_str,
                 }
-                if existing
-                else None
-            )
 
-            after_state = {
-                "account_id": norm_account,
-                "ticker": norm_ticker,
-                "shares": shares_str,
-                "wac_eur": wac_eur_str,
-                "wac_usd": wac_usd_str,
-            }
+                self._conn.execute(
+                    """
+                    INSERT INTO portfolio_positions (
+                        account_id, ticker, shares, wac_eur, wac_usd, last_updated_at_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(account_id, ticker) DO UPDATE SET
+                        shares = excluded.shares,
+                        wac_eur = excluded.wac_eur,
+                        wac_usd = excluded.wac_usd,
+                        last_updated_at_utc = excluded.last_updated_at_utc
+                    """,
+                    (norm_account, norm_ticker, shares_str, wac_eur_str, wac_usd_str, valid_ts),
+                )
 
-            self._conn.execute(
-                """
-                INSERT INTO portfolio_positions (
-                    account_id, ticker, shares, wac_eur, wac_usd, last_updated_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(account_id, ticker) DO UPDATE SET
-                    shares = excluded.shares,
-                    wac_eur = excluded.wac_eur,
-                    wac_usd = excluded.wac_usd,
-                    last_updated_at_utc = excluded.last_updated_at_utc
-                """,
-                (norm_account, norm_ticker, shares_str, wac_eur_str, wac_usd_str, valid_ts),
-            )
+                # Atomically increment database revision with mutation
+                increment_db_revision(self._conn, valid_ts)
 
-            # Atomically increment database revision with mutation
-            increment_db_revision(self._conn, valid_ts)
+                # R1.2: Construct capability directly from validated local state and append changelog
+                from python.database.repositories.audit import FinancialChangelogRepository
 
-            # R1.2: Construct capability directly from validated local state and append changelog
-            from python.database.repositories.audit import FinancialChangelogRepository
-
-            cap = _FinancialMutationCapability(
-                credential=_acquire_mutation_credential(),
-                connection=self._conn,
-                correlation_id=cid,
-                actor_role=effective_actor,
-                operation_name="upsert_position",
-                target_resource=target_resource,
-                before_state=before_state,
-                after_state=after_state,
-                approval_digest=approval_digest,
-                timestamp_utc=valid_ts,
-            )
-            self._last_mutation_capability = cap
-            FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
-
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-        except sqlite3.IntegrityError as e:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise IntegrityConflictError(f"Integrity constraint violation upserting position: {e}") from e
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
+                cap = _FinancialMutationCapability(
+                    credential=_acquire_mutation_credential(),
+                    connection=self._conn,
+                    correlation_id=cid,
+                    actor_role=effective_actor,
+                    operation_name="upsert_position",
+                    target_resource=target_resource,
+                    before_state=before_state,
+                    after_state=after_state,
+                    approval_digest=approval_digest,
+                    timestamp_utc=valid_ts,
+                )
+                self._last_mutation_capability = cap
+                FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
+            except sqlite3.IntegrityError as e:
+                raise IntegrityConflictError(f"Integrity constraint violation upserting position: {e}") from e
 
         return PositionRecord(
             account_id=norm_account,
@@ -678,16 +627,10 @@ class PositionRepository(BaseRepository):
         cid = correlation_id or uuid.uuid4().hex
         approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
-        # R5: Acquire write lock BEFORE reading before-state
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
-
-        try:
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
             existing = self.get_position(norm_account, norm_ticker)
             if existing is None:
-                if owns_tx:
-                    self._conn.execute("COMMIT;")
                 return False
 
             before_state = {
@@ -723,17 +666,7 @@ class PositionRepository(BaseRepository):
             )
             self._last_mutation_capability = cap
             FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
-
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
-        return True
+            return True
 
 
 # ---------------------------------------------------------------------------
@@ -818,72 +751,55 @@ class WatchlistRepository(BaseRepository):
             requires_owner_approval=requires_owner_approval,
         )
 
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
+            try:
+                existing = self.get_watchlist_item(norm_ticker)
+                added_at = existing.added_at_utc if existing else valid_ts
 
-        try:
-            existing = self.get_watchlist_item(norm_ticker)
-            added_at = existing.added_at_utc if existing else valid_ts
+                before_state = (
+                    {"ticker": existing.ticker, "status": existing.status, "notes": existing.notes}
+                    if existing
+                    else None
+                )
+                after_state = {"ticker": norm_ticker, "status": norm_status, "notes": notes}
 
-            before_state = (
-                {"ticker": existing.ticker, "status": existing.status, "notes": existing.notes}
-                if existing
-                else None
-            )
-            after_state = {"ticker": norm_ticker, "status": norm_status, "notes": notes}
+                self._conn.execute(
+                    """
+                    INSERT INTO watchlist (ticker, status, added_at_utc, notes)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(ticker) DO UPDATE SET
+                        status = excluded.status,
+                        notes = excluded.notes
+                    """,
+                    (norm_ticker, norm_status, added_at, notes),
+                )
 
-            self._conn.execute(
-                """
-                INSERT INTO watchlist (ticker, status, added_at_utc, notes)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(ticker) DO UPDATE SET
-                    status = excluded.status,
-                    notes = excluded.notes
-                """,
-                (norm_ticker, norm_status, added_at, notes),
-            )
+                # Atomically increment database revision with mutation
+                increment_db_revision(self._conn, valid_ts)
 
-            # Atomically increment database revision with mutation
-            increment_db_revision(self._conn, valid_ts)
+                cid = correlation_id or uuid.uuid4().hex
+                approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
-            cid = correlation_id or uuid.uuid4().hex
-            approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
+                # R1.2: Construct capability directly from validated local state and append changelog
+                from python.database.repositories.audit import FinancialChangelogRepository
 
-            # R1.2: Construct capability directly from validated local state and append changelog
-            from python.database.repositories.audit import FinancialChangelogRepository
-
-            cap = _FinancialMutationCapability(
-                credential=_acquire_mutation_credential(),
-                connection=self._conn,
-                correlation_id=cid,
-                actor_role=effective_actor,
-                operation_name="upsert_watchlist_item",
-                target_resource=target_resource,
-                before_state=before_state,
-                after_state=after_state,
-                approval_digest=approval_digest,
-                timestamp_utc=valid_ts,
-            )
-            self._last_mutation_capability = cap
-            FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
-
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-        except sqlite3.IntegrityError as e:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise IntegrityConflictError(f"Integrity constraint violation upserting watchlist: {e}") from e
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
+                cap = _FinancialMutationCapability(
+                    credential=_acquire_mutation_credential(),
+                    connection=self._conn,
+                    correlation_id=cid,
+                    actor_role=effective_actor,
+                    operation_name="upsert_watchlist_item",
+                    target_resource=target_resource,
+                    before_state=before_state,
+                    after_state=after_state,
+                    approval_digest=approval_digest,
+                    timestamp_utc=valid_ts,
+                )
+                self._last_mutation_capability = cap
+                FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
+            except sqlite3.IntegrityError as e:
+                raise IntegrityConflictError(f"Integrity constraint violation upserting watchlist: {e}") from e
 
         return WatchlistItem(
             ticker=norm_ticker,
@@ -916,15 +832,10 @@ class WatchlistRepository(BaseRepository):
         )
 
         timestamp_utc = utc_now_iso()
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
-
-        try:
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
             existing = self.get_watchlist_item(norm_ticker)
             if existing is None:
-                if owns_tx:
-                    self._conn.execute("COMMIT;")
                 return False
 
             before_state = {"ticker": existing.ticker, "status": existing.status, "notes": existing.notes}
@@ -954,14 +865,4 @@ class WatchlistRepository(BaseRepository):
             )
             self._last_mutation_capability = cap
             FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
-
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
-        return True
+            return True

@@ -37,6 +37,7 @@ from python.database.repositories.base import (
     validate_timestamp_utc,
     get_db_revision,
     increment_db_revision,
+    repository_transaction,
     BaseRepository,
 )
 
@@ -101,6 +102,7 @@ __all__ = [
     "validate_timestamp_utc",
     "get_db_revision",
     "increment_db_revision",
+    "repository_transaction",
     "BaseRepository",
     # Repositories
     "CashRepository",

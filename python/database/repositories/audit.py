@@ -28,6 +28,7 @@ from python.database.repositories.base import (
     validate_event_id,
     validate_identifier,
     utc_now_iso,
+    repository_transaction,
 )
 from python.database.repositories.financial import _FinancialMutationCapability
 from python.tool_registry import (
@@ -75,11 +76,8 @@ class AuditEventRepository(BaseRepository):
         norm_approval = validate_identifier(approval_status, "approval_status")
         raw_event_json = json.dumps(raw_event, sort_keys=True)
 
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
-
-        try:
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
             cur = self._conn.cursor()
 
             # Check for existing event to enforce idempotency vs conflict
@@ -103,8 +101,6 @@ class AuditEventRepository(BaseRepository):
 
                 if same_hash and same_json:
                     # Idempotent replay: return existing record
-                    if owns_tx:
-                        self._conn.execute("COMMIT;")
                     return AuditEventRecord(
                         event_id=existing[0],
                         timestamp_utc=existing[1],
@@ -118,11 +114,6 @@ class AuditEventRepository(BaseRepository):
                         raw_event=json.loads(existing[9]),
                     )
                 else:
-                    if owns_tx:
-                        try:
-                            self._conn.execute("ROLLBACK;")
-                        except Exception:
-                            pass
                     raise IntegrityConflictError(
                         f"Audit event with id '{norm_id}' already exists with different payload or hash."
                     )
@@ -150,22 +141,7 @@ class AuditEventRepository(BaseRepository):
                     ),
                 )
             except sqlite3.IntegrityError as e:
-                if owns_tx:
-                    try:
-                        self._conn.execute("ROLLBACK;")
-                    except Exception:
-                        pass
                 raise IntegrityConflictError(f"Integrity violation inserting audit event: {e}") from e
-
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
 
         return AuditEventRecord(
             event_id=norm_id,

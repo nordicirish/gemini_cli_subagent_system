@@ -32,6 +32,7 @@ from python.database.repositories.base import (
     validate_timestamp_utc,
     increment_db_revision,
     get_db_revision,
+    repository_transaction,
 )
 from python.tool_registry import authorize_financial_mutation, get_active_caller_role
 
@@ -149,43 +150,26 @@ class ScoutCategoryRepository(BaseRepository):
             requires_owner_approval=requires_owner_approval,
         )
 
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
+            try:
+                cur = self._conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO scout_categories (category_name, description, tickers_json, updated_at_utc)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(category_name) DO UPDATE SET
+                        description = excluded.description,
+                        tickers_json = excluded.tickers_json,
+                        updated_at_utc = excluded.updated_at_utc
+                    """,
+                    (norm_name, description, tickers_json, valid_ts),
+                )
 
-        try:
-            cur = self._conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO scout_categories (category_name, description, tickers_json, updated_at_utc)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(category_name) DO UPDATE SET
-                    description = excluded.description,
-                    tickers_json = excluded.tickers_json,
-                    updated_at_utc = excluded.updated_at_utc
-                """,
-                (norm_name, description, tickers_json, valid_ts),
-            )
-
-            # Increment db_revision atomically within the same transaction
-            increment_db_revision(self._conn, valid_ts)
-
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-        except sqlite3.IntegrityError as e:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise IntegrityConflictError(f"Integrity constraint violation in scout category: {e}") from e
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
+                # Increment db_revision atomically within the same transaction
+                increment_db_revision(self._conn, valid_ts)
+            except sqlite3.IntegrityError as e:
+                raise IntegrityConflictError(f"Integrity constraint violation in scout category: {e}") from e
 
         cat = self.get_category_by_name(norm_name)
         if cat is None:
@@ -224,11 +208,8 @@ class ScoutCategoryRepository(BaseRepository):
             requires_owner_approval=requires_owner_approval,
         )
 
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
-
-        try:
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
             cur = self._conn.cursor()
             cur.execute("DELETE FROM scout_categories WHERE id = ?", (category_id,))
             deleted = cur.rowcount > 0
@@ -236,16 +217,7 @@ class ScoutCategoryRepository(BaseRepository):
             if deleted:
                 increment_db_revision(self._conn)
 
-            if owns_tx:
-                self._conn.execute("COMMIT;")
             return deleted
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
 
 
 # ---------------------------------------------------------------------------
@@ -360,47 +332,30 @@ class TradeLessonRepository(BaseRepository):
             caller_role=effective_actor,
         )
 
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
+            try:
+                existing = self.get_lesson(norm_code)
+                created_at = existing.created_at_utc if existing else valid_ts
 
-        try:
-            existing = self.get_lesson(norm_code)
-            created_at = existing.created_at_utc if existing else valid_ts
+                self._conn.execute(
+                    """
+                    INSERT INTO trade_lessons (
+                        rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(rule_code) DO UPDATE SET
+                        directive_text = excluded.directive_text,
+                        category = excluded.category,
+                        status = excluded.status,
+                        last_reviewed_at_utc = excluded.last_reviewed_at_utc
+                    """,
+                    (norm_code, norm_directive, norm_cat, norm_status, created_at, valid_ts),
+                )
 
-            self._conn.execute(
-                """
-                INSERT INTO trade_lessons (
-                    rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(rule_code) DO UPDATE SET
-                    directive_text = excluded.directive_text,
-                    category = excluded.category,
-                    status = excluded.status,
-                    last_reviewed_at_utc = excluded.last_reviewed_at_utc
-                """,
-                (norm_code, norm_directive, norm_cat, norm_status, created_at, valid_ts),
-            )
-
-            # Atomically increment database revision with mutation
-            increment_db_revision(self._conn, valid_ts)
-
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-        except sqlite3.IntegrityError as e:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise IntegrityConflictError(f"Integrity constraint violation upserting lesson: {e}") from e
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
+                # Atomically increment database revision with mutation
+                increment_db_revision(self._conn, valid_ts)
+            except sqlite3.IntegrityError as e:
+                raise IntegrityConflictError(f"Integrity constraint violation upserting lesson: {e}") from e
 
         return TradeLesson(
             rule_code=norm_code,
@@ -426,11 +381,8 @@ class TradeLessonRepository(BaseRepository):
             caller_role=effective_actor,
         )
 
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
-
-        try:
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
             cur = self._conn.cursor()
             cur.execute("DELETE FROM trade_lessons WHERE rule_code = ?", (norm_code,))
             deleted = cur.rowcount > 0
@@ -438,16 +390,7 @@ class TradeLessonRepository(BaseRepository):
             if deleted:
                 increment_db_revision(self._conn)
 
-            if owns_tx:
-                self._conn.execute("COMMIT;")
             return deleted
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
 
 
 # ---------------------------------------------------------------------------
@@ -496,50 +439,33 @@ class DecisionLogRepository(BaseRepository):
             caller_role=effective_actor,
         )
 
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
+            cur = self._conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO decision_log (
+                        session_id, ticker, action_proposed, decision_outcome,
+                        votes_json, transcript_text, timestamp_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        norm_session,
+                        norm_ticker,
+                        norm_action,
+                        norm_outcome,
+                        votes_json,
+                        transcript_text,
+                        valid_ts,
+                    ),
+                )
+                record_id = cur.lastrowid
 
-        cur = self._conn.cursor()
-        try:
-            cur.execute(
-                """
-                INSERT INTO decision_log (
-                    session_id, ticker, action_proposed, decision_outcome,
-                    votes_json, transcript_text, timestamp_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    norm_session,
-                    norm_ticker,
-                    norm_action,
-                    norm_outcome,
-                    votes_json,
-                    transcript_text,
-                    valid_ts,
-                ),
-            )
-            record_id = cur.lastrowid
-
-            # Atomically increment database revision with mutation
-            increment_db_revision(self._conn, valid_ts)
-
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-        except sqlite3.IntegrityError as e:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise IntegrityConflictError(f"Integrity violation appending decision log: {e}") from e
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
+                # Atomically increment database revision with mutation
+                increment_db_revision(self._conn, valid_ts)
+            except sqlite3.IntegrityError as e:
+                raise IntegrityConflictError(f"Integrity violation appending decision log: {e}") from e
 
         return DecisionRecord(
             id=record_id,
@@ -685,44 +611,27 @@ class OwnerApprovalRepository(BaseRepository):
         norm_grantor = active_role
         timestamp_utc = utc_now_iso()
 
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
+            cur = self._conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO owner_approvals (
+                        approval_id, operation_name, target_resource, payload_digest,
+                        granted_by, status, created_at_utc
+                    ) VALUES (?, ?, ?, ?, ?, 'PENDING', ?)
+                    """,
+                    (norm_id, norm_op, norm_target, norm_digest, norm_grantor, timestamp_utc),
+                )
+                record_id = cur.lastrowid
 
-        cur = self._conn.cursor()
-        try:
-            cur.execute(
-                """
-                INSERT INTO owner_approvals (
-                    approval_id, operation_name, target_resource, payload_digest,
-                    granted_by, status, created_at_utc
-                ) VALUES (?, ?, ?, ?, ?, 'PENDING', ?)
-                """,
-                (norm_id, norm_op, norm_target, norm_digest, norm_grantor, timestamp_utc),
-            )
-            record_id = cur.lastrowid
-
-            # Atomically increment database revision with mutation
-            increment_db_revision(self._conn, timestamp_utc)
-
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-        except sqlite3.IntegrityError as e:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            if "UNIQUE constraint failed" in str(e):
-                raise DuplicateEntityError(f"Owner approval with id '{norm_id}' already exists") from e
-            raise IntegrityConflictError(f"Integrity violation creating owner approval: {e}") from e
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
+                # Atomically increment database revision with mutation
+                increment_db_revision(self._conn, timestamp_utc)
+            except sqlite3.IntegrityError as e:
+                if "UNIQUE constraint failed" in str(e):
+                    raise DuplicateEntityError(f"Owner approval with id '{norm_id}' already exists") from e
+                raise IntegrityConflictError(f"Integrity violation creating owner approval: {e}") from e
 
         return OwnerApprovalRecord(
             id=record_id,
@@ -809,11 +718,8 @@ class OwnerApprovalRepository(BaseRepository):
         norm_id = validate_identifier(approval_id, "approval_id")
         timestamp_utc = utc_now_iso()
 
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
-
-        try:
+        # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
+        with repository_transaction(self._conn):
             cur = self._conn.cursor()
             cur.execute(
                 """
@@ -828,16 +734,7 @@ class OwnerApprovalRepository(BaseRepository):
             if consumed:
                 increment_db_revision(self._conn, timestamp_utc)
 
-            if owns_tx:
-                self._conn.execute("COMMIT;")
             return consumed
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
 
     def list_approvals(self, status: Optional[str] = None) -> List[OwnerApprovalRecord]:
         """Lists owner approvals, optionally filtered by status."""

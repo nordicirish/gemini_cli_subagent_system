@@ -24,7 +24,11 @@ from python.database.manager import (
     DatabaseBusyError,
     DatabaseCorruptionError,
 )
-from python.database.repositories.base import RepositoryError, get_db_revision
+from python.database.repositories.base import (
+    RepositoryError,
+    TransactionIntegrityError,
+    get_db_revision,
+)
 from python.database.repositories.financial import (
     CashRepository,
     PositionRepository,
@@ -148,7 +152,14 @@ class UnitOfWork:
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:
             if exc_type is not None:
-                self.rollback()
+                try:
+                    self.rollback()
+                except TransactionIntegrityError as tie:
+                    # R2: Chaining diagnostic context; ensure rollback failure is not swallowed
+                    raise TransactionIntegrityError(
+                        f"CRITICAL: Rollback failed during exception handling: {tie}. "
+                        f"Connection is in an uncertain state."
+                    ) from exc_val
             else:
                 if not self._committed and not self._rolled_back:
                     if self._auto_commit:
@@ -171,7 +182,7 @@ class UnitOfWork:
                 self._conn = None
 
     def commit(self) -> None:
-        """Commits the current transaction (R6)."""
+        """Commits the current transaction (R6/R2)."""
         if not self._is_active or not self._in_transaction or self._conn is None:
             raise RepositoryError("No active transaction to commit.")
         if self._rolled_back:
@@ -186,23 +197,36 @@ class UnitOfWork:
             self._is_active = False
             self._clear_repositories()
         except Exception as e:
-            self.rollback()
+            try:
+                self.rollback()
+            except TransactionIntegrityError as tie:
+                raise TransactionIntegrityError(
+                    f"CRITICAL: Commit failed and subsequent rollback also failed: {tie}. "
+                    f"Database connection is in an uncertain state."
+                ) from e
             raise DatabaseTransactionError(f"Commit failed: {e}") from e
 
     def rollback(self) -> None:
-        """Rolls back the current transaction (R6)."""
+        """Rolls back the current transaction (R6/R2)."""
         if self._conn is None or self._rolled_back:
             return
+        rollback_error = None
         try:
             if self._in_transaction:
                 self._conn.execute("ROLLBACK;")
-        except Exception:
-            pass
+        except Exception as e:
+            rollback_error = e
         finally:
             self._rolled_back = True
             self._in_transaction = False
             self._is_active = False
             self._clear_repositories()
+
+        if rollback_error is not None:
+            raise TransactionIntegrityError(
+                f"CRITICAL: Failed to roll back transaction: {rollback_error}. "
+                f"The database connection is in an uncertain state and must not be committed."
+            ) from rollback_error
 
     def get_db_revision(self) -> int:
         """Returns the current monotonic database revision for the UnitOfWork connection."""

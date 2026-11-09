@@ -28,6 +28,7 @@ from python.database.repositories.base import (
     validate_identifier,
     validate_date_str,
     utc_now_iso,
+    repository_transaction,
 )
 
 
@@ -203,54 +204,38 @@ class DailyBarRepository(BaseRepository):
         close_str = decimal_to_canonical_str(dec_close)
         timestamp_utc = utc_now_iso()
 
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
-
-        cur = self._conn.cursor()
-        try:
-            cur.execute(
-                """
-                INSERT INTO daily_bars (
-                    ticker, bar_date, open, high, low, close, volume, indicators_json, updated_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(ticker, bar_date) DO UPDATE SET
-                    open = excluded.open,
-                    high = excluded.high,
-                    low = excluded.low,
-                    close = excluded.close,
-                    volume = excluded.volume,
-                    indicators_json = excluded.indicators_json,
-                    updated_at_utc = excluded.updated_at_utc
-                """,
-                (
-                    norm_ticker,
-                    norm_date,
-                    open_str,
-                    high_str,
-                    low_str,
-                    close_str,
-                    vol,
-                    indicators_json,
-                    timestamp_utc,
-                ),
-            )
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-        except sqlite3.IntegrityError as e:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise IntegrityConflictError(f"Integrity violation upserting daily bar: {e}") from e
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
+        # R1/R3/R7: Transaction & savepoint lifecycle management
+        with repository_transaction(self._conn):
+            cur = self._conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO daily_bars (
+                        ticker, bar_date, open, high, low, close, volume, indicators_json, updated_at_utc
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(ticker, bar_date) DO UPDATE SET
+                        open = excluded.open,
+                        high = excluded.high,
+                        low = excluded.low,
+                        close = excluded.close,
+                        volume = excluded.volume,
+                        indicators_json = excluded.indicators_json,
+                        updated_at_utc = excluded.updated_at_utc
+                    """,
+                    (
+                        norm_ticker,
+                        norm_date,
+                        open_str,
+                        high_str,
+                        low_str,
+                        close_str,
+                        vol,
+                        indicators_json,
+                        timestamp_utc,
+                    ),
+                )
+            except sqlite3.IntegrityError as e:
+                raise IntegrityConflictError(f"Integrity violation upserting daily bar: {e}") from e
 
         return DailyBarRecord(
             ticker=norm_ticker,
@@ -280,18 +265,10 @@ class DailyBarRepository(BaseRepository):
 
         timestamp_utc = utc_now_iso()
 
-        # R3/R7: Transaction / savepoint management across the batch
-        owns_tx = not self._conn.in_transaction
-        sp_name = f"sp_batch_{uuid.uuid4().hex}" if not owns_tx else None
-
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
-        else:
-            self._conn.execute(f"SAVEPOINT {sp_name};")
-
-        cur = self._conn.cursor()
-        inserted_count = 0
-        try:
+        # R1/R3/R7: Transaction & savepoint lifecycle management across the batch
+        with repository_transaction(self._conn):
+            cur = self._conn.cursor()
+            inserted_count = 0
             for b in bars:
                 if isinstance(b, DailyBarRecord):
                     (
@@ -336,105 +313,46 @@ class DailyBarRepository(BaseRepository):
                 else:
                     raise ValidationError(f"Unsupported bar item type: {type(b).__name__}")
 
-                cur.execute(
-                    """
-                    INSERT INTO daily_bars (
-                        ticker, bar_date, open, high, low, close, volume, indicators_json, updated_at_utc
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(ticker, bar_date) DO UPDATE SET
-                        open = excluded.open,
-                        high = excluded.high,
-                        low = excluded.low,
-                        close = excluded.close,
-                        volume = excluded.volume,
-                        indicators_json = excluded.indicators_json,
-                        updated_at_utc = excluded.updated_at_utc
-                    """,
-                    (
-                        norm_ticker,
-                        norm_date,
-                        decimal_to_canonical_str(dec_open),
-                        decimal_to_canonical_str(dec_high),
-                        decimal_to_canonical_str(dec_low),
-                        decimal_to_canonical_str(dec_close),
-                        vol,
-                        ind_json,
-                        timestamp_utc,
-                    ),
-                )
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO daily_bars (
+                            ticker, bar_date, open, high, low, close, volume, indicators_json, updated_at_utc
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(ticker, bar_date) DO UPDATE SET
+                            open = excluded.open,
+                            high = excluded.high,
+                            low = excluded.low,
+                            close = excluded.close,
+                            volume = excluded.volume,
+                            indicators_json = excluded.indicators_json,
+                            updated_at_utc = excluded.updated_at_utc
+                        """,
+                        (
+                            norm_ticker,
+                            norm_date,
+                            decimal_to_canonical_str(dec_open),
+                            decimal_to_canonical_str(dec_high),
+                            decimal_to_canonical_str(dec_low),
+                            decimal_to_canonical_str(dec_close),
+                            vol,
+                            ind_json,
+                            timestamp_utc,
+                        ),
+                    )
+                except sqlite3.IntegrityError as e:
+                    raise IntegrityConflictError(f"Integrity violation in batch daily bar upsert: {e}") from e
                 inserted_count += 1
 
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-            else:
-                try:
-                    self._conn.execute(f"RELEASE SAVEPOINT {sp_name};")
-                except Exception as release_err:
-                    raise TransactionIntegrityError(
-                        f"CRITICAL: Failed to release savepoint '{sp_name}' after successful batch: {release_err}. "
-                        f"The caller-owned transaction is in an uncertain state and MUST NOT be committed."
-                    ) from release_err
-        except TransactionIntegrityError:
-            raise
-        except sqlite3.IntegrityError as e:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-                raise IntegrityConflictError(f"Integrity violation in batch daily bar upsert: {e}") from e
-            else:
-                try:
-                    self._conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name};")
-                    self._conn.execute(f"RELEASE SAVEPOINT {sp_name};")
-                except Exception as rollback_err:
-                    raise TransactionIntegrityError(
-                        f"CRITICAL: Failed to roll back savepoint '{sp_name}' during batch failure: {rollback_err}. "
-                        f"The caller-owned transaction is in an uncertain state and MUST NOT be committed. "
-                        f"Full transaction rollback or connection termination is required."
-                    ) from e
-                raise IntegrityConflictError(f"Integrity violation in batch daily bar upsert: {e}") from e
-        except Exception as batch_err:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-                raise
-            else:
-                try:
-                    self._conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name};")
-                    self._conn.execute(f"RELEASE SAVEPOINT {sp_name};")
-                except Exception as rollback_err:
-                    raise TransactionIntegrityError(
-                        f"CRITICAL: Failed to roll back savepoint '{sp_name}' during batch failure: {rollback_err}. "
-                        f"The caller-owned transaction is in an uncertain state and MUST NOT be committed. "
-                        f"Full transaction rollback or connection termination is required."
-                    ) from batch_err
-                raise
-
-        return inserted_count
+            return inserted_count
 
     def delete_bars(self, ticker: str) -> int:
-        """Deletes all daily bars for a ticker with standalone transaction wrapping. Returns count of deleted rows."""
+        """Deletes all daily bars for a ticker with transaction safety. Returns count of deleted rows."""
         self._check_active()
         norm_ticker = validate_identifier(ticker, "ticker").upper()
 
-        owns_tx = not self._conn.in_transaction
-        if owns_tx:
-            self._conn.execute("BEGIN IMMEDIATE;")
-
-        try:
+        # R1/R3: Transaction & savepoint lifecycle management
+        with repository_transaction(self._conn):
             cur = self._conn.cursor()
             cur.execute("DELETE FROM daily_bars WHERE ticker = ?", (norm_ticker,))
-            count = cur.rowcount
-            if owns_tx:
-                self._conn.execute("COMMIT;")
-            return count
-        except Exception:
-            if owns_tx:
-                try:
-                    self._conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
-            raise
+            return cur.rowcount

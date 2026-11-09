@@ -2160,5 +2160,145 @@ class TestCheckExtractorSqlLexicalIntegrity(unittest.TestCase):
         self.assertIn("unterminated backtick identifier in trailing DDL", str(ctx.exception))
 
 
+class TestStage15A1BackupRestorationSafety(unittest.TestCase):
+    """
+    Stage 1.5-A.1 Regression Test Suite for R4:
+    - Backup restoration safety contract and quiescence enforcement.
+    - Active connection blocking, WAL/SHM handling, corrupt backup rejection,
+      and fallback recovery.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.src_path = os.path.join(self.temp_dir.name, "source_15a1.db")
+        self.dst_path = os.path.join(self.temp_dir.name, "backup_15a1.db")
+
+        # Initialize source database with primary financial profile
+        src_mgr = DatabaseManager(self.src_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with src_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('PRIMARY', 'EUR', '1000.00', '2026-11-09T12:00:00Z')"
+            )
+        # Create verified backup snapshot
+        BackupManager.create_backup(self.src_path, self.dst_path)
+
+    def tearDown(self):
+        try:
+            self.temp_dir.cleanup()
+        except Exception:
+            pass
+
+    def test_r4_valid_backup_restoration(self):
+        """R4.1: Valid backup snapshot is restored safely to a new target destination."""
+        target_path = os.path.join(self.temp_dir.name, "target_restored.db")
+        result = BackupManager.restore_backup(self.dst_path, target_path)
+
+        self.assertEqual(result.integrity_status, "ok")
+        self.assertTrue(os.path.exists(target_path))
+
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT amount FROM portfolio_cash WHERE account_id='PRIMARY' AND currency='EUR'")
+            row = cur.fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[0], "1000.00")
+
+    def test_r4_corrupt_backup_rejected_without_target_damage(self):
+        """R4.2: Corrupted backup is rejected fail-closed without modifying existing target."""
+        target_path = os.path.join(self.temp_dir.name, "existing_target.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('PRIMARY', 'USD', '777.00', '2026-11-09T12:00:00Z')"
+            )
+
+        corrupt_backup = os.path.join(self.temp_dir.name, "corrupt_backup.db")
+        with open(corrupt_backup, "wb") as f:
+            f.write(b"SQLite format 3\x00" + b"\x00" * 200 + b"garbage-corrupted-bytes")
+
+        with self.assertRaises((BackupIntegrityError, BackupError)):
+            BackupManager.restore_backup(corrupt_backup, target_path)
+
+        # Confirm target is completely unharmed
+        with DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE).connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT amount FROM portfolio_cash WHERE account_id='PRIMARY' AND currency='USD'")
+            self.assertEqual(cur.fetchone()[0], "777.00")
+
+    def test_r4_target_remains_unchanged_when_restoration_refused(self):
+        """R4.3: Target remains unchanged when restoration is refused due to invalid source."""
+        target_path = os.path.join(self.temp_dir.name, "target_untouched.db")
+        with open(target_path, "w") as f:
+            f.write("authoritative target state")
+
+        non_existent_backup = os.path.join(self.temp_dir.name, "missing.db")
+        with self.assertRaises(BackupError):
+            BackupManager.restore_backup(non_existent_backup, target_path)
+
+        with open(target_path, "r") as f:
+            self.assertEqual(f.read(), "authoritative target state")
+
+    def test_r4_active_target_concurrent_access_blocks_restoration_fail_closed(self):
+        """R4.4: Active concurrent access or transaction on target blocks restoration fail-closed."""
+        target_path = os.path.join(self.temp_dir.name, "active_target.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+
+        # Hold an open uncheckpointed transaction on target in WAL mode
+        active_conn = target_mgr.connect()
+        active_conn.execute("BEGIN IMMEDIATE;")
+        active_conn.execute(
+            "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+            "VALUES ('HOLD', 'EUR', '99.00', '2026-11-09T12:00:00Z')"
+        )
+
+        try:
+            with self.assertRaises(BackupError) as ctx:
+                BackupManager.restore_backup(self.dst_path, target_path)
+            err_msg = str(ctx.exception).lower()
+            self.assertTrue(
+                "locked" in err_msg or "in use" in err_msg or "concurrent" in err_msg or "active" in err_msg,
+                f"Unexpected error message: {ctx.exception}"
+            )
+        finally:
+            active_conn.execute("ROLLBACK;")
+            active_conn.close()
+
+    def test_r4_wal_shm_handling_cleans_sidecars_safely(self):
+        """R4.5: Target database in WAL mode is safely transitioned and restored without sidecar corruption."""
+        target_path = os.path.join(self.temp_dir.name, "wal_target.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('OLD', 'EUR', '1.00', '2026-11-09T12:00:00Z')"
+            )
+
+        # Now restore backup onto the WAL target
+        res = BackupManager.restore_backup(self.dst_path, target_path)
+        self.assertEqual(res.integrity_status, "ok")
+
+        # Verify restored data
+        with DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE).connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT amount FROM portfolio_cash WHERE account_id='PRIMARY' AND currency='EUR'")
+            self.assertEqual(cur.fetchone()[0], "1000.00")
+
+    def test_r4_final_restored_database_passes_integrity_verification(self):
+        """R4.6: Final restored database passes PRAGMA integrity_check verification."""
+        target_path = os.path.join(self.temp_dir.name, "integrity_target.db")
+        res = BackupManager.restore_backup(self.dst_path, target_path)
+        self.assertEqual(res.integrity_status, "ok")
+        BackupManager.verify_backup(target_path)
+
+
 if __name__ == "__main__":
     unittest.main()

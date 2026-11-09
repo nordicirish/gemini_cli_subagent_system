@@ -77,6 +77,7 @@ from python.database.repositories import (
     validate_timestamp_utc,
     get_db_revision,
     increment_db_revision,
+    repository_transaction,
 )
 from python.tool_registry import (
     execution_role_context,
@@ -4104,6 +4105,390 @@ class TestStage15ARepositoryTransactionAuthorizationRevisionHardening(BaseReposi
                 # Empty string
                 with self.assertRaises(ValidationError):
                     cash_repo.set_cash_balance("PRIMARY", "EUR", "100.00", timestamp_utc="")
+
+
+class TestStage15A1NestedTransactionAtomicityAndTimestampSafety(unittest.TestCase):
+    """
+    Stage 1.5-A.1 Regression Test Suite:
+    - R1: Nested repository-operation atomicity via SAVEPOINTs and unified transaction management.
+    - R2: Fail-closed rollback error handling without silent error suppression.
+    - R3: Strict UTC timestamp validation with explicit 'Z' or '+00:00'/'-00:00' timezone designator.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test_stage_15_a1.db")
+        self.core_manager = DatabaseManager(self.db_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with self.core_manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+
+    def tearDown(self):
+        try:
+            self.temp_dir.cleanup()
+        except Exception:
+            pass
+
+    def test_r1_standalone_mutation_commits_normally(self):
+        """R1.1: Standalone repository mutation acquires BEGIN IMMEDIATE and commits normally."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                rec = cash_repo.set_cash_balance("PRIMARY", "EUR", "1500.00")
+                self.assertEqual(rec.amount, Decimal("1500.00"))
+
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            rec = cash_repo.get_cash("PRIMARY", "EUR")
+            self.assertIsNotNone(rec)
+            self.assertEqual(rec.amount, Decimal("1500.00"))
+            self.assertEqual(get_db_revision(conn), 1)
+
+    def test_r1_standalone_mutation_failure_rolls_back_all_statements(self):
+        """R1.2: Standalone repository mutation failure rolls back all statements."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                # Invalid currency fails validation before commit
+                with self.assertRaises(ValidationError):
+                    cash_repo.set_cash_balance("PRIMARY", "INVALID", "1500.00")
+            self.assertEqual(get_db_revision(conn), 0)
+
+    def test_r1_nested_mutation_success_leaves_outer_transaction_open(self):
+        """R1.3: Successful nested repository operation leaves outer transaction open."""
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.cash.set_cash_balance("PRIMARY", "EUR", "2000.00")
+                self.assertTrue(uow.is_active)
+                self.assertTrue(uow._conn.in_transaction)
+
+                uow.watchlist.upsert_watchlist_item("AAPL")
+                self.assertTrue(uow.is_active)
+                self.assertTrue(uow._conn.in_transaction)
+
+        # After commit, both mutations and revisions exist
+        with self.core_manager.connection() as conn:
+            cash = CashRepository(conn).get_cash("PRIMARY", "EUR")
+            self.assertEqual(cash.amount, Decimal("2000.00"))
+            wl = WatchlistRepository(conn).get_watchlist_item("AAPL")
+            self.assertIsNotNone(wl)
+            self.assertEqual(get_db_revision(conn), 2)
+
+    def test_r1_nested_mutation_failure_rolls_back_own_changes(self):
+        """R1.4: Failed nested operation rolls back all of its own changes without affecting outer tx."""
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.cash.set_cash_balance("PRIMARY", "EUR", "3000.00")
+
+                # Injected integrity error inside position upsert
+                pos_repo = uow.positions
+                with self.assertRaises(ValidationError):
+                    pos_repo.upsert_position("PRIMARY", "FAIL", "-10", "100.00")
+
+                # Outer transaction is still active and can be committed
+                self.assertTrue(uow.is_active)
+
+        with self.core_manager.connection() as conn:
+            cash = CashRepository(conn).get_cash("PRIMARY", "EUR")
+            self.assertEqual(cash.amount, Decimal("3000.00"))
+            pos = PositionRepository(conn).get_position("PRIMARY", "FAIL")
+            self.assertIsNone(pos)
+            self.assertEqual(get_db_revision(conn), 1)
+
+    def test_r1_nested_failure_does_not_erase_unrelated_prior_outer_changes(self):
+        """R1.5: A failed nested operation does not erase unrelated successful changes made earlier."""
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.watchlist.upsert_watchlist_item("MSFT")
+                self.assertEqual(uow.get_db_revision(), 1)
+
+                try:
+                    # Trigger validation error
+                    uow.cash.set_cash_balance("PRIMARY", "INVALID_CCY", "100.00")
+                except ValidationError:
+                    pass
+
+                # Outer work continues
+                uow.watchlist.upsert_watchlist_item("GOOGL")
+                self.assertEqual(uow.get_db_revision(), 2)
+
+        with self.core_manager.connection() as conn:
+            wl_repo = WatchlistRepository(conn)
+            self.assertIsNotNone(wl_repo.get_watchlist_item("MSFT"))
+            self.assertIsNotNone(wl_repo.get_watchlist_item("GOOGL"))
+            self.assertEqual(get_db_revision(conn), 2)
+
+    def test_r1_caller_can_commit_outer_tx_after_catching_nested_exception(self):
+        """R1.6: After catching a nested-operation exception, the caller can successfully commit outer tx."""
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.cash.set_cash_balance("PRIMARY", "USD", "500.00")
+
+                # Nested operation fails and rolls back its savepoint
+                with self.assertRaises(ValidationError):
+                    uow.trade_lessons.upsert_lesson("BAD_CODE", "directive", "INVALID_CATEGORY")
+
+                # Continue outer transaction
+                uow.cash.set_cash_balance("PRIMARY", "EUR", "750.00")
+
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            self.assertEqual(cash_repo.get_cash("PRIMARY", "USD").amount, Decimal("500.00"))
+            self.assertEqual(cash_repo.get_cash("PRIMARY", "EUR").amount, Decimal("750.00"))
+            self.assertIsNone(TradeLessonRepository(conn).get_lesson("BAD_CODE"))
+
+    def test_r1_multiple_nested_savepoints_do_not_interfere(self):
+        """R1.7: Multiple repository operations can use nested SAVEPOINTs without interfering."""
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                # Success 1
+                uow.watchlist.upsert_watchlist_item("TICKER1")
+                # Failure 1 (caught)
+                try:
+                    uow.watchlist.upsert_watchlist_item("TICKER_BAD", status="INVALID_STATUS")
+                except ValidationError:
+                    pass
+                # Success 2
+                uow.watchlist.upsert_watchlist_item("TICKER2")
+                # Failure 2 (caught)
+                try:
+                    uow.trade_lessons.upsert_lesson("L1", "directive", "INVALID_CATEGORY")
+                except ValidationError:
+                    pass
+                # Success 3
+                uow.trade_lessons.upsert_lesson("L1", "valid directive", "MANDATE")
+
+        with self.core_manager.connection() as conn:
+            wl = WatchlistRepository(conn)
+            tl = TradeLessonRepository(conn)
+            self.assertIsNotNone(wl.get_watchlist_item("TICKER1"))
+            self.assertIsNone(wl.get_watchlist_item("TICKER_BAD"))
+            self.assertIsNotNone(wl.get_watchlist_item("TICKER2"))
+            self.assertIsNotNone(tl.get_lesson("L1"))
+            self.assertEqual(get_db_revision(conn), 3)
+
+    def test_r1_revision_and_changelog_roll_back_with_failed_nested_mutation(self):
+        """R1.8: Revision increments and financial changelog records roll back with failed nested mutation."""
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.watchlist.upsert_watchlist_item("INITIAL")
+                self.assertEqual(uow.get_db_revision(), 1)
+
+                # Attempt invalid position mutation
+                try:
+                    uow.positions.upsert_position("PRIMARY", "FAIL", "0.00", "100.00")
+                except ValidationError:
+                    pass
+
+                self.assertEqual(uow.get_db_revision(), 1)
+
+    def test_r1_financial_mutation_changelog_failure_injection_in_uow(self):
+        """
+        R1.9 Failure Injection: Allow primary row write and revision increment to occur,
+        force changelog insertion to fail, catch exception inside UnitOfWork, then commit outer tx.
+        Verify that neither primary row nor revision increment nor changelog survives,
+        while an unrelated successful outer-transaction mutation DOES survive.
+        """
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                # 1. Unrelated successful outer-transaction mutation
+                uow.watchlist.upsert_watchlist_item("NVDA")
+                self.assertEqual(uow.get_db_revision(), 1)
+
+                # 2. Monkeypatch changelog append_entry to fail after row write and revision increment
+                orig_append = FinancialChangelogRepository.append_entry
+                def fail_append(repo_self, *args, **kwargs):
+                    raise RuntimeError("Injected changelog persistence failure after row mutation")
+
+                FinancialChangelogRepository.append_entry = fail_append
+                try:
+                    # Primary cash write and revision increment execute inside set_cash_balance,
+                    # but append_entry fails. repository_transaction must rollback to savepoint.
+                    uow.cash.set_cash_balance("PRIMARY", "EUR", "5000.00")
+                    self.fail("Expected RuntimeError from injected changelog failure")
+                except RuntimeError as e:
+                    self.assertIn("Injected changelog persistence failure", str(e))
+                finally:
+                    FinancialChangelogRepository.append_entry = orig_append
+
+                # 3. Outer transaction is committed cleanly
+                self.assertTrue(uow.is_active)
+                # Outer revision must have rolled back to 1
+                self.assertEqual(uow.get_db_revision(), 1)
+
+        # 4. Verify post-commit state on a fresh connection
+        with self.core_manager.connection() as conn:
+            # Unrelated mutation survived
+            wl = WatchlistRepository(conn).get_watchlist_item("NVDA")
+            self.assertIsNotNone(wl)
+
+            # Financial cash mutation did NOT survive
+            cash = CashRepository(conn).get_cash("PRIMARY", "EUR")
+            self.assertIsNone(cash)
+
+            # Changelog cash entry did NOT survive
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM financial_changelog WHERE target_resource LIKE 'portfolio_cash%'")
+            self.assertEqual(cur.fetchone()[0], 0)
+
+            # Revision is exactly 1 (NVDA increment survived, cash increment rolled back)
+            self.assertEqual(get_db_revision(conn), 1)
+
+    def test_r2_standalone_rollback_failure_raises_transaction_integrity_error(self):
+        """R2.1: Standalone rollback failure raises TransactionIntegrityError with chained cause."""
+        class FaultyRollbackConn:
+            def __init__(self, target):
+                self._target = target
+            def __getattr__(self, name):
+                return getattr(self._target, name)
+            @property
+            def in_transaction(self):
+                return self._target.in_transaction
+            def execute(self, sql, *args, **kwargs):
+                if isinstance(sql, str) and sql.strip().startswith("ROLLBACK"):
+                    raise sqlite3.OperationalError("Simulated disk error during standalone rollback")
+                return self._target.execute(sql, *args, **kwargs)
+
+        with self.core_manager.connection() as raw_conn:
+            proxy = FaultyRollbackConn(raw_conn)
+            with self.assertRaises(TransactionIntegrityError) as ctx:
+                with repository_transaction(proxy):
+                    raise ValueError("Business logic error triggering rollback")
+
+            err_msg = str(ctx.exception)
+            self.assertIn("CRITICAL: Standalone rollback failed", err_msg)
+            self.assertIn("Database connection is in an uncertain state", err_msg)
+            # Verify original cause is preserved via exception chaining
+            self.assertIsInstance(ctx.exception.__cause__, ValueError)
+
+    def test_r2_savepoint_rollback_failure_raises_transaction_integrity_error(self):
+        """R2.2: Nested SAVEPOINT rollback failure raises TransactionIntegrityError with chained cause."""
+        class FaultySavepointConn:
+            def __init__(self, target):
+                self._target = target
+            def __getattr__(self, name):
+                return getattr(self._target, name)
+            @property
+            def in_transaction(self):
+                return True
+            def execute(self, sql, *args, **kwargs):
+                if isinstance(sql, str) and "ROLLBACK TO SAVEPOINT" in sql:
+                    raise sqlite3.OperationalError("Simulated I/O failure during savepoint rollback")
+                return self._target.execute(sql, *args, **kwargs)
+
+        with self.core_manager.connection() as raw_conn:
+            raw_conn.execute("BEGIN IMMEDIATE;")
+            proxy = FaultySavepointConn(raw_conn)
+            try:
+                with self.assertRaises(TransactionIntegrityError) as ctx:
+                    with repository_transaction(proxy):
+                        raise ValueError("Operation error inside savepoint")
+
+                err_msg = str(ctx.exception)
+                self.assertIn("CRITICAL: Failed to roll back savepoint", err_msg)
+                self.assertIn("MUST NOT be committed", err_msg)
+                self.assertIsInstance(ctx.exception.__cause__, ValueError)
+            finally:
+                raw_conn.execute("ROLLBACK;")
+
+    def test_r2_uow_commit_failure_raises_database_transaction_error(self):
+        """R2.3: UnitOfWork.commit failure calls rollback and raises DatabaseTransactionError."""
+        with UnitOfWork(self.core_manager, auto_commit=False) as uow:
+            class FaultyCommitConn:
+                def __init__(self, target):
+                    self._target = target
+                def __getattr__(self, name):
+                    return getattr(self._target, name)
+                def execute(self, sql, *args, **kwargs):
+                    if isinstance(sql, str) and sql.strip().startswith("COMMIT"):
+                        raise sqlite3.OperationalError("Simulated disk error during COMMIT")
+                    return self._target.execute(sql, *args, **kwargs)
+
+            uow._conn = FaultyCommitConn(uow._conn)
+            with self.assertRaises(DatabaseTransactionError) as ctx:
+                uow.commit()
+            self.assertIn("Commit failed", str(ctx.exception))
+            self.assertTrue(uow._rolled_back)
+
+    def test_r3_strict_utc_accepted_formats(self):
+        """R3.1: Strict UTC validation accepts explicit 'Z' and '+00:00'/'-00:00' offsets."""
+        # 'Z' suffix
+        ts_z = "2024-03-15T09:30:00Z"
+        self.assertEqual(validate_timestamp_utc(ts_z), ts_z)
+
+        # '+00:00' offset
+        ts_plus = "2024-03-15T09:30:00+00:00"
+        self.assertEqual(validate_timestamp_utc(ts_plus), ts_plus)
+
+        # '-00:00' offset
+        ts_minus = "2024-03-15T09:30:00-00:00"
+        self.assertEqual(validate_timestamp_utc(ts_minus), ts_minus)
+
+        # Microseconds with Z
+        ts_micro = "2024-03-15T09:30:00.123456Z"
+        self.assertEqual(validate_timestamp_utc(ts_micro), ts_micro)
+
+        # None returns current UTC with Z
+        now_ts = validate_timestamp_utc(None)
+        self.assertTrue(now_ts.endswith("Z"))
+        self.assertIn("T", now_ts)
+
+    def test_r3_strict_utc_rejected_formats(self):
+        """R3.2: Strict UTC validation rejects naive, space-separated, non-zero offset, and invalid timestamps."""
+        rejected_cases = [
+            ("2024-03-15T09:30:00", "naive ISO timestamp without timezone"),
+            ("2024-03-15 09:30:00", "space-separated datetime without timezone"),
+            ("2024-03-15 09:30:00Z", "space-separated datetime with Z"),
+            ("2024-03-15T09:30:00+02:00", "non-zero timezone offset +02:00"),
+            ("2024-03-15T09:30:00-05:00", "non-zero timezone offset -05:00"),
+            ("2024-02-30T09:30:00Z", "invalid calendar date Feb 30"),
+            ("2024-03-15T25:00:00Z", "invalid time hour 25"),
+            ("2024-03-15T09:60:00Z", "invalid time minute 60"),
+            ("", "empty string"),
+            ("   ", "whitespace-only string"),
+            ("not-a-timestamp", "arbitrary text"),
+            (123456789, "integer type"),
+            (123.456, "float type"),
+            (["2024-03-15T09:30:00Z"], "list type"),
+            ({"ts": "2024-03-15T09:30:00Z"}, "dict type"),
+        ]
+        for val, desc in rejected_cases:
+            with self.subTest(case=desc, val=val):
+                with self.assertRaises(ValidationError):
+                    validate_timestamp_utc(val)  # type: ignore
+
+    def test_r3_all_six_mutations_preserve_valid_historical_timestamps(self):
+        """R3.3: All 6 core mutation operations preserve valid historical UTC timestamps exactly."""
+        historical_z = "2023-01-15T08:00:00Z"
+        historical_offset = "2023-06-20T14:30:00+00:00"
+
+        with self.core_manager.connection() as conn:
+            with execution_role_context("Terminal Orchestrator"):
+                # 1. Cash Balance
+                c1 = CashRepository(conn).set_cash_balance("PRIMARY", "EUR", "100.00", timestamp_utc=historical_z)
+                self.assertEqual(c1.last_updated_at_utc, historical_z)
+                c2 = CashRepository(conn).set_cash_balance("PRIMARY", "USD", "200.00", timestamp_utc=historical_offset)
+                self.assertEqual(c2.last_updated_at_utc, historical_offset)
+
+                # 2. Position
+                p1 = PositionRepository(conn).upsert_position("PRIMARY", "AIR.PA", "10", "120.00", timestamp_utc=historical_z)
+                self.assertEqual(p1.last_updated_at_utc, historical_z)
+
+                # 3. Watchlist
+                w1 = WatchlistRepository(conn).upsert_watchlist_item("BNP.PA", timestamp_utc=historical_offset)
+                self.assertEqual(w1.added_at_utc, historical_offset)
+
+                # 4. Scout Category
+                s1 = ScoutCategoryRepository(conn).upsert_category("AERO", tickers=["AIR.PA"], timestamp_utc=historical_z)
+                self.assertEqual(s1.updated_at_utc, historical_z)
+
+                # 5. Trade Lesson
+                l1 = TradeLessonRepository(conn).upsert_lesson("RULE_Z", "Rule directive", "MANDATE", timestamp_utc=historical_z)
+                self.assertEqual(l1.created_at_utc, historical_z)
+                self.assertEqual(l1.last_reviewed_at_utc, historical_z)
+
+                # 6. Decision Log
+                d1 = DecisionLogRepository(conn).append_decision("S_Z", "BUY AIR.PA", "APPROVED", ticker="AIR.PA", timestamp_utc=historical_offset)
+                self.assertEqual(d1.timestamp_utc, historical_offset)
 
 
 if __name__ == "__main__":
