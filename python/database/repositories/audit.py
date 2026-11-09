@@ -68,12 +68,18 @@ class AuditEventRepository(BaseRepository):
         Appends a new audit event, or deterministically returns existing record if replayed identically.
         Raises IntegrityConflictError if event_id already exists with different payload hash or json.
 
-        timestamp_utc is validated by the centralized validate_timestamp_utc() contract
+        timestamp_utc is REQUIRED and must be supplied explicitly by the producer: None is rejected
+        with ValidationError (the repository never invents an audit event timestamp). A supplied value
+        is validated by the centralized validate_timestamp_utc() contract
         (only explicit 'Z' or '+00:00'; no whitespace, '-00:00' or other offsets) BEFORE any
         transaction, lock, read or write occurs. A valid timestamp is persisted and returned
-        byte-for-byte unchanged. Raises ValidationError on an invalid timestamp.
+        byte-for-byte unchanged. Raises ValidationError on a missing or invalid timestamp.
         """
         self._check_active()
+        # An audit event timestamp must be explicitly supplied. validate_timestamp_utc() treats None as
+        # "generate now", which is not acceptable here, so reject None before the shared validator runs.
+        if timestamp_utc is None:
+            raise ValidationError("timestamp_utc is required")
         # Validate before transaction entry, database reads or writes (no state change on failure).
         valid_timestamp = validate_timestamp_utc(timestamp_utc)
         norm_id = validate_event_id(event_id)

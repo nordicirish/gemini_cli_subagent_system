@@ -4090,17 +4090,189 @@ class TestStage15ARepositoryTransactionAuthorizationRevisionHardening(BaseReposi
             self.assertEqual(stored.raw_event, {"action": "original"})
             self.assertEqual(stored.timestamp_utc, ts)
 
-    def test_r4_1_none_timestamp_follows_centralized_contract_and_generates_utc_now(self):
-        """R4.1: Characterizes the centralized validate_timestamp_utc() contract as now applied here:
-        None generates a current 'Z' UTC timestamp that itself satisfies the strict validator.
-        (Previously None violated the NOT NULL constraint.)"""
+    # -----------------------------------------------------------------------
+    # R4.3 (Stage 1.5-A.3.3): audit event timestamp is REQUIRED (None is rejected, never generated)
+    #
+    # NOTE: this section SUPERSEDES the Stage 1.5-A.3.2 test
+    # `test_r4_1_none_timestamp_follows_centralized_contract_and_generates_utc_now`, which pinned the
+    # opposite (None -> generated timestamp) behaviour that Stage 1.5-A.3.3 deliberately reverses.
+    # -----------------------------------------------------------------------
+
+    def _r43_assert_sql_trace_is_live(self, conn, repo, statements):
+        """Guard against vacuous 'no SQL issued' assertions: prove the trace callback captures real
+        statements by performing one VALID append and checking SQL was recorded."""
+        statements.clear()
+        self._r41_append(repo, uuid.uuid4().hex, "2026-11-09T12:30:00Z")
+        self.assertTrue(
+            any(s.lstrip().upper().startswith("INSERT INTO AUDIT_EVENTS") for s in statements),
+            f"SQL trace callback did not capture the valid insert: {statements!r}",
+        )
+
+    def test_r4_3_none_timestamp_is_rejected_with_validation_error_and_no_mutation(self):
+        """R4.3 Test A: None -> ValidationError('timestamp_utc is required'); no row, no count change,
+        no transaction, no SAVEPOINT, and in fact NO SQL of any kind is issued."""
         event_id = uuid.uuid4().hex
+        statements = []
         with self.core_manager.connection() as conn:
             repo = AuditEventRepository(conn)
-            rec = self._r41_append(repo, event_id, None)
-            self.assertTrue(rec.timestamp_utc.endswith("Z"))
-            self.assertEqual(validate_timestamp_utc(rec.timestamp_utc), rec.timestamp_utc)
-            self.assertEqual(repo.get_event(event_id).timestamp_utc, rec.timestamp_utc)
+            conn.set_trace_callback(statements.append)
+            try:
+                count_before = repo.count_events()
+                statements.clear()  # ignore the count query itself
+
+                with self.assertRaises(ValidationError) as ctx:
+                    self._r41_append(repo, event_id, None)
+
+                self.assertIn("timestamp_utc", str(ctx.exception))
+                self.assertIn("required", str(ctx.exception))
+                self.assertEqual(statements, [], f"SQL was issued for a None timestamp: {statements!r}")
+                self.assertFalse(
+                    any(s.lstrip().upper().startswith(("SAVEPOINT", "BEGIN", "RELEASE", "ROLLBACK")) for s in statements)
+                )
+                self.assertFalse(conn.in_transaction)
+
+                self._r43_assert_sql_trace_is_live(conn, repo, statements)
+            finally:
+                conn.set_trace_callback(None)
+
+            self.assertEqual(repo.count_events(), count_before + 1)  # only the guard's valid insert
+            self.assertIsNone(repo.get_event(event_id))
+
+            # The very same event_id remains insertable with an explicit timestamp
+            rec = self._r41_append(repo, event_id, "2026-11-09T12:30:00.5+00:00")
+            self.assertEqual(rec.timestamp_utc, "2026-11-09T12:30:00.5+00:00")
+
+    def test_r4_3_none_check_runs_before_shared_validator_and_transaction_entry(self):
+        """R4.3 Test B: Explicit ordering proof. With BOTH the shared validator and the transaction
+        mechanism instrumented to fail loudly, None is still rejected by the explicit check:
+        the validator and repository_transaction are never reached."""
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            with patch(
+                "python.database.repositories.audit.validate_timestamp_utc",
+                side_effect=AssertionError("shared validator reached for None"),
+            ) as validator_spy, patch(
+                "python.database.repositories.audit.repository_transaction",
+                side_effect=AssertionError("repository_transaction entered for None"),
+            ) as tx_spy:
+                with self.assertRaises(ValidationError) as ctx:
+                    self._r41_append(repo, uuid.uuid4().hex, None)
+                self.assertIn("required", str(ctx.exception))
+                validator_spy.assert_not_called()
+                tx_spy.assert_not_called()
+            self.assertFalse(conn.in_transaction)
+            self.assertEqual(repo.count_events(), 0)
+
+    def test_r4_3_shared_validator_still_runs_for_non_none_values_before_transaction(self):
+        """R4.3: The explicit None check must not bypass the shared validator for supplied values:
+        for a non-None value the shared validator runs, and still before transaction entry."""
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            with patch(
+                "python.database.repositories.audit.repository_transaction",
+                side_effect=AssertionError("repository_transaction entered for invalid timestamp"),
+            ) as tx_spy, patch(
+                "python.database.repositories.audit.validate_timestamp_utc",
+                wraps=validate_timestamp_utc,
+            ) as validator_spy:
+                with self.assertRaises(ValidationError):
+                    self._r41_append(repo, uuid.uuid4().hex, "2026-11-09T12:30:00-00:00")
+                validator_spy.assert_called_once_with("2026-11-09T12:30:00-00:00")
+                tx_spy.assert_not_called()
+
+    def test_r4_3_none_timestamp_inside_uow_does_not_alter_outer_transaction(self):
+        """R4.3 Test C: A None audit timestamp inside a caller-owned UnitOfWork raises ValidationError,
+        issues no SQL, does not poison the UoW, and the surrounding valid work (an audit event AND an
+        unrelated cash write) still commits; verified through a fresh connection."""
+        id_valid, id_none = uuid.uuid4().hex, uuid.uuid4().hex
+        statements = []
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.cash.set_cash_balance("PRIMARY", "EUR", "250.00", timestamp_utc="2026-11-09T12:00:00Z")
+            self._r41_append(uow.audit_events, id_valid, "2026-11-09T12:00:00Z")
+            self.assertTrue(uow._conn.in_transaction)
+
+            uow._conn.set_trace_callback(statements.append)
+            try:
+                statements.clear()
+                with self.assertRaises(ValidationError) as ctx:
+                    self._r41_append(uow.audit_events, id_none, None)
+                self.assertIn("required", str(ctx.exception))
+                self.assertEqual(statements, [], f"SQL issued inside UoW for None: {statements!r}")
+                self.assertFalse(any("SAVEPOINT" in s.upper() for s in statements))
+            finally:
+                uow._conn.set_trace_callback(None)
+
+            self.assertTrue(uow.is_active)
+            self.assertFalse(uow.is_poisoned)
+            self.assertFalse(uow.is_conn_unsafe)
+            self.assertTrue(uow._conn.in_transaction)
+            self.assertEqual(uow.audit_events.count_events(), 1)
+
+            # Same UoW remains fully usable for further valid work
+            with execution_role_context("Terminal Orchestrator"):
+                uow.cash.set_cash_balance("PRIMARY", "USD", "300.00", timestamp_utc="2026-11-09T12:01:00Z")
+        # leaving the with-block commits; any failure to commit would have raised
+
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            self.assertEqual(repo.count_events(), 1)
+            self.assertEqual(repo.get_event(id_valid).timestamp_utc, "2026-11-09T12:00:00Z")
+            self.assertIsNone(repo.get_event(id_none))
+            self.assertEqual(CashRepository(conn).get_cash("PRIMARY", "EUR").amount, Decimal("250.00"))
+            self.assertEqual(CashRepository(conn).get_cash("PRIMARY", "USD").amount, Decimal("300.00"))
+
+    def test_r4_3_invalid_or_missing_timestamp_on_replay_rejected_before_existence_query(self):
+        """R4.3 Test E: A replay of an EXISTING event carrying a missing (None) or invalid timestamp is
+        rejected before the existence SELECT (no SQL at all is issued) and leaves the stored event
+        completely unchanged."""
+        event_id = uuid.uuid4().hex
+        original_ts = "2026-11-09T12:30:00.123456Z"
+        raw = {"action": "r43", "n": 1}
+        statements = []
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            original = self._r41_append(repo, event_id, original_ts, raw_event=raw)
+
+            conn.set_trace_callback(statements.append)
+            try:
+                for bad in (None, "2026-11-09T12:30:00Z\n", "2026-11-09T12:30:00-00:00", ""):
+                    with self.subTest(replay_timestamp=repr(bad)):
+                        statements.clear()
+                        with self.assertRaises(ValidationError):
+                            self._r41_append(repo, event_id, bad, raw_event=raw)
+                        self.assertEqual(
+                            statements, [], f"SQL (e.g. existence query) issued before validation: {statements!r}"
+                        )
+                        self.assertFalse(conn.in_transaction)
+                self._r43_assert_sql_trace_is_live(conn, repo, statements)
+            finally:
+                conn.set_trace_callback(None)
+
+            self.assertEqual(repo.get_event(event_id), original)
+
+        with self.core_manager.connection() as conn:
+            stored = AuditEventRepository(conn).get_event(event_id)
+            self.assertEqual(stored, original)
+            self.assertEqual(stored.timestamp_utc, original_ts)
+            self.assertEqual(stored.raw_event, raw)
+
+    def test_r4_3_valid_replay_semantics_unchanged_after_none_rejection(self):
+        """R4.3 Test E (regression): identical replay is still idempotent and returns the stored
+        timestamp; a conflicting payload still raises IntegrityConflictError; an explicit valid
+        timestamp is still accepted byte-for-byte."""
+        event_id = uuid.uuid4().hex
+        ts = "2026-11-09T12:30:00+00:00"
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            first = self._r41_append(repo, event_id, ts)
+            replay = self._r41_append(repo, event_id, ts)
+            self.assertEqual(first, replay)
+            self.assertEqual(replay.timestamp_utc, ts)
+            with self.assertRaises(IntegrityConflictError):
+                self._r41_append(repo, event_id, ts, raw_event={"action": "tampered"})
+            self.assertEqual(repo.count_events(), 1)
+            self.assertEqual(repo.get_event(event_id).timestamp_utc, ts)
 
     # -----------------------------------------------------------------------
     # R5: Monotonic db_revision Tracking
