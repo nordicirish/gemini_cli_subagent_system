@@ -265,7 +265,7 @@ class CashRepository(BaseRepository):
         approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             try:
                 # Fetch before-state under write lock inside the transaction
                 existing = self.get_cash(norm_account, norm_currency)
@@ -356,7 +356,7 @@ class CashRepository(BaseRepository):
         approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             existing = self.get_cash(norm_account, norm_currency)
             if existing is None:
                 return False
@@ -528,7 +528,7 @@ class PositionRepository(BaseRepository):
         approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             try:
                 # Query before-state under write lock inside transaction
                 existing = self.get_position(norm_account, norm_ticker)
@@ -628,7 +628,7 @@ class PositionRepository(BaseRepository):
         approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             existing = self.get_position(norm_account, norm_ticker)
             if existing is None:
                 return False
@@ -752,7 +752,7 @@ class WatchlistRepository(BaseRepository):
         )
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             try:
                 existing = self.get_watchlist_item(norm_ticker)
                 added_at = existing.added_at_utc if existing else valid_ts
@@ -833,7 +833,7 @@ class WatchlistRepository(BaseRepository):
 
         timestamp_utc = utc_now_iso()
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             existing = self.get_watchlist_item(norm_ticker)
             if existing is None:
                 return False

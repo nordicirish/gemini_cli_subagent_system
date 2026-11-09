@@ -205,7 +205,7 @@ class DailyBarRepository(BaseRepository):
         timestamp_utc = utc_now_iso()
 
         # R1/R3/R7: Transaction & savepoint lifecycle management
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             cur = self._conn.cursor()
             try:
                 cur.execute(
@@ -266,7 +266,7 @@ class DailyBarRepository(BaseRepository):
         timestamp_utc = utc_now_iso()
 
         # R1/R3/R7: Transaction & savepoint lifecycle management across the batch
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             cur = self._conn.cursor()
             inserted_count = 0
             for b in bars:
@@ -352,7 +352,7 @@ class DailyBarRepository(BaseRepository):
         norm_ticker = validate_identifier(ticker, "ticker").upper()
 
         # R1/R3: Transaction & savepoint lifecycle management
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             cur = self._conn.cursor()
             cur.execute("DELETE FROM daily_bars WHERE ticker = ?", (norm_ticker,))
             return cur.rowcount

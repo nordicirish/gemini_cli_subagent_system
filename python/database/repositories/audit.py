@@ -77,7 +77,7 @@ class AuditEventRepository(BaseRepository):
         raw_event_json = json.dumps(raw_event, sort_keys=True)
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             cur = self._conn.cursor()
 
             # Check for existing event to enforce idempotency vs conflict

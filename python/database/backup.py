@@ -9,6 +9,7 @@ even when the source database is in active WAL mode with concurrent readers/writ
 
 import os
 import sys
+import ctypes
 import sqlite3
 import datetime
 from dataclasses import dataclass
@@ -32,6 +33,94 @@ class BackupDestinationExistsError(BackupError):
 class BackupIntegrityError(BackupError):
     """Raised when an exported backup fails PRAGMA integrity_check."""
     pass
+
+
+class BackupQuiescenceError(BackupError):
+    """Raised when target database quiescence cannot be established (R3)."""
+    pass
+
+
+class BackupRecoveryError(BackupError):
+    """Raised when restoration replacement failed and recovery of original target also failed (R4)."""
+    def __init__(self, message: str, target_path: str, fallback_path: str):
+        super().__init__(message)
+        self.target_path = target_path
+        self.fallback_path = fallback_path
+
+
+class BackupCleanupError(BackupError):
+    """Raised when cleanup of temporary files or preserved fallback backups fails (R4)."""
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Exclusive Target Locking Helpers (R3)
+# ---------------------------------------------------------------------------
+
+def _acquire_exclusive_target_lock(file_path: str):
+    """
+    Acquires an exclusive OS-level file handle to verify quiescence and block concurrent access (R3).
+    On Windows: uses kernel32.CreateFileW with FILE_SHARE_DELETE (blocking read/write while allowing rename).
+    On POSIX: uses fcntl.flock(LOCK_EX | LOCK_NB).
+    Raises BackupQuiescenceError if the file is in use by any active/idle process.
+    Returns opaque handle or file object that must be closed to release.
+    """
+    if not os.path.exists(file_path):
+        return None
+
+    abs_path = os.path.abspath(file_path)
+    if sys.platform == "win32":
+        GENERIC_READ = 0x80000000
+        GENERIC_WRITE = 0x40000000
+        DELETE = 0x00010000
+        FILE_SHARE_DELETE = 4
+        OPEN_EXISTING = 3
+
+        handle = ctypes.windll.kernel32.CreateFileW(
+            abs_path,
+            GENERIC_READ | GENERIC_WRITE | DELETE,
+            FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            0,
+            None,
+        )
+        if handle in (-1, 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFF):
+            err = ctypes.windll.kernel32.GetLastError()
+            raise BackupQuiescenceError(
+                f"Target database '{file_path}' cannot be safely restored: "
+                f"Held open by active or idle connection (WinError {err})."
+            )
+        return handle
+    else:
+        try:
+            import fcntl
+            f = open(abs_path, "r+b")
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return f
+        except (IOError, OSError) as e:
+            raise BackupQuiescenceError(
+                f"Target database '{file_path}' cannot be safely restored: "
+                f"Held open by active or idle connection: {e}"
+            ) from e
+
+
+def _close_exclusive_target_lock(handle) -> None:
+    """Closes an acquired exclusive OS file handle."""
+    if handle is None:
+        return
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception:
+            pass
+    else:
+        try:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -237,19 +326,22 @@ class BackupManager:
         progress_callback: Optional[Callable[[int, int, int], None]] = None,
     ) -> BackupResult:
         """
-        Safely restores a verified SQLite backup snapshot to target_db_path (R4).
+        Safely restores a verified SQLite backup snapshot to target_db_path (R3/R4).
 
         Enforces strict safety contract:
         - Verifies source backup physical integrity before touching the target.
         - Establishes target quiescence before modifying or replacing any target files:
-          - Rejects restoration fail-closed if target is in active use by any connection or process.
+          - Uses OS-level exclusive file access checks to reject restoration fail-closed
+            if target is in active or idle use by any connection or process.
           - If target is in WAL mode, checkpoints and transitions safely via PRAGMA journal_mode=DELETE,
             ensuring SQLite engine itself coordinates WAL flush and cleans up -wal and -shm sidecars.
-          - Verifies exclusive filesystem-level access on target.
+          - Holds persistent exclusive OS lock on target across entire temporary restoration and swap.
+          - Creates and holds coordinated restore lock file to notify DatabaseManager.connect().
         - Restores to an isolated temporary database file first and verifies its integrity.
         - Preserves existing target file as rollback fallback during atomic swap.
+        - If replacement fails, recovers original target; if recovery fails, NEVER deletes fallback.
         - Verifies the final restored database with PRAGMA integrity_check.
-        - Guaranteed clean cleanup of temporary files in all scenarios.
+        - Guaranteed accurate reporting of all recovery or cleanup failures.
         """
         backup_path = os.path.abspath(backup_path)
         target_db_path = os.path.abspath(target_db_path)
@@ -288,198 +380,252 @@ class BackupManager:
         target_exists = os.path.exists(target_db_path)
         wal_path = f"{target_db_path}-wal"
         shm_path = f"{target_db_path}-shm"
+        restore_lock_path = f"{target_db_path}.restore_lock"
 
-        # 2. If target exists, establish and verify target quiescence fail-closed
-        if target_exists:
-            if os.path.isdir(target_db_path):
-                raise BackupError(f"Target database path is a directory, not a file: '{target_db_path}'")
+        # Create coordinated restore lock file to signal DatabaseManager.connect()
+        try:
+            with open(restore_lock_path, "w") as f:
+                f.write(f"pid={os.getpid()}\nutc={datetime.datetime.now(datetime.timezone.utc).isoformat()}\n")
+        except OSError as e:
+            raise BackupError(f"Failed to create coordinated restore lock '{restore_lock_path}': {e}") from e
 
-            # Verify exclusive filesystem access to target file
-            try:
-                with open(target_db_path, "r+b"):
-                    pass
-            except (PermissionError, OSError) as e:
-                raise BackupError(
-                    f"Target database '{target_db_path}' cannot be safely restored: "
-                    f"Database file is held open by another active process: {e}"
-                ) from e
-
-            # Check if target is a valid SQLite database
-            is_sqlite = False
-            if os.path.getsize(target_db_path) >= 100:
-                try:
-                    with open(target_db_path, "rb") as f:
-                        hdr = f.read(16)
-                    is_sqlite = hdr.startswith(b"SQLite format 3\x00")
-                except OSError:
-                    is_sqlite = False
-
-            if is_sqlite:
-                # Check exclusive connection lock
-                try:
-                    target_check = sqlite3.connect(target_db_path, timeout=0.0, autocommit=True)
-                except sqlite3.OperationalError as e:
-                    raise BackupError(
-                        f"Target database '{target_db_path}' cannot be safely restored: "
-                        f"Target database is currently in use or locked: {e}"
-                    ) from e
-
-                try:
-                    cur = target_check.cursor()
-                    cur.execute("PRAGMA journal_mode;")
-                    row = cur.fetchone()
-                    jmode = str(row[0]).lower() if row else ""
-
-                    if jmode == "wal":
-                        # Checkpoint and truncate WAL
-                        cur.execute("PRAGMA wal_checkpoint(TRUNCATE);")
-                        cp_row = cur.fetchone()
-                        if cp_row and cp_row[0] != 0:
-                            raise BackupError(
-                                f"Target database '{target_db_path}' cannot be safely restored: "
-                                f"Active concurrent readers or uncheckpointed writes in WAL mode."
-                            )
-                        # Transition away from WAL mode so SQLite flushes and unlinks sidecars
-                        try:
-                            cur.execute("PRAGMA journal_mode=DELETE;")
-                            new_jmode = str(cur.fetchone()[0]).lower()
-                            if new_jmode != "delete":
-                                raise BackupError(
-                                    f"Target database '{target_db_path}' cannot be safely restored: "
-                                    f"Failed to transition from WAL mode (remained '{new_jmode}')."
-                                )
-                        except sqlite3.OperationalError as e:
-                            raise BackupError(
-                                f"Target database '{target_db_path}' cannot be safely restored: "
-                                f"Concurrent connection active preventing WAL transition: {e}"
-                            ) from e
-                    else:
-                        # Rollback journal mode: verify exclusive locking
-                        try:
-                            cur.execute("PRAGMA locking_mode=EXCLUSIVE;")
-                            cur.execute("BEGIN EXCLUSIVE;")
-                            cur.execute("COMMIT;")
-                        except sqlite3.OperationalError as e:
-                            raise BackupError(
-                                f"Target database '{target_db_path}' cannot be safely restored: "
-                                f"Database is locked by another connection: {e}"
-                            ) from e
-                finally:
-                    target_check.close()
-            else:
-                # If target is non-SQLite (e.g. dummy/corrupted file), clean up any stale sidecars safely
-                for s_path in (wal_path, shm_path):
-                    if os.path.exists(s_path):
-                        try:
-                            with open(s_path, "r+b"):
-                                pass
-                            os.unlink(s_path)
-                        except (PermissionError, OSError) as e:
-                            raise BackupError(
-                                f"Target database '{target_db_path}' cannot be safely restored: "
-                                f"Sidecar '{s_path}' is held open by another process: {e}"
-                            ) from e
-
-            # Verify no sidecar files remain active
-            if os.path.exists(wal_path) or os.path.exists(shm_path):
-                raise BackupError(
-                    f"Target database '{target_db_path}' cannot be safely restored: "
-                    f"WAL/SHM sidecars still present after quiescence."
-                )
-
-        now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%H%M%S%f")
-        tmp_restore = f"{target_db_path}.tmp_restore_{os.getpid()}_{now_str}"
-        target_bak = f"{target_db_path}.pre_restore_{os.getpid()}_{now_str}" if target_exists else None
-
-        src_conn = None
-        dst_conn = None
+        h_target = None
+        cleanup_errors = []
 
         try:
-            src_conn = sqlite3.connect(backup_path, autocommit=True)
-            dst_conn = sqlite3.connect(tmp_restore, autocommit=True)
+            # 2. If target exists, establish and verify target quiescence fail-closed
+            if target_exists:
+                if os.path.isdir(target_db_path):
+                    raise BackupError(f"Target database path is a directory, not a file: '{target_db_path}'")
 
-            # Reconstruct restored database via Online Backup API
-            src_conn.backup(dst_conn, pages=pages_per_step, progress=progress_callback)
+                # Verify exclusive OS filesystem access to target file and sidecars
+                test_h = _acquire_exclusive_target_lock(target_db_path)
+                _close_exclusive_target_lock(test_h)
 
-            # Verify integrity of newly restored temporary database
-            cursor = dst_conn.cursor()
-            cursor.execute("PRAGMA integrity_check;")
-            rows = cursor.fetchall()
-            integrity_results = [r[0] for r in rows if r]
+                for s_path in (wal_path, shm_path):
+                    if os.path.exists(s_path):
+                        test_sh = _acquire_exclusive_target_lock(s_path)
+                        _close_exclusive_target_lock(test_sh)
 
-            if not integrity_results or integrity_results[0] != "ok":
-                raise BackupIntegrityError(
-                    f"Integrity check failed for restored temporary database '{tmp_restore}': {integrity_results}"
+                # Check if target is a valid SQLite database
+                is_sqlite = False
+                if os.path.getsize(target_db_path) >= 100:
+                    try:
+                        with open(target_db_path, "rb") as f:
+                            hdr = f.read(16)
+                        is_sqlite = hdr.startswith(b"SQLite format 3\x00")
+                    except OSError:
+                        is_sqlite = False
+
+                if is_sqlite:
+                    # Check exclusive connection lock and checkpoint WAL if applicable
+                    try:
+                        target_check = sqlite3.connect(target_db_path, timeout=0.0, autocommit=True)
+                    except sqlite3.OperationalError as e:
+                        raise BackupQuiescenceError(
+                            f"Target database '{target_db_path}' cannot be safely restored: "
+                            f"Target database is currently in use or locked: {e}"
+                        ) from e
+
+                    try:
+                        cur = target_check.cursor()
+                        cur.execute("PRAGMA journal_mode;")
+                        row = cur.fetchone()
+                        jmode = str(row[0]).lower() if row else ""
+
+                        if jmode == "wal":
+                            # Checkpoint and truncate WAL
+                            cur.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                            cp_row = cur.fetchone()
+                            if cp_row and cp_row[0] != 0:
+                                raise BackupQuiescenceError(
+                                    f"Target database '{target_db_path}' cannot be safely restored: "
+                                    f"Active concurrent readers or uncheckpointed writes in WAL mode."
+                                )
+                            # Transition away from WAL mode so SQLite flushes and unlinks sidecars
+                            try:
+                                cur.execute("PRAGMA journal_mode=DELETE;")
+                                new_jmode = str(cur.fetchone()[0]).lower()
+                                if new_jmode != "delete":
+                                    raise BackupQuiescenceError(
+                                        f"Target database '{target_db_path}' cannot be safely restored: "
+                                        f"Failed to transition from WAL mode (remained '{new_jmode}')."
+                                    )
+                            except sqlite3.OperationalError as e:
+                                raise BackupQuiescenceError(
+                                    f"Target database '{target_db_path}' cannot be safely restored: "
+                                    f"Concurrent connection active preventing WAL transition: {e}"
+                                ) from e
+                        else:
+                            # Rollback journal mode: verify exclusive locking
+                            try:
+                                cur.execute("PRAGMA locking_mode=EXCLUSIVE;")
+                                cur.execute("BEGIN EXCLUSIVE;")
+                                cur.execute("COMMIT;")
+                            except sqlite3.OperationalError as e:
+                                raise BackupQuiescenceError(
+                                    f"Target database '{target_db_path}' cannot be safely restored: "
+                                    f"Database is locked by another connection: {e}"
+                                ) from e
+                    finally:
+                        target_check.close()
+                else:
+                    # If target is non-SQLite (e.g. dummy/corrupted file), clean up any stale sidecars safely
+                    for s_path in (wal_path, shm_path):
+                        if os.path.exists(s_path):
+                            try:
+                                os.unlink(s_path)
+                            except (PermissionError, OSError) as e:
+                                raise BackupQuiescenceError(
+                                    f"Target database '{target_db_path}' cannot be safely restored: "
+                                    f"Sidecar '{s_path}' is held open by another process: {e}"
+                                ) from e
+
+                # Verify no sidecar files remain active
+                if os.path.exists(wal_path) or os.path.exists(shm_path):
+                    raise BackupQuiescenceError(
+                        f"Target database '{target_db_path}' cannot be safely restored: "
+                        f"WAL/SHM sidecars still present after quiescence."
+                    )
+
+                # Acquire and HOLD persistent exclusive lock on target database
+                h_target = _acquire_exclusive_target_lock(target_db_path)
+
+            now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%H%M%S%f")
+            tmp_restore = f"{target_db_path}.tmp_restore_{os.getpid()}_{now_str}"
+            target_bak = f"{target_db_path}.pre_restore_{os.getpid()}_{now_str}" if target_exists else None
+
+            src_conn = None
+            dst_conn = None
+
+            try:
+                src_conn = sqlite3.connect(backup_path, autocommit=True)
+                dst_conn = sqlite3.connect(tmp_restore, autocommit=True)
+
+                # Reconstruct restored database via Online Backup API
+                src_conn.backup(dst_conn, pages=pages_per_step, progress=progress_callback)
+
+                # Verify integrity of newly restored temporary database
+                cursor = dst_conn.cursor()
+                cursor.execute("PRAGMA integrity_check;")
+                rows = cursor.fetchall()
+                integrity_results = [r[0] for r in rows if r]
+
+                if not integrity_results or integrity_results[0] != "ok":
+                    raise BackupIntegrityError(
+                        f"Integrity check failed for restored temporary database '{tmp_restore}': {integrity_results}"
+                    )
+
+                try:
+                    dst_conn.close()
+                except Exception as ce:
+                    cleanup_errors.append(ce)
+                dst_conn = None
+
+                try:
+                    src_conn.close()
+                except Exception as ce:
+                    cleanup_errors.append(ce)
+                src_conn = None
+
+                # Atomically replace target database with fallback preservation
+                if target_exists:
+                    try:
+                        os.replace(target_db_path, target_bak)
+                        os.replace(tmp_restore, target_db_path)
+                        # Verify final placed database
+                        cls.verify_backup(target_db_path)
+                        # Verified! Safely release lock and unlink backup
+                        _close_exclusive_target_lock(h_target)
+                        h_target = None
+                        try:
+                            os.unlink(target_bak)
+                            target_bak = None
+                        except OSError as unlink_err:
+                            cleanup_errors.append(unlink_err)
+                    except Exception as replace_err:
+                        # Release lock if still held before recovery
+                        _close_exclusive_target_lock(h_target)
+                        h_target = None
+
+                        # Rollback swap: recover original target from target_bak
+                        if target_bak is not None and os.path.exists(target_bak):
+                            try:
+                                os.replace(target_bak, target_db_path)
+                                cls.verify_backup(target_db_path)
+                                target_bak = None
+                            except Exception as rec_err:
+                                # Recovery failed! Do NOT unlink target_bak!
+                                raise BackupRecoveryError(
+                                    f"CRITICAL: Replacement failed ({replace_err}) and recovery of original target "
+                                    f"from '{target_bak}' also failed ({rec_err}). Original target is preserved at '{target_bak}'.",
+                                    target_path=target_db_path,
+                                    fallback_path=target_bak,
+                                ) from rec_err
+                            raise BackupError(
+                                f"Restore operation failed: {replace_err}. Original target database successfully recovered."
+                            ) from replace_err
+                        raise
+                else:
+                    os.replace(tmp_restore, target_db_path)
+                    cls.verify_backup(target_db_path)
+
+                if cleanup_errors:
+                    raise BackupCleanupError(
+                        f"Restoration succeeded but non-fatal cleanup errors occurred: {cleanup_errors}"
+                    )
+
+                restored_size = os.path.getsize(target_db_path)
+                now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+                return BackupResult(
+                    source_path=backup_path,
+                    destination_path=target_db_path,
+                    file_size_bytes=restored_size,
+                    timestamp_utc=now_iso,
+                    integrity_status="ok",
                 )
 
-            dst_conn.close()
-            dst_conn = None
-            src_conn.close()
-            src_conn = None
+            except Exception as e:
+                _close_exclusive_target_lock(h_target)
+                h_target = None
 
-            # Atomically replace target database with fallback preservation
-            if target_exists:
-                try:
-                    os.replace(target_db_path, target_bak)
-                    os.replace(tmp_restore, target_db_path)
-                    # Verify final placed database
-                    cls.verify_backup(target_db_path)
-                    # Verified! Safely unlink backup
+                if dst_conn is not None:
+                    try:
+                        dst_conn.close()
+                    except Exception as ce:
+                        cleanup_errors.append(ce)
+                if src_conn is not None:
+                    try:
+                        src_conn.close()
+                    except Exception as ce:
+                        cleanup_errors.append(ce)
+
+                if os.path.exists(tmp_restore):
+                    try:
+                        os.unlink(tmp_restore)
+                    except Exception as ce:
+                        cleanup_errors.append(ce)
+
+                if isinstance(e, BackupRecoveryError):
+                    # NEVER touch or delete target_bak if recovery failed!
+                    raise
+
+                if target_bak is not None and os.path.exists(target_bak):
                     try:
                         os.unlink(target_bak)
                         target_bak = None
-                    except OSError:
-                        pass
-                except Exception as replace_err:
-                    # Rollback swap if possible
-                    if target_bak is not None and os.path.exists(target_bak) and not os.path.exists(target_db_path):
-                        try:
-                            os.replace(target_bak, target_db_path)
-                        except OSError:
-                            pass
+                    except Exception as ce:
+                        cleanup_errors.append(ce)
+
+                if isinstance(e, BackupError):
                     raise
-            else:
-                os.replace(tmp_restore, target_db_path)
-                cls.verify_backup(target_db_path)
+                raise BackupError(f"Restore operation failed: {e}") from e
 
-            restored_size = os.path.getsize(target_db_path)
-            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-            return BackupResult(
-                source_path=backup_path,
-                destination_path=target_db_path,
-                file_size_bytes=restored_size,
-                timestamp_utc=now_iso,
-                integrity_status="ok",
-            )
-
-        except Exception as e:
-            if dst_conn is not None:
+        finally:
+            _close_exclusive_target_lock(h_target)
+            if os.path.exists(restore_lock_path):
                 try:
-                    dst_conn.close()
+                    os.unlink(restore_lock_path)
                 except Exception:
                     pass
-            if src_conn is not None:
-                try:
-                    src_conn.close()
-                except Exception:
-                    pass
-            if os.path.exists(tmp_restore):
-                try:
-                    os.unlink(tmp_restore)
-                except Exception:
-                    pass
-            if target_bak is not None and os.path.exists(target_bak):
-                if not os.path.exists(target_db_path):
-                    try:
-                        os.replace(target_bak, target_db_path)
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        os.unlink(target_bak)
-                    except Exception:
-                        pass
-            if isinstance(e, BackupError):
-                raise
-            raise BackupError(f"Restore operation failed: {e}") from e

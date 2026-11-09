@@ -48,6 +48,9 @@ from database.backup import (
     BackupError,
     BackupDestinationExistsError,
     BackupIntegrityError,
+    BackupQuiescenceError,
+    BackupRecoveryError,
+    BackupCleanupError,
     BackupResult,
 )
 
@@ -2298,6 +2301,333 @@ class TestStage15A1BackupRestorationSafety(unittest.TestCase):
         res = BackupManager.restore_backup(self.dst_path, target_path)
         self.assertEqual(res.integrity_status, "ok")
         BackupManager.verify_backup(target_path)
+
+
+# ===========================================================================
+# Stage 1.5-A.2: Backup Restoration Quiescence, Locking & Cleanup Safety Tests (R3/R4)
+# ===========================================================================
+
+class TestStage15A2BackupRestoreQuiescenceAndCleanupSafety(unittest.TestCase):
+    """
+    Mandatory regression and failure-injection test suite for Stage 1.5-A.2 (R3 & R4).
+    Verifies enforceable target quiescence, cross-process access blocking,
+    safe WAL checkpointing/transition, and reliable failure recovery without silent suppression.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.src_path = os.path.join(self.temp_dir.name, "source_15a2.db")
+        self.backup_path = os.path.join(self.temp_dir.name, "backup_15a2.db")
+
+        # Initialize source database with known content
+        src_mgr = DatabaseManager(self.src_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with src_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('PRIMARY', 'EUR', '9999.00', '2026-11-09T15:00:00Z')"
+            )
+        BackupManager.create_backup(self.src_path, self.backup_path)
+
+    def tearDown(self):
+        try:
+            self.temp_dir.cleanup()
+        except Exception:
+            pass
+
+    def test_r3_active_uncommitted_writer_rejected_fail_closed(self):
+        """R3.1: Active uncommitted writer holding lock on target blocks restoration fail-closed."""
+        target_path = os.path.join(self.temp_dir.name, "target_writer.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('ORIG', 'EUR', '111.00', '2026-11-09T12:00:00Z')"
+            )
+
+        writer_conn = target_mgr.connect()
+        writer_conn.execute("BEGIN IMMEDIATE;")
+        writer_conn.execute(
+            "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+            "VALUES ('UNCOMMITTED', 'EUR', '222.00', '2026-11-09T12:00:00Z')"
+        )
+        try:
+            with self.assertRaises(BackupError) as ctx:
+                BackupManager.restore_backup(self.backup_path, target_path)
+            self.assertTrue(isinstance(ctx.exception, (BackupQuiescenceError, BackupError)))
+        finally:
+            writer_conn.execute("ROLLBACK;")
+            writer_conn.close()
+
+        # Original data untouched
+        with target_mgr.connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT amount FROM portfolio_cash WHERE account_id='ORIG'")
+            self.assertEqual(cur.fetchone()[0], "111.00")
+
+    def test_r3_active_reader_transaction_rejected_fail_closed(self):
+        """R3.2: Active reader transaction holding locks on target blocks restoration fail-closed."""
+        target_path = os.path.join(self.temp_dir.name, "target_reader.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('READER_ORIG', 'EUR', '333.00', '2026-11-09T12:00:00Z')"
+            )
+
+        reader_conn = target_mgr.connect()
+        reader_conn.execute("BEGIN DEFERRED;")
+        reader_conn.execute("SELECT count(*) FROM portfolio_cash;")
+        try:
+            with self.assertRaises(BackupError) as ctx:
+                BackupManager.restore_backup(self.backup_path, target_path)
+            self.assertTrue(isinstance(ctx.exception, (BackupQuiescenceError, BackupError)))
+        finally:
+            reader_conn.execute("ROLLBACK;")
+            reader_conn.close()
+
+    def test_r3_idle_open_connection_rejected_fail_closed(self):
+        """R3.3: Idle open SQLite connection holding file handle blocks restoration fail-closed."""
+        target_path = os.path.join(self.temp_dir.name, "target_idle.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+
+        idle_conn = target_mgr.connect()
+        try:
+            with self.assertRaises(BackupError) as ctx:
+                BackupManager.restore_backup(self.backup_path, target_path)
+            self.assertTrue(isinstance(ctx.exception, (BackupQuiescenceError, BackupError)))
+        finally:
+            idle_conn.close()
+
+    def test_r3_concurrent_database_manager_connect_blocked_by_restore_lock(self):
+        """R3.4: Concurrent DatabaseManager.connect() during restoration is rejected via restore lock."""
+        target_path = os.path.join(self.temp_dir.name, "target_lock_test.db")
+        restore_lock_path = f"{target_path}.restore_lock"
+
+        # Simulate active restore lock
+        with open(restore_lock_path, "w") as f:
+            f.write("pid=1234\n")
+
+        try:
+            mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+            with self.assertRaises(DatabaseBusyError) as ctx:
+                mgr.connect()
+            self.assertIn("undergoing offline backup restoration", str(ctx.exception))
+        finally:
+            if os.path.exists(restore_lock_path):
+                os.unlink(restore_lock_path)
+
+    def test_r3_wal_database_with_outstanding_frames_checkpointed_and_restored(self):
+        """R3.5: Target WAL database with outstanding frames is checkpointed and restored safely."""
+        target_path = os.path.join(self.temp_dir.name, "target_wal_frames.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('WAL_PRE', 'EUR', '50.00', '2026-11-09T12:00:00Z')"
+            )
+
+        # Restore onto the WAL database (which has closed all connections and is quiescent)
+        res = BackupManager.restore_backup(self.backup_path, target_path)
+        self.assertEqual(res.integrity_status, "ok")
+
+        with target_mgr.connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT amount FROM portfolio_cash WHERE account_id='PRIMARY'")
+            self.assertEqual(cur.fetchone()[0], "9999.00")
+
+    def test_r3_checkpoint_failure_fails_closed(self):
+        """R3.6: Failure during WAL checkpoint causes restoration to reject fail-closed without modifying target."""
+        target_path = os.path.join(self.temp_dir.name, "target_cp_fail.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('SAFE', 'EUR', '123.00', '2026-11-09T12:00:00Z')"
+            )
+
+        # Active reader prevents WAL checkpoint truncation
+        active_reader = sqlite3.connect(target_path, autocommit=True)
+        active_reader.execute("BEGIN DEFERRED;")
+        active_reader.execute("SELECT * FROM portfolio_cash;")
+
+        try:
+            with self.assertRaises(BackupError) as ctx:
+                BackupManager.restore_backup(self.backup_path, target_path)
+            self.assertTrue(isinstance(ctx.exception, (BackupQuiescenceError, BackupError)))
+        finally:
+            active_reader.execute("ROLLBACK;")
+            active_reader.close()
+
+        # Original data untouched
+        with target_mgr.connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT amount FROM portfolio_cash WHERE account_id='SAFE'")
+            self.assertEqual(cur.fetchone()[0], "123.00")
+
+    def test_r3_failure_during_replacement_recovers_original_target(self):
+        """R3.7: Failure during replacement recovers original target and verifies integrity."""
+        target_path = os.path.join(self.temp_dir.name, "target_swap_fail.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('ORIGINAL', 'EUR', '888.00', '2026-11-09T12:00:00Z')"
+            )
+
+        real_replace = os.replace
+        replace_call_count = [0]
+
+        def faulty_replace(src, dst):
+            replace_call_count[0] += 1
+            # First replace is target -> target_bak (let it succeed)
+            # Second replace is tmp_restore -> target (inject failure)
+            if replace_call_count[0] == 2:
+                raise OSError("Simulated filesystem I/O error during tmp_restore -> target replace")
+            return real_replace(src, dst)
+
+        os.replace = faulty_replace
+        try:
+            with self.assertRaises(BackupError) as ctx:
+                BackupManager.restore_backup(self.backup_path, target_path)
+            self.assertIn("Original target database successfully recovered", str(ctx.exception))
+        finally:
+            os.replace = real_replace
+
+        # Verify original target is completely recovered
+        with target_mgr.connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT amount FROM portfolio_cash WHERE account_id='ORIGINAL'")
+            self.assertEqual(cur.fetchone()[0], "888.00")
+
+    def test_r3_failure_during_final_integrity_verification_recovers_original_target(self):
+        """R3.8: Failure during final integrity verification recovers original target from backup."""
+        target_path = os.path.join(self.temp_dir.name, "target_final_verify_fail.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('KEEP_ORIGINAL', 'EUR', '444.00', '2026-11-09T12:00:00Z')"
+            )
+
+        real_verify = BackupManager.verify_backup
+        verify_calls = [0]
+
+        def faulty_verify(path):
+            verify_calls[0] += 1
+            # Call 1 is pre-check on backup_path (let it pass)
+            # Call 2 is on final placed target (fail it)
+            if verify_calls[0] == 2:
+                raise BackupIntegrityError("Simulated corruption in final placed target")
+            return real_verify(path)
+
+        BackupManager.verify_backup = classmethod(lambda cls, path: faulty_verify(path))
+        try:
+            with self.assertRaises(BackupError) as ctx:
+                BackupManager.restore_backup(self.backup_path, target_path)
+            self.assertIn("Original target database successfully recovered", str(ctx.exception))
+        finally:
+            BackupManager.verify_backup = real_verify
+
+        # Verify original target is recovered
+        with target_mgr.connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT amount FROM portfolio_cash WHERE account_id='KEEP_ORIGINAL'")
+            self.assertEqual(cur.fetchone()[0], "444.00")
+
+    def test_r3_no_unsafe_sidecar_deletion_when_target_held_open(self):
+        """R3.9: WAL/SHM sidecars are NOT deleted when target database is active."""
+        target_path = os.path.join(self.temp_dir.name, "target_sidecars.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('SIDECAR', 'EUR', '10.00', '2026-11-09T12:00:00Z')"
+            )
+
+        active = target_mgr.connect()
+        try:
+            with self.assertRaises(BackupError):
+                BackupManager.restore_backup(self.backup_path, target_path)
+
+            wal_file = f"{target_path}-wal"
+            shm_file = f"{target_path}-shm"
+            self.assertTrue(os.path.exists(wal_file) or os.path.exists(shm_file))
+        finally:
+            active.close()
+
+    def test_r4_fallback_database_deletion_failure_reported(self):
+        """R4.1: Failure during target_bak deletion raises BackupCleanupError."""
+        target_path = os.path.join(self.temp_dir.name, "target_cleanup_fail.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('PRE', 'EUR', '1.00', '2026-11-09T12:00:00Z')"
+            )
+
+        real_unlink = os.unlink
+
+        def faulty_unlink(path):
+            if ".pre_restore_" in path:
+                raise OSError("Simulated permission error unlinking fallback backup")
+            return real_unlink(path)
+
+        os.unlink = faulty_unlink
+        try:
+            with self.assertRaises(BackupCleanupError) as ctx:
+                BackupManager.restore_backup(self.backup_path, target_path)
+            self.assertIn("non-fatal cleanup errors occurred", str(ctx.exception))
+        finally:
+            os.unlink = real_unlink
+
+    def test_r4_original_target_recovery_failure_preserves_fallback_and_raises_recovery_error(self):
+        """R4.2: When replacement fails AND recovery of original target fails, fallback is NEVER deleted."""
+        target_path = os.path.join(self.temp_dir.name, "target_catastrophic_fail.db")
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('CRITICAL_DATA', 'EUR', '555.00', '2026-11-09T12:00:00Z')"
+            )
+
+        real_replace = os.replace
+        replace_call_count = [0]
+
+        def double_faulty_replace(src, dst):
+            replace_call_count[0] += 1
+            # Call 1: target -> target_bak (succeeds)
+            # Call 2: tmp_restore -> target (fails)
+            # Call 3: target_bak -> target recovery (fails)
+            if replace_call_count[0] in (2, 3):
+                raise OSError(f"Simulated fatal filesystem error on replace #{replace_call_count[0]}")
+            return real_replace(src, dst)
+
+        os.replace = double_faulty_replace
+        try:
+            with self.assertRaises(BackupRecoveryError) as ctx:
+                BackupManager.restore_backup(self.backup_path, target_path)
+
+            self.assertIn("recovery of original target", str(ctx.exception))
+            self.assertEqual(ctx.exception.target_path, target_path)
+            self.assertTrue(os.path.exists(ctx.exception.fallback_path))
+            self.assertIn(".pre_restore_", ctx.exception.fallback_path)
+        finally:
+            os.replace = real_replace
 
 
 if __name__ == "__main__":

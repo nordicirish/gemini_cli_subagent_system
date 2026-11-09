@@ -19,7 +19,7 @@ import sqlite3
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
-from python.database.manager import DatabaseError
+from python.database.manager import DatabaseError, DatabaseTransactionError
 from python.tool_registry import get_active_caller_role
 
 
@@ -422,10 +422,16 @@ class BaseRepository:
 
     def _check_active(self) -> None:
         """Verifies that the repository and its managing UnitOfWork are active."""
-        if self._uow is not None and not getattr(self._uow, "is_active", True):
-            raise RepositoryError(
-                "UnitOfWork is no longer active; operations through retained repository references are prohibited."
-            )
+        if self._uow is not None:
+            if getattr(self._uow, "is_poisoned", False):
+                reason = getattr(self._uow, "poison_reason", "unknown")
+                raise TransactionIntegrityError(
+                    f"UnitOfWork transaction is poisoned ({reason}); operations through repository references are prohibited."
+                )
+            if not getattr(self._uow, "is_active", True):
+                raise RepositoryError(
+                    "UnitOfWork is no longer active; operations through retained repository references are prohibited."
+                )
 
     @property
     def connection(self) -> sqlite3.Connection:
@@ -498,18 +504,25 @@ class repository_transaction:
     - If conn is in an existing transaction (nested/UnitOfWork): creates a unique SAVEPOINT,
       releases savepoint on exit, rolls back to and releases savepoint on exception.
     - Never commits or rolls back a caller-owned outer transaction.
-    - If rollback or savepoint recovery fails, raises TransactionIntegrityError chained with original error.
+    - If rollback or savepoint recovery fails, raises TransactionIntegrityError chained with original error
+      and notifies/poisons the owning UnitOfWork.
     - Preserves caller-owned UnitOfWork lifecycle and nested transaction protections.
     """
 
-    def __init__(self, connection: sqlite3.Connection):
+    def __init__(self, connection: sqlite3.Connection, uow: Optional[Any] = None):
         if connection is None:
             raise ValueError("Repository connection cannot be None")
         self._conn = connection
+        self._uow = uow
         self._owns_tx = False
         self._sp_name: Optional[str] = None
 
     def __enter__(self) -> "repository_transaction":
+        if self._uow is not None and getattr(self._uow, "is_poisoned", False):
+            reason = getattr(self._uow, "poison_reason", "unknown")
+            raise TransactionIntegrityError(
+                f"Cannot begin repository transaction: UnitOfWork transaction is poisoned ({reason})."
+            )
         self._owns_tx = not self._conn.in_transaction
         if self._owns_tx:
             self._conn.execute("BEGIN IMMEDIATE;")
@@ -528,14 +541,22 @@ class repository_transaction:
                         self._conn.execute("ROLLBACK;")
                     except Exception as rb_err:
                         raise TransactionIntegrityError(
-                            f"CRITICAL: Commit failed and subsequent rollback also failed: {rb_err}. "
+                            f"CRITICAL: Standalone commit failed and subsequent rollback also failed: {rb_err}. "
                             f"Database connection is in an uncertain state."
                         ) from commit_err
-                    raise
+                    raise DatabaseTransactionError(f"Standalone commit failed: {commit_err}") from commit_err
             else:
                 try:
                     self._conn.execute(f"RELEASE SAVEPOINT {self._sp_name};")
                 except Exception as release_err:
+                    if self._uow is not None and hasattr(self._uow, "poison"):
+                        try:
+                            self._uow.poison(
+                                f"Failed to release savepoint '{self._sp_name}'",
+                                cause=release_err,
+                            )
+                        except TransactionIntegrityError:
+                            pass
                     raise TransactionIntegrityError(
                         f"CRITICAL: Failed to release savepoint '{self._sp_name}' after successful operation: {release_err}. "
                         f"The caller-owned transaction is in an uncertain state and MUST NOT be committed."
@@ -550,14 +571,38 @@ class repository_transaction:
                         f"Database connection is in an uncertain state."
                     ) from exc_val
             else:
+                sp_failed = False
+                sp_err = None
                 try:
                     self._conn.execute(f"ROLLBACK TO SAVEPOINT {self._sp_name};")
                     self._conn.execute(f"RELEASE SAVEPOINT {self._sp_name};")
-                except Exception as sp_err:
+                except Exception as err:
+                    sp_failed = True
+                    sp_err = err
+
+                if sp_failed:
+                    outer_tie = None
+                    if self._uow is not None and hasattr(self._uow, "poison"):
+                        try:
+                            self._uow.poison(
+                                f"Failed to roll back savepoint '{self._sp_name}'",
+                                cause=sp_err,
+                                original_error=exc_val,
+                            )
+                        except TransactionIntegrityError as tie:
+                            outer_tie = tie
+
+                    if outer_tie is not None:
+                        raise TransactionIntegrityError(
+                            f"CRITICAL: Failed to roll back savepoint '{self._sp_name}' during operation error: {sp_err}. "
+                            f"Outer transaction rollback also failed: {outer_tie}. Database connection is unsafe."
+                        ) from exc_val
+
                     raise TransactionIntegrityError(
                         f"CRITICAL: Failed to roll back savepoint '{self._sp_name}' during operation error: {sp_err}. "
                         f"The caller-owned transaction is in an uncertain state and MUST NOT be committed."
                     ) from exc_val
+
             return False
 
 

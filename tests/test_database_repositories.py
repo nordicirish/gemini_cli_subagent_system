@@ -4491,5 +4491,373 @@ class TestStage15A1NestedTransactionAtomicityAndTimestampSafety(unittest.TestCas
                 self.assertEqual(d1.timestamp_utc, historical_offset)
 
 
+# ===========================================================================
+# 28. Stage 1.5-A.2: Transaction Poisoning & Recovery Failure Enforcement (R1/R2)
+# ===========================================================================
+
+class TestStage15A2TransactionPoisoningAndRecoveryFailureEnforcement(BaseRepositoryTestCase):
+    """
+    Mandatory regression and failure-injection test suite for Stage 1.5-A.2 (R1 & R2).
+    Verifies that failed nested savepoint recoveries or releases immediately poison
+    the owning UnitOfWork, strictly forbidding subsequent commits or mutations,
+    enforcing fail-closed outer rollback, and marking connections unsafe on cascading failures.
+    """
+
+    def test_r1_nested_savepoint_rollback_success_preserves_outer_usability(self):
+        """R1.1: When nested savepoint rollback succeeds, the outer UnitOfWork remains healthy and committable."""
+        with execution_role_context("Terminal Orchestrator"):
+            with UnitOfWork(self.core_manager) as uow:
+                # 1. First mutation in outer transaction
+                uow.positions.upsert_position("PRIMARY", "ASML.AS", "10", "800.00")
+
+                # 2. Nested mutation that fails validation
+                try:
+                    with repository_transaction(uow._conn, uow=uow):
+                        # Trigger an operational error inside savepoint
+                        uow._conn.execute("INSERT INTO portfolio_cash VALUES ('FAIL', 'EUR', '100.00', 'invalid_date');")
+                except sqlite3.IntegrityError:
+                    pass  # Caller handled nested error
+
+                # 3. Outer UoW is NOT poisoned because savepoint rollback succeeded
+                self.assertFalse(uow.is_poisoned)
+                self.assertFalse(uow.is_conn_unsafe)
+
+                # 4. Second mutation in outer transaction succeeds
+                uow.cash.set_cash_balance("PRIMARY", "EUR", "5000.00")
+
+            # 5. After clean exit, valid mutations were committed
+            with self.core_manager.connection() as conn:
+                pos = PositionRepository(conn).get_position("PRIMARY", "ASML.AS")
+                cash = CashRepository(conn).get_cash("PRIMARY", "EUR")
+                self.assertIsNotNone(pos)
+                self.assertIsNotNone(cash)
+                self.assertEqual(cash.amount, Decimal("5000.00"))
+
+    def test_r1_nested_savepoint_rollback_failure_poisons_uow(self):
+        """R1.2: When nested savepoint rollback fails, UnitOfWork is immediately poisoned."""
+        with execution_role_context("Terminal Orchestrator"):
+            uow = UnitOfWork(self.core_manager)
+            uow.__enter__()
+            try:
+                # Wrap connection to inject failure into ROLLBACK TO SAVEPOINT
+                class FaultySavepointRollbackConn:
+                    def __init__(self, target):
+                        self._target = target
+                    def __getattr__(self, name):
+                        return getattr(self._target, name)
+                    def execute(self, sql, *args, **kwargs):
+                        if isinstance(sql, str) and sql.strip().startswith("ROLLBACK TO SAVEPOINT"):
+                            raise sqlite3.OperationalError("Simulated disk error during savepoint rollback")
+                        return self._target.execute(sql, *args, **kwargs)
+
+                uow._conn = FaultySavepointRollbackConn(uow._conn)
+
+                with self.assertRaises(TransactionIntegrityError) as ctx:
+                    with repository_transaction(uow._conn, uow=uow):
+                        raise RuntimeError("Operation error inside savepoint")
+
+                self.assertIn("Failed to roll back savepoint", str(ctx.exception))
+                self.assertTrue(uow.is_poisoned)
+                self.assertIn("Failed to roll back savepoint", str(uow.poison_reason))
+            finally:
+                try:
+                    uow.__exit__(None, None, None)
+                except Exception:
+                    pass
+
+    def test_r1_poisoned_uow_rejects_subsequent_commit(self):
+        """R1.3: Caller catching TransactionIntegrityError cannot subsequently commit poisoned UnitOfWork."""
+        with execution_role_context("Terminal Orchestrator"):
+            uow = UnitOfWork(self.core_manager)
+            uow.__enter__()
+            try:
+                uow.positions.upsert_position("PRIMARY", "ASML.AS", "10", "800.00")
+
+                # Poison the UoW directly
+                uow.poison("Simulated nested savepoint failure", cause=RuntimeError("disk failure"))
+                self.assertTrue(uow.is_poisoned)
+
+                # Attempt to commit must fail closed
+                with self.assertRaises(TransactionIntegrityError) as ctx:
+                    uow.commit()
+                self.assertIn("UnitOfWork transaction has been poisoned", str(ctx.exception))
+            finally:
+                try:
+                    uow.__exit__(None, None, None)
+                except Exception:
+                    pass
+
+    def test_r1_poisoned_uow_rejects_subsequent_mutations(self):
+        """R1.4: Subsequent repository mutations through a poisoned UnitOfWork are strictly rejected."""
+        with execution_role_context("Terminal Orchestrator"):
+            uow = UnitOfWork(self.core_manager)
+            uow.__enter__()
+            try:
+                pos_ref = uow.positions
+
+                # Poison the UoW
+                uow.poison("Simulated savepoint failure")
+
+                # Property access on UoW must fail closed
+                with self.assertRaises(TransactionIntegrityError) as ctx:
+                    _ = uow.positions
+                self.assertIn("UnitOfWork transaction is poisoned", str(ctx.exception))
+
+                with self.assertRaises(TransactionIntegrityError) as ctx:
+                    _ = uow.cash
+                self.assertIn("UnitOfWork transaction is poisoned", str(ctx.exception))
+
+                # Mutation via retained reference must also fail closed
+                with self.assertRaises(TransactionIntegrityError) as ctx:
+                    pos_ref.upsert_position("PRIMARY", "SAP.DE", "5", "150.00")
+                self.assertIn("UnitOfWork transaction is poisoned", str(ctx.exception))
+            finally:
+                try:
+                    uow.__exit__(None, None, None)
+                except Exception:
+                    pass
+
+    def test_r1_poisoned_uow_context_exit_does_not_commit_and_raises(self):
+        """R1.5: If caller catches TransactionIntegrityError, __exit__ does NOT commit and raises TransactionIntegrityError."""
+        with execution_role_context("Terminal Orchestrator"):
+            with self.assertRaises(TransactionIntegrityError) as ctx:
+                with UnitOfWork(self.core_manager) as uow:
+                    uow.positions.upsert_position("PRIMARY", "ASML.AS", "10", "800.00")
+
+                    # Inject savepoint failure and catch it
+                    class FaultySavepointConn:
+                        def __init__(self, target):
+                            self._target = target
+                        def __getattr__(self, name):
+                            return getattr(self._target, name)
+                        def execute(self, sql, *args, **kwargs):
+                            if isinstance(sql, str) and sql.strip().startswith("ROLLBACK TO SAVEPOINT"):
+                                raise sqlite3.OperationalError("Simulated rollback failure")
+                            return self._target.execute(sql, *args, **kwargs)
+
+                    uow._conn = FaultySavepointConn(uow._conn)
+                    try:
+                        with repository_transaction(uow._conn, uow=uow):
+                            raise ValueError("Inner failure")
+                    except TransactionIntegrityError:
+                        pass  # Caller swallowed the integrity error!
+
+                    # Code continues to end of with block...
+
+            self.assertIn("UnitOfWork transaction completed with poisoned state", str(ctx.exception))
+
+            # Verify no data was committed
+            with self.core_manager.connection() as conn:
+                pos = PositionRepository(conn).get_position("PRIMARY", "ASML.AS")
+                self.assertIsNone(pos)
+
+    def test_r1_outer_rollback_succeeds_after_nested_recovery_failure(self):
+        """R1.6: When nested recovery fails, poison() successfully performs outer transaction rollback."""
+        with execution_role_context("Terminal Orchestrator"):
+            uow = UnitOfWork(self.core_manager)
+            uow.__enter__()
+            try:
+                uow.positions.upsert_position("PRIMARY", "MC.PA", "2", "700.00")
+
+                # Poisoning performs outer rollback
+                uow.poison("Nested recovery failure")
+                self.assertTrue(uow._rolled_back)
+                self.assertFalse(uow._in_transaction)
+                self.assertFalse(uow.is_conn_unsafe)  # Rollback succeeded, so connection is cleanly closed
+            finally:
+                try:
+                    uow.__exit__(None, None, None)
+                except Exception:
+                    pass
+
+            with self.core_manager.connection() as conn:
+                self.assertIsNone(PositionRepository(conn).get_position("PRIMARY", "MC.PA"))
+
+    def test_r1_outer_rollback_failure_marks_connection_unsafe(self):
+        """R1.7: When outer rollback also fails after poisoning, connection is marked unsafe."""
+        with execution_role_context("Terminal Orchestrator"):
+            uow = UnitOfWork(self.core_manager)
+            uow.__enter__()
+            try:
+                # Wrap connection so outer ROLLBACK fails
+                class BrokenRollbackConn:
+                    def __init__(self, target):
+                        self._target = target
+                    def __getattr__(self, name):
+                        return getattr(self._target, name)
+                    def execute(self, sql, *args, **kwargs):
+                        if isinstance(sql, str) and sql.strip().startswith("ROLLBACK"):
+                            raise sqlite3.OperationalError("Outer rollback fatal disk error")
+                        return self._target.execute(sql, *args, **kwargs)
+
+                uow._conn = BrokenRollbackConn(uow._conn)
+
+                with self.assertRaises(TransactionIntegrityError) as ctx:
+                    uow.poison("Savepoint broken", cause=RuntimeError("inner error"))
+
+                self.assertIn("full outer rollback also failed", str(ctx.exception))
+                self.assertTrue(uow.is_conn_unsafe)
+                self.assertTrue(uow.is_poisoned)
+            finally:
+                try:
+                    uow.__exit__(None, None, None)
+                except Exception:
+                    pass
+
+    def test_r2_injected_release_savepoint_failure(self):
+        """R2.1: Failure during RELEASE SAVEPOINT poisons UnitOfWork and raises TransactionIntegrityError."""
+        with execution_role_context("Terminal Orchestrator"):
+            uow = UnitOfWork(self.core_manager)
+            uow.__enter__()
+            try:
+                class FaultyReleaseConn:
+                    def __init__(self, target):
+                        self._target = target
+                    def __getattr__(self, name):
+                        return getattr(self._target, name)
+                    def execute(self, sql, *args, **kwargs):
+                        if isinstance(sql, str) and sql.strip().startswith("RELEASE SAVEPOINT"):
+                            raise sqlite3.OperationalError("Simulated RELEASE SAVEPOINT disk error")
+                        return self._target.execute(sql, *args, **kwargs)
+
+                uow._conn = FaultyReleaseConn(uow._conn)
+
+                with self.assertRaises(TransactionIntegrityError) as ctx:
+                    with repository_transaction(uow._conn, uow=uow):
+                        pass  # Operation itself succeeds, but release fails
+
+                self.assertIn("Failed to release savepoint", str(ctx.exception))
+                self.assertTrue(uow.is_poisoned)
+                self.assertIn("Failed to release savepoint", str(uow.poison_reason))
+
+                # Subsequent commit attempt must be rejected
+                with self.assertRaises(TransactionIntegrityError):
+                    uow.commit()
+            finally:
+                try:
+                    uow.__exit__(None, None, None)
+                except Exception:
+                    pass
+
+    def test_r2_injected_standalone_commit_failure_with_safe_rollback(self):
+        """R2.2: Failure during standalone COMMIT safely rolls back and raises DatabaseTransactionError."""
+        with self.core_manager.connection() as real_conn:
+            class FaultyCommitConn:
+                def __init__(self, target):
+                    self._target = target
+                def __getattr__(self, name):
+                    return getattr(self._target, name)
+                def execute(self, sql, *args, **kwargs):
+                    if isinstance(sql, str) and sql.strip().startswith("COMMIT"):
+                        raise sqlite3.OperationalError("Simulated COMMIT write error")
+                    return self._target.execute(sql, *args, **kwargs)
+
+            f_conn = FaultyCommitConn(real_conn)
+            with self.assertRaises(DatabaseTransactionError) as ctx:
+                with repository_transaction(f_conn):
+                    f_conn.execute("INSERT INTO scout_categories (category_name, updated_at_utc) VALUES ('X', '2026-01-01T00:00:00Z');")
+            self.assertIn("Standalone commit failed", str(ctx.exception))
+
+    def test_r2_injected_standalone_commit_and_rollback_double_failure(self):
+        """R2.3: Double failure during standalone COMMIT and subsequent ROLLBACK raises TransactionIntegrityError."""
+        with self.core_manager.connection() as real_conn:
+            class TotalFailureConn:
+                def __init__(self, target):
+                    self._target = target
+                def __getattr__(self, name):
+                    return getattr(self._target, name)
+                def execute(self, sql, *args, **kwargs):
+                    if isinstance(sql, str) and (sql.strip().startswith("COMMIT") or sql.strip().startswith("ROLLBACK")):
+                        raise sqlite3.OperationalError("Fatal I/O deadlock")
+                    return self._target.execute(sql, *args, **kwargs)
+
+            f_conn = TotalFailureConn(real_conn)
+            with self.assertRaises(TransactionIntegrityError) as ctx:
+                with repository_transaction(f_conn):
+                    f_conn.execute("INSERT INTO scout_categories (category_name, updated_at_utc) VALUES ('Y', '2026-01-01T00:00:00Z');")
+            self.assertIn("commit failed and subsequent rollback also failed", str(ctx.exception).lower())
+
+    def test_r2_injected_standalone_rollback_failure_following_operation_error(self):
+        """R2.4: Standalone rollback failure following operation error raises TransactionIntegrityError chaining exc_val."""
+        with self.core_manager.connection() as real_conn:
+            class RollbackFailConn:
+                def __init__(self, target):
+                    self._target = target
+                def __getattr__(self, name):
+                    return getattr(self._target, name)
+                def execute(self, sql, *args, **kwargs):
+                    if isinstance(sql, str) and sql.strip().startswith("ROLLBACK"):
+                        raise sqlite3.OperationalError("Rollback disk fail")
+                    return self._target.execute(sql, *args, **kwargs)
+
+            f_conn = RollbackFailConn(real_conn)
+            with self.assertRaises(TransactionIntegrityError) as ctx:
+                with repository_transaction(f_conn):
+                    raise ValueError("Initial operation error")
+
+            self.assertIn("Standalone rollback failed following operation error", str(ctx.exception))
+            self.assertIsInstance(ctx.exception.__cause__, ValueError)
+
+    def test_r2_injected_uow_commit_and_rollback_cascade_failure(self):
+        """R2.5: In UnitOfWork.commit(), cascade failure of COMMIT and ROLLBACK marks connection unsafe."""
+        with execution_role_context("Terminal Orchestrator"):
+            uow = UnitOfWork(self.core_manager)
+            uow.__enter__()
+            try:
+                class TotalFailConn:
+                    def __init__(self, target):
+                        self._target = target
+                    def __getattr__(self, name):
+                        return getattr(self._target, name)
+                    def execute(self, sql, *args, **kwargs):
+                        if isinstance(sql, str) and (sql.strip().startswith("COMMIT") or sql.strip().startswith("ROLLBACK")):
+                            raise sqlite3.OperationalError("Cascade fatal I/O failure")
+                        return self._target.execute(sql, *args, **kwargs)
+
+                uow._conn = TotalFailConn(uow._conn)
+
+                with self.assertRaises(TransactionIntegrityError) as ctx:
+                    uow.commit()
+
+                self.assertIn("Commit failed and subsequent rollback also failed", str(ctx.exception))
+                self.assertTrue(uow.is_conn_unsafe)
+            finally:
+                try:
+                    uow.__exit__(None, None, None)
+                except Exception:
+                    pass
+
+    def test_r2_injected_uow_rollback_failure_marks_unsafe(self):
+        """R2.6: In UnitOfWork.rollback(), failure raises TransactionIntegrityError and marks connection unsafe."""
+        with execution_role_context("Terminal Orchestrator"):
+            uow = UnitOfWork(self.core_manager)
+            uow.__enter__()
+            try:
+                class FailRollbackConn:
+                    def __init__(self, target):
+                        self._target = target
+                    def __getattr__(self, name):
+                        return getattr(self._target, name)
+                    def execute(self, sql, *args, **kwargs):
+                        if isinstance(sql, str) and sql.strip().startswith("ROLLBACK"):
+                            raise sqlite3.OperationalError("Direct rollback failure")
+                        return self._target.execute(sql, *args, **kwargs)
+
+                uow._conn = FailRollbackConn(uow._conn)
+
+                with self.assertRaises(TransactionIntegrityError) as ctx:
+                    uow.rollback()
+
+                self.assertIn("Failed to roll back transaction", str(ctx.exception))
+                self.assertTrue(uow.is_conn_unsafe)
+                self.assertTrue(uow.is_poisoned)
+            finally:
+                try:
+                    uow.__exit__(None, None, None)
+                except Exception:
+                    pass
+
+
+
 if __name__ == "__main__":
     unittest.main()

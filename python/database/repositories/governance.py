@@ -151,7 +151,7 @@ class ScoutCategoryRepository(BaseRepository):
         )
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             try:
                 cur = self._conn.cursor()
                 cur.execute(
@@ -209,7 +209,7 @@ class ScoutCategoryRepository(BaseRepository):
         )
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             cur = self._conn.cursor()
             cur.execute("DELETE FROM scout_categories WHERE id = ?", (category_id,))
             deleted = cur.rowcount > 0
@@ -333,7 +333,7 @@ class TradeLessonRepository(BaseRepository):
         )
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             try:
                 existing = self.get_lesson(norm_code)
                 created_at = existing.created_at_utc if existing else valid_ts
@@ -382,7 +382,7 @@ class TradeLessonRepository(BaseRepository):
         )
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             cur = self._conn.cursor()
             cur.execute("DELETE FROM trade_lessons WHERE rule_code = ?", (norm_code,))
             deleted = cur.rowcount > 0
@@ -440,7 +440,7 @@ class DecisionLogRepository(BaseRepository):
         )
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             cur = self._conn.cursor()
             try:
                 cur.execute(
@@ -612,7 +612,7 @@ class OwnerApprovalRepository(BaseRepository):
         timestamp_utc = utc_now_iso()
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             cur = self._conn.cursor()
             try:
                 cur.execute(
@@ -719,7 +719,7 @@ class OwnerApprovalRepository(BaseRepository):
         timestamp_utc = utc_now_iso()
 
         # R1/R3/R5: Acquire write lock and manage savepoint/transaction lifecycle
-        with repository_transaction(self._conn):
+        with repository_transaction(self._conn, uow=self._uow):
             cur = self._conn.cursor()
             cur.execute(
                 """

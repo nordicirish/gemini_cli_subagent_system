@@ -152,6 +152,13 @@ class DatabaseManager:
                         f"Failed to create directory for database '{self.db_path}': {e}"
                     ) from e
 
+            # Check for coordinated offline restoration lock (Stage 1.5-A.2)
+            restore_lock_path = f"{self.db_path}.restore_lock"
+            if os.path.exists(restore_lock_path):
+                raise DatabaseBusyError(
+                    f"Database '{self.db_path}' is locked: currently undergoing offline backup restoration."
+                )
+
         # Python 3.12+ supports autocommit=True, allowing manual explicit transactions
         # without sqlite3 automatically beginning transactions before PRAGMA statements.
         try:
@@ -163,7 +170,7 @@ class DatabaseManager:
             )
         except sqlite3.OperationalError as e:
             err_msg = str(e).lower()
-            if "locked" in err_msg or "busy" in err_msg:
+            if "locked" in err_msg or "busy" in err_msg or "unable to open database file" in err_msg:
                 raise DatabaseBusyError(f"Database locked or busy '{self.db_path}': {e}") from e
             if "malformed" in err_msg or "corrupt" in err_msg or "not a database" in err_msg:
                 raise DatabaseCorruptionError(f"Database corrupted '{self.db_path}': {e}") from e
