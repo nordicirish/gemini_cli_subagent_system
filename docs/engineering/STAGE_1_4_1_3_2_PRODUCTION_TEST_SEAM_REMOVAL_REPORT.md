@@ -2,7 +2,8 @@
 
 **Repository:** `nordicirish/gemini_cli_subagent_system`  
 **Branch:** `main`  
-**Predecessor Baseline Commit:** `32f82869fe855584bfcb2ad0276686bfd5ea5582`  
+**Predecessor Baseline Commit:** `32f82865d14731f21b81212731f3b7dc79eed72e`  
+**Implementation Commit:** `b74dfeac54253b5fcd3a9568b74d76e4fade9cfd`  
 **Date:** 2026-11-09  
 **Status:** COMPLETE  
 **Governance Framework:** `.agents/AGENTS.md` (Engineering Governance Protocols 01–06)
@@ -28,7 +29,8 @@ All 150 repository tests, all 95 core database tests, and all 299 tests across t
 ## 2. Baseline & Pre-Implementation Reproduction Evidence
 
 ### 2.1 Baseline State
-- **Predecessor Baseline Commit:** `32f82869fe855584bfcb2ad0276686bfd5ea5582` ("fix(database): encapsulate capability credential and enforce exact financial after-state verification")
+- **Predecessor Baseline Commit:** `32f82865d14731f21b81212731f3b7dc79eed72e` ("fix(database): encapsulate capability credential and enforce exact financial after-state verification")
+- **Implementation Commit:** `b74dfeac54253b5fcd3a9568b74d76e4fade9cfd` ("fix(database): remove production capability test seam and eliminate module-name checks")
 - **Python Runtime:** Python 3.13.3, SQLite 3.49.1 on Windows 11.
 - **Working Tree:** Clean prior to implementation.
 
