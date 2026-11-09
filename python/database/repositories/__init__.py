@@ -34,6 +34,9 @@ from python.database.repositories.base import (
     validate_date_str,
     validate_event_id,
     utc_now_iso,
+    validate_timestamp_utc,
+    get_db_revision,
+    increment_db_revision,
     BaseRepository,
 )
 
@@ -95,6 +98,9 @@ __all__ = [
     "validate_date_str",
     "validate_event_id",
     "utc_now_iso",
+    "validate_timestamp_utc",
+    "get_db_revision",
+    "increment_db_revision",
     "BaseRepository",
     # Repositories
     "CashRepository",

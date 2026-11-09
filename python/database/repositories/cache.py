@@ -416,9 +416,25 @@ class DailyBarRepository(BaseRepository):
         return inserted_count
 
     def delete_bars(self, ticker: str) -> int:
-        """Deletes all daily bars for a ticker. Returns count of deleted rows."""
+        """Deletes all daily bars for a ticker with standalone transaction wrapping. Returns count of deleted rows."""
         self._check_active()
         norm_ticker = validate_identifier(ticker, "ticker").upper()
-        cur = self._conn.cursor()
-        cur.execute("DELETE FROM daily_bars WHERE ticker = ?", (norm_ticker,))
-        return cur.rowcount
+
+        owns_tx = not self._conn.in_transaction
+        if owns_tx:
+            self._conn.execute("BEGIN IMMEDIATE;")
+
+        try:
+            cur = self._conn.cursor()
+            cur.execute("DELETE FROM daily_bars WHERE ticker = ?", (norm_ticker,))
+            count = cur.rowcount
+            if owns_tx:
+                self._conn.execute("COMMIT;")
+            return count
+        except Exception:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+            raise

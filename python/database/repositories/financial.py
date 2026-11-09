@@ -31,6 +31,9 @@ from python.database.repositories.base import (
     decimal_to_canonical_str,
     validate_identifier,
     utc_now_iso,
+    _resolve_effective_actor,
+    validate_timestamp_utc,
+    increment_db_revision,
 )
 from python.tool_registry import (
     authorize_financial_mutation,
@@ -141,25 +144,6 @@ class _FinancialMutationCapability:
         self._consumed = True
 
 
-def _resolve_effective_actor(caller_role: Optional[str] = None) -> str:
-    """
-    Derives financial actor attribution strictly from trusted execution context (R2).
-    Requires exact agreement if caller_role is explicitly supplied; rejects any mismatch.
-    A System context cannot claim or impersonate any other execution identity.
-    """
-    active_role = get_active_caller_role()
-    if caller_role is not None and caller_role != active_role:
-        if active_role in ("System", "Root"):
-            raise PermissionError(
-                f"Security violation: Active context '{active_role}' cannot claim '{caller_role}' attribution."
-            )
-        else:
-            raise PermissionError(
-                f"Security violation: Agent role '{active_role}' cannot spoof actor role '{caller_role}'."
-            )
-    return active_role
-
-
 # ---------------------------------------------------------------------------
 # Cash Repository
 # ---------------------------------------------------------------------------
@@ -235,6 +219,7 @@ class CashRepository(BaseRepository):
         correlation_id: Optional[str] = None,
         caller_role: Optional[str] = None,
         requires_owner_approval: bool = False,
+        timestamp_utc: Optional[str] = None,
     ) -> CashBalance:
         """
         Sets the cash balance for an account and currency.
@@ -256,7 +241,7 @@ class CashRepository(BaseRepository):
             allow_none=False,
         )
         amount_str = decimal_to_canonical_str(dec_amount)
-        timestamp_utc = utc_now_iso()
+        valid_ts = validate_timestamp_utc(timestamp_utc)
         cid = correlation_id or uuid.uuid4().hex
         effective_actor = _resolve_effective_actor(caller_role)
         target_resource = f"portfolio_cash/{norm_account}/{norm_currency}"
@@ -310,8 +295,11 @@ class CashRepository(BaseRepository):
                     amount = excluded.amount,
                     last_updated_at_utc = excluded.last_updated_at_utc
                 """,
-                (norm_account, norm_currency, amount_str, timestamp_utc),
+                (norm_account, norm_currency, amount_str, valid_ts),
             )
+
+            # Atomically increment database revision with mutation
+            increment_db_revision(self._conn, valid_ts)
 
             # R1.2: Construct capability directly from validated local state and append changelog
             from python.database.repositories.audit import FinancialChangelogRepository
@@ -326,7 +314,7 @@ class CashRepository(BaseRepository):
                 before_state=before_state,
                 after_state=after_state,
                 approval_digest=approval_digest,
-                timestamp_utc=timestamp_utc,
+                timestamp_utc=valid_ts,
             )
             self._last_mutation_capability = cap
             FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
@@ -352,7 +340,7 @@ class CashRepository(BaseRepository):
             account_id=norm_account,
             currency=norm_currency,
             amount=dec_amount,
-            last_updated_at_utc=timestamp_utc,
+            last_updated_at_utc=valid_ts,
         )
 
     def delete_cash(
@@ -406,6 +394,9 @@ class CashRepository(BaseRepository):
                 "DELETE FROM portfolio_cash WHERE account_id = ? AND currency = ?",
                 (norm_account, norm_currency),
             )
+
+            # Atomically increment database revision when row is actually deleted
+            increment_db_revision(self._conn, timestamp_utc)
 
             # R1.2: Construct capability directly from validated local state and append changelog
             from python.database.repositories.audit import FinancialChangelogRepository
@@ -518,6 +509,7 @@ class PositionRepository(BaseRepository):
         correlation_id: Optional[str] = None,
         caller_role: Optional[str] = None,
         requires_owner_approval: bool = False,
+        timestamp_utc: Optional[str] = None,
     ) -> PositionRecord:
         """
         Upserts a portfolio position.
@@ -545,7 +537,7 @@ class PositionRepository(BaseRepository):
         shares_str = decimal_to_canonical_str(dec_shares)
         wac_eur_str = decimal_to_canonical_str(dec_wac_eur)
         wac_usd_str = decimal_to_canonical_str(dec_wac_usd) if dec_wac_usd is not None else None
-        timestamp_utc = utc_now_iso()
+        valid_ts = validate_timestamp_utc(timestamp_utc)
         cid = correlation_id or uuid.uuid4().hex
         effective_actor = _resolve_effective_actor(caller_role)
         target_resource = f"portfolio_positions/{norm_account}/{norm_ticker}"
@@ -607,8 +599,11 @@ class PositionRepository(BaseRepository):
                     wac_usd = excluded.wac_usd,
                     last_updated_at_utc = excluded.last_updated_at_utc
                 """,
-                (norm_account, norm_ticker, shares_str, wac_eur_str, wac_usd_str, timestamp_utc),
+                (norm_account, norm_ticker, shares_str, wac_eur_str, wac_usd_str, valid_ts),
             )
+
+            # Atomically increment database revision with mutation
+            increment_db_revision(self._conn, valid_ts)
 
             # R1.2: Construct capability directly from validated local state and append changelog
             from python.database.repositories.audit import FinancialChangelogRepository
@@ -623,7 +618,7 @@ class PositionRepository(BaseRepository):
                 before_state=before_state,
                 after_state=after_state,
                 approval_digest=approval_digest,
-                timestamp_utc=timestamp_utc,
+                timestamp_utc=valid_ts,
             )
             self._last_mutation_capability = cap
             FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
@@ -651,7 +646,7 @@ class PositionRepository(BaseRepository):
             shares=dec_shares,
             wac_eur=dec_wac_eur,
             wac_usd=dec_wac_usd,
-            last_updated_at_utc=timestamp_utc,
+            last_updated_at_utc=valid_ts,
         )
 
     def delete_position(
@@ -707,6 +702,9 @@ class PositionRepository(BaseRepository):
                 "DELETE FROM portfolio_positions WHERE account_id = ? AND ticker = ?",
                 (norm_account, norm_ticker),
             )
+
+            # Atomically increment database revision when row is actually deleted
+            increment_db_revision(self._conn, timestamp_utc)
 
             # R1.2: Construct capability directly from validated local state and append changelog
             from python.database.repositories.audit import FinancialChangelogRepository
@@ -798,6 +796,7 @@ class WatchlistRepository(BaseRepository):
         correlation_id: Optional[str] = None,
         caller_role: Optional[str] = None,
         requires_owner_approval: bool = False,
+        timestamp_utc: Optional[str] = None,
     ) -> WatchlistItem:
         """Upserts a watchlist item."""
         self._check_active()
@@ -806,7 +805,7 @@ class WatchlistRepository(BaseRepository):
         if norm_status not in ("ACTIVE", "PAUSED", "REMOVED"):
             raise ValidationError(f"Invalid watchlist status '{norm_status}'. Must be ACTIVE, PAUSED, or REMOVED.")
 
-        timestamp_utc = utc_now_iso()
+        valid_ts = validate_timestamp_utc(timestamp_utc)
         target_resource = f"watchlist/{norm_ticker}"
         payload = {"ticker": norm_ticker, "status": norm_status, "notes": notes}
 
@@ -825,7 +824,7 @@ class WatchlistRepository(BaseRepository):
 
         try:
             existing = self.get_watchlist_item(norm_ticker)
-            added_at = existing.added_at_utc if existing else timestamp_utc
+            added_at = existing.added_at_utc if existing else valid_ts
 
             before_state = (
                 {"ticker": existing.ticker, "status": existing.status, "notes": existing.notes}
@@ -845,6 +844,9 @@ class WatchlistRepository(BaseRepository):
                 (norm_ticker, norm_status, added_at, notes),
             )
 
+            # Atomically increment database revision with mutation
+            increment_db_revision(self._conn, valid_ts)
+
             cid = correlation_id or uuid.uuid4().hex
             approval_digest = compute_payload_digest(payload) if requires_owner_approval else None
 
@@ -861,7 +863,7 @@ class WatchlistRepository(BaseRepository):
                 before_state=before_state,
                 after_state=after_state,
                 approval_digest=approval_digest,
-                timestamp_utc=timestamp_utc,
+                timestamp_utc=valid_ts,
             )
             self._last_mutation_capability = cap
             FinancialChangelogRepository(self._conn).append_entry(mutation_capability=cap)
@@ -928,6 +930,9 @@ class WatchlistRepository(BaseRepository):
             before_state = {"ticker": existing.ticker, "status": existing.status, "notes": existing.notes}
 
             self._conn.execute("DELETE FROM watchlist WHERE ticker = ?", (norm_ticker,))
+
+            # Atomically increment database revision when row is actually deleted
+            increment_db_revision(self._conn, timestamp_utc)
 
             cid = correlation_id or uuid.uuid4().hex
             approval_digest = compute_payload_digest(payload) if requires_owner_approval else None

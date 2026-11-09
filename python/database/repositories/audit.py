@@ -75,70 +75,97 @@ class AuditEventRepository(BaseRepository):
         norm_approval = validate_identifier(approval_status, "approval_status")
         raw_event_json = json.dumps(raw_event, sort_keys=True)
 
-        cur = self._conn.cursor()
+        owns_tx = not self._conn.in_transaction
+        if owns_tx:
+            self._conn.execute("BEGIN IMMEDIATE;")
 
-        # Check for existing event to enforce idempotency vs conflict
-        cur.execute(
-            """
-            SELECT event_id, timestamp_utc, action_category, status, agent_role,
-                   tool_name, permission_decision, approval_status, payload_hash, raw_event_json
-            FROM audit_events
-            WHERE event_id = ?
-            """,
-            (norm_id,),
-        )
-        existing = cur.fetchone()
-        if existing is not None:
-            existing_payload_hash = existing[8]
-            existing_raw_json = existing[9]
-
-            # Compare payloads to detect conflict
-            same_hash = (existing_payload_hash or "") == (payload_hash or "")
-            same_json = json.loads(existing_raw_json) == raw_event
-
-            if same_hash and same_json:
-                # Idempotent replay: return existing record
-                return AuditEventRecord(
-                    event_id=existing[0],
-                    timestamp_utc=existing[1],
-                    action_category=existing[2],
-                    status=existing[3],
-                    agent_role=existing[4],
-                    tool_name=existing[5],
-                    permission_decision=existing[6],
-                    approval_status=existing[7],
-                    payload_hash=existing[8],
-                    raw_event=json.loads(existing[9]),
-                )
-            else:
-                raise IntegrityConflictError(
-                    f"Audit event with id '{norm_id}' already exists with different payload or hash."
-                )
-
-        # Insert new record
         try:
+            cur = self._conn.cursor()
+
+            # Check for existing event to enforce idempotency vs conflict
             cur.execute(
                 """
-                INSERT INTO audit_events (
-                    event_id, timestamp_utc, action_category, status, agent_role,
-                    tool_name, permission_decision, approval_status, payload_hash, raw_event_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                SELECT event_id, timestamp_utc, action_category, status, agent_role,
+                       tool_name, permission_decision, approval_status, payload_hash, raw_event_json
+                FROM audit_events
+                WHERE event_id = ?
                 """,
-                (
-                    norm_id,
-                    timestamp_utc,
-                    norm_category,
-                    norm_status,
-                    norm_role,
-                    tool_name,
-                    norm_decision,
-                    norm_approval,
-                    payload_hash,
-                    raw_event_json,
-                ),
+                (norm_id,),
             )
-        except sqlite3.IntegrityError as e:
-            raise IntegrityConflictError(f"Integrity violation inserting audit event: {e}") from e
+            existing = cur.fetchone()
+            if existing is not None:
+                existing_payload_hash = existing[8]
+                existing_raw_json = existing[9]
+
+                # Compare payloads to detect conflict
+                same_hash = (existing_payload_hash or "") == (payload_hash or "")
+                same_json = json.loads(existing_raw_json) == raw_event
+
+                if same_hash and same_json:
+                    # Idempotent replay: return existing record
+                    if owns_tx:
+                        self._conn.execute("COMMIT;")
+                    return AuditEventRecord(
+                        event_id=existing[0],
+                        timestamp_utc=existing[1],
+                        action_category=existing[2],
+                        status=existing[3],
+                        agent_role=existing[4],
+                        tool_name=existing[5],
+                        permission_decision=existing[6],
+                        approval_status=existing[7],
+                        payload_hash=existing[8],
+                        raw_event=json.loads(existing[9]),
+                    )
+                else:
+                    if owns_tx:
+                        try:
+                            self._conn.execute("ROLLBACK;")
+                        except Exception:
+                            pass
+                    raise IntegrityConflictError(
+                        f"Audit event with id '{norm_id}' already exists with different payload or hash."
+                    )
+
+            # Insert new record
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO audit_events (
+                        event_id, timestamp_utc, action_category, status, agent_role,
+                        tool_name, permission_decision, approval_status, payload_hash, raw_event_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        norm_id,
+                        timestamp_utc,
+                        norm_category,
+                        norm_status,
+                        norm_role,
+                        tool_name,
+                        norm_decision,
+                        norm_approval,
+                        payload_hash,
+                        raw_event_json,
+                    ),
+                )
+            except sqlite3.IntegrityError as e:
+                if owns_tx:
+                    try:
+                        self._conn.execute("ROLLBACK;")
+                    except Exception:
+                        pass
+                raise IntegrityConflictError(f"Integrity violation inserting audit event: {e}") from e
+
+            if owns_tx:
+                self._conn.execute("COMMIT;")
+        except Exception:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+            raise
 
         return AuditEventRecord(
             event_id=norm_id,

@@ -19,6 +19,7 @@ import sqlite3
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from python.database.manager import DatabaseError
+from python.tool_registry import get_active_caller_role
 
 
 # ---------------------------------------------------------------------------
@@ -199,11 +200,63 @@ class DailyBarRecord:
 
 _HEX_32_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ISO_TIMESTAMP_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$"
+)
+
+
+def _resolve_effective_actor(caller_role: Optional[str] = None) -> str:
+    """
+    Derives financial actor attribution strictly from trusted execution context (R2/R4).
+    Requires exact agreement if caller_role is explicitly supplied; rejects any mismatch.
+    A System context cannot claim or impersonate any other execution identity.
+    """
+    active_role = get_active_caller_role()
+    if caller_role is not None and caller_role != active_role:
+        if active_role in ("System", "Root"):
+            raise PermissionError(
+                f"Security violation: Active context '{active_role}' cannot claim '{caller_role}' attribution."
+            )
+        else:
+            raise PermissionError(
+                f"Security violation: Agent role '{active_role}' cannot spoof actor role '{caller_role}'."
+            )
+    return active_role
 
 
 def utc_now_iso() -> str:
     """Returns current UTC ISO-8601 timestamp with explicit Z suffix."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def validate_timestamp_utc(ts: Optional[str]) -> str:
+    """
+    Validates and normalizes an ISO-8601 UTC timestamp string.
+    If ts is None, returns current utc_now_iso().
+    If ts is provided, validates that it is a valid ISO-8601 string representing UTC.
+    Raises ValidationError if invalid, not a string, or invalid date/time.
+    """
+    if ts is None:
+        return utc_now_iso()
+    if not isinstance(ts, str):
+        raise ValidationError(f"Timestamp must be a string, got {type(ts).__name__}")
+    s = ts.strip()
+    if not s:
+        raise ValidationError("Timestamp string cannot be empty")
+    if not _ISO_TIMESTAMP_PATTERN.match(s):
+        raise ValidationError(f"Invalid ISO-8601 timestamp format: '{ts}'")
+    try:
+        norm = s.replace("Z", "+00:00") if s.endswith("Z") else s
+        dt = datetime.fromisoformat(norm)
+    except (ValueError, TypeError) as e:
+        raise ValidationError(f"Invalid ISO-8601 timestamp '{ts}': {e}") from e
+
+    if dt.tzinfo is not None:
+        offset = dt.utcoffset()
+        if offset is not None and offset.total_seconds() != 0:
+            raise ValidationError(f"Timestamp must be UTC, got timezone offset {offset} in '{ts}'")
+
+    return s
 
 
 def validate_event_id(event_id: str) -> str:
@@ -374,4 +427,56 @@ class BaseRepository:
         """The underlying sqlite3.Connection."""
         self._check_active()
         return self._conn
+
+    def get_db_revision(self) -> int:
+        """Retrieves the current monotonic database revision for the connected database."""
+        self._check_active()
+        return get_db_revision(self._conn)
+
+
+# ---------------------------------------------------------------------------
+# Monotonic Database Revision Tracking Helpers (R5)
+# ---------------------------------------------------------------------------
+
+def get_db_revision(conn: sqlite3.Connection) -> int:
+    """
+    Retrieves the current monotonic db_revision from database_metadata.
+    Returns 0 if database_metadata does not exist or has no rows.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='database_metadata';"
+    )
+    if cur.fetchone()[0] == 0:
+        return 0
+    cur.execute("SELECT db_revision FROM database_metadata WHERE id = 1;")
+    row = cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+def increment_db_revision(conn: sqlite3.Connection, timestamp_utc: Optional[str] = None) -> int:
+    """
+    Atomically increments database_metadata.db_revision by 1 and updates last_updated_at_utc.
+    Must be executed within an active transaction on the core financial database.
+    Returns the new incremented db_revision.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='database_metadata';"
+    )
+    if cur.fetchone()[0] == 0:
+        return 0
+    now_ts = timestamp_utc or utc_now_iso()
+    cur.execute(
+        """
+        UPDATE database_metadata
+        SET db_revision = db_revision + 1,
+            last_updated_at_utc = ?
+        WHERE id = 1;
+        """,
+        (now_ts,),
+    )
+    cur.execute("SELECT db_revision FROM database_metadata WHERE id = 1;")
+    row = cur.fetchone()
+    return int(row[0]) if row else 0
 

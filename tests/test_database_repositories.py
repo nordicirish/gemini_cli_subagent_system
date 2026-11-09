@@ -74,6 +74,9 @@ from python.database.repositories import (
     RepositoryFactory,
     validate_decimal,
     utc_now_iso,
+    validate_timestamp_utc,
+    get_db_revision,
+    increment_db_revision,
 )
 from python.tool_registry import (
     execution_role_context,
@@ -279,54 +282,56 @@ class TestRepositoryCrudAndMapping(BaseRepositoryTestCase):
     def test_trade_lessons_crud_and_mapping(self):
         with self.core_manager.connection() as conn:
             repo = TradeLessonRepository(conn)
-            lesson = repo.upsert_lesson(
-                rule_code="RULE_01",
-                directive_text="Never enter without structural edge",
-                category="MANDATE",
-                status="ACTIVE",
-                caller_role="Terminal Orchestrator",
-            )
-            self.assertEqual(lesson.rule_code, "RULE_01")
-            self.assertEqual(lesson.category, "MANDATE")
+            with execution_role_context("Terminal Orchestrator"):
+                lesson = repo.upsert_lesson(
+                    rule_code="RULE_01",
+                    directive_text="Never enter without structural edge",
+                    category="MANDATE",
+                    status="ACTIVE",
+                    caller_role="Terminal Orchestrator",
+                )
+                self.assertEqual(lesson.rule_code, "RULE_01")
+                self.assertEqual(lesson.category, "MANDATE")
 
-            fetched = repo.get_lesson("RULE_01")
-            self.assertIsNotNone(fetched)
-            self.assertEqual(fetched.directive_text, "Never enter without structural edge")
+                fetched = repo.get_lesson("RULE_01")
+                self.assertIsNotNone(fetched)
+                self.assertEqual(fetched.directive_text, "Never enter without structural edge")
 
-            # List filtered
-            repo.upsert_lesson("RULE_02", "Take profit at Fib 1.618", "EXECUTION", caller_role="Terminal Orchestrator")
-            mandates = repo.list_lessons(category="MANDATE")
-            self.assertEqual(len(mandates), 1)
-            self.assertEqual(mandates[0].rule_code, "RULE_01")
+                # List filtered
+                repo.upsert_lesson("RULE_02", "Take profit at Fib 1.618", "EXECUTION", caller_role="Terminal Orchestrator")
+                mandates = repo.list_lessons(category="MANDATE")
+                self.assertEqual(len(mandates), 1)
+                self.assertEqual(mandates[0].rule_code, "RULE_01")
 
-            # Delete lesson
-            deleted = repo.delete_lesson("RULE_02", caller_role="Terminal Orchestrator")
-            self.assertTrue(deleted)
-            self.assertIsNone(repo.get_lesson("RULE_02"))
+                # Delete lesson
+                deleted = repo.delete_lesson("RULE_02", caller_role="Terminal Orchestrator")
+                self.assertTrue(deleted)
+                self.assertIsNone(repo.get_lesson("RULE_02"))
 
     def test_decision_log_crud_and_mapping(self):
         with self.core_manager.connection() as conn:
             repo = DecisionLogRepository(conn)
-            record = repo.append_decision(
-                session_id="SESS_001",
-                action_proposed="BUY NOVO-B.CO",
-                decision_outcome="APPROVED",
-                ticker="NOVO-B.CO",
-                votes={"Bullish Advocate": "YES", "Macro Sentinel": "YES"},
-                transcript_text="Council approved based on GLP-1 demand.",
-                caller_role="Terminal Orchestrator",
-            )
-            self.assertIsNotNone(record.id)
-            self.assertEqual(record.session_id, "SESS_001")
-            self.assertEqual(record.votes["Bullish Advocate"], "YES")
+            with execution_role_context("Terminal Orchestrator"):
+                record = repo.append_decision(
+                    session_id="SESS_001",
+                    action_proposed="BUY NOVO-B.CO",
+                    decision_outcome="APPROVED",
+                    ticker="NOVO-B.CO",
+                    votes={"Bullish Advocate": "YES", "Macro Sentinel": "YES"},
+                    transcript_text="Council approved based on GLP-1 demand.",
+                    caller_role="Terminal Orchestrator",
+                )
+                self.assertIsNotNone(record.id)
+                self.assertEqual(record.session_id, "SESS_001")
+                self.assertEqual(record.votes["Bullish Advocate"], "YES")
 
-            fetched = repo.get_decision(record.id)
-            self.assertIsNotNone(fetched)
-            self.assertEqual(fetched.action_proposed, "BUY NOVO-B.CO")
+                fetched = repo.get_decision(record.id)
+                self.assertIsNotNone(fetched)
+                self.assertEqual(fetched.action_proposed, "BUY NOVO-B.CO")
 
-            # Filter list
-            items = repo.list_decisions(ticker="NOVO-B.CO")
-            self.assertEqual(len(items), 1)
+                # Filter list
+                items = repo.list_decisions(ticker="NOVO-B.CO")
+                self.assertEqual(len(items), 1)
 
     def test_financial_changelog_crud_and_mapping(self):
         with self.core_manager.connection() as conn:
@@ -2902,6 +2907,7 @@ class TestStage14131CapabilityCredentialAndExactStateVerification(BaseRepository
                 cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("999.00"))
             self.assertIsNone(cash_repo.get_cash("PRIMARY", "EUR"))
 
+
     # -----------------------------------------------------------------------
     # R2: Exact Financial After-State Field Verification Tests
     # -----------------------------------------------------------------------
@@ -3510,6 +3516,594 @@ def exploit():
             with self.assertRaises(sqlite3.OperationalError):
                 cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("999.00"))
             self.assertIsNone(cash_repo.get_cash("PRIMARY", "EUR"))
+
+
+# ===========================================================================
+# Stage 1.5-A: Repository Transaction, Attribution, Authorization & Revision
+# ===========================================================================
+
+class TestStage15ARepositoryTransactionAuthorizationRevisionHardening(BaseRepositoryTestCase):
+    """
+    Automated regression suite verifying Stage 1.5-A infrastructure hardening:
+    - R1: Trusted actor attribution on trade lessons and decision log.
+    - R2: Scout category authorization boundary (update_ssot).
+    - R3: Standalone transaction safety and isolation.
+    - R4: Audit event idempotency and concurrency protection.
+    - R5: Monotonic database_metadata.db_revision tracking.
+    - R6: Historical timestamp preservation.
+    """
+
+    # -----------------------------------------------------------------------
+    # R1: Trusted Actor Attribution
+    # -----------------------------------------------------------------------
+
+    def test_r1_trade_lesson_matching_role_succeeds(self):
+        """R1: Explicit caller_role matching active context succeeds."""
+        with self.core_manager.connection() as conn:
+            repo = TradeLessonRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                lesson = repo.upsert_lesson(
+                    rule_code="R1_TEST_01",
+                    directive_text="Matching role directive",
+                    category="MANDATE",
+                    caller_role="Terminal Orchestrator",
+                )
+                self.assertEqual(lesson.rule_code, "R1_TEST_01")
+
+    def test_r1_trade_lesson_mismatched_role_rejected(self):
+        """R1: Explicit caller_role conflicting with active context is rejected fail-closed."""
+        with self.core_manager.connection() as conn:
+            repo = TradeLessonRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.upsert_lesson(
+                        rule_code="R1_TEST_02",
+                        directive_text="Spoofed directive",
+                        category="MANDATE",
+                        caller_role="Context Engine",
+                    )
+                self.assertIn("cannot spoof", str(ctx.exception))
+
+    def test_r1_trade_lesson_system_claiming_agent_rejected(self):
+        """R1: Default System context cannot claim agent role without execution context."""
+        with self.core_manager.connection() as conn:
+            repo = TradeLessonRepository(conn)
+            # Active context is default System
+            with self.assertRaises(PermissionError) as ctx:
+                repo.upsert_lesson(
+                    rule_code="R1_TEST_03",
+                    directive_text="Claimed agent directive",
+                    category="MANDATE",
+                    caller_role="Terminal Orchestrator",
+                )
+            self.assertIn("cannot claim", str(ctx.exception))
+
+    def test_r1_trade_lesson_engineering_role_rejected(self):
+        """R1: Engineering roles are forbidden from mutating trade lessons."""
+        with self.core_manager.connection() as conn:
+            repo = TradeLessonRepository(conn)
+            with execution_role_context("Python Engineer"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.upsert_lesson(
+                        rule_code="R1_TEST_04",
+                        directive_text="Engineer directive",
+                        category="MANDATE",
+                    )
+                self.assertIn("Engineering role", str(ctx.exception))
+
+    def test_r1_trade_lesson_unauthorized_investment_role_rejected(self):
+        """R1: Unauthorized investment roles cannot mutate trade lessons."""
+        with self.core_manager.connection() as conn:
+            repo = TradeLessonRepository(conn)
+            with execution_role_context("Macro Sentinel"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.upsert_lesson(
+                        rule_code="R1_TEST_05",
+                        directive_text="Macro Sentinel directive",
+                        category="MANDATE",
+                    )
+                self.assertIn("not authorized", str(ctx.exception))
+
+    def test_r1_trade_lesson_delete_actor_attribution(self):
+        """R1: Trade lesson deletion enforces exact actor attribution."""
+        with self.core_manager.connection() as conn:
+            repo = TradeLessonRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                repo.upsert_lesson("R1_DEL_01", "To be deleted", "MANDATE")
+
+            with execution_role_context("Python Engineer"):
+                with self.assertRaises(PermissionError):
+                    repo.delete_lesson("R1_DEL_01")
+
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PermissionError):
+                    repo.delete_lesson("R1_DEL_01", caller_role="Review Engine")
+                deleted = repo.delete_lesson("R1_DEL_01", caller_role="Terminal Orchestrator")
+                self.assertTrue(deleted)
+
+    def test_r1_decision_log_matching_role_succeeds(self):
+        """R1: Decision log append with matching role succeeds."""
+        with self.core_manager.connection() as conn:
+            repo = DecisionLogRepository(conn)
+            with execution_role_context("Review Engine"):
+                rec = repo.append_decision(
+                    session_id="SESS_R1_01",
+                    action_proposed="HOLD",
+                    decision_outcome="APPROVED",
+                    caller_role="Review Engine",
+                )
+                self.assertIsNotNone(rec.id)
+
+    def test_r1_decision_log_mismatched_role_rejected(self):
+        """R1: Decision log append with mismatched role raises PermissionError."""
+        with self.core_manager.connection() as conn:
+            repo = DecisionLogRepository(conn)
+            with execution_role_context("Review Engine"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.append_decision(
+                        session_id="SESS_R1_02",
+                        action_proposed="BUY",
+                        decision_outcome="APPROVED",
+                        caller_role="Terminal Orchestrator",
+                    )
+                self.assertIn("cannot spoof", str(ctx.exception))
+
+    def test_r1_decision_log_system_claiming_owner_rejected(self):
+        """R1: Default System context cannot claim Owner/Human identity."""
+        with self.core_manager.connection() as conn:
+            repo = DecisionLogRepository(conn)
+            with self.assertRaises(PermissionError) as ctx:
+                repo.append_decision(
+                    session_id="SESS_R1_03",
+                    action_proposed="BUY",
+                    decision_outcome="APPROVED",
+                    caller_role="Owner",
+                )
+            self.assertIn("cannot claim", str(ctx.exception))
+
+    def test_r1_decision_log_engineering_role_rejected(self):
+        """R1: Engineering roles are forbidden from appending to decision log."""
+        with self.core_manager.connection() as conn:
+            repo = DecisionLogRepository(conn)
+            with execution_role_context("Security Agent"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.append_decision(
+                        session_id="SESS_R1_04",
+                        action_proposed="AUDIT",
+                        decision_outcome="APPROVED",
+                    )
+                self.assertIn("Engineering role", str(ctx.exception))
+
+    # -----------------------------------------------------------------------
+    # R2: Scout Category Authorization
+    # -----------------------------------------------------------------------
+
+    def test_r2_scout_category_upsert_authorized_roles(self):
+        """R2: Authorized roles (Terminal Orchestrator, Context Engine, System, Owner) can upsert categories."""
+        with self.core_manager.connection() as conn:
+            repo = ScoutCategoryRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                cat = repo.upsert_category("AI Infrastructure", "Semiconductors", ["NVDA", "ASML.AS"])
+                self.assertEqual(cat.category_name, "AI Infrastructure")
+
+            with execution_role_context("Context Engine"):
+                cat2 = repo.upsert_category("Defense Tech", "Aerospace", ["RHM.DE"])
+                self.assertEqual(cat2.category_name, "Defense Tech")
+
+    def test_r2_scout_category_upsert_engineering_role_rejected(self):
+        """R2: Engineering roles are rejected fail-closed on scout category mutations."""
+        with self.core_manager.connection() as conn:
+            repo = ScoutCategoryRepository(conn)
+            with execution_role_context("Python Engineer"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.upsert_category("Blocked Category", "Desc", ["AAPL"])
+                self.assertIn("Engineering role", str(ctx.exception))
+
+    def test_r2_scout_category_upsert_unauthorized_investment_role_rejected(self):
+        """R2: Unauthorized investment roles (e.g. Bullish Advocate) are rejected on scout categories."""
+        with self.core_manager.connection() as conn:
+            repo = ScoutCategoryRepository(conn)
+            with execution_role_context("Bullish Advocate"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.upsert_category("Bull Category", "Desc", ["TSLA"])
+                self.assertIn("not authorized", str(ctx.exception))
+
+    def test_r2_scout_category_delete_authorization(self):
+        """R2: Delete authorization checks role and targets category correctly."""
+        with self.core_manager.connection() as conn:
+            repo = ScoutCategoryRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                cat = repo.upsert_category("To Delete Cat", "Temp", ["MSFT"])
+
+            # Engineering role rejected
+            with execution_role_context("Architecture Agent"):
+                with self.assertRaises(PermissionError):
+                    repo.delete_category(cat.id)
+
+            # Authorized role succeeds
+            with execution_role_context("Terminal Orchestrator"):
+                deleted = repo.delete_category(cat.id)
+                self.assertTrue(deleted)
+                self.assertIsNone(repo.get_category(cat.id))
+
+    def test_r2_scout_category_owner_approval_requirement(self):
+        """R2: requires_owner_approval enforces local owner approval verify_or_prompt."""
+        with self.core_manager.connection() as conn:
+            repo = ScoutCategoryRepository(conn)
+            # In non-interactive mode with no pre-approved token, requires_owner_approval raises PermissionError
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PermissionError) as ctx:
+                    repo.upsert_category("High Risk Cat", "Desc", ["COIN"], requires_owner_approval=True)
+                self.assertIn("owner confirmation", str(ctx.exception).lower())
+
+    # -----------------------------------------------------------------------
+    # R3: Standalone Transaction Safety
+    # -----------------------------------------------------------------------
+
+    def test_r3_standalone_write_transaction_atomicity(self):
+        """R3: Standalone operations manage transaction boundaries (BEGIN IMMEDIATE / COMMIT) safely."""
+        with self.core_manager.connection() as conn:
+            # Standalone autocommit connection
+            repo = ScoutCategoryRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                cat = repo.upsert_category("Tx Test Category", "Description", ["SAP.DE"])
+                self.assertEqual(cat.category_name, "Tx Test Category")
+                # Ensure no transaction was left open on the connection
+                self.assertFalse(conn.in_transaction)
+
+    def test_r3_standalone_rollback_on_failure(self):
+        """R3: Standalone operations roll back their owned transaction on error without dangling locks."""
+        with self.core_manager.connection() as conn:
+            repo = TradeLessonRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(ValidationError):
+                    # Invalid status causes ValidationError before or during write
+                    repo.upsert_lesson("INV_RULE", "Text", "MANDATE", status="INVALID_STATUS")
+                self.assertFalse(conn.in_transaction)
+
+    def test_r3_unit_of_work_transaction_preserved(self):
+        """R3: Repository methods inside UnitOfWork participate without committing or rolling back early."""
+        with self.factory.create_unit_of_work() as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("50000.00"))
+                uow.positions.upsert_position("PRIMARY", "ASML.AS", Decimal("10.0000"), Decimal("800.0000"))
+                uow.scout_categories.upsert_category("Semis", "Equip", ["ASML.AS"])
+                # Transaction is still active in UoW
+                self.assertTrue(uow.is_active)
+            uow.commit()
+
+        # Verify all three mutations committed together
+        with self.core_manager.connection() as conn:
+            self.assertEqual(CashRepository(conn).get_cash("PRIMARY", "EUR").amount, Decimal("50000.00"))
+            self.assertEqual(PositionRepository(conn).get_position("PRIMARY", "ASML.AS").shares, Decimal("10.0000"))
+            self.assertIsNotNone(ScoutCategoryRepository(conn).get_category_by_name("Semis"))
+
+    # -----------------------------------------------------------------------
+    # R4: Audit Event Idempotency and Concurrency
+    # -----------------------------------------------------------------------
+
+    def test_r4_audit_event_idempotency_and_replay(self):
+        """R4: Audit event first insertion and identical replay succeed idempotently."""
+        event_id = uuid.uuid4().hex
+        raw = {"action": "test", "value": 123}
+
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            # First insert
+            rec1 = repo.append_event(
+                event_id=event_id,
+                timestamp_utc="2026-11-09T12:00:00Z",
+                action_category="TEST",
+                status="SUCCESS",
+                agent_role="Terminal Orchestrator",
+                permission_decision="ALLOW",
+                approval_status="NONE",
+                raw_event=raw,
+            )
+            self.assertEqual(rec1.event_id, event_id)
+
+            # Replay identical event
+            rec2 = repo.append_event(
+                event_id=event_id,
+                timestamp_utc="2026-11-09T12:00:00Z",
+                action_category="TEST",
+                status="SUCCESS",
+                agent_role="Terminal Orchestrator",
+                permission_decision="ALLOW",
+                approval_status="NONE",
+                raw_event=raw,
+            )
+            self.assertEqual(rec2.event_id, event_id)
+            self.assertEqual(repo.count_events(), 1)
+
+    def test_r4_audit_event_conflicting_replay_raises(self):
+        """R4: Replaying existing event_id with conflicting payload raises IntegrityConflictError."""
+        event_id = uuid.uuid4().hex
+        raw1 = {"action": "original"}
+        raw2 = {"action": "conflicting_tamper"}
+
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            repo.append_event(
+                event_id=event_id,
+                timestamp_utc="2026-11-09T12:00:00Z",
+                action_category="TEST",
+                status="SUCCESS",
+                agent_role="Terminal Orchestrator",
+                permission_decision="ALLOW",
+                approval_status="NONE",
+                raw_event=raw1,
+            )
+
+            with self.assertRaises(IntegrityConflictError) as ctx:
+                repo.append_event(
+                    event_id=event_id,
+                    timestamp_utc="2026-11-09T12:00:00Z",
+                    action_category="TEST",
+                    status="SUCCESS",
+                    agent_role="Terminal Orchestrator",
+                    permission_decision="ALLOW",
+                    approval_status="NONE",
+                    raw_event=raw2,
+                )
+            self.assertIn("different payload", str(ctx.exception))
+
+    def test_r4_audit_event_concurrent_connections_idempotent(self):
+        """R4: Two independent connections appending identical events succeed idempotently."""
+        event_id = uuid.uuid4().hex
+        raw = {"action": "concurrent_test", "data": "same"}
+
+        conn1 = self.core_manager.connect()
+        conn2 = self.core_manager.connect()
+        try:
+            repo1 = AuditEventRepository(conn1)
+            repo2 = AuditEventRepository(conn2)
+
+            rec1 = repo1.append_event(
+                event_id=event_id,
+                timestamp_utc="2026-11-09T12:00:00Z",
+                action_category="CONCURRENT",
+                status="SUCCESS",
+                agent_role="Terminal Orchestrator",
+                permission_decision="ALLOW",
+                approval_status="NONE",
+                raw_event=raw,
+            )
+
+            rec2 = repo2.append_event(
+                event_id=event_id,
+                timestamp_utc="2026-11-09T12:00:00Z",
+                action_category="CONCURRENT",
+                status="SUCCESS",
+                agent_role="Terminal Orchestrator",
+                permission_decision="ALLOW",
+                approval_status="NONE",
+                raw_event=raw,
+            )
+
+            self.assertEqual(rec1.event_id, event_id)
+            self.assertEqual(rec2.event_id, event_id)
+            self.assertEqual(repo1.count_events(), 1)
+        finally:
+            conn1.close()
+            conn2.close()
+
+    # -----------------------------------------------------------------------
+    # R5: Monotonic db_revision Tracking
+    # -----------------------------------------------------------------------
+
+    def test_r5_initial_revision_is_zero(self):
+        """R5: Database initialization creates database_metadata with db_revision == 0."""
+        with self.core_manager.connection() as conn:
+            rev = get_db_revision(conn)
+            self.assertEqual(rev, 0)
+            self.assertEqual(CashRepository(conn).get_db_revision(), 0)
+
+    def test_r5_individual_mutations_increment_revision(self):
+        """R5: Every successful logical mutation across all 7 repositories increments db_revision by 1."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            pos_repo = PositionRepository(conn)
+            wl_repo = WatchlistRepository(conn)
+            cat_repo = ScoutCategoryRepository(conn)
+            lesson_repo = TradeLessonRepository(conn)
+            dec_repo = DecisionLogRepository(conn)
+            appr_repo = OwnerApprovalRepository(conn)
+
+            with execution_role_context("Terminal Orchestrator"):
+                # 1. CashRepository
+                cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("1000.00"))
+                self.assertEqual(get_db_revision(conn), 1)
+
+                # 2. PositionRepository
+                pos_repo.upsert_position("PRIMARY", "NOVO-B.CO", Decimal("10.0000"), Decimal("100.0000"))
+                self.assertEqual(get_db_revision(conn), 2)
+
+                # 3. WatchlistRepository
+                wl_repo.upsert_watchlist_item("SAP.DE")
+                self.assertEqual(get_db_revision(conn), 3)
+
+                # 4. ScoutCategoryRepository
+                cat = cat_repo.upsert_category("Software", "Tech", ["SAP.DE"])
+                self.assertEqual(get_db_revision(conn), 4)
+
+                # 5. TradeLessonRepository
+                lesson_repo.upsert_lesson("L_REV_01", "Revision test directive", "MANDATE")
+                self.assertEqual(get_db_revision(conn), 5)
+
+                # 6. DecisionLogRepository
+                dec_repo.append_decision("SESS_REV", "BUY", "APPROVED")
+                self.assertEqual(get_db_revision(conn), 6)
+
+            # 7. OwnerApprovalRepository.append_approval (requires Owner/Human)
+            with execution_role_context("Owner"):
+                appr_repo.append_approval("APP_REV_01", "update_ssot", "portfolio_cash", "hash123")
+                self.assertEqual(get_db_revision(conn), 7)
+
+                # 8. OwnerApprovalRepository.consume_approval
+                appr_repo.consume_approval("APP_REV_01")
+                self.assertEqual(get_db_revision(conn), 8)
+
+    def test_r5_unit_of_work_multiple_mutations_and_rollback(self):
+        """R5: Multiple mutations in a UnitOfWork increment atomically; rollback preserves original revision."""
+        with self.core_manager.connection() as conn:
+            initial_rev = get_db_revision(conn)
+            self.assertEqual(initial_rev, 0)
+
+        # Successful UnitOfWork with 3 mutations
+        with self.factory.create_unit_of_work() as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("5000.00"))
+                self.assertEqual(uow.get_db_revision(), 1)
+                uow.positions.upsert_position("PRIMARY", "AAPL", Decimal("5.0000"), Decimal("200.0000"))
+                self.assertEqual(uow.get_db_revision(), 2)
+                uow.watchlist.upsert_watchlist_item("GOOG")
+                self.assertEqual(uow.get_db_revision(), 3)
+            uow.commit()
+
+        with self.core_manager.connection() as conn:
+            self.assertEqual(get_db_revision(conn), 3)
+
+        # Rolled back UnitOfWork
+        try:
+            with self.factory.create_unit_of_work() as uow:
+                with execution_role_context("Terminal Orchestrator"):
+                    uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("9999.00"))
+                    self.assertEqual(uow.get_db_revision(), 4)
+                    raise RuntimeError("Simulated failure inside transaction")
+        except RuntimeError:
+            pass
+
+        # Revision must remain at 3 following rollback
+        with self.core_manager.connection() as conn:
+            self.assertEqual(get_db_revision(conn), 3)
+            # Cash balance must be unmutated
+            self.assertEqual(CashRepository(conn).get_cash("PRIMARY", "EUR").amount, Decimal("5000.00"))
+
+    def test_r5_noop_operations_do_not_increment_revision(self):
+        """R5: No-op deletions or unconsumed approvals do not increment db_revision."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            cat_repo = ScoutCategoryRepository(conn)
+            lesson_repo = TradeLessonRepository(conn)
+            appr_repo = OwnerApprovalRepository(conn)
+
+            initial_rev = get_db_revision(conn)
+
+            with execution_role_context("Terminal Orchestrator"):
+                # Non-existent cash deletion
+                deleted_cash = cash_repo.delete_cash("NON_EXISTENT", "EUR")
+                self.assertFalse(deleted_cash)
+                self.assertEqual(get_db_revision(conn), initial_rev)
+
+                # Non-existent category deletion
+                deleted_cat = cat_repo.delete_category(9999)
+                self.assertFalse(deleted_cat)
+                self.assertEqual(get_db_revision(conn), initial_rev)
+
+                # Non-existent lesson deletion
+                deleted_lesson = lesson_repo.delete_lesson("NON_EXISTENT_RULE")
+                self.assertFalse(deleted_lesson)
+                self.assertEqual(get_db_revision(conn), initial_rev)
+
+            # Consuming non-existent approval
+            consumed = appr_repo.consume_approval("NON_EXISTENT_APP")
+            self.assertFalse(consumed)
+            self.assertEqual(get_db_revision(conn), initial_rev)
+
+    def test_r5_cache_daily_bars_do_not_increment_core_revision(self):
+        """R5: Market-data cache operations never increment core db_revision."""
+        with self.core_manager.connection() as core_conn:
+            initial_core_rev = get_db_revision(core_conn)
+
+        with self.cache_manager.connection() as cache_conn:
+            cache_repo = DailyBarRepository(cache_conn)
+            cache_repo.upsert_bar("SPY", "2026-11-09", 500, 505, 498, 502, 1000000)
+            cache_repo.delete_bars("SPY")
+
+        with self.core_manager.connection() as core_conn:
+            self.assertEqual(get_db_revision(core_conn), initial_core_rev)
+
+    # -----------------------------------------------------------------------
+    # R6: Historical Timestamp Preservation
+    # -----------------------------------------------------------------------
+
+    def test_r6_historical_timestamp_preservation_across_all_mutations(self):
+        """R6: Valid historical timestamps are preserved exactly across all 6 mutation methods."""
+        historical_ts = "2024-03-15T09:30:00Z"
+
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            pos_repo = PositionRepository(conn)
+            wl_repo = WatchlistRepository(conn)
+            cat_repo = ScoutCategoryRepository(conn)
+            lesson_repo = TradeLessonRepository(conn)
+            dec_repo = DecisionLogRepository(conn)
+
+            with execution_role_context("Terminal Orchestrator"):
+                # 1. Cash
+                bal = cash_repo.set_cash_balance("PRIMARY", "EUR", "12500.00", timestamp_utc=historical_ts)
+                self.assertEqual(bal.last_updated_at_utc, historical_ts)
+                fetched_cash = cash_repo.get_cash("PRIMARY", "EUR")
+                self.assertEqual(fetched_cash.last_updated_at_utc, historical_ts)
+
+                # 2. Position
+                pos = pos_repo.upsert_position(
+                    "PRIMARY", "MC.PA", "25.0000", "820.5000", timestamp_utc=historical_ts
+                )
+                self.assertEqual(pos.last_updated_at_utc, historical_ts)
+                fetched_pos = pos_repo.get_position("PRIMARY", "MC.PA")
+                self.assertEqual(fetched_pos.last_updated_at_utc, historical_ts)
+
+                # 3. Watchlist
+                wl = wl_repo.upsert_watchlist_item("OR.PA", timestamp_utc=historical_ts)
+                self.assertEqual(wl.added_at_utc, historical_ts)
+                fetched_wl = wl_repo.get_watchlist_item("OR.PA")
+                self.assertEqual(fetched_wl.added_at_utc, historical_ts)
+
+                # 4. Scout Category
+                cat = cat_repo.upsert_category("Luxury", "European Luxury", ["MC.PA", "OR.PA"], timestamp_utc=historical_ts)
+                self.assertEqual(cat.updated_at_utc, historical_ts)
+                fetched_cat = cat_repo.get_category_by_name("Luxury")
+                self.assertEqual(fetched_cat.updated_at_utc, historical_ts)
+
+                # 5. Trade Lesson
+                lesson = lesson_repo.upsert_lesson(
+                    "HIST_01", "Preserve history", "MANDATE", timestamp_utc=historical_ts
+                )
+                self.assertEqual(lesson.created_at_utc, historical_ts)
+                self.assertEqual(lesson.last_reviewed_at_utc, historical_ts)
+                fetched_lesson = lesson_repo.get_lesson("HIST_01")
+                self.assertEqual(fetched_lesson.created_at_utc, historical_ts)
+
+                # 6. Decision Log
+                dec = dec_repo.append_decision(
+                    "SESS_HIST", "BUY MC.PA", "APPROVED", ticker="MC.PA", timestamp_utc=historical_ts
+                )
+                self.assertEqual(dec.timestamp_utc, historical_ts)
+                fetched_dec = dec_repo.get_decision(dec.id)
+                self.assertEqual(fetched_dec.timestamp_utc, historical_ts)
+
+    def test_r6_invalid_timestamps_rejected_fail_closed(self):
+        """R6: Malformed, non-UTC, or invalid timestamps raise ValidationError and are never silently accepted."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            with execution_role_context("Terminal Orchestrator"):
+                # Malformed string
+                with self.assertRaises(ValidationError):
+                    cash_repo.set_cash_balance("PRIMARY", "EUR", "100.00", timestamp_utc="not-a-timestamp")
+
+                # Non-UTC timezone offset (+02:00)
+                with self.assertRaises(ValidationError):
+                    cash_repo.set_cash_balance("PRIMARY", "EUR", "100.00", timestamp_utc="2026-11-09T12:00:00+02:00")
+
+                # Wrong data type
+                with self.assertRaises(ValidationError):
+                    cash_repo.set_cash_balance("PRIMARY", "EUR", "100.00", timestamp_utc=12345678)  # type: ignore
+
+                # Empty string
+                with self.assertRaises(ValidationError):
+                    cash_repo.set_cash_balance("PRIMARY", "EUR", "100.00", timestamp_utc="")
 
 
 if __name__ == "__main__":

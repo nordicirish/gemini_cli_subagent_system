@@ -28,6 +28,10 @@ from python.database.repositories.base import (
     RepositoryError,
     validate_identifier,
     utc_now_iso,
+    _resolve_effective_actor,
+    validate_timestamp_utc,
+    increment_db_revision,
+    get_db_revision,
 )
 from python.tool_registry import authorize_financial_mutation, get_active_caller_role
 
@@ -118,16 +122,39 @@ class ScoutCategoryRepository(BaseRepository):
         category_name: str,
         description: Optional[str] = None,
         tickers: Optional[Sequence[str]] = None,
+        caller_role: Optional[str] = None,
+        requires_owner_approval: bool = False,
+        timestamp_utc: Optional[str] = None,
     ) -> ScoutCategory:
-        """Upserts a scout category definition."""
+        """Upserts a scout category definition with authorization and revision tracking (R2/R3/R5/R6)."""
         self._check_active()
         norm_name = validate_identifier(category_name, "category_name")
         tickers_list = [validate_identifier(t, "ticker").upper() for t in (tickers or [])]
         tickers_json = json.dumps(tickers_list, sort_keys=True)
-        timestamp_utc = utc_now_iso()
+        valid_ts = validate_timestamp_utc(timestamp_utc)
 
-        cur = self._conn.cursor()
+        target_resource = f"scout_categories/{norm_name}"
+        payload = {
+            "category_name": norm_name,
+            "description": description,
+            "tickers": tickers_list,
+        }
+
+        effective_actor = _resolve_effective_actor(caller_role)
+        authorize_financial_mutation(
+            operation_name="update_ssot",
+            target_resource=target_resource,
+            payload=payload,
+            caller_role=effective_actor,
+            requires_owner_approval=requires_owner_approval,
+        )
+
+        owns_tx = not self._conn.in_transaction
+        if owns_tx:
+            self._conn.execute("BEGIN IMMEDIATE;")
+
         try:
+            cur = self._conn.cursor()
             cur.execute(
                 """
                 INSERT INTO scout_categories (category_name, description, tickers_json, updated_at_utc)
@@ -137,22 +164,88 @@ class ScoutCategoryRepository(BaseRepository):
                     tickers_json = excluded.tickers_json,
                     updated_at_utc = excluded.updated_at_utc
                 """,
-                (norm_name, description, tickers_json, timestamp_utc),
+                (norm_name, description, tickers_json, valid_ts),
             )
+
+            # Increment db_revision atomically within the same transaction
+            increment_db_revision(self._conn, valid_ts)
+
+            if owns_tx:
+                self._conn.execute("COMMIT;")
         except sqlite3.IntegrityError as e:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
             raise IntegrityConflictError(f"Integrity constraint violation in scout category: {e}") from e
+        except Exception:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+            raise
 
         cat = self.get_category_by_name(norm_name)
         if cat is None:
             raise EntityNotFoundError(f"Failed to retrieve newly upserted category '{norm_name}'")
         return cat
 
-    def delete_category(self, category_id: int) -> bool:
-        """Deletes a scout category by ID."""
+    def delete_category(
+        self,
+        category_id: int,
+        caller_role: Optional[str] = None,
+        requires_owner_approval: bool = False,
+    ) -> bool:
+        """Deletes a scout category by ID with authorization and revision tracking (R2/R3/R5)."""
         self._check_active()
-        cur = self._conn.cursor()
-        cur.execute("DELETE FROM scout_categories WHERE id = ?", (category_id,))
-        return cur.rowcount > 0
+        if not isinstance(category_id, int) or category_id <= 0:
+            raise ValidationError(f"category_id must be a positive integer, got {category_id}")
+
+        existing = self.get_category(category_id)
+        target_resource = (
+            f"scout_categories/{existing.category_name}"
+            if existing
+            else f"scout_categories/id:{category_id}"
+        )
+        payload = {
+            "category_id": category_id,
+            "action": "delete",
+            "category_name": existing.category_name if existing else None,
+        }
+
+        effective_actor = _resolve_effective_actor(caller_role)
+        authorize_financial_mutation(
+            operation_name="update_ssot",
+            target_resource=target_resource,
+            payload=payload,
+            caller_role=effective_actor,
+            requires_owner_approval=requires_owner_approval,
+        )
+
+        owns_tx = not self._conn.in_transaction
+        if owns_tx:
+            self._conn.execute("BEGIN IMMEDIATE;")
+
+        try:
+            cur = self._conn.cursor()
+            cur.execute("DELETE FROM scout_categories WHERE id = ?", (category_id,))
+            deleted = cur.rowcount > 0
+
+            if deleted:
+                increment_db_revision(self._conn)
+
+            if owns_tx:
+                self._conn.execute("COMMIT;")
+            return deleted
+        except Exception:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -235,8 +328,9 @@ class TradeLessonRepository(BaseRepository):
         category: str,
         status: str = "ACTIVE",
         caller_role: Optional[str] = None,
+        timestamp_utc: Optional[str] = None,
     ) -> TradeLesson:
-        """Upserts a trade lesson with authorization check."""
+        """Upserts a trade lesson with authorization check, transaction safety, and revision tracking (R1/R3/R5/R6)."""
         self._check_active()
         norm_code = validate_identifier(rule_code, "rule_code").upper()
         norm_directive = validate_identifier(directive_text, "directive_text")
@@ -248,6 +342,7 @@ class TradeLessonRepository(BaseRepository):
         if norm_status not in self.VALID_STATUSES:
             raise ValidationError(f"Invalid status '{norm_status}'. Must be one of {sorted(self.VALID_STATUSES)}")
 
+        valid_ts = validate_timestamp_utc(timestamp_utc)
         target_resource = f"trade_lessons/{norm_code}"
         payload = {
             "rule_code": norm_code,
@@ -256,21 +351,23 @@ class TradeLessonRepository(BaseRepository):
             "status": norm_status,
         }
 
-        active_role = get_active_caller_role()
-        effective_role = caller_role or active_role
+        effective_actor = _resolve_effective_actor(caller_role)
 
         authorize_financial_mutation(
             operation_name="update_trade_lessons",
             target_resource=target_resource,
             payload=payload,
-            caller_role=effective_role,
+            caller_role=effective_actor,
         )
 
-        timestamp_utc = utc_now_iso()
-        existing = self.get_lesson(norm_code)
-        created_at = existing.created_at_utc if existing else timestamp_utc
+        owns_tx = not self._conn.in_transaction
+        if owns_tx:
+            self._conn.execute("BEGIN IMMEDIATE;")
 
         try:
+            existing = self.get_lesson(norm_code)
+            created_at = existing.created_at_utc if existing else valid_ts
+
             self._conn.execute(
                 """
                 INSERT INTO trade_lessons (
@@ -282,10 +379,28 @@ class TradeLessonRepository(BaseRepository):
                     status = excluded.status,
                     last_reviewed_at_utc = excluded.last_reviewed_at_utc
                 """,
-                (norm_code, norm_directive, norm_cat, norm_status, created_at, timestamp_utc),
+                (norm_code, norm_directive, norm_cat, norm_status, created_at, valid_ts),
             )
+
+            # Atomically increment database revision with mutation
+            increment_db_revision(self._conn, valid_ts)
+
+            if owns_tx:
+                self._conn.execute("COMMIT;")
         except sqlite3.IntegrityError as e:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
             raise IntegrityConflictError(f"Integrity constraint violation upserting lesson: {e}") from e
+        except Exception:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+            raise
 
         return TradeLesson(
             rule_code=norm_code,
@@ -293,28 +408,46 @@ class TradeLessonRepository(BaseRepository):
             category=norm_cat,
             status=norm_status,
             created_at_utc=created_at,
-            last_reviewed_at_utc=timestamp_utc,
+            last_reviewed_at_utc=valid_ts,
         )
 
     def delete_lesson(self, rule_code: str, caller_role: Optional[str] = None) -> bool:
-        """Deletes a trade lesson with authorization."""
+        """Deletes a trade lesson with authorization, transaction safety, and revision tracking (R1/R3/R5)."""
         self._check_active()
         norm_code = validate_identifier(rule_code, "rule_code").upper()
         target_resource = f"trade_lessons/{norm_code}"
 
-        active_role = get_active_caller_role()
-        effective_role = caller_role or active_role
+        effective_actor = _resolve_effective_actor(caller_role)
 
         authorize_financial_mutation(
             operation_name="update_trade_lessons",
             target_resource=target_resource,
             payload={"rule_code": norm_code, "action": "delete"},
-            caller_role=effective_role,
+            caller_role=effective_actor,
         )
 
-        cur = self._conn.cursor()
-        cur.execute("DELETE FROM trade_lessons WHERE rule_code = ?", (norm_code,))
-        return cur.rowcount > 0
+        owns_tx = not self._conn.in_transaction
+        if owns_tx:
+            self._conn.execute("BEGIN IMMEDIATE;")
+
+        try:
+            cur = self._conn.cursor()
+            cur.execute("DELETE FROM trade_lessons WHERE rule_code = ?", (norm_code,))
+            deleted = cur.rowcount > 0
+
+            if deleted:
+                increment_db_revision(self._conn)
+
+            if owns_tx:
+                self._conn.execute("COMMIT;")
+            return deleted
+        except Exception:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -336,15 +469,16 @@ class DecisionLogRepository(BaseRepository):
         votes: Optional[Dict[str, Any]] = None,
         transcript_text: Optional[str] = None,
         caller_role: Optional[str] = None,
+        timestamp_utc: Optional[str] = None,
     ) -> DecisionRecord:
-        """Appends a new council decision record."""
+        """Appends a new council decision record with authorization, transaction safety, and revision tracking (R1/R3/R5/R6)."""
         self._check_active()
         norm_session = validate_identifier(session_id, "session_id")
         norm_action = validate_identifier(action_proposed, "action_proposed")
         norm_outcome = validate_identifier(decision_outcome, "decision_outcome")
         norm_ticker = validate_identifier(ticker, "ticker").upper() if ticker else None
         votes_json = json.dumps(votes or {}, sort_keys=True)
-        timestamp_utc = utc_now_iso()
+        valid_ts = validate_timestamp_utc(timestamp_utc)
 
         payload = {
             "session_id": norm_session,
@@ -353,15 +487,18 @@ class DecisionLogRepository(BaseRepository):
             "ticker": norm_ticker,
         }
 
-        active_role = get_active_caller_role()
-        effective_role = caller_role or active_role
+        effective_actor = _resolve_effective_actor(caller_role)
 
         authorize_financial_mutation(
             operation_name="update_decision_log",
             target_resource="decision_log",
             payload=payload,
-            caller_role=effective_role,
+            caller_role=effective_actor,
         )
+
+        owns_tx = not self._conn.in_transaction
+        if owns_tx:
+            self._conn.execute("BEGIN IMMEDIATE;")
 
         cur = self._conn.cursor()
         try:
@@ -379,12 +516,30 @@ class DecisionLogRepository(BaseRepository):
                     norm_outcome,
                     votes_json,
                     transcript_text,
-                    timestamp_utc,
+                    valid_ts,
                 ),
             )
             record_id = cur.lastrowid
+
+            # Atomically increment database revision with mutation
+            increment_db_revision(self._conn, valid_ts)
+
+            if owns_tx:
+                self._conn.execute("COMMIT;")
         except sqlite3.IntegrityError as e:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
             raise IntegrityConflictError(f"Integrity violation appending decision log: {e}") from e
+        except Exception:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+            raise
 
         return DecisionRecord(
             id=record_id,
@@ -394,7 +549,7 @@ class DecisionLogRepository(BaseRepository):
             decision_outcome=norm_outcome,
             votes=votes or {},
             transcript_text=transcript_text,
-            timestamp_utc=timestamp_utc,
+            timestamp_utc=valid_ts,
         )
 
     def get_decision(self, decision_id: int) -> Optional[DecisionRecord]:
@@ -530,6 +685,10 @@ class OwnerApprovalRepository(BaseRepository):
         norm_grantor = active_role
         timestamp_utc = utc_now_iso()
 
+        owns_tx = not self._conn.in_transaction
+        if owns_tx:
+            self._conn.execute("BEGIN IMMEDIATE;")
+
         cur = self._conn.cursor()
         try:
             cur.execute(
@@ -542,10 +701,28 @@ class OwnerApprovalRepository(BaseRepository):
                 (norm_id, norm_op, norm_target, norm_digest, norm_grantor, timestamp_utc),
             )
             record_id = cur.lastrowid
+
+            # Atomically increment database revision with mutation
+            increment_db_revision(self._conn, timestamp_utc)
+
+            if owns_tx:
+                self._conn.execute("COMMIT;")
         except sqlite3.IntegrityError as e:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
             if "UNIQUE constraint failed" in str(e):
                 raise DuplicateEntityError(f"Owner approval with id '{norm_id}' already exists") from e
             raise IntegrityConflictError(f"Integrity violation creating owner approval: {e}") from e
+        except Exception:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+            raise
 
         return OwnerApprovalRecord(
             id=record_id,
@@ -631,16 +808,36 @@ class OwnerApprovalRepository(BaseRepository):
         self._check_active()
         norm_id = validate_identifier(approval_id, "approval_id")
         timestamp_utc = utc_now_iso()
-        cur = self._conn.cursor()
-        cur.execute(
-            """
-            UPDATE owner_approvals
-            SET status = 'CONSUMED', consumed_at_utc = ?
-            WHERE approval_id = ? AND status = 'PENDING'
-            """,
-            (timestamp_utc, norm_id),
-        )
-        return cur.rowcount > 0
+
+        owns_tx = not self._conn.in_transaction
+        if owns_tx:
+            self._conn.execute("BEGIN IMMEDIATE;")
+
+        try:
+            cur = self._conn.cursor()
+            cur.execute(
+                """
+                UPDATE owner_approvals
+                SET status = 'CONSUMED', consumed_at_utc = ?
+                WHERE approval_id = ? AND status = 'PENDING'
+                """,
+                (timestamp_utc, norm_id),
+            )
+            consumed = cur.rowcount > 0
+
+            if consumed:
+                increment_db_revision(self._conn, timestamp_utc)
+
+            if owns_tx:
+                self._conn.execute("COMMIT;")
+            return consumed
+        except Exception:
+            if owns_tx:
+                try:
+                    self._conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+            raise
 
     def list_approvals(self, status: Optional[str] = None) -> List[OwnerApprovalRecord]:
         """Lists owner approvals, optionally filtered by status."""

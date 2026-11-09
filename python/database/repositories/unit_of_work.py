@@ -24,7 +24,7 @@ from python.database.manager import (
     DatabaseBusyError,
     DatabaseCorruptionError,
 )
-from python.database.repositories.base import RepositoryError
+from python.database.repositories.base import RepositoryError, get_db_revision
 from python.database.repositories.financial import (
     CashRepository,
     PositionRepository,
@@ -203,6 +203,12 @@ class UnitOfWork:
             self._in_transaction = False
             self._is_active = False
             self._clear_repositories()
+
+    def get_db_revision(self) -> int:
+        """Returns the current monotonic database revision for the UnitOfWork connection."""
+        if not self._is_active or self._conn is None:
+            raise RepositoryError("UnitOfWork is not active.")
+        return get_db_revision(self._conn)
 
     @property
     def positions(self) -> PositionRepository:

@@ -1249,6 +1249,73 @@ class TestBackupInfrastructure(unittest.TestCase):
         with open(self.dst_path, "r") as f:
             self.assertEqual(f.read(), "original destination data")
 
+    def test_restore_backup_success_and_integrity(self):
+        """R7: Valid backup is successfully restored to target database with verified integrity."""
+        BackupManager.create_backup(self.src_path, self.dst_path)
+        restored_path = os.path.join(self.temp_dir.name, "restored.db")
+
+        res = BackupManager.restore_backup(self.dst_path, restored_path)
+        self.assertIsInstance(res, BackupResult)
+        self.assertEqual(res.destination_path, os.path.abspath(restored_path))
+        self.assertEqual(res.integrity_status, "ok")
+        self.assertTrue(os.path.exists(restored_path))
+
+        # Verify data in restored database
+        restored_manager = DatabaseManager(restored_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with restored_manager.connection() as conn:
+            cash = conn.execute("SELECT amount FROM portfolio_cash WHERE currency='EUR';").fetchone()[0]
+            pos = conn.execute("SELECT shares, wac_eur FROM portfolio_positions WHERE ticker='SPY';").fetchone()
+            wl = conn.execute("SELECT ticker FROM watchlist WHERE ticker='GOOG';").fetchone()[0]
+
+            self.assertEqual(cash, "25000.00")
+            self.assertEqual(pos, ("50.0000", "495.5000"))
+            self.assertEqual(wl, "GOOG")
+
+    def test_restore_backup_rejects_corrupted_backup(self):
+        """R7: Corrupted or non-database files are rejected and fail-closed before touching target."""
+        corrupted_path = os.path.join(self.temp_dir.name, "corrupt_backup.db")
+        with open(corrupted_path, "wb") as f:
+            f.write(b"NOT A SQLITE FILE - GARBAGE BYTES " * 10)
+
+        target_path = os.path.join(self.temp_dir.name, "target_untouched.db")
+        with open(target_path, "w") as f:
+            f.write("target existing content")
+
+        with self.assertRaises((BackupIntegrityError, BackupError)):
+            BackupManager.restore_backup(corrupted_path, target_path)
+
+        # Target must remain completely untouched
+        with open(target_path, "r") as f:
+            self.assertEqual(f.read(), "target existing content")
+
+    def test_restore_backup_cleans_stale_wal_shm_sidecars(self):
+        """R7: Existing stale WAL and SHM sidecars at target destination are cleaned up safely."""
+        BackupManager.create_backup(self.src_path, self.dst_path)
+        target_path = os.path.join(self.temp_dir.name, "target_wal_test.db")
+        wal_path = f"{target_path}-wal"
+        shm_path = f"{target_path}-shm"
+
+        # Create dummy target and stale sidecars
+        with open(target_path, "w") as f:
+            f.write("old db")
+        with open(wal_path, "wb") as f:
+            f.write(b"stale wal frames")
+        with open(shm_path, "wb") as f:
+            f.write(b"stale shm frames")
+
+        res = BackupManager.restore_backup(self.dst_path, target_path)
+        self.assertEqual(res.integrity_status, "ok")
+        # Stale sidecars must be removed
+        self.assertFalse(os.path.exists(wal_path))
+        self.assertFalse(os.path.exists(shm_path))
+
+        # Restored database opens cleanly
+        target_mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with target_mgr.connection() as conn:
+            cur = conn.cursor()
+            cur.execute("PRAGMA integrity_check;")
+            self.assertEqual(cur.fetchone()[0], "ok")
+
 
 class TestPersistenceIsolationStrengthened(unittest.TestCase):
     """D7: Cryptographic hash verification demonstrating zero modification to file-backed state."""
