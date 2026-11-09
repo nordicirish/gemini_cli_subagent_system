@@ -51,6 +51,7 @@ from database.backup import (
     BackupQuiescenceError,
     BackupRecoveryError,
     BackupCleanupError,
+    DatabaseRestoreLock,
     BackupResult,
 )
 
@@ -2406,20 +2407,14 @@ class TestStage15A2BackupRestoreQuiescenceAndCleanupSafety(unittest.TestCase):
     def test_r3_concurrent_database_manager_connect_blocked_by_restore_lock(self):
         """R3.4: Concurrent DatabaseManager.connect() during restoration is rejected via restore lock."""
         target_path = os.path.join(self.temp_dir.name, "target_lock_test.db")
-        restore_lock_path = f"{target_path}.restore_lock"
-
-        # Simulate active restore lock
-        with open(restore_lock_path, "w") as f:
-            f.write("pid=1234\n")
-
+        token = DatabaseRestoreLock.acquire_exclusive(target_path)
         try:
             mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
             with self.assertRaises(DatabaseBusyError) as ctx:
                 mgr.connect()
             self.assertIn("undergoing offline backup restoration", str(ctx.exception))
         finally:
-            if os.path.exists(restore_lock_path):
-                os.unlink(restore_lock_path)
+            token.release()
 
     def test_r3_wal_database_with_outstanding_frames_checkpointed_and_restored(self):
         """R3.5: Target WAL database with outstanding frames is checkpointed and restored safely."""

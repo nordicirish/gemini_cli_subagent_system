@@ -213,17 +213,33 @@ class UnitOfWork:
         try:
             if self._is_poisoned:
                 # R1: The UnitOfWork must never automatically commit a poisoned transaction during __exit__().
+                rollback_err = None
                 if self._in_transaction and self._conn is not None:
                     try:
                         self.rollback()
-                    except Exception:
+                    except Exception as re:
                         self._conn_unsafe = True
+                        rollback_err = re
 
                 # If caller caught/suppressed the exception inside the block, exc_type is None!
                 if exc_type is None:
-                    raise TransactionIntegrityError(
+                    tie = TransactionIntegrityError(
                         f"UnitOfWork transaction completed with poisoned state: {self._poison_reason}"
-                    ) from self._poison_cause
+                    )
+                    if rollback_err is not None:
+                        tie.rollback_error = rollback_err
+                    tie.__cause__ = self._poison_cause
+                    raise tie
+                else:
+                    if rollback_err is not None:
+                        try:
+                            setattr(exc_val, "rollback_error", rollback_err)
+                        except Exception:
+                            pass
+                        raise TransactionIntegrityError(
+                            f"CRITICAL: Rollback failed during poisoned transaction exit: {rollback_err}. "
+                            f"Original cause: {exc_val}"
+                        ) from exc_val
                 return False
 
             if exc_type is not None:

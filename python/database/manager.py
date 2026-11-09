@@ -21,12 +21,17 @@ Durability & Consistency Considerations:
 """
 
 import os
+import sys
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Generator, Optional, Tuple, List, Any
 
-from python.database.backup import DatabaseRestoreLock, RestoreLockBusyError
+from python.database.backup import (
+    DatabaseRestoreLock,
+    DatabaseRestoreLockToken,
+    RestoreLockBusyError,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +66,68 @@ class DatabaseCorruptionError(DatabaseError):
 class DatabaseTransactionError(DatabaseError):
     """Raised when transaction begin, commit, or rollback fails, or on nested transaction attempts."""
     pass
+
+
+# ---------------------------------------------------------------------------
+# Managed Connection Lifecycle (Stage 1.5-A.2.2 R1)
+# ---------------------------------------------------------------------------
+
+class ManagedConnection(sqlite3.Connection):
+    """
+    Managed SQLite connection retaining an active DatabaseRestoreLock shared token
+    throughout its lifecycle (Stage 1.5-A.2.2 R1).
+    Deterministically releases the token when closed.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._lock_token: Optional[DatabaseRestoreLockToken] = None
+        self._is_closed: bool = False
+
+    @property
+    def lock_token(self) -> Optional[DatabaseRestoreLockToken]:
+        """Returns the held DatabaseRestoreLockToken, if any."""
+        return self._lock_token
+
+    def close(self) -> None:
+        """
+        Idempotently closes SQLite connection and releases the restore lock token (R1).
+        Preserves and chains both errors if both SQLite close and lock release fail (R1, R5).
+        """
+        if self._is_closed:
+            return
+        self._is_closed = True
+
+        sqlite_err = None
+        try:
+            super().close()
+        except Exception as e:
+            sqlite_err = e
+
+        lock_err = None
+        if self._lock_token is not None:
+            try:
+                self._lock_token.release()
+            except Exception as e:
+                lock_err = e
+            self._lock_token = None
+
+        if sqlite_err is not None and lock_err is not None:
+            err = DatabaseConnectionError(
+                f"Both SQLite connection close and restore lock release failed: "
+                f"sqlite_err={sqlite_err}; lock_err={lock_err}"
+            )
+            err.__cause__ = sqlite_err
+            err.lock_release_error = lock_err
+            raise err
+        elif sqlite_err is not None:
+            if isinstance(sqlite_err, DatabaseError):
+                raise sqlite_err
+            raise DatabaseConnectionError(f"Failed to close SQLite connection: {sqlite_err}") from sqlite_err
+        elif lock_err is not None:
+            if isinstance(lock_err, DatabaseError):
+                raise lock_err
+            raise DatabaseConnectionError(f"Failed to release restore lock token on connection close: {lock_err}") from lock_err
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +209,7 @@ class DatabaseManager:
         """
         Creates and configures a new SQLite connection according to the active profile.
         Verifies that all required PRAGMAs are effectively applied before returning.
+        Acquires and attaches a connection-lifetime shared restore lock token (R1).
         """
         # Ensure parent directory exists for file-backed databases
         if self.db_path != ":memory:" and not self.db_path.startswith("file:"):
@@ -154,42 +222,56 @@ class DatabaseManager:
                         f"Failed to create directory for database '{self.db_path}': {e}"
                     ) from e
 
-        # Python 3.12+ supports autocommit=True, allowing manual explicit transactions
-        # without sqlite3 automatically beginning transactions before PRAGMA statements.
+        token: Optional[DatabaseRestoreLockToken] = None
         try:
-            with DatabaseRestoreLock.shared_gate(self.db_path):
-                try:
-                    timeout_sec = max(1.0, self.profile.busy_timeout_ms / 1000.0)
-                    conn = sqlite3.connect(
-                        self.db_path,
-                        timeout=timeout_sec,
-                        autocommit=True,
-                    )
-                except sqlite3.OperationalError as e:
-                    err_msg = str(e).lower()
-                    if "locked" in err_msg or "busy" in err_msg or "unable to open database file" in err_msg:
-                        raise DatabaseBusyError(f"Database locked or busy '{self.db_path}': {e}") from e
-                    if "malformed" in err_msg or "corrupt" in err_msg or "not a database" in err_msg:
-                        raise DatabaseCorruptionError(f"Database corrupted '{self.db_path}': {e}") from e
-                    raise DatabaseConnectionError(f"Failed to connect to database '{self.db_path}': {e}") from e
-                except Exception as e:
-                    raise DatabaseConnectionError(f"Unexpected connection error for '{self.db_path}': {e}") from e
-
-                # Configure connection PRAGMAs and verify their effectiveness
-                try:
-                    self._apply_and_verify_pragmas(conn)
-                except Exception as e:
-                    try:
-                        conn.close()
-                    except Exception as ce:
-                        setattr(e, "connection_close_error", ce)
-                    raise
-
-                return conn
+            token = DatabaseRestoreLock.acquire_shared(self.db_path)
         except RestoreLockBusyError as e:
             raise DatabaseBusyError(
                 f"Database '{self.db_path}' is locked: currently undergoing offline backup restoration."
             ) from e
+
+        conn: Optional[sqlite3.Connection] = None
+        try:
+            timeout_sec = max(1.0, self.profile.busy_timeout_ms / 1000.0)
+            conn = sqlite3.connect(
+                self.db_path,
+                timeout=timeout_sec,
+                autocommit=True,
+                factory=ManagedConnection,
+            )
+            # Attach lock token to managed connection lifecycle (R1)
+            conn._lock_token = token
+        except sqlite3.OperationalError as e:
+            if token is not None:
+                try:
+                    token.release()
+                except Exception as ce:
+                    setattr(e, "lock_release_error", ce)
+            err_msg = str(e).lower()
+            if "locked" in err_msg or "busy" in err_msg or "unable to open database file" in err_msg:
+                raise DatabaseBusyError(f"Database locked or busy '{self.db_path}': {e}") from e
+            if "malformed" in err_msg or "corrupt" in err_msg or "not a database" in err_msg:
+                raise DatabaseCorruptionError(f"Database corrupted '{self.db_path}': {e}") from e
+            raise DatabaseConnectionError(f"Failed to connect to database '{self.db_path}': {e}") from e
+        except Exception as e:
+            if token is not None:
+                try:
+                    token.release()
+                except Exception as ce:
+                    setattr(e, "lock_release_error", ce)
+            raise DatabaseConnectionError(f"Unexpected connection error for '{self.db_path}': {e}") from e
+
+        # Configure connection PRAGMAs and verify their effectiveness
+        try:
+            self._apply_and_verify_pragmas(conn)
+        except Exception as e:
+            try:
+                conn.close()
+            except Exception as ce:
+                setattr(e, "connection_close_error", ce)
+            raise
+
+        return conn
 
     def _apply_and_verify_pragmas(self, conn: sqlite3.Connection) -> None:
         """Applies profile PRAGMAs and verifies their effective values."""
@@ -266,15 +348,28 @@ class DatabaseManager:
         """
         Context manager for acquiring a managed connection.
         Closes the connection safely upon context exit.
+        Reports connection close errors without silent suppression (R5).
         """
         conn = self.connect()
+        close_err = None
         try:
             yield conn
         finally:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as ce:
+                close_err = ce
+            if close_err is not None:
+                exc_type, exc_val, _ = sys.exc_info()
+                if exc_type is not None:
+                    try:
+                        setattr(exc_val, "connection_close_error", close_err)
+                    except Exception:
+                        pass
+                else:
+                    if isinstance(close_err, DatabaseError):
+                        raise close_err
+                    raise DatabaseConnectionError(f"Failed to close connection: {close_err}") from close_err
 
     @contextmanager
     def transaction(self, conn: Optional[sqlite3.Connection] = None) -> Generator[sqlite3.Connection, None, None]:
@@ -282,6 +377,7 @@ class DatabaseManager:
         Explicit ACID transaction context manager using BEGIN IMMEDIATE.
         Acquires write lock immediately to prevent deadlock in concurrent write flows.
         Commits on clean exit, rolls back on exception, and cleans up resources.
+        Reports rollback and close errors without silent suppression (R5).
 
         Nested transactions on the same connection are strictly rejected to prevent
         ambiguous commit boundaries.
@@ -302,23 +398,33 @@ class DatabaseManager:
             if owns_connection:
                 try:
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as ce:
+                    setattr(e, "connection_close_error", ce)
             if "locked" in err_msg or "busy" in err_msg:
                 raise DatabaseBusyError(f"Database locked attempting BEGIN IMMEDIATE: {e}") from e
             if "malformed" in err_msg or "corrupt" in err_msg:
                 raise DatabaseCorruptionError(f"Database corrupted attempting transaction: {e}") from e
             raise DatabaseTransactionError(f"Failed to begin immediate transaction: {e}") from e
 
+        rollback_err = None
         try:
             yield conn
             conn.execute("COMMIT;")
         except Exception as exc:
             try:
                 conn.execute("ROLLBACK;")
-            except Exception:
-                # Swallow rollback secondary exception, preserve primary cause
-                pass
+            except Exception as re:
+                rollback_err = re
+                setattr(exc, "rollback_error", rollback_err)
+
+            if rollback_err is not None:
+                tie = DatabaseTransactionError(
+                    f"Transaction failed and rollback also failed: rollback_err={rollback_err}; primary_err={exc}"
+                )
+                tie.__cause__ = exc
+                tie.rollback_error = rollback_err
+                raise tie from exc
+
             if isinstance(exc, DatabaseError):
                 raise
             if isinstance(exc, sqlite3.OperationalError):
@@ -331,10 +437,22 @@ class DatabaseManager:
             raise
         finally:
             if owns_connection:
+                close_err = None
                 try:
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as ce:
+                    close_err = ce
+                if close_err is not None:
+                    exc_type, exc_val, _ = sys.exc_info()
+                    if exc_type is not None:
+                        try:
+                            setattr(exc_val, "connection_close_error", close_err)
+                        except Exception:
+                            pass
+                    else:
+                        raise DatabaseConnectionError(
+                            f"Failed to close owned transaction connection: {close_err}"
+                        ) from close_err
 
     def checkpoint(self, mode: str = "PASSIVE") -> Tuple[int, int, int]:
         """

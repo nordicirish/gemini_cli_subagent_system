@@ -13,6 +13,7 @@ No production database files are created, and no live state files are migrated.
 
 from .manager import (
     DatabaseManager,
+    ManagedConnection,
     DatabaseProfile,
     PRIMARY_FINANCIAL_PROFILE,
     MARKET_DATA_CACHE_PROFILE,

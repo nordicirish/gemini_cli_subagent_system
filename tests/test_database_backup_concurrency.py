@@ -26,15 +26,19 @@ from unittest.mock import patch, MagicMock
 
 from python.database.manager import (
     DatabaseManager,
+    ManagedConnection,
     PRIMARY_FINANCIAL_PROFILE,
     DatabaseBusyError,
     DatabaseError,
+    DatabaseConnectionError,
+    DatabaseTransactionError,
 )
 from python.database.schema import SchemaMigrator
 from python.database.backup import (
     BackupManager,
     BackupResult,
     BackupError,
+    BackupDestinationExistsError,
     BackupQuiescenceError,
     BackupRecoveryError,
     BackupCleanupError,
@@ -58,6 +62,37 @@ class FaultyCloseConnection(sqlite3.Connection):
         if not self.allow_close:
             raise sqlite3.OperationalError("Injected connection close failure")
         super().close()
+
+
+class FaultyBaseConnection(sqlite3.Connection):
+    """Base connection class for testing close failures through ManagedConnection super() calls."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.allow_close = True
+
+    def close(self):
+        if not self.allow_close:
+            raise sqlite3.OperationalError("Injected connection close failure")
+        super().close()
+
+
+class FaultyManagedConnection(ManagedConnection, FaultyBaseConnection):
+    """Subclass of ManagedConnection for testing close failure propagation."""
+    pass
+
+
+class FaultyRollbackConnection(ManagedConnection):
+    """Subclass of ManagedConnection that injects rollback failure for testing."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fail_rollback = False
+
+    def execute(self, sql, *args, **kwargs):
+        if self.fail_rollback and "ROLLBACK" in str(sql).upper():
+            raise sqlite3.OperationalError("Rollback hardware fail")
+        return super().execute(sql, *args, **kwargs)
 
 
 class FaultyBackupConnection(sqlite3.Connection):
@@ -107,7 +142,13 @@ class TestStage15A21BackupLockingAndConcurrency(unittest.TestCase):
         with open(target_path, "w") as f:
             f.write("existing db content")
 
-        with patch("sys.platform", "linux"):
+        mock_fcntl = MagicMock()
+        mock_fcntl.LOCK_SH = 1
+        mock_fcntl.LOCK_NB = 4
+        mock_fcntl.LOCK_EX = 2
+        mock_fcntl.LOCK_UN = 8
+
+        with patch("sys.platform", "linux"), patch.dict("sys.modules", {"fcntl": mock_fcntl}):
             with self.assertRaises(BackupQuiescenceError) as ctx:
                 BackupManager.restore_backup(self.backup_path, target_path)
             self.assertIn("not supported on POSIX", str(ctx.exception))
@@ -534,6 +575,449 @@ sys.exit(0)
             row = cur.fetchone()
             self.assertEqual(str(row[0]), "100")
             self.assertEqual(str(row[1]), "150.00")
+
+
+# ===========================================================================
+# Stage 1.5-A.2.2: Restore Gate Lifetime, Target-State Race & No-Clobber Tests
+# ===========================================================================
+
+class TestStage15A22RestoreGateLifetimeAndNoClobber(unittest.TestCase):
+    """
+    Automated regression and concurrency tests for Stage 1.5-A.2.2.
+    Verifies:
+    - R1: Connection-lifetime shared lock contract on ManagedConnection.
+    - R2: Target-state inspection reordered behind exclusive lock acquisition; pre-placement recheck.
+    - R3: Atomic no-clobber placement for new targets; destination and tmp_restore preservation.
+    - R4: Persistent zero-byte restore lock file identity; zero-byte kernel locks; no unlinking.
+    - R5: Elimination of remaining silent exception suppression.
+    - R6: Cross-process, race condition, and error-chaining verifications.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.source_db_path = os.path.join(self.temp_dir.name, "source_stage15_a22.db")
+        self.backup_path = os.path.join(self.temp_dir.name, "backup_stage15_a22.db")
+
+        # Initialize and populate source database
+        mgr = DatabaseManager(self.source_db_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with mgr.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+            conn.execute(
+                "INSERT INTO portfolio_cash (account_id, currency, amount, last_updated_at_utc) "
+                "VALUES ('PRIMARY', 'EUR', '250000.00', '2026-11-09T18:00:00Z');"
+            )
+
+        # Create valid verified backup
+        res = BackupManager.create_backup(self.source_db_path, self.backup_path, overwrite=False)
+        self.assertEqual(res.integrity_status, "ok")
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    # ---------------------------------------------------------------------------
+    # R1: Connection-Lifetime Shared Lock Contract
+    # ---------------------------------------------------------------------------
+
+    def test_r1_managed_connection_retains_token_until_closed(self):
+        """R1.1: ManagedConnection retains shared restore lock across its entire active lifetime."""
+        target_path = os.path.join(self.temp_dir.name, "target_lifetime.db")
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+        conn = mgr.connect()
+        try:
+            self.assertIsInstance(conn, ManagedConnection)
+            self.assertIsNotNone(conn.lock_token)
+            self.assertTrue(conn.lock_token.is_held)
+
+            # While connection is open, restore attempt MUST be rejected with BackupQuiescenceError
+            with self.assertRaises(BackupQuiescenceError) as ctx:
+                BackupManager.restore_backup(self.backup_path, target_path)
+            self.assertIn("Restore coordination lock is currently held", str(ctx.exception))
+        finally:
+            conn.close()
+
+        # After connection is closed, token is released and restore succeeds
+        self.assertIsNone(conn.lock_token)
+        res = BackupManager.restore_backup(self.backup_path, target_path)
+        self.assertEqual(res.integrity_status, "ok")
+
+    def test_r1_managed_connection_close_idempotent(self):
+        """R1.2: Calling close() repeatedly on ManagedConnection is completely safe and idempotent."""
+        target_path = os.path.join(self.temp_dir.name, "target_idempotent_close.db")
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+        conn = mgr.connect()
+        self.assertTrue(conn.lock_token.is_held)
+
+        conn.close()
+        self.assertIsNone(conn.lock_token)
+
+        # Second and third close calls must not raise
+        conn.close()
+        conn.close()
+
+    def test_r1_connection_config_failure_releases_shared_token(self):
+        """R1.3: Failure during PRAGMA configuration releases the acquired shared lock token."""
+        target_path = os.path.join(self.temp_dir.name, "target_cfg_fail.db")
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+        with patch.object(mgr, "_apply_and_verify_pragmas", side_effect=RuntimeError("Pragma verification failed")):
+            with self.assertRaises(RuntimeError):
+                mgr.connect()
+
+        # Token must not have leaked; exclusive restore lock can be acquired
+        token = DatabaseRestoreLock.acquire_exclusive(target_path)
+        self.assertTrue(token.is_held)
+        token.release()
+
+    def test_r1_both_sqlite_close_and_token_release_fail_preserves_both_errors(self):
+        """R1.4: If both SQLite close and lock release fail, both errors are preserved in DatabaseConnectionError."""
+        target_path = os.path.join(self.temp_dir.name, "target_both_fail.db")
+        conn = sqlite3.connect(target_path, factory=FaultyManagedConnection)
+        conn.allow_close = False
+        mock_token = MagicMock()
+        mock_token.release.side_effect = RuntimeError("Lock release failed")
+        conn._lock_token = mock_token
+
+        try:
+            with self.assertRaises(DatabaseConnectionError) as ctx:
+                conn.close()
+            self.assertIn("Both SQLite connection close and restore lock release failed", str(ctx.exception))
+            self.assertIn("Injected connection close failure", str(ctx.exception))
+            self.assertIn("Lock release failed", str(ctx.exception))
+            self.assertTrue(hasattr(ctx.exception, "lock_release_error"))
+        finally:
+            conn._is_closed = False
+            conn.allow_close = True
+            conn._lock_token = None
+            conn.close()
+
+    def test_r1_unit_of_work_owned_vs_external_connection_token_lifecycle(self):
+        """R1.5: UnitOfWork-owned connection releases token on exit; external connection does not."""
+        target_path = os.path.join(self.temp_dir.name, "target_uow_tokens.db")
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+        # 1. Owned connection: token held during UoW, released on exit
+        with UnitOfWork(mgr) as uow:
+            with self.assertRaises(BackupQuiescenceError):
+                BackupManager.restore_backup(self.backup_path, target_path)
+
+        # After UoW exit, restore lock can be acquired
+        token = DatabaseRestoreLock.acquire_exclusive(target_path)
+        self.assertTrue(token.is_held)
+        token.release()
+
+        # 2. External connection: token not released when UoW exits
+        ext_conn = mgr.connect()
+        try:
+            with UnitOfWork(mgr, connection=ext_conn) as uow:
+                pass
+            # External connection is still open; restore must still be blocked
+            with self.assertRaises(BackupQuiescenceError):
+                BackupManager.restore_backup(self.backup_path, target_path)
+        finally:
+            ext_conn.close()
+
+        # Now restore succeeds
+        token = DatabaseRestoreLock.acquire_exclusive(target_path)
+        self.assertTrue(token.is_held)
+        token.release()
+
+    # ---------------------------------------------------------------------------
+    # R2: Target-State Inspection Behind Exclusive Lock & Pre-Placement Recheck
+    # ---------------------------------------------------------------------------
+
+    def test_r2_target_inspection_occurs_after_exclusive_lock_acquisition(self):
+        """R2.1: Target existence inspection is performed strictly after exclusive restore lock acquisition."""
+        target_path = os.path.join(self.temp_dir.name, "target_r2_order.db")
+        self.assertFalse(os.path.exists(target_path))
+
+        execution_order = []
+        real_acquire_exclusive = DatabaseRestoreLock.acquire_exclusive
+        real_exists = os.path.exists
+
+        def tracked_acquire_exclusive(path):
+            execution_order.append("acquire_exclusive")
+            return real_acquire_exclusive(path)
+
+        def tracked_exists(path):
+            if path == target_path:
+                execution_order.append("inspect_target")
+            return real_exists(path)
+
+        with patch.object(DatabaseRestoreLock, "acquire_exclusive", side_effect=tracked_acquire_exclusive), \
+             patch("os.path.exists", side_effect=tracked_exists):
+            res = BackupManager.restore_backup(self.backup_path, target_path)
+            self.assertEqual(res.integrity_status, "ok")
+
+        # Verify that acquire_exclusive occurred BEFORE the first target inspection
+        first_acquire = execution_order.index("acquire_exclusive")
+        target_inspections = [i for i, step in enumerate(execution_order) if step == "inspect_target"]
+        self.assertTrue(len(target_inspections) >= 1)
+        self.assertLess(first_acquire, target_inspections[0])
+
+    def test_r2_target_created_before_placement_detected_by_recheck(self):
+        """R2.2: Target appearing before placement raises BackupDestinationExistsError and preserves files."""
+        target_path = os.path.join(self.temp_dir.name, "target_r2_recheck.db")
+        self.assertFalse(os.path.exists(target_path))
+
+        tmp_restore_path = [None]
+
+        def progress_inject(status, remaining, total):
+            # When backup is in progress, create target_path to simulate a concurrent racer
+            if not os.path.exists(target_path):
+                with open(target_path, "w") as f:
+                    f.write("CONCURRENT RACER CONTENT")
+
+        with self.assertRaises(BackupDestinationExistsError) as ctx:
+            BackupManager.restore_backup(
+                self.backup_path,
+                target_path,
+                progress_callback=progress_inject,
+            )
+
+        self.assertIn("was created concurrently during restoration", str(ctx.exception))
+        # Verify existing racer file was not clobbered
+        with open(target_path, "r") as f:
+            content = f.read()
+        self.assertEqual(content, "CONCURRENT RACER CONTENT")
+
+        # Verify temporary database was preserved intact
+        self.assertTrue(hasattr(ctx.exception, "temporary_database_path"))
+        tmp_path = ctx.exception.temporary_database_path
+        self.assertTrue(os.path.exists(tmp_path))
+        # Verify the preserved temporary file is a valid SQLite DB
+        self.assertTrue(BackupManager.verify_backup(tmp_path))
+
+        # Cleanup preserved temporary file
+        os.unlink(tmp_path)
+
+    # ---------------------------------------------------------------------------
+    # R3: Atomic No-Clobber Placement for New Targets
+    # ---------------------------------------------------------------------------
+
+    def test_r3_atomic_no_clobber_placement_failure_preserves_both_files(self):
+        """R3.1: _atomic_no_clobber_place raises BackupDestinationExistsError and preserves files."""
+        tmp_db = os.path.join(self.temp_dir.name, "tmp_source.db")
+        dest_db = os.path.join(self.temp_dir.name, "dest_exists.db")
+
+        with open(tmp_db, "w") as f:
+            f.write("TEMPORARY DB CONTENT")
+        with open(dest_db, "w") as f:
+            f.write("DESTINATION DB CONTENT")
+
+        with self.assertRaises(BackupDestinationExistsError) as ctx:
+            BackupManager._atomic_no_clobber_place(tmp_db, dest_db)
+
+        self.assertIn("atomic no-clobber placement rejected overwrite", str(ctx.exception))
+        # Both files must remain unchanged and present
+        self.assertTrue(os.path.exists(tmp_db))
+        self.assertTrue(os.path.exists(dest_db))
+        with open(tmp_db, "r") as f:
+            self.assertEqual(f.read(), "TEMPORARY DB CONTENT")
+        with open(dest_db, "r") as f:
+            self.assertEqual(f.read(), "DESTINATION DB CONTENT")
+
+    # ---------------------------------------------------------------------------
+    # R4: Persistent Zero-Byte Restore-Lock Identity
+    # ---------------------------------------------------------------------------
+
+    def test_r4_persistent_zero_byte_restore_lock_never_unlinked(self):
+        """R4.1: Restore lock file remains a persistent zero-byte artifact and is never unlinked."""
+        target_path = os.path.join(self.temp_dir.name, "target_persistent_lock.db")
+        lock_path = DatabaseRestoreLock.get_lock_path(target_path)
+        self.assertFalse(os.path.exists(lock_path))
+
+        # 1. Acquire shared lock
+        token_sh = DatabaseRestoreLock.acquire_shared(target_path)
+        self.assertTrue(os.path.exists(lock_path))
+        self.assertEqual(os.path.getsize(lock_path), 0)
+
+        # Release shared lock: must NOT unlink lock file!
+        token_sh.release()
+        self.assertTrue(os.path.exists(lock_path))
+        self.assertEqual(os.path.getsize(lock_path), 0)
+
+        # 2. Acquire exclusive lock
+        token_ex = DatabaseRestoreLock.acquire_exclusive(target_path)
+        self.assertTrue(os.path.exists(lock_path))
+        # Must NOT write pid/timestamp metadata; must remain 0 bytes
+        self.assertEqual(os.path.getsize(lock_path), 0)
+
+        # Release exclusive lock: must NOT unlink lock file!
+        token_ex.release()
+        self.assertTrue(os.path.exists(lock_path))
+        self.assertEqual(os.path.getsize(lock_path), 0)
+
+    def test_r4_multiple_concurrent_managed_connections_coexist(self):
+        """R4.2: Multiple ManagedConnection instances share the lock file without interference."""
+        target_path = os.path.join(self.temp_dir.name, "target_multi_conn.db")
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+        c1 = mgr.connect()
+        c2 = mgr.connect()
+        c3 = mgr.connect()
+
+        try:
+            # All 3 hold shared locks concurrently
+            self.assertTrue(c1.lock_token.is_held)
+            self.assertTrue(c2.lock_token.is_held)
+            self.assertTrue(c3.lock_token.is_held)
+
+            # Exclusive restore lock must be rejected
+            with self.assertRaises(BackupQuiescenceError):
+                DatabaseRestoreLock.acquire_exclusive(target_path)
+
+            c1.close()
+            # Still rejected while c2 and c3 are open
+            with self.assertRaises(BackupQuiescenceError):
+                DatabaseRestoreLock.acquire_exclusive(target_path)
+
+            c2.close()
+            # Still rejected while c3 is open
+            with self.assertRaises(BackupQuiescenceError):
+                DatabaseRestoreLock.acquire_exclusive(target_path)
+        finally:
+            c3.close()
+
+        # All closed: exclusive lock succeeds
+        tok_ex = DatabaseRestoreLock.acquire_exclusive(target_path)
+        self.assertTrue(tok_ex.is_held)
+        tok_ex.release()
+
+    def test_r4_cross_process_managed_connection_blocks_restore(self):
+        """R4.3: Managed connection held in a child process blocks restoration in parent process."""
+        target_path = os.path.join(self.temp_dir.name, "target_child_proc.db")
+        ready_file = os.path.join(self.temp_dir.name, "child_ready.flag")
+        stop_file = os.path.join(self.temp_dir.name, "child_stop.flag")
+
+        child_code = f"""
+import sys, time, os
+sys.path.insert(0, os.path.abspath('python'))
+from database.manager import DatabaseManager, PRIMARY_FINANCIAL_PROFILE
+
+mgr = DatabaseManager(r'{target_path}', profile=PRIMARY_FINANCIAL_PROFILE)
+conn = mgr.connect()
+with open(r'{ready_file}', 'w') as f:
+    f.write('ready')
+
+while not os.path.exists(r'{stop_file}'):
+    time.sleep(0.05)
+
+conn.close()
+"""
+        proc = subprocess.Popen([sys.executable, "-c", child_code])
+        try:
+            # Wait for child process to acquire connection
+            timeout = time.time() + 10.0
+            while not os.path.exists(ready_file) and time.time() < timeout:
+                time.sleep(0.05)
+            self.assertTrue(os.path.exists(ready_file), "Child process failed to acquire connection in time")
+
+            # Restore must be rejected while child connection is open
+            with self.assertRaises(BackupQuiescenceError) as ctx:
+                BackupManager.restore_backup(self.backup_path, target_path)
+            self.assertIn("Restore coordination lock is currently held", str(ctx.exception))
+        finally:
+            with open(stop_file, "w") as f:
+                f.write("stop")
+            proc.wait(timeout=5.0)
+
+        # Once child process has closed its connection and terminated, restore succeeds
+        res = BackupManager.restore_backup(self.backup_path, target_path)
+        self.assertEqual(res.integrity_status, "ok")
+
+    # ---------------------------------------------------------------------------
+    # R5: Elimination of Remaining Silent Exception Suppression
+    # ---------------------------------------------------------------------------
+
+    def test_r5_unit_of_work_poisoned_rollback_failure_propagates_integrity_error(self):
+        """R5.1: Failed rollback on poisoned UnitOfWork exit raises TransactionIntegrityError."""
+        target_path = os.path.join(self.temp_dir.name, "target_uow_poison_rollback.db")
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+        # Case A: exc_type is None (e.g. inner block caught the error)
+        uow = UnitOfWork(mgr)
+        uow.__enter__()
+        uow._is_poisoned = True
+        uow._poison_reason = "Deliberate poisoning for test"
+        with patch.object(uow, "rollback", side_effect=RuntimeError("Rollback execution failed")):
+            with self.assertRaises(TransactionIntegrityError) as ctx:
+                uow.__exit__(None, None, None)
+
+        self.assertIn("completed with poisoned state", str(ctx.exception))
+        self.assertTrue(hasattr(ctx.exception, "rollback_error"))
+        self.assertIn("Rollback execution failed", str(ctx.exception.rollback_error))
+
+        # Case B: exc_type is not None (exception bubbling out)
+        uow2 = UnitOfWork(mgr)
+        uow2.__enter__()
+        uow2._is_poisoned = True
+        uow2._poison_reason = "Poisoned before error"
+        val_err = ValueError("Primary domain failure")
+        with patch.object(uow2, "rollback", side_effect=RuntimeError("Secondary rollback failure")):
+            with self.assertRaises(TransactionIntegrityError) as ctx2:
+                uow2.__exit__(ValueError, val_err, None)
+
+        self.assertIn("Rollback failed during poisoned transaction exit", str(ctx2.exception))
+        self.assertIn("Secondary rollback failure", str(ctx2.exception))
+        self.assertIs(ctx2.exception.__cause__, val_err)
+
+    def test_r5_database_manager_connection_close_failure_reported(self):
+        """R5.2: DatabaseManager.connection() reports connection close failure without suppression."""
+        target_path = os.path.join(self.temp_dir.name, "target_mgr_conn_close.db")
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+        created_conns = []
+
+        def faulty_connect():
+            c = sqlite3.connect(mgr.db_path, autocommit=True, factory=FaultyManagedConnection)
+            c.allow_close = False
+            created_conns.append(c)
+            return c
+
+        try:
+            with patch.object(mgr, "connect", side_effect=faulty_connect):
+                # 1. Clean context exit: close failure raises DatabaseConnectionError
+                with self.assertRaises(DatabaseConnectionError) as ctx:
+                    with mgr.connection() as conn:
+                        pass
+                self.assertIn("Injected connection close failure", str(ctx.exception))
+
+                # 2. Context exit with active exception: close failure attached as connection_close_error
+                with self.assertRaises(ValueError) as ctx:
+                    with mgr.connection() as conn:
+                        raise ValueError("Domain query failure")
+                self.assertEqual(str(ctx.exception), "Domain query failure")
+                self.assertTrue(hasattr(ctx.exception, "connection_close_error"))
+                self.assertIn("Injected connection close failure", str(ctx.exception.connection_close_error))
+        finally:
+            # Cleanup created connections
+            for c in created_conns:
+                c._is_closed = False
+                c.allow_close = True
+                c.close()
+
+    def test_r5_database_manager_transaction_rollback_failure_reported(self):
+        """R5.3: DatabaseManager.transaction() rollback failure raises DatabaseTransactionError."""
+        target_path = os.path.join(self.temp_dir.name, "target_mgr_tx_rollback.db")
+        mgr = DatabaseManager(target_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+        # Open connection with FaultyRollbackConnection factory
+        conn = sqlite3.connect(target_path, autocommit=True, factory=FaultyRollbackConnection)
+        conn.fail_rollback = True
+        try:
+            with self.assertRaises(DatabaseTransactionError) as ctx:
+                with mgr.transaction(conn=conn):
+                    raise ValueError("Transaction domain logic error")
+
+            self.assertIn("Transaction failed and rollback also failed", str(ctx.exception))
+            self.assertIn("Rollback hardware fail", str(ctx.exception))
+            self.assertIsInstance(ctx.exception.__cause__, ValueError)
+            self.assertTrue(hasattr(ctx.exception, "rollback_error"))
+        finally:
+            conn.fail_rollback = False
+            conn.close()
 
 
 if __name__ == "__main__":
