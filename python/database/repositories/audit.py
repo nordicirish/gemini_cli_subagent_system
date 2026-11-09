@@ -27,6 +27,7 @@ from python.database.repositories.base import (
     RepositoryError,
     validate_event_id,
     validate_identifier,
+    validate_timestamp_utc,
     utc_now_iso,
     repository_transaction,
 )
@@ -66,8 +67,15 @@ class AuditEventRepository(BaseRepository):
         """
         Appends a new audit event, or deterministically returns existing record if replayed identically.
         Raises IntegrityConflictError if event_id already exists with different payload hash or json.
+
+        timestamp_utc is validated by the centralized validate_timestamp_utc() contract
+        (only explicit 'Z' or '+00:00'; no whitespace, '-00:00' or other offsets) BEFORE any
+        transaction, lock, read or write occurs. A valid timestamp is persisted and returned
+        byte-for-byte unchanged. Raises ValidationError on an invalid timestamp.
         """
         self._check_active()
+        # Validate before transaction entry, database reads or writes (no state change on failure).
+        valid_timestamp = validate_timestamp_utc(timestamp_utc)
         norm_id = validate_event_id(event_id)
         norm_category = validate_identifier(action_category, "action_category")
         norm_status = validate_identifier(status, "status")
@@ -129,7 +137,7 @@ class AuditEventRepository(BaseRepository):
                     """,
                     (
                         norm_id,
-                        timestamp_utc,
+                        valid_timestamp,
                         norm_category,
                         norm_status,
                         norm_role,
@@ -145,7 +153,7 @@ class AuditEventRepository(BaseRepository):
 
         return AuditEventRecord(
             event_id=norm_id,
-            timestamp_utc=timestamp_utc,
+            timestamp_utc=valid_timestamp,
             action_category=norm_category,
             status=norm_status,
             agent_role=norm_role,

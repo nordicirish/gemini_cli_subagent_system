@@ -3890,6 +3890,219 @@ class TestStage15ARepositoryTransactionAuthorizationRevisionHardening(BaseReposi
             conn2.close()
 
     # -----------------------------------------------------------------------
+    # R4.1 (Stage 1.5-A.3.2): Audit event timestamp integrity
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _r41_append(repo, event_id, timestamp_utc, raw_event=None, **overrides):
+        """Test-local helper: append an audit event, varying only what the caller overrides."""
+        kwargs = dict(
+            event_id=event_id,
+            timestamp_utc=timestamp_utc,
+            action_category="TEST",
+            status="SUCCESS",
+            agent_role="Terminal Orchestrator",
+            permission_decision="ALLOW",
+            approval_status="NONE",
+            raw_event={"action": "r41"} if raw_event is None else raw_event,
+        )
+        kwargs.update(overrides)
+        return repo.append_event(**kwargs)
+
+    def test_r4_1_audit_event_accepts_valid_utc_timestamps_and_preserves_bytes(self):
+        """R4.1: Valid 'Z' / '+00:00' / fractional timestamps are stored and returned byte-for-byte,
+        including when re-read through a fresh connection and by raw SQL."""
+        valid_values = [
+            "2026-11-09T12:30:00Z",
+            "2026-11-09T12:30:00+00:00",
+            "2026-11-09T12:30:00.123456Z",
+            "2026-11-09T12:30:00.123456+00:00",
+        ]
+        ids = {}
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            for value in valid_values:
+                with self.subTest(value=value):
+                    event_id = uuid.uuid4().hex
+                    ids[value] = event_id
+                    rec = self._r41_append(repo, event_id, value)
+                    self.assertEqual(rec.timestamp_utc, value)
+                    self.assertEqual(rec.timestamp_utc.encode("utf-8"), value.encode("utf-8"))
+
+        # Fresh connection: repository read path and raw column bytes
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            for value, event_id in ids.items():
+                with self.subTest(reread=value):
+                    self.assertEqual(repo.get_event(event_id).timestamp_utc, value)
+                    row = conn.cursor().execute(
+                        "SELECT timestamp_utc, typeof(timestamp_utc) FROM audit_events WHERE event_id = ?",
+                        (event_id,),
+                    ).fetchone()
+                    self.assertEqual(row[0], value)
+                    self.assertEqual(row[1], "text")
+
+    def test_r4_1_audit_event_rejects_invalid_timestamps_without_mutation(self):
+        """R4.1: Every invalid timestamp raises ValidationError, leaves no row, changes no count,
+        leaves no open transaction, and the same repository/connection stays usable."""
+        invalid_values = [
+            ("2026-11-09T12:30:00-00:00", "negative-zero offset"),
+            ("2026-11-09T12:30:00+01:00", "+01:00 offset"),
+            ("2026-11-09T12:30:00-05:00", "-05:00 offset"),
+            ("2026-11-09T12:30:00+0000", "colon-less +0000"),
+            ("2026-11-09T12:30:00", "naive"),
+            (" 2026-11-09T12:30:00Z", "leading whitespace"),
+            ("2026-11-09T12:30:00Z ", "trailing whitespace"),
+            ("2026-11-09T12:30:00Z\n", "trailing newline"),
+            ("2026-02-30T12:30:00Z", "invalid calendar date"),
+            ("", "empty string"),
+            (1699533000, "integer"),
+            (True, "boolean"),
+            (b"2026-11-09T12:30:00Z", "bytes"),
+            (["2026-11-09T12:30:00Z"], "list"),
+            ({"ts": "2026-11-09T12:30:00Z"}, "dict"),
+        ]
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            for bad, desc in invalid_values:
+                with self.subTest(case=desc):
+                    event_id = uuid.uuid4().hex
+                    count_before = repo.count_events()
+
+                    with self.assertRaises(ValidationError):
+                        self._r41_append(repo, event_id, bad)
+
+                    self.assertEqual(repo.count_events(), count_before)
+                    self.assertIsNone(repo.get_event(event_id))
+                    self.assertFalse(conn.in_transaction)
+
+                    # Transaction state is still usable: the SAME event_id can now be inserted validly
+                    rec = self._r41_append(repo, event_id, "2026-11-09T12:30:00Z")
+                    self.assertEqual(rec.timestamp_utc, "2026-11-09T12:30:00Z")
+                    self.assertEqual(repo.count_events(), count_before + 1)
+
+    def test_r4_1_invalid_timestamp_is_rejected_before_transaction_entry(self):
+        """R4.1: Validation precedes repository_transaction(): it is never entered for invalid input."""
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            with patch(
+                "python.database.repositories.audit.repository_transaction",
+                side_effect=AssertionError("repository_transaction entered for invalid timestamp"),
+            ) as spy:
+                for bad in ("2026-11-09T12:30:00-00:00", " 2026-11-09T12:30:00Z", "2026-11-09T12:30:00"):
+                    with self.subTest(value=repr(bad)):
+                        with self.assertRaises(ValidationError):
+                            self._r41_append(repo, uuid.uuid4().hex, bad)
+                spy.assert_not_called()
+            self.assertFalse(conn.in_transaction)
+            self.assertEqual(repo.count_events(), 0)
+
+    def test_r4_1_invalid_timestamp_inside_uow_does_not_alter_outer_transaction(self):
+        """R4.1: An invalid timestamp inside a caller-owned UnitOfWork neither poisons it, opens a
+        savepoint, nor commits/rolls back; surrounding valid writes still commit atomically."""
+        id1, id2 = uuid.uuid4().hex, uuid.uuid4().hex
+        bad_id = uuid.uuid4().hex
+        with UnitOfWork(self.core_manager) as uow:
+            self._r41_append(uow.audit_events, id1, "2026-11-09T12:00:00Z")
+            self.assertTrue(uow._conn.in_transaction)
+
+            with patch(
+                "python.database.repositories.audit.repository_transaction",
+                side_effect=AssertionError("repository_transaction entered for invalid timestamp"),
+            ) as spy:
+                with self.assertRaises(ValidationError):
+                    self._r41_append(uow.audit_events, bad_id, "2026-11-09T12:30:00+01:00")
+                spy.assert_not_called()
+
+            # Outer unit of work is untouched and still usable
+            self.assertTrue(uow.is_active)
+            self.assertFalse(uow.is_poisoned)
+            self.assertFalse(uow.is_conn_unsafe)
+            self.assertTrue(uow._conn.in_transaction)
+            self.assertEqual(uow.audit_events.count_events(), 1)
+
+            self._r41_append(uow.audit_events, id2, "2026-11-09T12:31:00.5+00:00")
+
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            self.assertEqual(repo.count_events(), 2)
+            self.assertEqual(repo.get_event(id1).timestamp_utc, "2026-11-09T12:00:00Z")
+            self.assertEqual(repo.get_event(id2).timestamp_utc, "2026-11-09T12:31:00.5+00:00")
+            self.assertIsNone(repo.get_event(bad_id))
+
+    def test_r4_1_identical_replay_remains_idempotent_and_returns_original_timestamp(self):
+        """R4.1: Identical replay is still idempotent and returns the originally stored timestamp."""
+        event_id = uuid.uuid4().hex
+        ts = "2026-11-09T12:30:00.250000Z"
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            first = self._r41_append(repo, event_id, ts)
+            replay = self._r41_append(repo, event_id, ts)
+            self.assertEqual(first, replay)
+            self.assertEqual(replay.timestamp_utc, ts)
+            self.assertEqual(repo.count_events(), 1)
+
+    def test_r4_1_replay_with_different_valid_timestamp_does_not_overwrite_original(self):
+        """R4.1: Characterizes EXISTING semantics (unchanged): replay identity is payload hash + raw
+        event, not timestamp. A differing valid timestamp returns the original record and never
+        overwrites the stored value."""
+        event_id = uuid.uuid4().hex
+        original_ts = "2026-11-09T12:30:00Z"
+        other_ts = "2026-11-09T13:45:00+00:00"
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            self._r41_append(repo, event_id, original_ts)
+            replay = self._r41_append(repo, event_id, other_ts)
+            self.assertEqual(replay.timestamp_utc, original_ts)
+            self.assertEqual(repo.count_events(), 1)
+
+        with self.core_manager.connection() as conn:
+            self.assertEqual(AuditEventRepository(conn).get_event(event_id).timestamp_utc, original_ts)
+
+    def test_r4_1_invalid_timestamp_on_replay_raises_validation_error_not_silent_success(self):
+        """R4.1: Behaviour change (documented): a replay carrying an INVALID timestamp is now rejected
+        by validation instead of idempotently returning the existing record. The stored event is
+        unchanged."""
+        event_id = uuid.uuid4().hex
+        ts = "2026-11-09T12:30:00Z"
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            self._r41_append(repo, event_id, ts)
+            with self.assertRaises(ValidationError):
+                self._r41_append(repo, event_id, "2026-11-09T12:30:00Z\n")
+            self.assertEqual(repo.count_events(), 1)
+            self.assertEqual(repo.get_event(event_id).timestamp_utc, ts)
+
+    def test_r4_1_conflicting_payload_still_raises_integrity_conflict_with_valid_timestamps(self):
+        """R4.1: A conflicting payload still raises IntegrityConflictError (not ValidationError),
+        regardless of timestamp, and the original event is preserved."""
+        event_id = uuid.uuid4().hex
+        ts = "2026-11-09T12:30:00Z"
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            self._r41_append(repo, event_id, ts, raw_event={"action": "original"})
+            for replay_ts in (ts, "2026-11-09T18:00:00+00:00"):
+                with self.subTest(replay_ts=replay_ts):
+                    with self.assertRaises(IntegrityConflictError):
+                        self._r41_append(repo, event_id, replay_ts, raw_event={"action": "tampered"})
+            self.assertEqual(repo.count_events(), 1)
+            stored = repo.get_event(event_id)
+            self.assertEqual(stored.raw_event, {"action": "original"})
+            self.assertEqual(stored.timestamp_utc, ts)
+
+    def test_r4_1_none_timestamp_follows_centralized_contract_and_generates_utc_now(self):
+        """R4.1: Characterizes the centralized validate_timestamp_utc() contract as now applied here:
+        None generates a current 'Z' UTC timestamp that itself satisfies the strict validator.
+        (Previously None violated the NOT NULL constraint.)"""
+        event_id = uuid.uuid4().hex
+        with self.core_manager.connection() as conn:
+            repo = AuditEventRepository(conn)
+            rec = self._r41_append(repo, event_id, None)
+            self.assertTrue(rec.timestamp_utc.endswith("Z"))
+            self.assertEqual(validate_timestamp_utc(rec.timestamp_utc), rec.timestamp_utc)
+            self.assertEqual(repo.get_event(event_id).timestamp_utc, rec.timestamp_utc)
+
+    # -----------------------------------------------------------------------
     # R5: Monotonic db_revision Tracking
     # -----------------------------------------------------------------------
 
