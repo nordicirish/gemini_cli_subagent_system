@@ -49,6 +49,10 @@ __all__ = [
     "load_strict_json_file",
     "validate_migration_destination",
     "extract_rule_code_and_directive",
+    "consolidate_scout_representations",
+    "consolidate_watchlist_representations",
+    "consolidate_position_representations",
+    "consolidate_cash_representations",
     "_validate_json_dict_keys",
     "_reject_json_constant",
 ]
@@ -629,3 +633,708 @@ def extract_rule_code_and_directive(rule_text: str) -> Tuple[Optional[str], str]
         return match.group(1).upper(), match.group(2).strip()
     return None, rule_text.strip()
 
+
+def consolidate_scout_representations(
+    data: Dict[str, Any],
+    default_timestamp: Optional[str] = None,
+    allow_date_only: bool = False,
+    allow_naive_utc: bool = False,
+    discrepancies: Optional[List[Dict[str, Any]]] = None,
+    source_name: str = "source",
+    require_timestamp: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Consolidates scout category representations (SCOUT_TICKER_MAP, scout_categories, scout_category_records)
+    deterministically (Stage 1.5-D.1.1.2 R3).
+    Fails closed with MigrationConflictError on conflicting category tickers, descriptions, or timestamps.
+    Consolidates identical or compatible representations without double counting, invariant to key ordering.
+    """
+    records_by_cat: Dict[str, Dict[str, Any]] = {}
+    sources_by_cat: Dict[str, List[str]] = {}
+
+    rep_items: List[Tuple[str, str, Dict[str, Any]]] = []
+
+    # 1. SCOUT_TICKER_MAP and scout_candidates
+    for map_key in ("SCOUT_TICKER_MAP", "scout_candidates"):
+        if map_key in data and isinstance(data[map_key], dict):
+            for raw_k, raw_v in data[map_key].items():
+                cat = str(raw_k).strip()
+                if not cat:
+                    continue
+                parsed_tickers = sorted(list({parse_ticker(t, f"{map_key}[{cat}].ticker") for t in (raw_v or []) if t}))
+                if default_timestamp:
+                    ts_val, _ = resolve_historical_timestamp(
+                        None,
+                        f"{map_key}[{cat}]",
+                        default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
+                    )
+                elif require_timestamp:
+                    raise MigrationValidationError(
+                        f"{map_key}[{cat}].updated_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                    )
+                else:
+                    ts_val = None
+                rep_items.append((map_key, cat, {
+                    "category_name": cat,
+                    "description": None,
+                    "tickers": parsed_tickers,
+                    "updated_at_utc": ts_val,
+                    "timestamp_utc": ts_val,
+                }))
+
+    # 2. scout_categories and scout_category_records
+    for rep_key in ("scout_categories", "scout_category_records"):
+        raw_list = data.get(rep_key)
+        if isinstance(raw_list, list):
+            for idx, entry in enumerate(raw_list):
+                if isinstance(entry, dict):
+                    raw_name = entry.get("category_name")
+                    if not raw_name:
+                        continue
+                    cat = str(raw_name).strip()
+                    parsed_tickers = sorted(list({parse_ticker(t, f"{rep_key}[{idx}].ticker") for t in (entry.get("tickers") or []) if t}))
+                    desc = str(entry["description"]).strip() if entry.get("description") is not None else None
+                    raw_ts = entry.get("updated_at_utc") or entry.get("timestamp_utc")
+                    if raw_ts is not None:
+                        ts_val, _ = resolve_historical_timestamp(
+                            raw_ts,
+                            f"{rep_key}[{idx}].updated_at_utc",
+                            default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
+                        )
+                    elif default_timestamp:
+                        ts_val, _ = resolve_historical_timestamp(
+                            None,
+                            f"{rep_key}[{idx}].updated_at_utc",
+                            default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
+                        )
+                    elif require_timestamp:
+                        raise MigrationValidationError(
+                            f"{rep_key}[{idx}].updated_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                        )
+                    else:
+                        ts_val = None
+                    rep_items.append((rep_key, cat, {
+                        "category_name": cat,
+                        "description": desc,
+                        "tickers": parsed_tickers,
+                        "updated_at_utc": ts_val,
+                        "timestamp_utc": ts_val,
+                    }))
+                elif isinstance(entry, str) and entry.strip():
+                    cat = entry.strip()
+                    if default_timestamp:
+                        ts_val, _ = resolve_historical_timestamp(
+                            None,
+                            f"{rep_key}[{idx}]",
+                            default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
+                        )
+                    elif require_timestamp:
+                        raise MigrationValidationError(
+                            f"{rep_key}[{idx}].updated_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                        )
+                    else:
+                        ts_val = None
+                    rep_items.append((rep_key, cat, {
+                        "category_name": cat,
+                        "description": None,
+                        "tickers": [],
+                        "updated_at_utc": ts_val,
+                        "timestamp_utc": ts_val,
+                    }))
+
+    for rep_name, cat, item in rep_items:
+        if cat not in records_by_cat:
+            records_by_cat[cat] = item
+            sources_by_cat[cat] = [rep_name]
+        else:
+            prev = records_by_cat[cat]
+            prev_source = sources_by_cat[cat][0]
+
+            if records_equal(prev, item, SCOUT_CATEGORY_EQUALITY_FIELDS):
+                if discrepancies is not None:
+                    discrepancies.append({
+                        "domain": "scout_categories",
+                        "category_name": cat,
+                        "type": "EXACT_DUPLICATE_DEDUPLICATED",
+                        "message": f"Exact duplicate scout category record for '{cat}' deduplicated.",
+                    })
+                continue
+
+            # Compare tickers
+            prev_tickers = prev.get("tickers") or []
+            item_tickers = item.get("tickers") or []
+            if prev_tickers and item_tickers and prev_tickers != item_tickers:
+                raise MigrationConflictError(
+                    f"Conflicting duplicate scout category record for {cat} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' tickers {prev_tickers} != '{rep_name}' {item_tickers})"
+                )
+
+            # Compare description
+            prev_desc = prev.get("description")
+            item_desc = item.get("description")
+            if prev_desc is not None and item_desc is not None and prev_desc != item_desc:
+                raise MigrationConflictError(
+                    f"Conflicting duplicate scout category record for {cat} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' description '{prev_desc}' != '{rep_name}' '{item_desc}')"
+                )
+
+            # Compare timestamp
+            prev_ts = prev.get("timestamp_utc")
+            item_ts = item.get("timestamp_utc")
+            if prev_ts is not None and item_ts is not None and prev_ts != item_ts:
+                raise MigrationConflictError(
+                    f"Conflicting duplicate scout category record for {cat} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
+                )
+
+            # Any other equality field conflict
+            if not records_equal(prev, item, SCOUT_CATEGORY_EQUALITY_FIELDS):
+                raise MigrationConflictError(
+                    f"Conflicting duplicate scout category record for {cat} in {source_name}: "
+                    f"existing {prev} != incoming {item}"
+                )
+
+            prev["tickers"] = prev_tickers if prev_tickers else item_tickers
+            prev["description"] = prev_desc if prev_desc is not None else item_desc
+            prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts
+            prev["updated_at_utc"] = prev["timestamp_utc"]
+            sources_by_cat[cat].append(rep_name)
+
+    return sorted(records_by_cat.values(), key=lambda x: x["category_name"])
+
+
+def consolidate_watchlist_representations(
+    data: Dict[str, Any],
+    default_timestamp: Optional[str] = None,
+    allow_date_only: bool = False,
+    allow_naive_utc: bool = False,
+    discrepancies: Optional[List[Dict[str, Any]]] = None,
+    source_name: str = "source",
+    require_timestamp: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Consolidates watchlist representations (watchlist, watched_tickers, WATCHLIST, mutable_state)
+    deterministically (Stage 1.5-D.1.1.2 R3).
+    Fails closed with MigrationConflictError on conflicting status, notes, or timestamps.
+    Consolidates identical or compatible representations without double counting, invariant to key ordering.
+    """
+    records_by_tk: Dict[str, Dict[str, Any]] = {}
+    sources_by_tk: Dict[str, List[str]] = {}
+
+    rep_items: List[Tuple[str, str, Dict[str, Any]]] = []
+
+    # 1. watchlist structured list
+    if "watchlist" in data and isinstance(data["watchlist"], list):
+        for idx, entry in enumerate(data["watchlist"]):
+            if isinstance(entry, dict):
+                tk = parse_ticker(entry.get("ticker"), f"watchlist[{idx}].ticker")
+                status = str(entry.get("status") or "ACTIVE").strip().upper()
+                notes = str(entry["notes"]).strip() if entry.get("notes") is not None else None
+                raw_ts = entry.get("added_at_utc") or entry.get("timestamp_utc")
+                if raw_ts is not None:
+                    ts_val, _ = resolve_historical_timestamp(
+                        raw_ts,
+                        f"watchlist[{idx}].added_at_utc",
+                        default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
+                    )
+                elif default_timestamp:
+                    ts_val, _ = resolve_historical_timestamp(
+                        None,
+                        f"watchlist[{idx}].added_at_utc",
+                        default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
+                    )
+                elif require_timestamp:
+                    raise MigrationValidationError(
+                        f"watchlist[{idx}].added_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                    )
+                else:
+                    ts_val = None
+                rep_items.append(("watchlist", tk, {
+                    "ticker": tk,
+                    "status": status,
+                    "notes": notes,
+                    "added_at_utc": ts_val,
+                    "timestamp_utc": ts_val,
+                }))
+            else:
+                raise MigrationValidationError(f"watchlist[{idx}] must be a dict")
+
+    # 2. watched_tickers (top-level and in mutable_state) and WATCHLIST
+    candidate_keys = ["watched_tickers", "WATCHLIST"]
+    for rep_key in candidate_keys:
+        raw_list = data.get(rep_key)
+        if raw_list is None and rep_key == "watched_tickers" and isinstance(data.get("mutable_state"), dict):
+            raw_list = data["mutable_state"].get(rep_key)
+        if isinstance(raw_list, list):
+            for idx, entry in enumerate(raw_list):
+                if isinstance(entry, str) and entry.strip():
+                    tk = parse_ticker(entry, f"{rep_key}[{idx}]")
+                    if default_timestamp:
+                        ts_val, _ = resolve_historical_timestamp(
+                            None,
+                            f"{rep_key}[{idx}]",
+                            default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
+                        )
+                    elif require_timestamp:
+                        raise MigrationValidationError(
+                            f"{rep_key}[{idx}].added_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                        )
+                    else:
+                        ts_val = None
+                    rep_items.append((rep_key, tk, {
+                        "ticker": tk,
+                        "status": "ACTIVE",
+                        "notes": None,
+                        "added_at_utc": ts_val,
+                        "timestamp_utc": ts_val,
+                    }))
+                elif isinstance(entry, dict):
+                    tk = parse_ticker(entry.get("ticker"), f"{rep_key}[{idx}].ticker")
+                    status = str(entry.get("status") or "ACTIVE").strip().upper()
+                    notes = str(entry["notes"]).strip() if entry.get("notes") is not None else None
+                    raw_ts = entry.get("added_at_utc") or entry.get("timestamp_utc")
+                    if raw_ts is not None:
+                        ts_val, _ = resolve_historical_timestamp(
+                            raw_ts,
+                            f"{rep_key}[{idx}].added_at_utc",
+                            default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
+                        )
+                    elif default_timestamp:
+                        ts_val, _ = resolve_historical_timestamp(
+                            None,
+                            f"{rep_key}[{idx}].added_at_utc",
+                            default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
+                        )
+                    elif require_timestamp:
+                        raise MigrationValidationError(
+                            f"{rep_key}[{idx}].added_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                        )
+                    else:
+                        ts_val = None
+                    rep_items.append((rep_key, tk, {
+                        "ticker": tk,
+                        "status": status,
+                        "notes": notes,
+                        "added_at_utc": ts_val,
+                        "timestamp_utc": ts_val,
+                    }))
+        elif isinstance(raw_list, dict):
+            for tk_raw, details in raw_list.items():
+                tk = parse_ticker(tk_raw, f"{rep_key}[{tk_raw}]")
+                if isinstance(details, dict):
+                    status = str(details.get("status") or "ACTIVE").strip().upper()
+                    notes = str(details["notes"]).strip() if details.get("notes") is not None else None
+                    raw_ts = details.get("added_at_utc") or details.get("timestamp_utc")
+                    if raw_ts is not None:
+                        ts_val, _ = resolve_historical_timestamp(
+                            raw_ts,
+                            f"{rep_key}[{tk_raw}].added_at_utc",
+                            default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
+                        )
+                    elif default_timestamp:
+                        ts_val, _ = resolve_historical_timestamp(
+                            None,
+                            f"{rep_key}[{tk_raw}].added_at_utc",
+                            default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
+                        )
+                    elif require_timestamp:
+                        raise MigrationValidationError(
+                            f"{rep_key}[{tk_raw}].added_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                        )
+                    else:
+                        ts_val = None
+                else:
+                    status = "ACTIVE"
+                    notes = None
+                    if default_timestamp:
+                        ts_val, _ = resolve_historical_timestamp(
+                            None,
+                            f"{rep_key}[{tk_raw}]",
+                            default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
+                        )
+                    elif require_timestamp:
+                        raise MigrationValidationError(
+                            f"{rep_key}[{tk_raw}].added_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                        )
+                    else:
+                        ts_val = None
+                rep_items.append((rep_key, tk, {
+                    "ticker": tk,
+                    "status": status,
+                    "notes": notes,
+                    "added_at_utc": ts_val,
+                    "timestamp_utc": ts_val,
+                }))
+
+    for rep_name, tk, item in rep_items:
+        if tk not in records_by_tk:
+            records_by_tk[tk] = item
+            sources_by_tk[tk] = [rep_name]
+        else:
+            prev = records_by_tk[tk]
+            prev_source = sources_by_tk[tk][0]
+
+            if records_equal(prev, item, WATCHLIST_EQUALITY_FIELDS):
+                if discrepancies is not None:
+                    discrepancies.append({
+                        "domain": "watchlist",
+                        "ticker": tk,
+                        "type": "EXACT_DUPLICATE_DEDUPLICATED",
+                        "message": f"Exact duplicate watchlist record for {tk} deduplicated.",
+                    })
+                continue
+
+            # Compare status
+            prev_status = prev.get("status")
+            item_status = item.get("status")
+            if prev_status is not None and item_status is not None and prev_status != item_status:
+                raise MigrationConflictError(
+                    f"Conflicting duplicate watchlist record for {tk} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' status '{prev_status}' != '{rep_name}' '{item_status}')"
+                )
+
+            # Compare notes
+            prev_notes = prev.get("notes")
+            item_notes = item.get("notes")
+            if prev_notes is not None and item_notes is not None and prev_notes != item_notes:
+                raise MigrationConflictError(
+                    f"Conflicting duplicate watchlist record for {tk} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' notes '{prev_notes}' != '{rep_name}' '{item_notes}')"
+                )
+
+            # Compare timestamp
+            prev_ts = prev.get("timestamp_utc")
+            item_ts = item.get("timestamp_utc")
+            if prev_ts is not None and item_ts is not None and prev_ts != item_ts:
+                raise MigrationConflictError(
+                    f"Conflicting duplicate watchlist record for {tk} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
+                )
+
+            if not records_equal(prev, item, WATCHLIST_EQUALITY_FIELDS):
+                raise MigrationConflictError(
+                    f"Conflicting duplicate watchlist record for {tk} in {source_name}: "
+                    f"existing {prev} != incoming {item}"
+                )
+
+            prev["status"] = prev_status if prev_status is not None else item_status
+            prev["notes"] = prev_notes if prev_notes is not None else item_notes
+            prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts
+            prev["added_at_utc"] = prev["timestamp_utc"]
+            sources_by_tk[tk].append(rep_name)
+
+    return sorted(records_by_tk.values(), key=lambda x: x["ticker"])
+
+
+def consolidate_position_representations(
+    data: Dict[str, Any],
+    default_account_id: str = "PRIMARY",
+    default_timestamp: Optional[str] = None,
+    allow_date_only: bool = False,
+    allow_naive_utc: bool = False,
+    discrepancies: Optional[List[Dict[str, Any]]] = None,
+    source_name: str = "source",
+    require_timestamp: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Consolidates position representations (portfolio_snapshot, portfolio_positions, positions, mutable_state)
+    deterministically (Stage 1.5-D.1.1.2 R3).
+    Fails closed with MigrationConflictError on conflicting shares, WAC EUR, WAC USD, or timestamps.
+    Consolidates identical or compatible representations without double counting, invariant to key ordering.
+    """
+    records_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    sources_by_key: Dict[Tuple[str, str], List[str]] = {}
+
+    rep_items: List[Tuple[str, Tuple[str, str], Dict[str, Any]]] = []
+
+    for rep_key in ("portfolio_snapshot", "portfolio_positions", "positions"):
+        raw_list = data.get(rep_key)
+        if raw_list is None and isinstance(data.get("mutable_state"), dict):
+            raw_list = data["mutable_state"].get(rep_key)
+
+        if isinstance(raw_list, list):
+            for idx, entry in enumerate(raw_list):
+                if not isinstance(entry, dict):
+                    raise MigrationValidationError(f"{rep_key}[{idx}] must be a dict")
+                acc = str(entry.get("account_id") or default_account_id).strip().upper()
+                tk = parse_ticker(entry.get("ticker"), f"{rep_key}[{idx}].ticker")
+                shares = parse_financial_decimal(entry.get("shares"), f"{rep_key}[{idx}].shares", max_scale=4)
+                wac_eur_raw = entry.get("wac_eur") if entry.get("wac_eur") is not None else entry.get("wac")
+                if wac_eur_raw is None:
+                    raise MigrationValidationError(f"{rep_key}[{idx}] missing required wac/wac_eur")
+                wac_eur = parse_financial_decimal(wac_eur_raw, f"{rep_key}[{idx}].wac_eur", max_scale=4)
+                wac_usd_raw = entry.get("wac_usd")
+                wac_usd = (
+                    parse_financial_decimal(wac_usd_raw, f"{rep_key}[{idx}].wac_usd", max_scale=4)
+                    if wac_usd_raw is not None
+                    else None
+                )
+                raw_ts = entry.get("last_updated_at_utc") or entry.get("timestamp_utc")
+                if raw_ts is not None:
+                    ts_val, _ = resolve_historical_timestamp(
+                        raw_ts,
+                        f"{rep_key}[{idx}].last_updated_at_utc",
+                        default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
+                    )
+                elif default_timestamp:
+                    ts_val, _ = resolve_historical_timestamp(
+                        None,
+                        f"{rep_key}[{idx}].last_updated_at_utc",
+                        default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
+                    )
+                elif require_timestamp:
+                    raise MigrationValidationError(
+                        f"{rep_key}[{idx}].last_updated_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                    )
+                else:
+                    ts_val = None
+
+                pos_rec = {
+                    "account_id": acc,
+                    "ticker": tk,
+                    "shares": shares,
+                    "wac_eur": wac_eur,
+                    "wac_usd": wac_usd,
+                    "raw_shares": entry.get("shares"),
+                    "raw_wac": wac_eur_raw,
+                    "raw_wac_usd": wac_usd_raw,
+                    "last_updated_at_utc": ts_val,
+                    "timestamp_utc": ts_val,
+                }
+                rep_items.append((rep_key, (acc, tk), pos_rec))
+
+    for rep_name, key, item in rep_items:
+        if key not in records_by_key:
+            records_by_key[key] = item
+            sources_by_key[key] = [rep_name]
+        else:
+            prev = records_by_key[key]
+            prev_source = sources_by_key[key][0]
+
+            if records_equal(prev, item, POSITION_EQUALITY_FIELDS):
+                if discrepancies is not None:
+                    discrepancies.append({
+                        "domain": "portfolio_positions",
+                        "key": key,
+                        "type": "EXACT_DUPLICATE_DEDUPLICATED",
+                        "message": f"Exact duplicate position record for {key[0]}/{key[1]} deduplicated.",
+                    })
+                continue
+
+            # Compare shares
+            if Decimal(str(prev["shares"])) != Decimal(str(item["shares"])):
+                raise MigrationConflictError(
+                    f"Conflicting duplicate position record for {key[0]}/{key[1]} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' shares {prev['shares']} != '{rep_name}' {item['shares']})"
+                )
+
+            # Compare WAC EUR
+            if Decimal(str(prev["wac_eur"])) != Decimal(str(item["wac_eur"])):
+                raise MigrationConflictError(
+                    f"Conflicting duplicate position record for {key[0]}/{key[1]} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' wac_eur {prev['wac_eur']} != '{rep_name}' {item['wac_eur']})"
+                )
+
+            # Compare WAC USD
+            prev_usd = prev.get("wac_usd")
+            item_usd = item.get("wac_usd")
+            if (prev_usd is None) != (item_usd is None):
+                raise MigrationConflictError(
+                    f"Conflicting duplicate position record for {key[0]}/{key[1]} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' wac_usd {prev_usd} != '{rep_name}' {item_usd})"
+                )
+            if prev_usd is not None and item_usd is not None and Decimal(str(prev_usd)) != Decimal(str(item_usd)):
+                raise MigrationConflictError(
+                    f"Conflicting duplicate position record for {key[0]}/{key[1]} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' wac_usd {prev_usd} != '{rep_name}' {item_usd})"
+                )
+
+            # Compare timestamp
+            prev_ts = prev.get("timestamp_utc")
+            item_ts = item.get("timestamp_utc")
+            if prev_ts is not None and item_ts is not None and prev_ts != item_ts:
+                raise MigrationConflictError(
+                    f"Conflicting duplicate position record for {key[0]}/{key[1]} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
+                )
+
+            if not records_equal(prev, item, POSITION_EQUALITY_FIELDS):
+                raise MigrationConflictError(
+                    f"Conflicting duplicate position record for {key[0]}/{key[1]} in {source_name}: "
+                    f"existing {prev} != incoming {item}"
+                )
+
+            prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts
+            prev["last_updated_at_utc"] = prev["timestamp_utc"]
+            sources_by_key[key].append(rep_name)
+
+    return sorted(records_by_key.values(), key=lambda x: (x["account_id"], x["ticker"]))
+
+
+def consolidate_cash_representations(
+    data: Dict[str, Any],
+    default_account_id: str = "PRIMARY",
+    default_timestamp: Optional[str] = None,
+    allow_date_only: bool = False,
+    allow_naive_utc: bool = False,
+    discrepancies: Optional[List[Dict[str, Any]]] = None,
+    source_name: str = "source",
+    require_timestamp: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Consolidates portfolio cash representations (structured portfolio_cash and scalar unallocated_cash_eur/usd)
+    deterministically (Stage 1.5-D.1.1.2 R3).
+    Fails closed with MigrationConflictError on conflicting amounts or timestamps.
+    Consolidates identical or compatible representations without double counting, invariant to key ordering.
+    """
+    records_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    sources_by_key: Dict[Tuple[str, str], List[str]] = {}
+
+    rep_items: List[Tuple[str, Tuple[str, str], Dict[str, Any]]] = []
+
+    # 1. Structured portfolio_cash
+    raw_list = data.get("portfolio_cash")
+    if isinstance(raw_list, list):
+        for idx, entry in enumerate(raw_list):
+            if not isinstance(entry, dict):
+                raise MigrationValidationError(f"portfolio_cash[{idx}] must be a dict")
+            acc = str(entry.get("account_id") or default_account_id).strip().upper()
+            curr = str(entry.get("currency") or "EUR").strip().upper()
+            if curr not in ("EUR", "USD"):
+                raise MigrationValidationError(f"portfolio_cash[{idx}]: unsupported currency '{curr}'")
+            amt = parse_financial_decimal(entry.get("amount"), f"portfolio_cash[{idx}].amount", max_scale=2)
+            raw_ts = entry.get("last_updated_at_utc") or entry.get("timestamp_utc")
+            if raw_ts is not None:
+                ts_val, _ = resolve_historical_timestamp(
+                    raw_ts,
+                    f"portfolio_cash[{idx}].last_updated_at_utc",
+                    default_timestamp=default_timestamp,
+                    allow_date_only=allow_date_only,
+                    allow_naive_utc=allow_naive_utc,
+                )
+            elif default_timestamp:
+                ts_val, _ = resolve_historical_timestamp(
+                    None,
+                    f"portfolio_cash[{idx}].last_updated_at_utc",
+                    default_timestamp=default_timestamp,
+                    allow_date_only=allow_date_only,
+                    allow_naive_utc=allow_naive_utc,
+                )
+            elif require_timestamp:
+                raise MigrationValidationError(
+                    f"portfolio_cash[{idx}].last_updated_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                )
+            else:
+                ts_val = None
+            rep_items.append(("portfolio_cash", (acc, curr), {
+                "account_id": acc,
+                "currency": curr,
+                "amount": amt,
+                "raw_amount": entry.get("amount"),
+                "last_updated_at_utc": ts_val,
+                "timestamp_utc": ts_val,
+            }))
+
+    # 2. Scalar cash (unallocated_cash_eur, unallocated_cash_usd)
+    for curr, field_key in [("EUR", "unallocated_cash_eur"), ("USD", "unallocated_cash_usd")]:
+        val = data.get(field_key)
+        if val is None and isinstance(data.get("mutable_state"), dict):
+            val = data["mutable_state"].get(field_key)
+        if val is not None:
+            amt = parse_financial_decimal(val, field_key, max_scale=2)
+            if default_timestamp:
+                ts_val, _ = resolve_historical_timestamp(
+                    None,
+                    field_key,
+                    default_timestamp=default_timestamp,
+                    allow_date_only=allow_date_only,
+                    allow_naive_utc=allow_naive_utc,
+                )
+            elif require_timestamp:
+                raise MigrationValidationError(
+                    f"{field_key}: historical timestamp is missing; migration cannot fabricate provenance"
+                )
+            else:
+                ts_val = None
+            rep_items.append((field_key, (default_account_id, curr), {
+                "account_id": default_account_id,
+                "currency": curr,
+                "amount": amt,
+                "raw_amount": val,
+                "last_updated_at_utc": ts_val,
+                "timestamp_utc": ts_val,
+            }))
+
+    for rep_name, key, item in rep_items:
+        if key not in records_by_key:
+            records_by_key[key] = item
+            sources_by_key[key] = [rep_name]
+        else:
+            prev = records_by_key[key]
+            prev_source = sources_by_key[key][0]
+
+            if records_equal(prev, item, CASH_EQUALITY_FIELDS):
+                if discrepancies is not None:
+                    discrepancies.append({
+                        "domain": "portfolio_cash",
+                        "key": key,
+                        "type": "EXACT_DUPLICATE_DEDUPLICATED",
+                        "message": f"Exact duplicate cash record for {key[0]}/{key[1]} deduplicated.",
+                    })
+                continue
+
+            # Compare amount
+            if Decimal(str(prev["amount"])) != Decimal(str(item["amount"])):
+                raise MigrationConflictError(
+                    f"Conflicting duplicate cash record for {key[0]}/{key[1]} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' amount {prev['amount']} != '{rep_name}' {item['amount']})"
+                )
+
+            # Compare timestamp
+            prev_ts = prev.get("timestamp_utc")
+            item_ts = item.get("timestamp_utc")
+            if prev_ts is not None and item_ts is not None and prev_ts != item_ts:
+                raise MigrationConflictError(
+                    f"Conflicting duplicate cash record for {key[0]}/{key[1]} in {source_name}: "
+                    f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
+                )
+
+            if not records_equal(prev, item, CASH_EQUALITY_FIELDS):
+                raise MigrationConflictError(
+                    f"Conflicting duplicate cash record for {key[0]}/{key[1]} in {source_name}: "
+                    f"existing {prev} != incoming {item}"
+                )
+
+            prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts
+            prev["last_updated_at_utc"] = prev["timestamp_utc"]
+            sources_by_key[key].append(rep_name)
+
+    return sorted(records_by_key.values(), key=lambda x: (x["account_id"], x["currency"]))

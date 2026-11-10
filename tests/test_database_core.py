@@ -189,7 +189,7 @@ class TestDatabaseSchema(unittest.TestCase):
             cursor.execute("SELECT schema_version, db_revision FROM database_metadata WHERE id = 1;")
             row = cursor.fetchone()
             self.assertIsNotNone(row)
-            self.assertEqual(row[0], 1)
+            self.assertEqual(row[0], CURRENT_SCHEMA_VERSION)
             self.assertEqual(row[1], 0)
 
     def test_idempotent_schema_initialization(self):

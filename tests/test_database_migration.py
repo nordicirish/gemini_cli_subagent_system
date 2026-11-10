@@ -64,6 +64,10 @@ from python.database.migration.contract import (
     normalize_aware_timestamp,
     deep_equal,
     records_equal,
+    consolidate_scout_representations,
+    consolidate_watchlist_representations,
+    consolidate_position_representations,
+    consolidate_cash_representations,
 )
 from python.database.migration.importer import LegacyJsonImporter
 from python.database.migration.parity import SSoTParityVerifier
@@ -2175,6 +2179,635 @@ class TestStage15D111CorrectiveRegressions(BaseMigrationTestCase):
         with self.assertRaises(MigrationConflictError) as ctx:
             self.importer.plan_migration(source, default_timestamp=self.default_ts)
         self.assertIn("duplicate/colliding canonical sub-decision identity", str(ctx.exception))
+
+
+class TestStage15D112ParityAndConflictingRepresentations(BaseMigrationTestCase):
+    """
+    Stage 1.5-D.1.1.2 Regression Suite for Findings F2 and F3:
+    - F2: Complete field-level semantic parity without truthiness checks across all 6 domains.
+    - F3: Rejection of conflicting structured source representations and deterministic consolidation.
+    """
+
+    def test_cash_domain_explicit_parity_and_zero_preservation(self):
+        """F2: Validates zero cash amount preservation and explicit field comparison in cash parity."""
+        # 1. Zero cash amount preserved and matches
+        source = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "0.00", "last_updated_at_utc": self.default_ts}
+            ]
+        }
+        res = self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+        self.assertTrue(res.success)
+        with self.db_manager.connection() as conn:
+            proj = self.generator.generate(conn)
+        parity = self.verifier.compare(source, proj)
+        self.assertTrue(parity.is_parity)
+        self.assertGreaterEqual(parity.summary.exact_matches, 1)
+
+        # 2. Financial mismatch detected
+        mismatch_proj = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00", "last_updated_at_utc": self.default_ts}
+            ],
+            "unallocated_cash_eur": "100.00",
+        }
+        p_res = self.verifier.compare(source, mismatch_proj)
+        self.assertFalse(p_res.is_parity)
+        self.assertGreaterEqual(p_res.summary.financial_mismatches, 1)
+
+    def test_positions_wac_presence_and_explicit_field_parity(self):
+        """F2: Validates explicit presence and value equality for WAC EUR, WAC USD, and shares."""
+        # 1. Legacy has WAC USD, projected has None -> FINANCIAL_MISMATCH
+        source = {
+            "positions": [
+                {
+                    "account_id": "PRIMARY",
+                    "ticker": "AAPL",
+                    "shares": "10.0",
+                    "wac": "150.00",
+                    "wac_usd": "165.00",
+                    "last_updated_at_utc": self.default_ts,
+                }
+            ]
+        }
+        proj_no_usd = {
+            "portfolio_snapshot": [
+                {
+                    "account_id": "PRIMARY",
+                    "ticker": "AAPL",
+                    "shares": "10.0",
+                    "wac_eur": "150.00",
+                    "wac_usd": None,
+                    "last_updated_at_utc": self.default_ts,
+                }
+            ]
+        }
+        p1 = self.verifier.compare(source, proj_no_usd)
+        self.assertFalse(p1.is_parity)
+        self.assertTrue(any("WAC USD presence mismatch" in d.message for d in p1.discrepancies))
+
+        # 2. Legacy has None WAC USD, projected has WAC USD -> FINANCIAL_MISMATCH
+        source_no_usd = {
+            "positions": [
+                {
+                    "account_id": "PRIMARY",
+                    "ticker": "AAPL",
+                    "shares": "10.0",
+                    "wac": "150.00",
+                    "wac_usd": None,
+                    "last_updated_at_utc": self.default_ts,
+                }
+            ]
+        }
+        proj_with_usd = {
+            "portfolio_snapshot": [
+                {
+                    "account_id": "PRIMARY",
+                    "ticker": "AAPL",
+                    "shares": "10.0",
+                    "wac_eur": "150.00",
+                    "wac_usd": "165.00",
+                    "last_updated_at_utc": self.default_ts,
+                }
+            ]
+        }
+        p2 = self.verifier.compare(source_no_usd, proj_with_usd)
+        self.assertFalse(p2.is_parity)
+        self.assertTrue(any("WAC USD presence mismatch" in d.message for d in p2.discrepancies))
+
+        # 3. WAC EUR presence mismatch
+        proj_no_eur = {
+            "portfolio_snapshot": [
+                {
+                    "account_id": "PRIMARY",
+                    "ticker": "AAPL",
+                    "shares": "10.0",
+                    "wac_eur": None,
+                    "wac_usd": None,
+                    "last_updated_at_utc": self.default_ts,
+                }
+            ]
+        }
+        p3 = self.verifier.compare(source_no_usd, proj_no_eur)
+        self.assertFalse(p3.is_parity)
+        self.assertTrue(any("WAC EUR presence mismatch" in d.message for d in p3.discrepancies))
+
+        # 4. Shares mismatch
+        proj_diff_shares = {
+            "portfolio_snapshot": [
+                {
+                    "account_id": "PRIMARY",
+                    "ticker": "AAPL",
+                    "shares": "12.0",
+                    "wac_eur": "150.00",
+                    "wac_usd": None,
+                    "last_updated_at_utc": self.default_ts,
+                }
+            ]
+        }
+        p4 = self.verifier.compare(source_no_usd, proj_diff_shares)
+        self.assertFalse(p4.is_parity)
+        self.assertEqual(p4.summary.financial_mismatches, 1)
+
+    def test_watchlist_notes_none_vs_empty_vs_string_parity(self):
+        """F2: Validates explicit comparison of watchlist notes (None vs empty vs string) and status."""
+        # 1. notes=None in legacy, but string in projected -> FIELD_MISMATCH
+        legacy_none = {
+            "watchlist": [
+                {"ticker": "NVDA", "status": "ACTIVE", "notes": None, "added_at_utc": self.default_ts}
+            ]
+        }
+        proj_str = {
+            "watched_tickers": ["NVDA"],
+            "watchlist": [
+                {"ticker": "NVDA", "status": "ACTIVE", "notes": "Leader", "added_at_utc": self.default_ts}
+            ]
+        }
+        p1 = self.verifier.compare(legacy_none, proj_str)
+        self.assertFalse(p1.is_parity)
+        self.assertTrue(any("Notes mismatch" in d.message for d in p1.discrepancies))
+
+        # 2. notes="" in legacy, but string in projected -> FIELD_MISMATCH
+        legacy_empty = {
+            "watchlist": [
+                {"ticker": "NVDA", "status": "ACTIVE", "notes": "", "added_at_utc": self.default_ts}
+            ]
+        }
+        p2 = self.verifier.compare(legacy_empty, proj_str)
+        self.assertFalse(p2.is_parity)
+        self.assertTrue(any("Notes mismatch" in d.message for d in p2.discrepancies))
+
+        # 3. notes=None in legacy vs notes="" in projected (null vs empty) -> FIELD_MISMATCH
+        proj_empty = {
+            "watched_tickers": ["NVDA"],
+            "watchlist": [
+                {"ticker": "NVDA", "status": "ACTIVE", "notes": "", "added_at_utc": self.default_ts}
+            ]
+        }
+        p3 = self.verifier.compare(legacy_none, proj_empty)
+        self.assertFalse(p3.is_parity)
+        self.assertTrue(any("Notes mismatch" in d.message for d in p3.discrepancies))
+
+        # 4. Status mismatch
+        proj_status = {
+            "watched_tickers": ["NVDA"],
+            "watchlist": [
+                {"ticker": "NVDA", "status": "PAUSED", "notes": None, "added_at_utc": self.default_ts}
+            ]
+        }
+        p4 = self.verifier.compare(legacy_none, proj_status)
+        self.assertFalse(p4.is_parity)
+        self.assertTrue(any("Status mismatch" in d.message for d in p4.discrepancies))
+
+    def test_scout_categories_description_and_tickers_explicit_parity(self):
+        """F2: Validates explicit comparison of scout category description and ticker collections."""
+        # 1. description=None in legacy vs string in projected -> FIELD_MISMATCH
+        legacy_none = {
+            "scout_categories": [
+                {"category_name": "TECH", "description": None, "tickers": ["AAPL"], "updated_at_utc": self.default_ts}
+            ]
+        }
+        proj_str = {
+            "scout_category_records": [
+                {"category_name": "TECH", "description": "Tech stocks", "tickers": ["AAPL"], "updated_at_utc": self.default_ts}
+            ]
+        }
+        p1 = self.verifier.compare(legacy_none, proj_str)
+        self.assertFalse(p1.is_parity)
+        self.assertTrue(any("Description mismatch" in d.message for d in p1.discrepancies))
+
+        # 2. description="" in legacy vs None in projected -> FIELD_MISMATCH
+        legacy_empty = {
+            "scout_categories": [
+                {"category_name": "TECH", "description": "", "tickers": ["AAPL"], "updated_at_utc": self.default_ts}
+            ]
+        }
+        proj_none = {
+            "scout_category_records": [
+                {"category_name": "TECH", "description": None, "tickers": ["AAPL"], "updated_at_utc": self.default_ts}
+            ]
+        }
+        p2 = self.verifier.compare(legacy_empty, proj_none)
+        self.assertFalse(p2.is_parity)
+        self.assertTrue(any("Description mismatch" in d.message for d in p2.discrepancies))
+
+        # 3. Tickers collection mismatch
+        proj_diff_tickers = {
+            "scout_category_records": [
+                {"category_name": "TECH", "description": None, "tickers": ["AAPL", "NVDA"], "updated_at_utc": self.default_ts}
+            ]
+        }
+        p3 = self.verifier.compare(legacy_none, proj_diff_tickers)
+        self.assertFalse(p3.is_parity)
+        self.assertTrue(any("Tickers mismatch" in d.message for d in p3.discrepancies))
+
+    def test_trade_lessons_directive_and_review_ts_explicit_parity(self):
+        """F2: Validates explicit comparison of trade lesson directive, category, status, and nullable review timestamp."""
+        # 1. last_reviewed_at_utc None in legacy vs non-null in projected -> TIMESTAMP_MISMATCH
+        legacy_none = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-101",
+                    "directive_text": "Do not chase",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        proj_reviewed = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-101",
+                    "directive_text": "Do not chase",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": "2026-11-09T00:00:00Z",
+                }
+            ]
+        }
+        p1 = self.verifier.compare(legacy_none, proj_reviewed)
+        self.assertFalse(p1.is_parity)
+        self.assertTrue(any("last_reviewed_at_utc" in d.path and d.discrepancy_type == DiscrepancyType.TIMESTAMP_MISMATCH.value for d in p1.discrepancies))
+
+        # 2. last_reviewed_at_utc non-null in legacy vs None in projected -> TIMESTAMP_MISMATCH
+        p2 = self.verifier.compare(proj_reviewed, legacy_none)
+        self.assertFalse(p2.is_parity)
+        self.assertTrue(any("last_reviewed_at_utc" in d.path and d.discrepancy_type == DiscrepancyType.TIMESTAMP_MISMATCH.value for d in p2.discrepancies))
+
+        # 3. Directive text mismatch
+        proj_diff_dir = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-101",
+                    "directive_text": "Always chase",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        p3 = self.verifier.compare(legacy_none, proj_diff_dir)
+        self.assertFalse(p3.is_parity)
+        self.assertTrue(any("Directive text mismatch" in d.message for d in p3.discrepancies))
+
+        # 4. Category mismatch
+        proj_diff_cat = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-101",
+                    "directive_text": "Do not chase",
+                    "category": "RISK",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        p4 = self.verifier.compare(legacy_none, proj_diff_cat)
+        self.assertFalse(p4.is_parity)
+        self.assertTrue(any("Category mismatch" in d.message for d in p4.discrepancies))
+
+    def test_decision_log_transcript_and_votes_explicit_parity(self):
+        """F2: Validates explicit comparison of decision log transcript_text, votes, action, and outcome."""
+        # 1. transcript_text None in legacy vs string in projected -> FIELD_MISMATCH
+        legacy_none = {
+            "decision_log": [
+                {
+                    "session_id": "S1",
+                    "ticker": "SPY",
+                    "action_proposed": "HOLD",
+                    "decision_outcome": "APPROVED",
+                    "votes": {"bullish": "YES"},
+                    "transcript_text": None,
+                    "timestamp_utc": self.default_ts,
+                }
+            ]
+        }
+        proj_str = {
+            "decision_log": [
+                {
+                    "session_id": "S1",
+                    "ticker": "SPY",
+                    "action_proposed": "HOLD",
+                    "decision_outcome": "APPROVED",
+                    "votes": {"bullish": "YES"},
+                    "transcript_text": "Full debate transcript",
+                    "timestamp_utc": self.default_ts,
+                }
+            ]
+        }
+        p1 = self.verifier.compare(legacy_none, proj_str)
+        self.assertFalse(p1.is_parity)
+        self.assertTrue(any("Transcript text mismatch" in d.message for d in p1.discrepancies))
+
+        # 2. transcript_text "" in legacy vs None in projected -> FIELD_MISMATCH
+        legacy_empty = {
+            "decision_log": [
+                {
+                    "session_id": "S1",
+                    "ticker": "SPY",
+                    "action_proposed": "HOLD",
+                    "decision_outcome": "APPROVED",
+                    "votes": {"bullish": "YES"},
+                    "transcript_text": "",
+                    "timestamp_utc": self.default_ts,
+                }
+            ]
+        }
+        p2 = self.verifier.compare(legacy_empty, legacy_none)
+        self.assertFalse(p2.is_parity)
+        self.assertTrue(any("Transcript text mismatch" in d.message for d in p2.discrepancies))
+
+        # 3. votes mismatch
+        proj_diff_votes = {
+            "decision_log": [
+                {
+                    "session_id": "S1",
+                    "ticker": "SPY",
+                    "action_proposed": "HOLD",
+                    "decision_outcome": "APPROVED",
+                    "votes": {"bullish": "NO"},
+                    "transcript_text": None,
+                    "timestamp_utc": self.default_ts,
+                }
+            ]
+        }
+        p3 = self.verifier.compare(legacy_none, proj_diff_votes)
+        self.assertFalse(p3.is_parity)
+        self.assertTrue(any("Votes mismatch" in d.message for d in p3.discrepancies))
+
+    def test_bidirectional_parity_all_six_domains(self):
+        """F2: Validates that unexpected projected records in ALL 6 domains are detected fail-closed."""
+        empty_legacy = {}
+        all_projected = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00", "last_updated_at_utc": self.default_ts}
+            ],
+            "portfolio_snapshot": [
+                {"account_id": "PRIMARY", "ticker": "SPY", "shares": "10.0", "wac_eur": "400.00", "last_updated_at_utc": self.default_ts}
+            ],
+            "watched_tickers": ["NVDA"],
+            "scout_category_records": [
+                {"category_name": "GROWTH", "description": "High beta", "tickers": ["NVDA"], "updated_at_utc": self.default_ts}
+            ],
+            "trade_lessons": [
+                {"rule_code": "L-100", "directive_text": "Risk check", "category": "RISK", "status": "ACTIVE", "created_at_utc": self.default_ts}
+            ],
+            "decision_log": [
+                {"session_id": "S99", "ticker": "SPY", "action_proposed": "HOLD", "decision_outcome": "APPROVED", "timestamp_utc": self.default_ts}
+            ],
+        }
+
+        res = self.verifier.compare(empty_legacy, all_projected)
+        self.assertFalse(res.is_parity)
+        self.assertEqual(res.summary.unexpected_records, 6)
+
+        domains_detected = {d.domain for d in res.discrepancies if d.discrepancy_type == DiscrepancyType.UNEXPECTED_RECORD.value}
+        self.assertEqual(domains_detected, {
+            "portfolio_cash",
+            "portfolio_positions",
+            "watchlist",
+            "scout_categories",
+            "trade_lessons",
+            "decision_log",
+        })
+
+    def test_scout_representations_consolidation_and_conflict_rejection(self):
+        """F3: Validates consolidate_scout_representations handles identical sources and rejects conflicts."""
+        # 1. Identical representations consolidate cleanly
+        identical = {
+            "scout_categories": [
+                {"category_name": "TECH", "tickers": ["AAPL", "NVDA"], "updated_at_utc": self.default_ts}
+            ],
+            "scout_candidates": {"TECH": ["AAPL", "NVDA"]},
+        }
+        res = consolidate_scout_representations(identical, default_timestamp=self.default_ts)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["category_name"], "TECH")
+        self.assertEqual(res[0]["tickers"], ["AAPL", "NVDA"])
+
+        # 2. Conflicting tickers raise MigrationConflictError
+        conflict_tickers = {
+            "scout_categories": [
+                {"category_name": "TECH", "tickers": ["AAPL"], "updated_at_utc": self.default_ts}
+            ],
+            "scout_candidates": {"TECH": ["NVDA"]},
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_scout_representations(conflict_tickers, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate scout category record for TECH", str(ctx.exception))
+
+        # 3. Conflicting descriptions raise MigrationConflictError
+        conflict_desc = {
+            "scout_categories": [
+                {"category_name": "TECH", "description": "Desc A", "tickers": ["AAPL"], "updated_at_utc": self.default_ts},
+                {"category_name": "TECH", "description": "Desc B", "tickers": ["AAPL"], "updated_at_utc": self.default_ts},
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_scout_representations(conflict_desc, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate scout category record for TECH", str(ctx.exception))
+
+        # 4. Conflicting timestamps raise MigrationConflictError
+        conflict_ts = {
+            "scout_categories": [
+                {"category_name": "TECH", "tickers": ["AAPL"], "updated_at_utc": "2026-01-01T00:00:00Z"},
+                {"category_name": "TECH", "tickers": ["AAPL"], "updated_at_utc": "2026-01-02T00:00:00Z"},
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_scout_representations(conflict_ts, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate scout category record for TECH", str(ctx.exception))
+
+    def test_watchlist_representations_consolidation_and_conflict_rejection(self):
+        """F3: Validates consolidate_watchlist_representations handles identical sources and rejects conflicts."""
+        # 1. Identical representations consolidate cleanly
+        identical = {
+            "watchlist": [
+                {"ticker": "AAPL", "status": "ACTIVE", "notes": "Tech", "added_at_utc": self.default_ts}
+            ],
+            "watched_tickers": {
+                "AAPL": {"status": "ACTIVE", "notes": "Tech", "added_at_utc": self.default_ts}
+            },
+        }
+        res = consolidate_watchlist_representations(identical, default_timestamp=self.default_ts)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["ticker"], "AAPL")
+
+        # 2. Conflicting status raises MigrationConflictError
+        conflict_status = {
+            "watchlist": [
+                {"ticker": "AAPL", "status": "ACTIVE", "added_at_utc": self.default_ts}
+            ],
+            "watched_tickers": {
+                "AAPL": {"status": "PAUSED", "added_at_utc": self.default_ts}
+            },
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_watchlist_representations(conflict_status, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate watchlist record for AAPL", str(ctx.exception))
+
+        # 3. Conflicting notes raise MigrationConflictError
+        conflict_notes = {
+            "watchlist": [
+                {"ticker": "AAPL", "notes": "Notes A", "added_at_utc": self.default_ts}
+            ],
+            "watched_tickers": {
+                "AAPL": {"notes": "Notes B", "added_at_utc": self.default_ts}
+            },
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_watchlist_representations(conflict_notes, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate watchlist record for AAPL", str(ctx.exception))
+
+        # 4. Conflicting timestamps raise MigrationConflictError
+        conflict_ts = {
+            "watchlist": [
+                {"ticker": "AAPL", "added_at_utc": "2026-01-01T00:00:00Z"}
+            ],
+            "watched_tickers": {
+                "AAPL": {"added_at_utc": "2026-01-02T00:00:00Z"}
+            },
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_watchlist_representations(conflict_ts, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate watchlist record for AAPL", str(ctx.exception))
+
+    def test_position_representations_consolidation_and_conflict_rejection(self):
+        """F3: Validates consolidate_position_representations handles identical sources and rejects conflicts."""
+        # 1. Identical representations consolidate cleanly
+        identical = {
+            "positions": [
+                {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "10.0", "wac": "150.00", "last_updated_at_utc": self.default_ts}
+            ],
+            "mutable_state": {
+                "portfolio_snapshot": [
+                    {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "10.0", "wac": "150.00", "last_updated_at_utc": self.default_ts}
+                ]
+            }
+        }
+        res = consolidate_position_representations(identical, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["ticker"], "AAPL")
+        self.assertEqual(res[0]["shares"], Decimal("10.0"))
+
+        # 2. Conflicting shares raise MigrationConflictError
+        conflict_shares = {
+            "positions": [
+                {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "10.0", "wac": "150.00", "last_updated_at_utc": self.default_ts}
+            ],
+            "mutable_state": {
+                "portfolio_snapshot": [
+                    {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "15.0", "wac": "150.00", "last_updated_at_utc": self.default_ts}
+                ]
+            }
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_position_representations(conflict_shares, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate position record for PRIMARY/AAPL", str(ctx.exception))
+
+        # 3. Conflicting WAC EUR raises MigrationConflictError
+        conflict_wac = {
+            "positions": [
+                {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "10.0", "wac": "150.00", "last_updated_at_utc": self.default_ts}
+            ],
+            "mutable_state": {
+                "portfolio_snapshot": [
+                    {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "10.0", "wac": "160.00", "last_updated_at_utc": self.default_ts}
+                ]
+            }
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_position_representations(conflict_wac, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate position record for PRIMARY/AAPL", str(ctx.exception))
+
+        # 4. Conflicting timestamps raise MigrationConflictError
+        conflict_ts = {
+            "positions": [
+                {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "10.0", "wac": "150.00", "last_updated_at_utc": "2026-01-01T00:00:00Z"}
+            ],
+            "mutable_state": {
+                "portfolio_snapshot": [
+                    {"account_id": "PRIMARY", "ticker": "AAPL", "shares": "10.0", "wac": "150.00", "last_updated_at_utc": "2026-01-02T00:00:00Z"}
+                ]
+            }
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_position_representations(conflict_ts, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate position record for PRIMARY/AAPL", str(ctx.exception))
+
+    def test_cash_representations_consolidation_and_conflict_rejection(self):
+        """F3: Validates consolidate_cash_representations handles identical sources and rejects conflicts."""
+        # 1. Identical scalar and structured cash consolidate cleanly
+        identical = {
+            "unallocated_cash_eur": "5000.00",
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "5000.00", "last_updated_at_utc": self.default_ts}
+            ],
+        }
+        res = consolidate_cash_representations(identical, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["account_id"], "PRIMARY")
+        self.assertEqual(res[0]["currency"], "EUR")
+        self.assertEqual(res[0]["amount"], Decimal("5000.00"))
+
+        # 2. Conflicting amount raises MigrationConflictError
+        conflict_amt = {
+            "unallocated_cash_eur": "5000.00",
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "6000.00", "last_updated_at_utc": self.default_ts}
+            ],
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_cash_representations(conflict_amt, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate cash record for PRIMARY/EUR", str(ctx.exception))
+
+        # 3. Conflicting timestamps raise MigrationConflictError
+        conflict_ts = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "5000.00", "last_updated_at_utc": "2026-01-01T00:00:00Z"},
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "5000.00", "last_updated_at_utc": "2026-01-02T00:00:00Z"},
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_cash_representations(conflict_ts, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate cash record for PRIMARY/EUR", str(ctx.exception))
+
+    def test_consolidation_invariance_to_representation_order(self):
+        """F3: Validates consolidation produces deterministic output invariant to key/representation order."""
+        source_order_a = {
+            "scout_categories": [
+                {"category_name": "A", "tickers": ["T1"], "updated_at_utc": self.default_ts},
+                {"category_name": "B", "tickers": ["T2"], "updated_at_utc": self.default_ts},
+            ],
+            "scout_candidates": {
+                "A": ["T1"],
+                "B": ["T2"],
+            },
+        }
+        source_order_b = {
+            "scout_candidates": {
+                "B": ["T2"],
+                "A": ["T1"],
+            },
+            "scout_categories": [
+                {"category_name": "B", "tickers": ["T2"], "updated_at_utc": self.default_ts},
+                {"category_name": "A", "tickers": ["T1"], "updated_at_utc": self.default_ts},
+            ],
+        }
+
+        res_a = consolidate_scout_representations(source_order_a, default_timestamp=self.default_ts)
+        res_b = consolidate_scout_representations(source_order_b, default_timestamp=self.default_ts)
+
+        self.assertEqual(len(res_a), len(res_b))
+        for item_a, item_b in zip(res_a, res_b):
+            self.assertEqual(item_a["category_name"], item_b["category_name"])
+            self.assertEqual(item_a["tickers"], item_b["tickers"])
+            self.assertEqual(item_a["timestamp_utc"], item_b["timestamp_utc"])
 
 
 if __name__ == "__main__":

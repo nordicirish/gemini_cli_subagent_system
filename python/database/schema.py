@@ -11,7 +11,8 @@ import sqlite3
 from typing import Optional, Tuple, List, Dict, Any, Set
 
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
+PREVIOUS_SUPPORTED_CORE_SCHEMA_VERSIONS = frozenset({1})
 
 
 # ---------------------------------------------------------------------------
@@ -969,7 +970,9 @@ class SchemaMigrator:
         Installs the core financial and governance schema transactionally.
         If already installed at CURRENT_SCHEMA_VERSION, verifies existing schema integrity
         before returning current version idempotently.
-        If the database version is newer than CURRENT_SCHEMA_VERSION, raises SchemaVersionMismatchError.
+        If existing_version is in PREVIOUS_SUPPORTED_CORE_SCHEMA_VERSIONS, transactionally upgrades
+        the database to CURRENT_SCHEMA_VERSION and verifies resulting schema integrity.
+        If the database version is newer or unsupported, raises SchemaVersionMismatchError.
         """
         existing_version = cls.get_current_version(conn)
         if existing_version is not None:
@@ -980,7 +983,13 @@ class SchemaMigrator:
             if existing_version == CURRENT_SCHEMA_VERSION:
                 cls.verify_core_schema_integrity(conn)
                 return existing_version
-            # Future migrations for existing_version < CURRENT_SCHEMA_VERSION will be handled here
+            if existing_version in PREVIOUS_SUPPORTED_CORE_SCHEMA_VERSIONS:
+                cls._migrate_core_schema(conn, from_version=existing_version, to_version=CURRENT_SCHEMA_VERSION)
+                cls.verify_core_schema_integrity(conn)
+                return CURRENT_SCHEMA_VERSION
+            raise SchemaVersionMismatchError(
+                f"Database schema version {existing_version} is unsupported and cannot be migrated."
+            )
 
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -1014,6 +1023,72 @@ class SchemaMigrator:
         return CURRENT_SCHEMA_VERSION
 
     @classmethod
+    def _migrate_core_schema(cls, conn: sqlite3.Connection, from_version: int, to_version: int) -> None:
+        """
+        Migrates an existing core database from a supported previous schema version
+        to the target schema version transactionally and fail-closed (Stage 1.5-D.1.1.2 R1).
+        """
+        if from_version == 1 and to_version == 2:
+            cls._migrate_core_v1_to_v2(conn)
+        else:
+            raise SchemaVersionMismatchError(
+                f"No migration path available from core schema version {from_version} to {to_version}."
+            )
+
+    @classmethod
+    def _migrate_core_v1_to_v2(cls, conn: sqlite3.Connection) -> None:
+        """
+        Migrates core database from version 1 to version 2:
+        Rebuilds trade_lessons table to relax last_reviewed_at_utc NOT NULL constraint to nullable,
+        preserving all existing records, column types, ordering, primary keys, and CHECK constraints.
+        Advances schema_version in database_metadata to 2.
+        """
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            # 1. Create replacement table matching canonical v2 definition with nullable last_reviewed_at_utc
+            conn.execute("""
+                CREATE TABLE trade_lessons_migration_v2 (
+                    rule_code TEXT PRIMARY KEY NOT NULL CHECK (rule_code = UPPER(TRIM(rule_code)) AND length(rule_code) > 0),
+                    directive_text TEXT NOT NULL CHECK (length(trim(directive_text)) > 0),
+                    category TEXT NOT NULL CHECK (category IN ('MANDATE', 'EXECUTION', 'STRUCTURAL', 'RISK', 'HEURISTIC')),
+                    status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'DEPRECATED', 'SUSPENDED')),
+                    created_at_utc TEXT NOT NULL,
+                    last_reviewed_at_utc TEXT
+                );
+            """)
+
+            # 2. Copy all existing records enumerating every column explicitly
+            conn.execute("""
+                INSERT INTO trade_lessons_migration_v2 (
+                    rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
+                )
+                SELECT
+                    rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
+                FROM trade_lessons;
+            """)
+
+            # 3. Drop old table and rename replacement table
+            conn.execute("DROP TABLE trade_lessons;")
+            conn.execute("ALTER TABLE trade_lessons_migration_v2 RENAME TO trade_lessons;")
+
+            # 4. Advance schema_version to 2 in database_metadata
+            conn.execute("""
+                UPDATE database_metadata
+                SET schema_version = 2,
+                    last_updated_at_utc = ?
+                WHERE id = 1;
+            """, (now_iso,))
+
+            conn.execute("COMMIT;")
+        except Exception as e:
+            try:
+                conn.execute("ROLLBACK;")
+            except Exception:
+                pass
+            raise SchemaError(f"Failed to migrate core schema from version 1 to version 2: {e}") from e
+
+    @classmethod
     def initialize_cache_schema(cls, conn: sqlite3.Connection) -> int:
         """
         Installs the market-data cache schema transactionally.
@@ -1035,6 +1110,16 @@ class SchemaMigrator:
                 if existing_version == CURRENT_SCHEMA_VERSION:
                     cls.verify_cache_schema_integrity(conn)
                     return existing_version
+                if existing_version in (1, CURRENT_SCHEMA_VERSION):
+                    cls.verify_cache_schema_integrity(conn)
+                    conn.execute(
+                        "UPDATE cache_metadata SET schema_version = ? WHERE id = 1;",
+                        (CURRENT_SCHEMA_VERSION,),
+                    )
+                    return CURRENT_SCHEMA_VERSION
+                raise SchemaVersionMismatchError(
+                    f"Cache database schema version {existing_version} is unsupported."
+                )
 
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         try:

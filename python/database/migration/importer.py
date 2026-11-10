@@ -55,6 +55,10 @@ from python.database.migration.contract import (
     transform_legacy_decision_case_c,
     validate_migration_destination,
     extract_rule_code_and_directive,
+    consolidate_scout_representations,
+    consolidate_watchlist_representations,
+    consolidate_position_representations,
+    consolidate_cash_representations,
 )
 from python.tool_registry import execution_role_context
 
@@ -189,313 +193,130 @@ class LegacyJsonImporter:
                     plan.external_sections[ext_key] = data[ext_key]
 
             # ---------------------------------------------------------------
-            # 2. Portfolio Cash Domain
+            # 2. Portfolio Cash Domain (Stage 1.5-D.1.1.2 R3)
             # ---------------------------------------------------------------
-            # Check structured portfolio_cash list
-            raw_cash_list = data.get("portfolio_cash")
-            if isinstance(raw_cash_list, list):
-                for idx, c in enumerate(raw_cash_list):
-                    if not isinstance(c, dict):
-                        raise MigrationValidationError(f"{src.name}: portfolio_cash[{idx}] must be a dict")
-                    account = str(c.get("account_id") or default_account_id).strip()
-                    currency = str(c.get("currency") or "EUR").strip().upper()
-                    if currency not in ("EUR", "USD"):
-                        raise MigrationValidationError(f"{src.name}: unsupported currency '{currency}'")
-                    amount = parse_financial_decimal(c.get("amount"), f"portfolio_cash[{idx}].amount", max_scale=2)
-                    ts_valid, _ = resolve_historical_timestamp(
-                        c.get("last_updated_at_utc"),
-                        f"{src.name}: portfolio_cash[{idx}].last_updated_at_utc",
-                        default_timestamp=default_timestamp,
-                        allow_date_only=allow_date_only,
-                        allow_naive_utc=allow_naive_utc,
-                    )
-                    key = (account, currency)
-                    cash_rec = {
-                        "account_id": account,
-                        "currency": currency,
-                        "amount": amount,
-                        "timestamp_utc": ts_valid,
-                    }
-                    if key in seen_cash_records:
-                        prev = seen_cash_records[key]
-                        if records_equal(prev, cash_rec, CASH_EQUALITY_FIELDS):
-                            plan.discrepancies.append({
-                                "domain": "portfolio_cash",
-                                "key": key,
-                                "type": "EXACT_DUPLICATE_DEDUPLICATED",
-                                "message": f"Exact duplicate cash record for {account}/{currency} deduplicated.",
-                            })
-                        else:
-                            raise MigrationConflictError(
-                                f"Conflicting duplicate cash record for {account}/{currency} in {src.name}: "
-                                f"existing {prev} != incoming {cash_rec}"
-                            )
+            consolidated_cash = consolidate_cash_representations(
+                data,
+                default_account_id=default_account_id,
+                default_timestamp=default_timestamp,
+                allow_date_only=allow_date_only,
+                allow_naive_utc=allow_naive_utc,
+                discrepancies=plan.discrepancies,
+                source_name=src.name,
+            )
+            for cash_rec in consolidated_cash:
+                key = (cash_rec["account_id"], cash_rec["currency"])
+                if key in seen_cash_records:
+                    prev = seen_cash_records[key]
+                    if records_equal(prev, cash_rec, CASH_EQUALITY_FIELDS):
+                        plan.discrepancies.append({
+                            "domain": "portfolio_cash",
+                            "key": key,
+                            "type": "EXACT_DUPLICATE_DEDUPLICATED",
+                            "message": f"Exact duplicate cash record for {key[0]}/{key[1]} deduplicated.",
+                        })
                     else:
-                        seen_cash_records[key] = cash_rec
-                        plan.cash_records.append(cash_rec)
-
-            # Check scalar cash fields (e.g. unallocated_cash_eur / unallocated_cash_usd)
-            for curr, field_key in [("EUR", "unallocated_cash_eur"), ("USD", "unallocated_cash_usd")]:
-                val = data.get(field_key)
-                if val is None and "mutable_state" in data and isinstance(data["mutable_state"], dict):
-                    val = data["mutable_state"].get(field_key)
-                if val is not None:
-                    amount = parse_financial_decimal(val, f"{src.name}.{field_key}", max_scale=2)
-                    ts_valid, _ = resolve_historical_timestamp(
-                        None,
-                        f"{src.name}.{field_key}",
-                        default_timestamp=default_timestamp,
-                        allow_date_only=allow_date_only,
-                        allow_naive_utc=allow_naive_utc,
-                    )
-                    key = (default_account_id, curr)
-                    cash_rec = {
-                        "account_id": default_account_id,
-                        "currency": curr,
-                        "amount": amount,
-                        "timestamp_utc": ts_valid,
-                    }
-                    if key in seen_cash_records:
-                        prev = seen_cash_records[key]
-                        if records_equal(prev, cash_rec, CASH_EQUALITY_FIELDS):
-                            plan.discrepancies.append({
-                                "domain": "portfolio_cash",
-                                "key": key,
-                                "type": "EXACT_DUPLICATE_DEDUPLICATED",
-                                "message": f"Exact duplicate scalar cash record for {curr} deduplicated.",
-                            })
-                        else:
-                            raise MigrationConflictError(
-                                f"Conflicting duplicate cash record for {default_account_id}/{curr} in {src.name}.{field_key}: "
-                                f"existing {prev} != incoming {cash_rec}"
-                            )
-                    else:
-                        seen_cash_records[key] = cash_rec
-                        plan.cash_records.append(cash_rec)
-
-            # ---------------------------------------------------------------
-            # 3. Portfolio Positions Domain
-            # ---------------------------------------------------------------
-            raw_pos_list = data.get("portfolio_snapshot") or data.get("portfolio_positions")
-            if raw_pos_list is None and "mutable_state" in data and isinstance(data["mutable_state"], dict):
-                raw_pos_list = data["mutable_state"].get("portfolio_snapshot") or data["mutable_state"].get("portfolio_positions")
-
-            if isinstance(raw_pos_list, list):
-                for idx, p in enumerate(raw_pos_list):
-                    if not isinstance(p, dict):
-                        raise MigrationValidationError(f"{src.name}: portfolio_snapshot[{idx}] must be a dict")
-                    account = str(p.get("account_id") or default_account_id).strip()
-                    ticker = parse_ticker(p.get("ticker"), f"portfolio_snapshot[{idx}].ticker")
-                    shares = parse_financial_decimal(p.get("shares"), f"portfolio_snapshot[{idx}].shares", max_scale=4)
-
-                    wac_eur_raw = p.get("wac_eur") or p.get("wac")
-                    if wac_eur_raw is None:
-                        raise MigrationValidationError(f"{src.name}: portfolio_snapshot[{idx}] missing required wac/wac_eur")
-                    wac_eur = parse_financial_decimal(wac_eur_raw, f"portfolio_snapshot[{idx}].wac_eur", max_scale=4)
-
-                    wac_usd_raw = p.get("wac_usd")
-                    wac_usd = (
-                        parse_financial_decimal(wac_usd_raw, f"portfolio_snapshot[{idx}].wac_usd", max_scale=4)
-                        if wac_usd_raw is not None
-                        else None
-                    )
-
-                    ts_valid, _ = resolve_historical_timestamp(
-                        p.get("last_updated_at_utc"),
-                        f"{src.name}: portfolio_snapshot[{idx}].last_updated_at_utc",
-                        default_timestamp=default_timestamp,
-                        allow_date_only=allow_date_only,
-                        allow_naive_utc=allow_naive_utc,
-                    )
-
-                    key = (account, ticker)
-                    pos_rec = {
-                        "account_id": account,
-                        "ticker": ticker,
-                        "shares": shares,
-                        "wac_eur": wac_eur,
-                        "wac_usd": wac_usd,
-                        "timestamp_utc": ts_valid,
-                    }
-                    if key in seen_position_records:
-                        prev = seen_position_records[key]
-                        if records_equal(prev, pos_rec, POSITION_EQUALITY_FIELDS):
-                            plan.discrepancies.append({
-                                "domain": "portfolio_positions",
-                                "key": key,
-                                "type": "EXACT_DUPLICATE_DEDUPLICATED",
-                                "message": f"Exact duplicate position record for {account}/{ticker} deduplicated.",
-                            })
-                        else:
-                            raise MigrationConflictError(
-                                f"Conflicting duplicate position record for {account}/{ticker} in {src.name}: "
-                                f"existing {prev} != incoming {pos_rec}"
-                            )
-                    else:
-                        seen_position_records[key] = pos_rec
-                        plan.position_records.append(pos_rec)
-
-            # ---------------------------------------------------------------
-            # 4. Watchlist Domain
-            # ---------------------------------------------------------------
-            # Check watched_tickers or WATCHLIST or structured watchlist
-            raw_wl = data.get("watchlist")
-            if isinstance(raw_wl, list) and raw_wl and isinstance(raw_wl[0], dict):
-                for idx, item in enumerate(raw_wl):
-                    ticker = parse_ticker(item.get("ticker"), f"watchlist[{idx}].ticker")
-                    status = str(item.get("status") or "ACTIVE").strip().upper()
-                    notes = item.get("notes")
-                    ts_valid, _ = resolve_historical_timestamp(
-                        item.get("added_at_utc"),
-                        f"{src.name}: watchlist[{idx}].added_at_utc",
-                        default_timestamp=default_timestamp,
-                        allow_date_only=allow_date_only,
-                        allow_naive_utc=allow_naive_utc,
-                    )
-                    wl_rec = {
-                        "ticker": ticker,
-                        "status": status,
-                        "notes": notes,
-                        "timestamp_utc": ts_valid,
-                    }
-                    if ticker in seen_watchlist_records:
-                        prev = seen_watchlist_records[ticker]
-                        if records_equal(prev, wl_rec, WATCHLIST_EQUALITY_FIELDS):
-                            plan.discrepancies.append({
-                                "domain": "watchlist",
-                                "ticker": ticker,
-                                "type": "EXACT_DUPLICATE_DEDUPLICATED",
-                                "message": f"Exact duplicate watchlist record for {ticker} deduplicated.",
-                            })
-                        else:
-                            raise MigrationConflictError(
-                                f"Conflicting duplicate watchlist record for {ticker} in {src.name}: "
-                                f"existing {prev} != incoming {wl_rec}"
-                            )
-                    else:
-                        seen_watchlist_records[ticker] = wl_rec
-                        plan.watchlist_records.append(wl_rec)
-            else:
-                raw_tickers = (
-                    data.get("watched_tickers")
-                    or (data.get("mutable_state", {}).get("watched_tickers") if isinstance(data.get("mutable_state"), dict) else None)
-                    or data.get("WATCHLIST")
-                )
-                if isinstance(raw_tickers, list):
-                    for item in raw_tickers:
-                        ticker = parse_ticker(item, f"{src.name}.watched_tickers")
-                        ts_valid, _ = resolve_historical_timestamp(
-                            None,
-                            f"{src.name}.watched_tickers[{ticker}]",
-                            default_timestamp=default_timestamp,
-                            allow_date_only=allow_date_only,
-                            allow_naive_utc=allow_naive_utc,
+                        raise MigrationConflictError(
+                            f"Conflicting duplicate cash record for {key[0]}/{key[1]} in {src.name}: "
+                            f"existing {prev} != incoming {cash_rec}"
                         )
-                        wl_rec = {
+                else:
+                    seen_cash_records[key] = cash_rec
+                    plan.cash_records.append(cash_rec)
+
+            # ---------------------------------------------------------------
+            # 3. Portfolio Positions Domain (Stage 1.5-D.1.1.2 R3)
+            # ---------------------------------------------------------------
+            consolidated_pos = consolidate_position_representations(
+                data,
+                default_account_id=default_account_id,
+                default_timestamp=default_timestamp,
+                allow_date_only=allow_date_only,
+                allow_naive_utc=allow_naive_utc,
+                discrepancies=plan.discrepancies,
+                source_name=src.name,
+            )
+            for pos_rec in consolidated_pos:
+                key = (pos_rec["account_id"], pos_rec["ticker"])
+                if key in seen_position_records:
+                    prev = seen_position_records[key]
+                    if records_equal(prev, pos_rec, POSITION_EQUALITY_FIELDS):
+                        plan.discrepancies.append({
+                            "domain": "portfolio_positions",
+                            "key": key,
+                            "type": "EXACT_DUPLICATE_DEDUPLICATED",
+                            "message": f"Exact duplicate position record for {key[0]}/{key[1]} deduplicated.",
+                        })
+                    else:
+                        raise MigrationConflictError(
+                            f"Conflicting duplicate position record for {key[0]}/{key[1]} in {src.name}: "
+                            f"existing {prev} != incoming {pos_rec}"
+                        )
+                else:
+                    seen_position_records[key] = pos_rec
+                    plan.position_records.append(pos_rec)
+
+            # ---------------------------------------------------------------
+            # 4. Watchlist Domain (Stage 1.5-D.1.1.2 R3)
+            # ---------------------------------------------------------------
+            consolidated_wl = consolidate_watchlist_representations(
+                data,
+                default_timestamp=default_timestamp,
+                allow_date_only=allow_date_only,
+                allow_naive_utc=allow_naive_utc,
+                discrepancies=plan.discrepancies,
+                source_name=src.name,
+            )
+            for wl_rec in consolidated_wl:
+                ticker = wl_rec["ticker"]
+                if ticker in seen_watchlist_records:
+                    prev = seen_watchlist_records[ticker]
+                    if records_equal(prev, wl_rec, WATCHLIST_EQUALITY_FIELDS):
+                        plan.discrepancies.append({
+                            "domain": "watchlist",
                             "ticker": ticker,
-                            "status": "ACTIVE",
-                            "notes": None,
-                            "timestamp_utc": ts_valid,
-                        }
-                        if ticker in seen_watchlist_records:
-                            prev = seen_watchlist_records[ticker]
-                            if records_equal(prev, wl_rec, WATCHLIST_EQUALITY_FIELDS):
-                                plan.discrepancies.append({
-                                    "domain": "watchlist",
-                                    "ticker": ticker,
-                                    "type": "EXACT_DUPLICATE_DEDUPLICATED",
-                                    "message": f"Exact duplicate watched ticker {ticker} deduplicated.",
-                                })
-                            else:
-                                raise MigrationConflictError(
-                                    f"Conflicting duplicate watchlist record for {ticker} in {src.name}: "
-                                    f"existing {prev} != incoming {wl_rec}"
-                                )
-                        else:
-                            seen_watchlist_records[ticker] = wl_rec
-                            plan.watchlist_records.append(wl_rec)
+                            "type": "EXACT_DUPLICATE_DEDUPLICATED",
+                            "message": f"Exact duplicate watchlist record for {ticker} deduplicated.",
+                        })
+                    else:
+                        raise MigrationConflictError(
+                            f"Conflicting duplicate watchlist record for {ticker} in {src.name}: "
+                            f"existing {prev} != incoming {wl_rec}"
+                        )
+                else:
+                    seen_watchlist_records[ticker] = wl_rec
+                    plan.watchlist_records.append(wl_rec)
 
             # ---------------------------------------------------------------
-            # 5. Scout Categories Domain
+            # 5. Scout Categories Domain (Stage 1.5-D.1.1.2 R3)
             # ---------------------------------------------------------------
-            # Check SCOUT_TICKER_MAP in config.json
-            scout_map = data.get("SCOUT_TICKER_MAP")
-            if isinstance(scout_map, dict):
-                for cat_name, tickers in scout_map.items():
-                    norm_cat = str(cat_name).strip()
-                    if not norm_cat:
-                        continue
-                    parsed_tickers = [parse_ticker(t, f"scout[{norm_cat}].ticker") for t in (tickers or [])]
-                    ts_valid, _ = resolve_historical_timestamp(
-                        None,
-                        f"{src.name}.SCOUT_TICKER_MAP[{norm_cat}]",
-                        default_timestamp=default_timestamp,
-                        allow_date_only=allow_date_only,
-                        allow_naive_utc=allow_naive_utc,
-                    )
-                    cat_rec = {
-                        "category_name": norm_cat,
-                        "description": None,
-                        "tickers": sorted(parsed_tickers),
-                        "timestamp_utc": ts_valid,
-                    }
-                    if norm_cat in seen_category_records:
-                        prev = seen_category_records[norm_cat]
-                        if records_equal(prev, cat_rec, SCOUT_CATEGORY_EQUALITY_FIELDS):
-                            plan.discrepancies.append({
-                                "domain": "scout_categories",
-                                "category_name": norm_cat,
-                                "type": "EXACT_DUPLICATE_DEDUPLICATED",
-                                "message": f"Exact duplicate scout category record for '{norm_cat}' deduplicated.",
-                            })
-                        else:
-                            raise MigrationConflictError(
-                                f"Conflicting duplicate scout category record for '{norm_cat}' in {src.name}: "
-                                f"existing {prev} != incoming {cat_rec}"
-                            )
+            consolidated_sc = consolidate_scout_representations(
+                data,
+                default_timestamp=default_timestamp,
+                allow_date_only=allow_date_only,
+                allow_naive_utc=allow_naive_utc,
+                discrepancies=plan.discrepancies,
+                source_name=src.name,
+            )
+            for cat_rec in consolidated_sc:
+                norm_cat = cat_rec["category_name"]
+                if norm_cat in seen_category_records:
+                    prev = seen_category_records[norm_cat]
+                    if records_equal(prev, cat_rec, SCOUT_CATEGORY_EQUALITY_FIELDS):
+                        plan.discrepancies.append({
+                            "domain": "scout_categories",
+                            "category_name": norm_cat,
+                            "type": "EXACT_DUPLICATE_DEDUPLICATED",
+                            "message": f"Exact duplicate scout category record for '{norm_cat}' deduplicated.",
+                        })
                     else:
-                        seen_category_records[norm_cat] = cat_rec
-                        plan.scout_categories.append(cat_rec)
-
-            # Check structured scout_categories
-            scout_cats = data.get("scout_categories")
-            if isinstance(scout_cats, list) and scout_cats and isinstance(scout_cats[0], dict):
-                for idx, sc in enumerate(scout_cats):
-                    norm_cat = str(sc.get("category_name") or "").strip()
-                    if not norm_cat:
-                        continue
-                    desc = sc.get("description")
-                    parsed_tickers = [parse_ticker(t, f"scout[{norm_cat}].ticker") for t in (sc.get("tickers") or [])]
-                    ts_valid, _ = resolve_historical_timestamp(
-                        sc.get("updated_at_utc"),
-                        f"{src.name}: scout[{norm_cat}].updated_at_utc",
-                        default_timestamp=default_timestamp,
-                        allow_date_only=allow_date_only,
-                        allow_naive_utc=allow_naive_utc,
-                    )
-                    cat_rec = {
-                        "category_name": norm_cat,
-                        "description": desc,
-                        "tickers": sorted(parsed_tickers),
-                        "timestamp_utc": ts_valid,
-                    }
-                    if norm_cat in seen_category_records:
-                        prev = seen_category_records[norm_cat]
-                        if records_equal(prev, cat_rec, SCOUT_CATEGORY_EQUALITY_FIELDS):
-                            plan.discrepancies.append({
-                                "domain": "scout_categories",
-                                "category_name": norm_cat,
-                                "type": "EXACT_DUPLICATE_DEDUPLICATED",
-                                "message": f"Exact duplicate scout category record for '{norm_cat}' deduplicated.",
-                            })
-                        else:
-                            raise MigrationConflictError(
-                                f"Conflicting duplicate scout category record for '{norm_cat}' in {src.name}: "
-                                f"existing {prev} != incoming {cat_rec}"
-                            )
-                    else:
-                        seen_category_records[norm_cat] = cat_rec
-                        plan.scout_categories.append(cat_rec)
+                        raise MigrationConflictError(
+                            f"Conflicting duplicate scout category record for '{norm_cat}' in {src.name}: "
+                            f"existing {prev} != incoming {cat_rec}"
+                        )
+                else:
+                    seen_category_records[norm_cat] = cat_rec
+                    plan.scout_categories.append(cat_rec)
 
             # ---------------------------------------------------------------
             # 6. Trade Lessons Domain
