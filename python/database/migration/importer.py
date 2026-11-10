@@ -59,6 +59,7 @@ from python.database.migration.contract import (
     consolidate_watchlist_representations,
     consolidate_position_representations,
     consolidate_cash_representations,
+    _UNSPECIFIED,
 )
 from python.tool_registry import execution_role_context
 
@@ -331,17 +332,37 @@ class LegacyJsonImporter:
                     if "rule_code" in item and "directive_text" in item:
                         code = str(item["rule_code"]).strip().upper()
                         directive = str(item["directive_text"]).strip()
-                        category = str(item.get("category") or "MANDATE").strip().upper()
-                        status = str(item.get("status") or "ACTIVE").strip().upper()
+                        if "category" in item:
+                            raw_cat = item["category"]
+                            if raw_cat is None or not isinstance(raw_cat, str) or not raw_cat.strip():
+                                raise MigrationValidationError(
+                                    f"{src.name}: trade_lessons[{idx}].category: explicitly supplied category must be a non-empty string"
+                                )
+                            category = raw_cat.strip().upper()
+                        else:
+                            category = "MANDATE"
+
+                        if "status" in item:
+                            raw_stat = item["status"]
+                            if raw_stat is None or not isinstance(raw_stat, str) or not raw_stat.strip():
+                                raise MigrationValidationError(
+                                    f"{src.name}: trade_lessons[{idx}].status: explicitly supplied status must be a non-empty string"
+                                )
+                            status = raw_stat.strip().upper()
+                        else:
+                            status = "ACTIVE"
+
+                        raw_created = item["created_at_utc"] if "created_at_utc" in item else _UNSPECIFIED
                         ts_created, _ = resolve_historical_timestamp(
-                            item.get("created_at_utc"),
+                            raw_created,
                             f"{src.name}: trade_lessons[{idx}].created_at_utc",
                             default_timestamp=default_timestamp,
                             allow_date_only=allow_date_only,
                             allow_naive_utc=allow_naive_utc,
                         )
+                        raw_reviewed = item["last_reviewed_at_utc"] if "last_reviewed_at_utc" in item else _UNSPECIFIED
                         ts_reviewed, _ = resolve_historical_timestamp(
-                            item.get("last_reviewed_at_utc"),
+                            raw_reviewed,
                             f"{src.name}: trade_lessons[{idx}].last_reviewed_at_utc",
                             nullable=True,
                             default_timestamp=None,
@@ -476,8 +497,9 @@ class LegacyJsonImporter:
                         ticker = parse_ticker(d["ticker"]) if d.get("ticker") else None
                         votes = d.get("votes") or {}
                         transcript = d.get("transcript_text")
+                        raw_ts = d["timestamp_utc"] if "timestamp_utc" in d else _UNSPECIFIED
                         ts, _ = resolve_historical_timestamp(
-                            d.get("timestamp_utc"),
+                            raw_ts,
                             f"{src.name}: decision_log[{idx}].timestamp_utc",
                             default_timestamp=default_timestamp,
                             allow_date_only=allow_date_only,

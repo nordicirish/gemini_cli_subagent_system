@@ -68,6 +68,8 @@ from python.database.migration.contract import (
     consolidate_watchlist_representations,
     consolidate_position_representations,
     consolidate_cash_representations,
+    _MISSING,
+    _UNSPECIFIED,
 )
 from python.database.migration.importer import LegacyJsonImporter
 from python.database.migration.parity import SSoTParityVerifier
@@ -3193,6 +3195,484 @@ class TestStage15D1121CorrectiveRegressions(BaseMigrationTestCase):
         with self.assertRaises(MigrationConflictError) as ctx:
             consolidate_cash_representations(conflict_amt, default_account_id="PRIMARY", default_timestamp=self.default_ts)
         self.assertIn("Conflicting duplicate cash record for PRIMARY/EUR", str(ctx.exception))
+
+
+class TestStage15D1122StrictValueAndTimestampCorrectiveRegressions(BaseMigrationTestCase):
+    """
+    Focused regression test suite for Stage 1.5-D.1.1.2.2 corrective findings:
+    - F1: Preservation of explicit empty collections during consolidation.
+    - F2: Rejection of explicitly empty account and currency identifiers.
+    - F3: Strict timestamp fallback elimination and historical provenance.
+    """
+
+    # -----------------------------------------------------------------------
+    # F1: Preservation of explicit empty collections during consolidation
+    # -----------------------------------------------------------------------
+
+    def test_f1_scout_missing_tickers_merges_with_populated_tickers(self):
+        """Field absent + ['AAPL'] -> ['AAPL'] and ['AAPL'] + Field absent -> ['AAPL']."""
+        source_ab = {
+            "scout_categories": [
+                {"category_name": "TECH", "description": "Technology sector"},
+            ],
+            "SCOUT_TICKER_MAP": {
+                "TECH": ["AAPL"],
+            },
+        }
+        source_ba = {
+            "SCOUT_TICKER_MAP": {
+                "TECH": ["AAPL"],
+            },
+            "scout_categories": [
+                {"category_name": "TECH", "description": "Technology sector"},
+            ],
+        }
+
+        res_ab = consolidate_scout_representations(source_ab, default_timestamp=self.default_ts)
+        res_ba = consolidate_scout_representations(source_ba, default_timestamp=self.default_ts)
+
+        self.assertEqual(len(res_ab), 1)
+        self.assertEqual(len(res_ba), 1)
+        self.assertEqual(res_ab[0]["tickers"], ["AAPL"])
+        self.assertEqual(res_ab[0]["description"], "Technology sector")
+        self.assertEqual(res_ab, res_ba)
+
+    def test_f1_scout_two_explicit_empty_collections_consolidate_to_empty(self):
+        """[] + [] -> []."""
+        source_ab = {
+            "scout_categories": [
+                {"category_name": "TECH", "tickers": [], "description": "Tech with empty list"},
+            ],
+            "SCOUT_TICKER_MAP": {
+                "TECH": [],
+            },
+        }
+        source_ba = {
+            "SCOUT_TICKER_MAP": {
+                "TECH": [],
+            },
+            "scout_categories": [
+                {"category_name": "TECH", "tickers": [], "description": "Tech with empty list"},
+            ],
+        }
+
+        res_ab = consolidate_scout_representations(source_ab, default_timestamp=self.default_ts)
+        res_ba = consolidate_scout_representations(source_ba, default_timestamp=self.default_ts)
+
+        self.assertEqual(len(res_ab), 1)
+        self.assertEqual(len(res_ba), 1)
+        self.assertEqual(res_ab[0]["tickers"], [])
+        self.assertEqual(res_ab, res_ba)
+
+    def test_f1_scout_explicit_empty_vs_populated_raises_conflict(self):
+        """[] + ['AAPL'] -> MigrationConflictError and ['AAPL'] + [] -> MigrationConflictError."""
+        source_empty_then_pop = {
+            "scout_categories": [
+                {"category_name": "TECH", "tickers": [], "description": "Tech empty"},
+            ],
+            "SCOUT_TICKER_MAP": {
+                "TECH": ["AAPL"],
+            },
+        }
+        with self.assertRaises(MigrationConflictError) as ctx1:
+            consolidate_scout_representations(source_empty_then_pop, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate scout category record for TECH", str(ctx1.exception))
+        self.assertIn("tickers", str(ctx1.exception))
+        self.assertIn("['AAPL']", str(ctx1.exception))
+        self.assertIn("[]", str(ctx1.exception))
+
+        source_pop_then_empty = {
+            "SCOUT_TICKER_MAP": {
+                "TECH": ["AAPL"],
+            },
+            "scout_categories": [
+                {"category_name": "TECH", "tickers": [], "description": "Tech empty"},
+            ],
+        }
+        with self.assertRaises(MigrationConflictError) as ctx2:
+            consolidate_scout_representations(source_pop_then_empty, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate scout category record for TECH", str(ctx2.exception))
+        self.assertIn("tickers", str(ctx2.exception))
+        self.assertIn("['AAPL']", str(ctx2.exception))
+        self.assertIn("[]", str(ctx2.exception))
+
+    def test_f1_scout_conflicting_populated_tickers_raises_conflict(self):
+        """['AAPL'] + ['MSFT'] -> MigrationConflictError."""
+        source = {
+            "scout_categories": [
+                {"category_name": "TECH", "tickers": ["AAPL"]},
+            ],
+            "SCOUT_TICKER_MAP": {
+                "TECH": ["MSFT"],
+            },
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_scout_representations(source, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate scout category record for TECH", str(ctx.exception))
+
+    def test_f1_scout_explicit_none_vs_populated_raises_conflict(self):
+        """None + ['AAPL'] -> MigrationConflictError and ['AAPL'] + None -> MigrationConflictError."""
+        source_none_then_pop = {
+            "scout_categories": [
+                {"category_name": "TECH", "tickers": None},
+            ],
+            "SCOUT_TICKER_MAP": {
+                "TECH": ["AAPL"],
+            },
+        }
+        with self.assertRaises(MigrationConflictError) as ctx1:
+            consolidate_scout_representations(source_none_then_pop, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate scout category record for TECH", str(ctx1.exception))
+
+        source_pop_then_none = {
+            "SCOUT_TICKER_MAP": {
+                "TECH": ["AAPL"],
+            },
+            "scout_categories": [
+                {"category_name": "TECH", "tickers": None},
+            ],
+        }
+        with self.assertRaises(MigrationConflictError) as ctx2:
+            consolidate_scout_representations(source_pop_then_none, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate scout category record for TECH", str(ctx2.exception))
+
+    # -----------------------------------------------------------------------
+    # F2: Rejection of explicitly empty account and currency identifiers
+    # -----------------------------------------------------------------------
+
+    def test_f2_positions_missing_account_id_defaults_to_primary(self):
+        """Missing account_id defaults to default_account_id ('PRIMARY')."""
+        source = {
+            "positions": [
+                {"ticker": "AAPL", "shares": "10", "wac": "150.00", "last_updated_at_utc": self.default_ts}
+            ]
+        }
+        res = consolidate_position_representations(source, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["account_id"], "PRIMARY")
+
+    def test_f2_positions_explicit_valid_account_id_normalizes(self):
+        """Explicit valid account_id is stripped and uppercased."""
+        source = {
+            "positions": [
+                {"account_id": " brokerage_1 ", "ticker": "AAPL", "shares": "10", "wac": "150.00", "last_updated_at_utc": self.default_ts}
+            ]
+        }
+        res = consolidate_position_representations(source, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["account_id"], "BROKERAGE_1")
+
+    def test_f2_positions_explicit_empty_or_invalid_account_id_rejected(self):
+        """Explicit empty, whitespace, None, or non-string account_id raises MigrationValidationError."""
+        for bad_acc in ["", "   ", None, 123, []]:
+            source = {
+                "positions": [
+                    {"account_id": bad_acc, "ticker": "AAPL", "shares": "10", "wac": "150.00", "last_updated_at_utc": self.default_ts}
+                ]
+            }
+            with self.assertRaises(MigrationValidationError) as ctx:
+                consolidate_position_representations(source, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+            self.assertIn("account_id: explicitly supplied account_id must be a non-empty string", str(ctx.exception))
+
+    def test_f2_cash_missing_account_id_defaults_to_primary(self):
+        """Missing account_id in portfolio_cash defaults to default_account_id ('PRIMARY')."""
+        source = {
+            "portfolio_cash": [
+                {"currency": "EUR", "amount": "5000.00", "last_updated_at_utc": self.default_ts}
+            ]
+        }
+        res = consolidate_cash_representations(source, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["account_id"], "PRIMARY")
+
+    def test_f2_cash_explicit_empty_or_invalid_account_id_rejected(self):
+        """Explicit empty, whitespace, None, or non-string account_id in cash raises MigrationValidationError."""
+        for bad_acc in ["", "   ", None, 123, []]:
+            source = {
+                "portfolio_cash": [
+                    {"account_id": bad_acc, "currency": "EUR", "amount": "5000.00", "last_updated_at_utc": self.default_ts}
+                ]
+            }
+            with self.assertRaises(MigrationValidationError) as ctx:
+                consolidate_cash_representations(source, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+            self.assertIn("account_id: explicitly supplied account_id must be a non-empty string", str(ctx.exception))
+
+    def test_f2_cash_missing_currency_defaults_to_eur(self):
+        """Missing currency in portfolio_cash defaults to 'EUR'."""
+        source = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "amount": "5000.00", "last_updated_at_utc": self.default_ts}
+            ]
+        }
+        res = consolidate_cash_representations(source, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["currency"], "EUR")
+
+    def test_f2_cash_explicit_valid_currency_normalizes(self):
+        """Explicit valid currency is stripped and uppercased."""
+        source = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": " usd ", "amount": "5000.00", "last_updated_at_utc": self.default_ts}
+            ]
+        }
+        res = consolidate_cash_representations(source, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["currency"], "USD")
+
+    def test_f2_cash_explicit_empty_or_invalid_currency_rejected(self):
+        """Explicit empty, whitespace, None, non-string, or unsupported currency raises MigrationValidationError."""
+        for bad_curr in ["", "   ", None, 123, []]:
+            source = {
+                "portfolio_cash": [
+                    {"account_id": "PRIMARY", "currency": bad_curr, "amount": "5000.00", "last_updated_at_utc": self.default_ts}
+                ]
+            }
+            with self.assertRaises(MigrationValidationError) as ctx:
+                consolidate_cash_representations(source, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+            self.assertIn("currency: explicitly supplied currency must be a non-empty string", str(ctx.exception))
+
+        for unsupp in ["GBP", "JPY", "CHF"]:
+            source = {
+                "portfolio_cash": [
+                    {"account_id": "PRIMARY", "currency": unsupp, "amount": "5000.00", "last_updated_at_utc": self.default_ts}
+                ]
+            }
+            with self.assertRaises(MigrationValidationError) as ctx:
+                consolidate_cash_representations(source, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+            self.assertIn(f"unsupported currency '{unsupp}'", str(ctx.exception))
+
+    # -----------------------------------------------------------------------
+    # F3: Strict timestamp fallback elimination and historical provenance
+    # -----------------------------------------------------------------------
+
+    def test_f3_resolve_historical_timestamp_strict_missing_and_empty(self):
+        """Tests resolve_historical_timestamp fail-closed behavior for empty, None, and missing values."""
+        # Explicit empty string fails closed
+        with self.assertRaises(MigrationValidationError) as ctx:
+            resolve_historical_timestamp("", "test_ts", default_timestamp=self.default_ts)
+        self.assertIn("explicitly supplied timestamp cannot be empty or whitespace", str(ctx.exception))
+
+        # Explicit whitespace fails closed
+        with self.assertRaises(MigrationValidationError) as ctx:
+            resolve_historical_timestamp("   ", "test_ts", default_timestamp=self.default_ts)
+        self.assertIn("explicitly supplied timestamp cannot be empty or whitespace", str(ctx.exception))
+
+        # Explicit None on non-nullable fails closed (never falls back to default)
+        with self.assertRaises(MigrationValidationError) as ctx:
+            resolve_historical_timestamp(None, "test_ts", nullable=False, default_timestamp=self.default_ts)
+        self.assertIn("non-nullable historical timestamp cannot be null", str(ctx.exception))
+
+        # Explicit None on nullable returns (None, MISSING) (never falls back to default)
+        ts_val, prov = resolve_historical_timestamp(None, "test_ts", nullable=True, default_timestamp=self.default_ts)
+        self.assertIsNone(ts_val)
+        self.assertEqual(prov, TimestampProvenance.MISSING)
+
+        # Genuinely missing (_MISSING or _UNSPECIFIED) with default returns default
+        ts_val, prov = resolve_historical_timestamp(_MISSING, "test_ts", default_timestamp=self.default_ts)
+        self.assertEqual(ts_val, self.default_ts)
+        self.assertEqual(prov, TimestampProvenance.CALLER_SUPPLIED_DEFAULT)
+
+        ts_val, prov = resolve_historical_timestamp(_UNSPECIFIED, "test_ts", default_timestamp=self.default_ts)
+        self.assertEqual(ts_val, self.default_ts)
+        self.assertEqual(prov, TimestampProvenance.CALLER_SUPPLIED_DEFAULT)
+
+        # Genuinely missing without default on non-nullable fails closed
+        with self.assertRaises(MigrationValidationError) as ctx:
+            resolve_historical_timestamp(_MISSING, "test_ts", nullable=False, default_timestamp=None)
+        self.assertIn("historical timestamp is missing; migration cannot fabricate provenance", str(ctx.exception))
+
+        # Genuinely missing without default on nullable returns (None, MISSING)
+        ts_val, prov = resolve_historical_timestamp(_MISSING, "test_ts", nullable=True, default_timestamp=None)
+        self.assertIsNone(ts_val)
+        self.assertEqual(prov, TimestampProvenance.MISSING)
+
+    def test_f3_watchlist_explicit_empty_timestamp_fails_closed_without_fallback(self):
+        """Watchlist entry with explicit empty added_at_utc fails closed even if timestamp_utc is valid."""
+        source_empty = {
+            "watchlist": [
+                {"ticker": "NVDA", "added_at_utc": "", "timestamp_utc": self.default_ts}
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            consolidate_watchlist_representations(source_empty, default_timestamp=self.default_ts)
+        self.assertIn("explicitly supplied timestamp cannot be empty or whitespace", str(ctx.exception))
+
+        source_whitespace = {
+            "watchlist": [
+                {"ticker": "NVDA", "added_at_utc": "   ", "timestamp_utc": self.default_ts}
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            consolidate_watchlist_representations(source_whitespace, default_timestamp=self.default_ts)
+        self.assertIn("explicitly supplied timestamp cannot be empty or whitespace", str(ctx.exception))
+
+        # Missing added_at_utc falls back to valid timestamp_utc
+        source_missing_primary = {
+            "watchlist": [
+                {"ticker": "NVDA", "timestamp_utc": self.default_ts}
+            ]
+        }
+        res = consolidate_watchlist_representations(source_missing_primary, default_timestamp=None)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["added_at_utc"], self.default_ts)
+
+    def test_f3_positions_explicit_empty_timestamp_fails_closed_without_fallback(self):
+        """Position with explicit empty last_updated_at_utc fails closed even if timestamp_utc is valid."""
+        source = {
+            "positions": [
+                {"ticker": "NVDA", "shares": "10", "wac": "100.00", "last_updated_at_utc": "", "timestamp_utc": self.default_ts}
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            consolidate_position_representations(source, default_timestamp=self.default_ts)
+        self.assertIn("explicitly supplied timestamp cannot be empty or whitespace", str(ctx.exception))
+
+        # Missing last_updated_at_utc falls back to valid timestamp_utc
+        source_missing_primary = {
+            "positions": [
+                {"ticker": "NVDA", "shares": "10", "wac": "100.00", "timestamp_utc": self.default_ts}
+            ]
+        }
+        res = consolidate_position_representations(source_missing_primary, default_timestamp=None)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["last_updated_at_utc"], self.default_ts)
+
+    def test_f3_cash_explicit_empty_timestamp_fails_closed_without_fallback(self):
+        """Cash with explicit empty last_updated_at_utc fails closed even if timestamp_utc is valid."""
+        source = {
+            "portfolio_cash": [
+                {"currency": "EUR", "amount": "100.00", "last_updated_at_utc": "", "timestamp_utc": self.default_ts}
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            consolidate_cash_representations(source, default_timestamp=self.default_ts)
+        self.assertIn("explicitly supplied timestamp cannot be empty or whitespace", str(ctx.exception))
+
+        # Missing last_updated_at_utc falls back to valid timestamp_utc
+        source_missing_primary = {
+            "portfolio_cash": [
+                {"currency": "EUR", "amount": "100.00", "timestamp_utc": self.default_ts}
+            ]
+        }
+        res = consolidate_cash_representations(source_missing_primary, default_timestamp=None)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["last_updated_at_utc"], self.default_ts)
+
+    def test_f3_scout_explicit_empty_timestamp_fails_closed_without_fallback(self):
+        """Scout with explicit empty updated_at_utc fails closed even if timestamp_utc is valid."""
+        source = {
+            "scout_categories": [
+                {"category_name": "TECH", "updated_at_utc": "", "timestamp_utc": self.default_ts}
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            consolidate_scout_representations(source, default_timestamp=self.default_ts)
+        self.assertIn("explicitly supplied timestamp cannot be empty or whitespace", str(ctx.exception))
+
+        # Missing updated_at_utc falls back to valid timestamp_utc
+        source_missing_primary = {
+            "scout_categories": [
+                {"category_name": "TECH", "timestamp_utc": self.default_ts}
+            ]
+        }
+        res = consolidate_scout_representations(source_missing_primary, default_timestamp=None)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["updated_at_utc"], self.default_ts)
+
+    def test_f3_trade_lessons_validation_and_timestamp_strictness(self):
+        """Trade lessons reject empty category/status and enforce timestamp strictness."""
+        # Explicit empty category
+        source_bad_cat = {
+            "trade_lessons": [
+                {"rule_code": "L-001", "directive_text": "Do not chase", "category": "", "created_at_utc": self.default_ts}
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            self.importer.import_into(source_bad_cat, self.db_manager)
+        self.assertIn("category: explicitly supplied category must be a non-empty string", str(ctx.exception))
+
+        # Explicit empty status
+        source_bad_stat = {
+            "trade_lessons": [
+                {"rule_code": "L-001", "directive_text": "Do not chase", "status": "   ", "created_at_utc": self.default_ts}
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            self.importer.import_into(source_bad_stat, self.db_manager)
+        self.assertIn("status: explicitly supplied status must be a non-empty string", str(ctx.exception))
+
+        # Explicit empty created_at_utc
+        source_bad_created = {
+            "trade_lessons": [
+                {"rule_code": "L-001", "directive_text": "Do not chase", "created_at_utc": ""}
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            self.importer.import_into(source_bad_created, self.db_manager, default_timestamp=self.default_ts)
+        self.assertIn("explicitly supplied timestamp cannot be empty or whitespace", str(ctx.exception))
+
+        # Explicit None in created_at_utc (non-nullable)
+        source_null_created = {
+            "trade_lessons": [
+                {"rule_code": "L-001", "directive_text": "Do not chase", "created_at_utc": None}
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            self.importer.import_into(source_null_created, self.db_manager, default_timestamp=self.default_ts)
+        self.assertIn("non-nullable historical timestamp cannot be null", str(ctx.exception))
+
+        # Explicit None in last_reviewed_at_utc (nullable) succeeds
+        source_null_reviewed = {
+            "trade_lessons": [
+                {"rule_code": "L-001", "directive_text": "Do not chase", "created_at_utc": self.default_ts, "last_reviewed_at_utc": None}
+            ]
+        }
+        res = self.importer.import_into(source_null_reviewed, self.db_manager)
+        self.assertTrue(res.success)
+        with self.db_manager.connection() as conn:
+            proj = self.generator.generate(conn)
+        trade_lessons = proj.get("trade_lessons", [])
+        self.assertEqual(len(trade_lessons), 1)
+        self.assertEqual(trade_lessons[0]["rule_code"], "L-001")
+        self.assertIsNone(trade_lessons[0].get("last_reviewed_at_utc"))
+
+    def test_f3_case_c_decision_sub_decision_empty_timestamp_fails_closed(self):
+        """Case C sub-decision with explicit empty timestamp fails closed rather than inheriting parent."""
+        source_bad_sub_ts = {
+            "decision_log": [
+                {
+                    "timestamp": self.default_ts,
+                    "trigger_context": "COUNCIL_SESSION",
+                    "council_debate": {"agent": "note"},
+                    "decisions": [
+                        {"action": "BUY", "outcome": "EXECUTED", "ticker": "AAPL", "timestamp": ""}
+                    ],
+                }
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            self.importer.import_into(source_bad_sub_ts, self.db_manager)
+        self.assertIn("explicitly supplied timestamp cannot be empty or whitespace", str(ctx.exception))
+
+        # Sub-decision with omitted timestamp inherits parent timestamp cleanly
+        source_omitted_sub_ts = {
+            "decision_log": [
+                {
+                    "timestamp": self.default_ts,
+                    "trigger_context": "COUNCIL_SESSION",
+                    "council_debate": {"agent": "note"},
+                    "decisions": [
+                        {"action": "BUY", "outcome": "EXECUTED", "ticker": "AAPL"}
+                    ],
+                }
+            ]
+        }
+        res = self.importer.import_into(source_omitted_sub_ts, self.db_manager)
+        self.assertTrue(res.success)
+        with self.db_manager.connection() as conn:
+            proj = self.generator.generate(conn)
+        self.assertEqual(len(proj.get("decision_log", [])), 1)
+        self.assertEqual(proj["decision_log"][0]["timestamp_utc"], self.default_ts)
 
 
 if __name__ == "__main__":

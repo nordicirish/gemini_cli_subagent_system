@@ -378,61 +378,80 @@ def resolve_historical_timestamp(
 ) -> Tuple[Optional[str], TimestampProvenance]:
     """
     Resolves historical timestamp without implicit current-time fabrication (D-01, D1.4, D1.5).
-    - If source_value is present:
-        - If date-only: rejected unless allow_date_only=True (provenance: DERIVED).
-        - If timezone-naive: rejected unless allow_naive_utc=True (provenance: DERIVED).
-        - If timezone-aware: normalized to canonical UTC ending in 'Z' (provenance: SOURCE_PROVIDED).
-    - If source_value is missing:
+    - If source_value is genuinely missing (_MISSING or _UNSPECIFIED):
         - If default_timestamp is provided: validated and returned (provenance: CALLER_SUPPLIED_DEFAULT).
         - If nullable=True: returns (None, TimestampProvenance.MISSING).
         - Otherwise raises MigrationValidationError fail-closed.
+    - If source_value is explicit None:
+        - If nullable=True: returns (None, TimestampProvenance.MISSING).
+        - If nullable=False: raises MigrationValidationError fail-closed (cannot silently fall back to default).
+    - If source_value is explicitly supplied:
+        - If empty string or whitespace: raises MigrationValidationError fail-closed.
+        - If date-only: rejected unless allow_date_only=True (provenance: DERIVED).
+        - If timezone-naive: rejected unless allow_naive_utc=True (provenance: DERIVED).
+        - If timezone-aware: normalized to canonical UTC ending in 'Z' (provenance: SOURCE_PROVIDED).
     """
-    if source_value is not None and str(source_value).strip() != "":
-        val_str = str(source_value).strip()
-        if is_date_only(val_str):
-            if allow_date_only:
-                canonical = f"{val_str}T00:00:00Z"
-                validate_timestamp_utc(canonical)
-                return canonical, TimestampProvenance.DERIVED
-            raise MigrationValidationError(
-                f"{field_name}: date-only value '{val_str}' cannot be converted to timestamp without explicit authorization"
-            )
+    if source_value is _MISSING or source_value is _UNSPECIFIED:
+        if default_timestamp is not None and str(default_timestamp).strip() != "":
+            ts = parse_iso_timestamp(default_timestamp, f"{field_name} (default)")
+            return ts, TimestampProvenance.CALLER_SUPPLIED_DEFAULT
+        if nullable:
+            return None, TimestampProvenance.MISSING
+        raise MigrationValidationError(
+            f"{field_name}: historical timestamp is missing; migration cannot fabricate provenance"
+        )
 
-        # Check if timezone naive
-        try:
-            norm = val_str[:-1] + "+00:00" if val_str.endswith("Z") else val_str
-            dt = datetime.fromisoformat(norm)
-            is_naive = dt.tzinfo is None or dt.utcoffset() is None
-        except Exception as exc:
-            raise MigrationValidationError(f"{field_name}: invalid timestamp format '{val_str}': {exc}") from exc
+    if source_value is None:
+        if nullable:
+            return None, TimestampProvenance.MISSING
+        raise MigrationValidationError(
+            f"{field_name}: non-nullable historical timestamp cannot be null"
+        )
 
-        if is_naive:
-            if allow_naive_utc:
-                candidate = f"{val_str}Z"
-                try:
-                    validate_timestamp_utc(candidate)
-                    return candidate, TimestampProvenance.DERIVED
-                except ValidationError as e:
-                    raise MigrationValidationError(f"{field_name}: invalid derived naive UTC timestamp: {e}") from e
-            raise MigrationValidationError(
-                f"{field_name}: timezone-naive timestamp '{val_str}' is forbidden fail-closed; "
-                f"timezone cannot be established without explicit caller authorization"
-            )
+    if not isinstance(source_value, str):
+        raise MigrationValidationError(
+            f"{field_name}: invalid timestamp format: expected string, got {type(source_value).__name__}"
+        )
 
-        # Timezone aware
-        canonical = normalize_aware_timestamp(val_str, field_name)
-        return canonical, TimestampProvenance.SOURCE_PROVIDED
+    val_str = source_value.strip()
+    if not val_str:
+        raise MigrationValidationError(
+            f"{field_name}: explicitly supplied timestamp cannot be empty or whitespace"
+        )
 
-    if default_timestamp is not None and str(default_timestamp).strip() != "":
-        ts = parse_iso_timestamp(default_timestamp, f"{field_name} (default)")
-        return ts, TimestampProvenance.CALLER_SUPPLIED_DEFAULT
+    if is_date_only(val_str):
+        if allow_date_only:
+            canonical = f"{val_str}T00:00:00Z"
+            validate_timestamp_utc(canonical)
+            return canonical, TimestampProvenance.DERIVED
+        raise MigrationValidationError(
+            f"{field_name}: date-only value '{val_str}' cannot be converted to timestamp without explicit authorization"
+        )
 
-    if nullable:
-        return None, TimestampProvenance.MISSING
+    # Check if timezone naive
+    try:
+        norm = val_str[:-1] + "+00:00" if val_str.endswith("Z") else val_str
+        dt = datetime.fromisoformat(norm)
+        is_naive = dt.tzinfo is None or dt.utcoffset() is None
+    except Exception as exc:
+        raise MigrationValidationError(f"{field_name}: invalid timestamp format '{val_str}': {exc}") from exc
 
-    raise MigrationValidationError(
-        f"{field_name}: historical timestamp is missing; migration cannot fabricate provenance"
-    )
+    if is_naive:
+        if allow_naive_utc:
+            candidate = f"{val_str}Z"
+            try:
+                validate_timestamp_utc(candidate)
+                return candidate, TimestampProvenance.DERIVED
+            except ValidationError as e:
+                raise MigrationValidationError(f"{field_name}: invalid derived naive UTC timestamp: {e}") from e
+        raise MigrationValidationError(
+            f"{field_name}: timezone-naive timestamp '{val_str}' is forbidden fail-closed; "
+            f"timezone cannot be established without explicit caller authorization"
+        )
+
+    # Timezone aware
+    canonical = normalize_aware_timestamp(val_str, field_name)
+    return canonical, TimestampProvenance.SOURCE_PROVIDED
 
 
 def transform_legacy_decision_case_b(
@@ -484,9 +503,9 @@ def transform_legacy_decision_case_c(
     if "decisions" not in record or not isinstance(record["decisions"], list):
         raise MigrationValidationError("Case C decision record missing 'decisions' list")
 
-    ts_raw = record.get("timestamp")
+    raw_parent_ts = record["timestamp"] if "timestamp" in record else _UNSPECIFIED
     parent_ts, _ = resolve_historical_timestamp(
-        ts_raw,
+        raw_parent_ts,
         "decision_log.timestamp",
         default_timestamp=default_timestamp,
         allow_naive_utc=allow_naive_utc,
@@ -531,11 +550,21 @@ def transform_legacy_decision_case_c(
         seen_sub_identities.add(sub_key)
 
         sub_votes = sub_d.get("scrutiny_audit") or council_debate or {}
-        sub_ts_raw = sub_d.get("timestamp") or ts_raw
+        if "timestamp" in sub_d:
+            sub_ts_raw = sub_d["timestamp"]
+            ts_field_name = f"decision_log.decisions[{sub_idx}].timestamp"
+        elif raw_parent_ts is not _UNSPECIFIED:
+            sub_ts_raw = raw_parent_ts
+            ts_field_name = "decision_log.timestamp"
+        else:
+            sub_ts_raw = _UNSPECIFIED
+            ts_field_name = f"decision_log.decisions[{sub_idx}].timestamp"
+
+        sub_default = parent_ts if parent_ts is not None else default_timestamp
         sub_ts, _ = resolve_historical_timestamp(
             sub_ts_raw,
-            f"decision_log.decisions[{sub_idx}].timestamp",
-            default_timestamp=parent_ts or default_timestamp,
+            ts_field_name,
+            default_timestamp=sub_default,
             allow_naive_utc=allow_naive_utc,
         )
         sub_records.append({
@@ -664,11 +693,16 @@ def consolidate_scout_representations(
                 cat = str(raw_k).strip()
                 if not cat:
                     continue
-                parsed_tickers = sorted(list({parse_ticker(t, f"{map_key}[{cat}].ticker") for t in (raw_v or []) if t}))
+                if raw_v is None:
+                    parsed_tickers = None
+                elif isinstance(raw_v, list):
+                    parsed_tickers = sorted(list({parse_ticker(t, f"{map_key}[{cat}].ticker") for t in raw_v if t}))
+                else:
+                    raise MigrationValidationError(f"{map_key}[{cat}]: tickers must be a list")
                 if default_timestamp:
                     ts_val, _ = resolve_historical_timestamp(
-                        None,
-                        f"{map_key}[{cat}]",
+                        _UNSPECIFIED,
+                        f"{map_key}[{cat}].updated_at_utc",
                         default_timestamp=default_timestamp,
                         allow_date_only=allow_date_only,
                         allow_naive_utc=allow_naive_utc,
@@ -697,34 +731,55 @@ def consolidate_scout_representations(
                     if not raw_name:
                         continue
                     cat = str(raw_name).strip()
-                    parsed_tickers = sorted(list({parse_ticker(t, f"{rep_key}[{idx}].ticker") for t in (entry.get("tickers") or []) if t}))
+                    if "tickers" in entry:
+                        raw_tickers = entry["tickers"]
+                        if raw_tickers is None:
+                            parsed_tickers = None
+                        elif isinstance(raw_tickers, list):
+                            parsed_tickers = sorted(list({parse_ticker(t, f"{rep_key}[{idx}].ticker") for t in raw_tickers if t}))
+                        else:
+                            raise MigrationValidationError(f"{rep_key}[{idx}].tickers must be a list")
+                    else:
+                        parsed_tickers = _UNSPECIFIED
+
                     if "description" in entry:
                         desc = str(entry["description"]).strip() if entry["description"] is not None else None
                     else:
                         desc = _UNSPECIFIED
-                    raw_ts = entry.get("updated_at_utc") or entry.get("timestamp_utc")
-                    if raw_ts is not None:
+
+                    if "updated_at_utc" in entry:
+                        raw_ts = entry["updated_at_utc"]
+                        ts_field = f"{rep_key}[{idx}].updated_at_utc"
+                    elif "timestamp_utc" in entry:
+                        raw_ts = entry["timestamp_utc"]
+                        ts_field = f"{rep_key}[{idx}].timestamp_utc"
+                    else:
+                        raw_ts = _UNSPECIFIED
+                        ts_field = f"{rep_key}[{idx}].updated_at_utc"
+
+                    if raw_ts is not _UNSPECIFIED:
                         ts_val, _ = resolve_historical_timestamp(
                             raw_ts,
-                            f"{rep_key}[{idx}].updated_at_utc",
+                            ts_field,
                             default_timestamp=default_timestamp,
                             allow_date_only=allow_date_only,
                             allow_naive_utc=allow_naive_utc,
                         )
                     elif default_timestamp:
                         ts_val, _ = resolve_historical_timestamp(
-                            None,
-                            f"{rep_key}[{idx}].updated_at_utc",
+                            _UNSPECIFIED,
+                            ts_field,
                             default_timestamp=default_timestamp,
                             allow_date_only=allow_date_only,
                             allow_naive_utc=allow_naive_utc,
                         )
                     elif require_timestamp:
                         raise MigrationValidationError(
-                            f"{rep_key}[{idx}].updated_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                            f"{ts_field}: historical timestamp is missing; migration cannot fabricate provenance"
                         )
                     else:
                         ts_val = None
+
                     rep_items.append((rep_key, cat, {
                         "category_name": cat,
                         "description": desc,
@@ -736,8 +791,8 @@ def consolidate_scout_representations(
                     cat = entry.strip()
                     if default_timestamp:
                         ts_val, _ = resolve_historical_timestamp(
-                            None,
-                            f"{rep_key}[{idx}]",
+                            _UNSPECIFIED,
+                            f"{rep_key}[{idx}].updated_at_utc",
                             default_timestamp=default_timestamp,
                             allow_date_only=allow_date_only,
                             allow_naive_utc=allow_naive_utc,
@@ -751,7 +806,7 @@ def consolidate_scout_representations(
                     rep_items.append((rep_key, cat, {
                         "category_name": cat,
                         "description": _UNSPECIFIED,
-                        "tickers": [],
+                        "tickers": _UNSPECIFIED,
                         "updated_at_utc": ts_val,
                         "timestamp_utc": ts_val,
                     }))
@@ -775,13 +830,14 @@ def consolidate_scout_representations(
                 continue
 
             # Compare tickers
-            prev_tickers = prev.get("tickers") or []
-            item_tickers = item.get("tickers") or []
-            if prev_tickers and item_tickers and prev_tickers != item_tickers:
-                raise MigrationConflictError(
-                    f"Conflicting duplicate scout category record for {cat} in {source_name}: "
-                    f"existing {prev} != incoming {item} (representation '{prev_source}' tickers {prev_tickers} != '{rep_name}' {item_tickers})"
-                )
+            prev_tickers = prev.get("tickers")
+            item_tickers = item.get("tickers")
+            if prev_tickers is not _UNSPECIFIED and item_tickers is not _UNSPECIFIED:
+                if prev_tickers != item_tickers:
+                    raise MigrationConflictError(
+                        f"Conflicting duplicate scout category record for {cat} in {source_name}: "
+                        f"existing {prev} != incoming {item} (representation '{prev_source}' tickers {prev_tickers} != '{rep_name}' {item_tickers})"
+                    )
 
             # Compare description
             prev_desc = prev.get("description")
@@ -801,7 +857,7 @@ def consolidate_scout_representations(
                     f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
                 )
 
-            prev["tickers"] = prev_tickers if prev_tickers else item_tickers
+            prev["tickers"] = prev_tickers if prev_tickers is not _UNSPECIFIED else item_tickers
             prev["description"] = prev_desc if prev_desc is not _UNSPECIFIED else item_desc
             prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts
             prev["updated_at_utc"] = prev["timestamp_utc"]
@@ -810,6 +866,8 @@ def consolidate_scout_representations(
     for rec in records_by_cat.values():
         if rec.get("description") is _UNSPECIFIED:
             rec["description"] = None
+        if rec.get("tickers") is _UNSPECIFIED:
+            rec["tickers"] = []
 
     return sorted(records_by_cat.values(), key=lambda x: x["category_name"])
 
@@ -847,26 +905,35 @@ def consolidate_watchlist_representations(
                     notes = str(entry["notes"]).strip() if entry["notes"] is not None else None
                 else:
                     notes = _UNSPECIFIED
-                raw_ts = entry.get("added_at_utc") or entry.get("timestamp_utc")
-                if raw_ts is not None:
+                if "added_at_utc" in entry:
+                    raw_ts = entry["added_at_utc"]
+                    ts_field = f"watchlist[{idx}].added_at_utc"
+                elif "timestamp_utc" in entry:
+                    raw_ts = entry["timestamp_utc"]
+                    ts_field = f"watchlist[{idx}].timestamp_utc"
+                else:
+                    raw_ts = _UNSPECIFIED
+                    ts_field = f"watchlist[{idx}].added_at_utc"
+
+                if raw_ts is not _UNSPECIFIED:
                     ts_val, _ = resolve_historical_timestamp(
                         raw_ts,
-                        f"watchlist[{idx}].added_at_utc",
+                        ts_field,
                         default_timestamp=default_timestamp,
                         allow_date_only=allow_date_only,
                         allow_naive_utc=allow_naive_utc,
                     )
                 elif default_timestamp:
                     ts_val, _ = resolve_historical_timestamp(
-                        None,
-                        f"watchlist[{idx}].added_at_utc",
+                        _UNSPECIFIED,
+                        ts_field,
                         default_timestamp=default_timestamp,
                         allow_date_only=allow_date_only,
                         allow_naive_utc=allow_naive_utc,
                     )
                 elif require_timestamp:
                     raise MigrationValidationError(
-                        f"watchlist[{idx}].added_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                        f"{ts_field}: historical timestamp is missing; migration cannot fabricate provenance"
                     )
                 else:
                     ts_val = None
@@ -892,8 +959,8 @@ def consolidate_watchlist_representations(
                     tk = parse_ticker(entry, f"{rep_key}[{idx}]")
                     if default_timestamp:
                         ts_val, _ = resolve_historical_timestamp(
-                            None,
-                            f"{rep_key}[{idx}]",
+                            _UNSPECIFIED,
+                            f"{rep_key}[{idx}].added_at_utc",
                             default_timestamp=default_timestamp,
                             allow_date_only=allow_date_only,
                             allow_naive_utc=allow_naive_utc,
@@ -921,26 +988,35 @@ def consolidate_watchlist_representations(
                         notes = str(entry["notes"]).strip() if entry["notes"] is not None else None
                     else:
                         notes = _UNSPECIFIED
-                    raw_ts = entry.get("added_at_utc") or entry.get("timestamp_utc")
-                    if raw_ts is not None:
+                    if "added_at_utc" in entry:
+                        raw_ts = entry["added_at_utc"]
+                        ts_field = f"{rep_key}[{idx}].added_at_utc"
+                    elif "timestamp_utc" in entry:
+                        raw_ts = entry["timestamp_utc"]
+                        ts_field = f"{rep_key}[{idx}].timestamp_utc"
+                    else:
+                        raw_ts = _UNSPECIFIED
+                        ts_field = f"{rep_key}[{idx}].added_at_utc"
+
+                    if raw_ts is not _UNSPECIFIED:
                         ts_val, _ = resolve_historical_timestamp(
                             raw_ts,
-                            f"{rep_key}[{idx}].added_at_utc",
+                            ts_field,
                             default_timestamp=default_timestamp,
                             allow_date_only=allow_date_only,
                             allow_naive_utc=allow_naive_utc,
                         )
                     elif default_timestamp:
                         ts_val, _ = resolve_historical_timestamp(
-                            None,
-                            f"{rep_key}[{idx}].added_at_utc",
+                            _UNSPECIFIED,
+                            ts_field,
                             default_timestamp=default_timestamp,
                             allow_date_only=allow_date_only,
                             allow_naive_utc=allow_naive_utc,
                         )
                     elif require_timestamp:
                         raise MigrationValidationError(
-                            f"{rep_key}[{idx}].added_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                            f"{ts_field}: historical timestamp is missing; migration cannot fabricate provenance"
                         )
                     else:
                         ts_val = None
@@ -963,26 +1039,35 @@ def consolidate_watchlist_representations(
                         notes = str(details["notes"]).strip() if details["notes"] is not None else None
                     else:
                         notes = _UNSPECIFIED
-                    raw_ts = details.get("added_at_utc") or details.get("timestamp_utc")
-                    if raw_ts is not None:
+                    if "added_at_utc" in details:
+                        raw_ts = details["added_at_utc"]
+                        ts_field = f"{rep_key}[{tk_raw}].added_at_utc"
+                    elif "timestamp_utc" in details:
+                        raw_ts = details["timestamp_utc"]
+                        ts_field = f"{rep_key}[{tk_raw}].timestamp_utc"
+                    else:
+                        raw_ts = _UNSPECIFIED
+                        ts_field = f"{rep_key}[{tk_raw}].added_at_utc"
+
+                    if raw_ts is not _UNSPECIFIED:
                         ts_val, _ = resolve_historical_timestamp(
                             raw_ts,
-                            f"{rep_key}[{tk_raw}].added_at_utc",
+                            ts_field,
                             default_timestamp=default_timestamp,
                             allow_date_only=allow_date_only,
                             allow_naive_utc=allow_naive_utc,
                         )
                     elif default_timestamp:
                         ts_val, _ = resolve_historical_timestamp(
-                            None,
-                            f"{rep_key}[{tk_raw}].added_at_utc",
+                            _UNSPECIFIED,
+                            ts_field,
                             default_timestamp=default_timestamp,
                             allow_date_only=allow_date_only,
                             allow_naive_utc=allow_naive_utc,
                         )
                     elif require_timestamp:
                         raise MigrationValidationError(
-                            f"{rep_key}[{tk_raw}].added_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                            f"{ts_field}: historical timestamp is missing; migration cannot fabricate provenance"
                         )
                     else:
                         ts_val = None
@@ -991,8 +1076,8 @@ def consolidate_watchlist_representations(
                     notes = _UNSPECIFIED
                     if default_timestamp:
                         ts_val, _ = resolve_historical_timestamp(
-                            None,
-                            f"{rep_key}[{tk_raw}]",
+                            _UNSPECIFIED,
+                            f"{rep_key}[{tk_raw}].added_at_utc",
                             default_timestamp=default_timestamp,
                             allow_date_only=allow_date_only,
                             allow_naive_utc=allow_naive_utc,
@@ -1101,7 +1186,15 @@ def consolidate_position_representations(
             for idx, entry in enumerate(raw_list):
                 if not isinstance(entry, dict):
                     raise MigrationValidationError(f"{rep_key}[{idx}] must be a dict")
-                acc = str(entry.get("account_id") or default_account_id).strip().upper()
+                raw_acc = entry.get("account_id", _UNSPECIFIED)
+                if raw_acc is _UNSPECIFIED:
+                    acc = default_account_id
+                else:
+                    if not isinstance(raw_acc, str) or not raw_acc.strip():
+                        raise MigrationValidationError(
+                            f"{rep_key}[{idx}].account_id: explicitly supplied account_id must be a non-empty string"
+                        )
+                    acc = raw_acc.strip().upper()
                 tk = parse_ticker(entry.get("ticker"), f"{rep_key}[{idx}].ticker")
                 shares = parse_financial_decimal(entry.get("shares"), f"{rep_key}[{idx}].shares", max_scale=4)
                 wac_eur_raw = entry.get("wac_eur") if entry.get("wac_eur") is not None else entry.get("wac")
@@ -1115,26 +1208,35 @@ def consolidate_position_representations(
                     wac_usd = parse_financial_decimal(raw_wac_usd, f"{rep_key}[{idx}].wac_usd", max_scale=4)
                 else:
                     wac_usd = None
-                raw_ts = entry.get("last_updated_at_utc") or entry.get("timestamp_utc")
-                if raw_ts is not None:
+                if "last_updated_at_utc" in entry:
+                    raw_ts = entry["last_updated_at_utc"]
+                    ts_field = f"{rep_key}[{idx}].last_updated_at_utc"
+                elif "timestamp_utc" in entry:
+                    raw_ts = entry["timestamp_utc"]
+                    ts_field = f"{rep_key}[{idx}].timestamp_utc"
+                else:
+                    raw_ts = _UNSPECIFIED
+                    ts_field = f"{rep_key}[{idx}].last_updated_at_utc"
+
+                if raw_ts is not _UNSPECIFIED:
                     ts_val, _ = resolve_historical_timestamp(
                         raw_ts,
-                        f"{rep_key}[{idx}].last_updated_at_utc",
+                        ts_field,
                         default_timestamp=default_timestamp,
                         allow_date_only=allow_date_only,
                         allow_naive_utc=allow_naive_utc,
                     )
                 elif default_timestamp:
                     ts_val, _ = resolve_historical_timestamp(
-                        None,
-                        f"{rep_key}[{idx}].last_updated_at_utc",
+                        _UNSPECIFIED,
+                        ts_field,
                         default_timestamp=default_timestamp,
                         allow_date_only=allow_date_only,
                         allow_naive_utc=allow_naive_utc,
                     )
                 elif require_timestamp:
                     raise MigrationValidationError(
-                        f"{rep_key}[{idx}].last_updated_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                        f"{ts_field}: historical timestamp is missing; migration cannot fabricate provenance"
                     )
                 else:
                     ts_val = None
@@ -1249,31 +1351,58 @@ def consolidate_cash_representations(
         for idx, entry in enumerate(raw_list):
             if not isinstance(entry, dict):
                 raise MigrationValidationError(f"portfolio_cash[{idx}] must be a dict")
-            acc = str(entry.get("account_id") or default_account_id).strip().upper()
-            curr = str(entry.get("currency") or "EUR").strip().upper()
+            raw_acc = entry.get("account_id", _UNSPECIFIED)
+            if raw_acc is _UNSPECIFIED:
+                acc = default_account_id
+            else:
+                if not isinstance(raw_acc, str) or not raw_acc.strip():
+                    raise MigrationValidationError(
+                        f"portfolio_cash[{idx}].account_id: explicitly supplied account_id must be a non-empty string"
+                    )
+                acc = raw_acc.strip().upper()
+
+            raw_curr = entry.get("currency", _UNSPECIFIED)
+            if raw_curr is _UNSPECIFIED:
+                curr = "EUR"
+            else:
+                if not isinstance(raw_curr, str) or not raw_curr.strip():
+                    raise MigrationValidationError(
+                        f"portfolio_cash[{idx}].currency: explicitly supplied currency must be a non-empty string"
+                    )
+                curr = raw_curr.strip().upper()
+
             if curr not in ("EUR", "USD"):
                 raise MigrationValidationError(f"portfolio_cash[{idx}]: unsupported currency '{curr}'")
             amt = parse_financial_decimal(entry.get("amount"), f"portfolio_cash[{idx}].amount", max_scale=2)
-            raw_ts = entry.get("last_updated_at_utc") or entry.get("timestamp_utc")
-            if raw_ts is not None:
+            if "last_updated_at_utc" in entry:
+                raw_ts = entry["last_updated_at_utc"]
+                ts_field = f"portfolio_cash[{idx}].last_updated_at_utc"
+            elif "timestamp_utc" in entry:
+                raw_ts = entry["timestamp_utc"]
+                ts_field = f"portfolio_cash[{idx}].timestamp_utc"
+            else:
+                raw_ts = _UNSPECIFIED
+                ts_field = f"portfolio_cash[{idx}].last_updated_at_utc"
+
+            if raw_ts is not _UNSPECIFIED:
                 ts_val, _ = resolve_historical_timestamp(
                     raw_ts,
-                    f"portfolio_cash[{idx}].last_updated_at_utc",
+                    ts_field,
                     default_timestamp=default_timestamp,
                     allow_date_only=allow_date_only,
                     allow_naive_utc=allow_naive_utc,
                 )
             elif default_timestamp:
                 ts_val, _ = resolve_historical_timestamp(
-                    None,
-                    f"portfolio_cash[{idx}].last_updated_at_utc",
+                    _UNSPECIFIED,
+                    ts_field,
                     default_timestamp=default_timestamp,
                     allow_date_only=allow_date_only,
                     allow_naive_utc=allow_naive_utc,
                 )
             elif require_timestamp:
                 raise MigrationValidationError(
-                    f"portfolio_cash[{idx}].last_updated_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
+                    f"{ts_field}: historical timestamp is missing; migration cannot fabricate provenance"
                 )
             else:
                 ts_val = None
@@ -1295,7 +1424,7 @@ def consolidate_cash_representations(
             amt = parse_financial_decimal(val, field_key, max_scale=2)
             if default_timestamp:
                 ts_val, _ = resolve_historical_timestamp(
-                    None,
+                    _UNSPECIFIED,
                     field_key,
                     default_timestamp=default_timestamp,
                     allow_date_only=allow_date_only,

@@ -275,8 +275,8 @@ class SSoTParityVerifier:
                 - If default_timestamp is provided: checks projected value == default_timestamp.
                 - If default_timestamp is None: flags TIMESTAMP_MISMATCH for unexplained projected timestamp.
         """
-        # 1. Source value present
-        if legacy_val is not None and str(legacy_val).strip() != "":
+        # 1. Source value explicitly supplied
+        if legacy_val is not None and legacy_val is not _MISSING:
             try:
                 expected_ts, _ = resolve_historical_timestamp(
                     legacy_val,
@@ -314,7 +314,7 @@ class SSoTParityVerifier:
                 ))
             return
 
-        # 2. Source value missing / None
+        # 2. Source value missing or null
         if nullable:
             if projected_val is None:
                 pass
@@ -335,7 +335,7 @@ class SSoTParityVerifier:
         if default_timestamp is not None and str(default_timestamp).strip() != "":
             try:
                 exp_default, _ = resolve_historical_timestamp(
-                    None,
+                    _MISSING,
                     field_name,
                     default_timestamp=default_timestamp,
                     allow_date_only=allow_date_only,
@@ -592,7 +592,12 @@ class SSoTParityVerifier:
                         summary.unresolved += 1
 
                     # Timestamp (R1)
-                    leg_c_ts = leg_c.get("last_updated_at_utc") if leg_c.get("last_updated_at_utc") is not None else leg_c.get("timestamp_utc")
+                    if "last_updated_at_utc" in leg_c:
+                        leg_c_ts = leg_c["last_updated_at_utc"]
+                    elif "timestamp_utc" in leg_c:
+                        leg_c_ts = leg_c["timestamp_utc"]
+                    else:
+                        leg_c_ts = _MISSING
                     self._verify_timestamp_field(
                         leg_c_ts,
                         proj_c.get("last_updated_at_utc"),
@@ -816,7 +821,12 @@ class SSoTParityVerifier:
                 ))
 
             # Compare Timestamp (R1)
-            leg_ts = leg_p.get("last_updated_at_utc") if leg_p.get("last_updated_at_utc") is not None else leg_p.get("timestamp_utc")
+            if "last_updated_at_utc" in leg_p:
+                leg_ts = leg_p["last_updated_at_utc"]
+            elif "timestamp_utc" in leg_p:
+                leg_ts = leg_p["timestamp_utc"]
+            else:
+                leg_ts = _MISSING
             self._verify_timestamp_field(
                 leg_ts,
                 proj_p.get("last_updated_at_utc"),
@@ -958,7 +968,12 @@ class SSoTParityVerifier:
                     ))
 
                 # Timestamp verification (R1)
-                leg_ts = leg_item.get("added_at_utc") if leg_item.get("added_at_utc") is not None else leg_item.get("timestamp_utc")
+                if "added_at_utc" in leg_item:
+                    leg_ts = leg_item["added_at_utc"]
+                elif "timestamp_utc" in leg_item:
+                    leg_ts = leg_item["timestamp_utc"]
+                else:
+                    leg_ts = _MISSING
                 self._verify_timestamp_field(
                     leg_ts,
                     proj_item.get("added_at_utc"),
@@ -1080,7 +1095,12 @@ class SSoTParityVerifier:
                     ))
 
                 # Timestamp verification (R1)
-                leg_ts = leg_info.get("updated_at_utc") if leg_info.get("updated_at_utc") is not None else leg_info.get("timestamp_utc")
+                if "updated_at_utc" in leg_info:
+                    leg_ts = leg_info["updated_at_utc"]
+                elif "timestamp_utc" in leg_info:
+                    leg_ts = leg_info["timestamp_utc"]
+                else:
+                    leg_ts = _MISSING
                 self._verify_timestamp_field(
                     leg_ts,
                     proj_sc.get("updated_at_utc"),
@@ -1220,8 +1240,9 @@ class SSoTParityVerifier:
                 has_mismatch = True
 
             # Verify created_at_utc (R1)
+            raw_created = item["created_at_utc"] if "created_at_utc" in item else _MISSING
             self._verify_timestamp_field(
-                item.get("created_at_utc"),
+                raw_created,
                 proj_l.get("created_at_utc"),
                 "created_at_utc",
                 f"trade_lessons[{norm_code}].created_at_utc",
@@ -1236,8 +1257,9 @@ class SSoTParityVerifier:
             )
 
             # Verify last_reviewed_at_utc (R1, R2) - intentionally nullable
+            raw_reviewed = item["last_reviewed_at_utc"] if "last_reviewed_at_utc" in item else _MISSING
             self._verify_timestamp_field(
-                item.get("last_reviewed_at_utc"),
+                raw_reviewed,
                 proj_l.get("last_reviewed_at_utc"),
                 "last_reviewed_at_utc",
                 f"trade_lessons[{norm_code}].last_reviewed_at_utc",
@@ -1372,8 +1394,9 @@ class SSoTParityVerifier:
                 has_diff = True
 
             # 6. Timestamp UTC (R1)
+            raw_decision_ts = exp["timestamp_utc"] if "timestamp_utc" in exp else _MISSING
             self._verify_timestamp_field(
-                exp.get("timestamp_utc"),
+                raw_decision_ts,
                 matching.get("timestamp_utc"),
                 "timestamp_utc",
                 f"{path_prefix}.timestamp_utc",
