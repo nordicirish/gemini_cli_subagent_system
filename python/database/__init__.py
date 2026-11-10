@@ -92,6 +92,20 @@ from .projections import (
     SSoTProjectionGenerator,
 )
 
+from .migration import (
+    MIGRATION_CONTRACT_VERSION,
+    LegacyJsonImporter,
+    SSoTParityVerifier,
+    MigrationError,
+    MigrationSafetyError,
+    MigrationValidationError,
+    MigrationConflictError,
+    ParityResult,
+    ParityDiscrepancy,
+    MigrationResult,
+    MigrationPlan,
+)
+
 __all__ = [
     "DatabaseManager",
     "DatabaseProfile",
@@ -158,4 +172,15 @@ __all__ = [
     "serialize_projection",
     "atomic_write_json",
     "SSoTProjectionGenerator",
+    "MIGRATION_CONTRACT_VERSION",
+    "LegacyJsonImporter",
+    "SSoTParityVerifier",
+    "MigrationError",
+    "MigrationSafetyError",
+    "MigrationValidationError",
+    "MigrationConflictError",
+    "ParityResult",
+    "ParityDiscrepancy",
+    "MigrationResult",
+    "MigrationPlan",
 ]
