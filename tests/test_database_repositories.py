@@ -21,6 +21,7 @@ Covers:
 16. R8: Consistent Daily Bar Input & Calendar Date Validation.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from decimal import Decimal
 import hashlib
@@ -29,6 +30,7 @@ import os
 from pathlib import Path
 import sqlite3
 import tempfile
+from threading import Barrier, Event
 import unittest
 import uuid
 from typing import Any, Dict, Optional
@@ -5614,10 +5616,10 @@ class TestStage15BMonotonicDatabaseRevisionTracking(BaseRepositoryTestCase):
             self.assertIsNotNone(WatchlistRepository(conn).get_watchlist_item("AMZN"))
             self.assertIsNotNone(WatchlistRepository(conn).get_watchlist_item("META"))
 
-    # --- E4: Concurrency & Serialized Writers ---
+    # --- E4: Concurrency, Serialized Writers & Snapshot Consistency ---
 
-    def test_stage15b_concurrent_connections_no_lost_increments(self):
-        """E4: Successive transactions across separate connections serialize cleanly without lost increments."""
+    def test_stage15b_sequential_cross_connection_visibility_no_lost_increments(self):
+        """E4 (Sequential Baseline): Successive transactions across separate connections serialize cleanly without lost increments."""
         # Using two independent connections to perform sequential revision-controlled writes
         with self.core_manager.connection() as conn1:
             with execution_role_context("Terminal Orchestrator"):
@@ -5637,16 +5639,125 @@ class TestStage15BMonotonicDatabaseRevisionTracking(BaseRepositoryTestCase):
         with self.core_manager.connection() as reader:
             self.assertEqual(get_db_revision(reader), 3)
 
-    def test_stage15b_concurrent_readers_observe_consistent_revisions(self):
-        """E4: Reader connection on core DB reads committed revision consistently."""
+    def test_stage15b_sequential_reader_observes_committed_revision(self):
+        """E4 (Sequential Baseline): Reader connection on core DB reads committed revision after writer commits."""
         with self.core_manager.connection() as writer:
             with execution_role_context("Terminal Orchestrator"):
                 CashRepository(writer).set_cash_balance("PRIMARY", "EUR", Decimal("500.00"))
 
-        # Concurrent reader reads committed revision
+        # Sequential reader reads committed revision after writer completion
         with self.core_manager.connection() as reader:
             self.assertEqual(get_db_revision(reader), 1)
             self.assertEqual(CashRepository(reader).get_cash("PRIMARY", "EUR").amount, Decimal("500.00"))
+
+    def test_stage15b_genuine_concurrent_writers_no_lost_increments(self):
+        """
+        E4 (Genuine Concurrency): Multiple threads concurrently attempting revision-controlled mutations
+        serialize cleanly via SQLite write locking and busy-timeout without lost increments.
+        """
+        worker_count = 4
+        barrier = Barrier(worker_count)
+
+        def worker(index: int):
+            with self.core_manager.connection() as conn:
+                with execution_role_context("Terminal Orchestrator"):
+                    # Wait for all workers to assemble before simultaneously attempting writes
+                    barrier.wait(timeout=10)
+                    WatchlistRepository(conn).upsert_watchlist_item(f"CONCURRENT_{index}")
+
+        with self.core_manager.connection() as conn:
+            initial_revision = get_db_revision(conn)
+
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(worker, i) for i in range(worker_count)]
+            for future in futures:
+                future.result(timeout=30)
+
+        with self.core_manager.connection() as conn:
+            final_revision = get_db_revision(conn)
+            self.assertEqual(
+                final_revision,
+                initial_revision + worker_count,
+                f"Expected revision {initial_revision + worker_count}, got {final_revision}",
+            )
+            for i in range(worker_count):
+                item = WatchlistRepository(conn).get_watchlist_item(f"CONCURRENT_{i}")
+                self.assertIsNotNone(item, f"Expected WatchlistItem CONCURRENT_{i} to exist")
+
+    def test_stage15b_genuine_concurrent_reader_writer_wal_snapshot_consistency(self):
+        """
+        E4 (Genuine Concurrency): Overlapping reader holding an active read transaction observes
+        WAL point-in-time snapshot, while concurrent writer commits and fresh reader observes new revision.
+        """
+        reader_ready = Event()
+        writer_done = Event()
+
+        results = {}
+
+        def reader_worker():
+            with self.core_manager.connection() as r_conn:
+                # Begin an explicit read transaction to capture a WAL point-in-time snapshot
+                r_conn.execute("BEGIN;")
+                results["init_rev"] = get_db_revision(r_conn)
+                results["init_cash"] = CashRepository(r_conn).get_cash("PRIMARY", "EUR")
+                reader_ready.set()
+
+                # Await writer commit completion on separate connection
+                self.assertTrue(writer_done.wait(timeout=10), "Writer failed to complete within timeout")
+
+                # Under WAL snapshot isolation, reader must still observe initial snapshot
+                results["snapshot_rev"] = get_db_revision(r_conn)
+                results["snapshot_cash"] = CashRepository(r_conn).get_cash("PRIMARY", "EUR")
+
+                # End reader transaction
+                r_conn.execute("COMMIT;")
+
+                # Subsequent query on same connection after transaction ends observes committed state
+                results["post_commit_rev"] = get_db_revision(r_conn)
+                results["post_commit_cash"] = CashRepository(r_conn).get_cash("PRIMARY", "EUR")
+
+            # Independent fresh reader connection also observes committed state
+            with self.core_manager.connection() as fresh_conn:
+                results["fresh_rev"] = get_db_revision(fresh_conn)
+                results["fresh_cash"] = CashRepository(fresh_conn).get_cash("PRIMARY", "EUR")
+
+        def writer_worker():
+            self.assertTrue(reader_ready.wait(timeout=10), "Reader failed to signal readiness within timeout")
+            with self.core_manager.connection() as w_conn:
+                with execution_role_context("Terminal Orchestrator"):
+                    CashRepository(w_conn).set_cash_balance("PRIMARY", "EUR", Decimal("888.88"))
+            writer_done.set()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            f_r = executor.submit(reader_worker)
+            f_w = executor.submit(writer_worker)
+            f_r.result(timeout=15)
+            f_w.result(timeout=15)
+
+        # Assertions establishing WAL snapshot isolation vs fresh visibility
+        self.assertEqual(results["init_rev"], 0)
+        self.assertIsNone(results["init_cash"])
+
+        # WAL Snapshot isolation: reader in active transaction still saw initial state
+        self.assertEqual(
+            results["snapshot_rev"],
+            0,
+            "Reader with open WAL transaction must observe pre-write snapshot revision",
+        )
+        self.assertIsNone(
+            results["snapshot_cash"],
+            "Reader with open WAL transaction must observe pre-write snapshot data",
+        )
+
+        # Post-commit on same connection observes new state
+        self.assertEqual(results["post_commit_rev"], 1)
+        self.assertIsNotNone(results["post_commit_cash"])
+        self.assertEqual(results["post_commit_cash"].amount, Decimal("888.88"))
+
+        # Fresh connection observes new state
+        self.assertEqual(results["fresh_rev"], 1)
+        self.assertIsNotNone(results["fresh_cash"])
+        self.assertEqual(results["fresh_cash"].amount, Decimal("888.88"))
 
     # --- E5: Helper Misuse & Guard Enforcement ---
 

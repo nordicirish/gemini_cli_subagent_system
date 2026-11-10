@@ -352,3 +352,93 @@ The human repository owner retains exclusive Git authority.
 
 *Stage 1.5-B concluded. Antigravity assistant has halted.*
 
+---
+
+## 13. Stage 1.5-B.1 — Genuine SQLite Concurrency Verification & Report Reconciliation (2026-11-10)
+
+During the independent technical review of Stage 1.5-B, finding **C-01** identified that the two cross-connection concurrency tests in Section 7 were executed sequentially rather than concurrently. Furthermore, the Stage 1.5-B Git commit history required reconciliation with the permanent GitHub record.
+
+In accordance with the Stage 1.5-B.1 directive, this corrective section documents the verified Git baseline, the renamed sequential baseline tests, the two new genuine concurrency tests, repeated stress execution evidence, and updated repository test totals.
+
+### 13.1 Git Chronology & Baseline Reconciliation
+- **Stage 1.5-B Implementation Baseline:** `d92e96d2d19f4b54e6d00e2b1438422558a1becb`
+- **Stage 1.5-B Committed Implementation:** `a18f8978e23aa42aa3a7386f6cb685b317da597b`  
+  *Commit Message:* `feat(database): complete monotonic revision tracking and Stage 1.5-A.4 errata (Stage 1.5-B)`  
+  *Chronology Correction:* The statement in Section 9.3 of the original report asserting that Stage 1.5-B changes remained uncommitted and unpushed is corrected: the Stage 1.5-B implementation and documentation were committed and pushed to GitHub by the repository owner in commit `a18f8978e23aa42aa3a7386f6cb685b317da597b`.
+- **Stage 1.5-B.1 Starting & Current HEAD:** `a18f8978e23aa42aa3a7386f6cb685b317da597b`
+- **Working Tree State:** Clean baseline before Stage 1.5-B.1 modifications; Stage 1.5-B.1 changes remain strictly local and uncommitted for human review.
+
+### 13.2 Concurrency Evidence Reconciliation (Finding C-01)
+Inspection of the initial test implementations revealed that `test_stage15b_concurrent_connections_no_lost_increments` and `test_stage15b_concurrent_readers_observe_consistent_revisions` executed operations sequentially in discrete context blocks. They proved cross-connection visibility and successive increments, but did not establish concurrent serialization or overlapping reader snapshot consistency.
+
+#### A. Renamed Sequential Baseline Tests
+To maintain evidence accuracy, the sequential tests were renamed to reflect their actual behavior:
+1. `test_stage15b_sequential_cross_connection_visibility_no_lost_increments`:  
+   *Proves:* Successive revision-controlled writes across separate connections advance and commit `db_revision` monotonically without regressions.
+2. `test_stage15b_sequential_reader_observes_committed_revision`:  
+   *Proves:* A reader connection opened after a writer commit observes the updated revision and financial state.
+
+#### B. Genuine Concurrent Writer Verification
+Added `test_stage15b_genuine_concurrent_writers_no_lost_increments` in `tests/test_database_repositories.py`:
+- **Architecture:** Uses `concurrent.futures.ThreadPoolExecutor(max_workers=4)` and a `threading.Barrier(4)`.
+- **Methodology:** Four worker threads obtain independent managed connections (`self.core_manager.connection()`). Each worker synchronizes at the barrier to simultaneously attempt a revision-controlled mutation (`WatchlistRepository(conn).upsert_watchlist_item(f"CONCURRENT_{index}")`) within a repository transaction (`BEGIN IMMEDIATE`).
+- **Safety Invariant:** SQLite's 5000ms busy-timeout (`PRIMARY_FINANCIAL_PROFILE.busy_timeout_ms = 5000`) and immediate write locking serialize the four concurrent attempts cleanly.
+- **Verification Assertions:** Propagates any thread exceptions with `future.result(timeout=30)`. Asserts that final revision equals `initial_revision + 4` and verifies that all four distinct watchlist items exist in the database.
+- **What It Proves:** Proves that concurrent multi-threaded writers to the isolated core database serialize without deadlocks, lost increments, or partial mutations.
+- **What It Does Not Prove:** Does not test separate multi-process OS processes (which is out of scope for the single-user local architecture).
+
+#### C. Genuine Concurrent Reader/Writer WAL Snapshot Consistency
+Added `test_stage15b_genuine_concurrent_reader_writer_wal_snapshot_consistency` in `tests/test_database_repositories.py`:
+- **Architecture:** Uses `ThreadPoolExecutor(max_workers=2)` coordinated with `threading.Event` synchronization primitives (`reader_ready`, `writer_done`).
+- **Methodology:**
+  1. A reader thread acquires a connection and opens an explicit read transaction (`BEGIN;`), querying initial revision (0) and cash (None).
+  2. The reader signals `reader_ready`.
+  3. While the reader's transaction remains actively open, a concurrent writer thread on a separate connection executes `CashRepository.set_cash_balance("PRIMARY", "EUR", Decimal("888.88"))` (`BEGIN IMMEDIATE`), atomically advances `db_revision` to 1, and commits.
+  4. The writer signals `writer_done`.
+  5. The reader thread, still inside its active read transaction, queries `get_db_revision` and cash.
+  6. The reader ends its transaction (`COMMIT;`).
+  7. The reader performs a post-commit read on the same connection, and an independent fresh reader connection performs a read.
+- **Verification Assertions:**
+  - In-transaction read during concurrent write: strictly observes revision 0 and `None` cash (verifying SQLite WAL MVCC point-in-time snapshot isolation; readers do not see uncommitted or concurrent mid-transaction changes).
+  - Post-transaction read on same connection: strictly observes revision 1 and `Decimal("888.88")`.
+  - Fresh connection read: strictly observes revision 1 and `Decimal("888.88")`.
+- **What It Proves:** Proves that an open read transaction in WAL mode is isolated from concurrent writer commits, maintaining snapshot consistency, and transitions cleanly to observing committed state once its read transaction concludes.
+
+### 13.3 Repeated Stress Test Execution Evidence
+To verify absence of race conditions, deadlocks, or nondeterministic flakiness, the two new concurrency tests were executed in an automated stress loop:
+- **Command:** Direct `unittest.TextTestRunner` execution of both tests in a 10-iteration loop.
+- **Result:** `10/10 runs passed successfully` (20 individual test executions, 0 failures, 0 errors, average execution time ~0.27s per run).
+
+### 13.4 Recalculated Test Execution Accounting
+
+| Test Suite / Command | Exit Code | Tests Discovered | Passed | Skipped | Failures / Errors | Runtime |
+|---|---|---|---|---|---|---|
+| `tests.test_database_repositories` | `0` | 254 | 254 | 0 | 0 / 0 | 17.728s |
+| `tests.test_database_core` | `0` | 115 | 115 | 0 | 0 / 0 | 5.259s |
+| `tests.test_database_backup_concurrency` | `0` | 74 | 73 | 1 (POSIX) | 0 / 0 | 7.158s |
+| **Full Repository Discovery (`test_*.py`)** | `0` | **497** | **496** | **1 (POSIX)** | **0 / 0** | **63.911s** |
+| `pip check` | `0` | N/A | Clean | 0 | 0 broken deps | 1.9s |
+| `compileall -q python/database tests` | `0` | N/A | Clean | 0 | 0 syntax errors | 0.9s |
+
+*Skipped Test:* `test_r5_04_posix_unlock_failure_injection` in `tests/test_database_backup_concurrency.py` (explicitly skipped on Windows via `@unittest.skipIf(sys.platform == "win32")`; its Windows counterpart ran and passed).
+
+### 13.5 File Modification Inventory (Stage 1.5-B.1)
+- **Modified:**
+  - `tests/test_database_repositories.py`: Added concurrency imports (`ThreadPoolExecutor`, `Barrier`, `Event`); renamed sequential baseline tests; added `test_stage15b_genuine_concurrent_writers_no_lost_increments` and `test_stage15b_genuine_concurrent_reader_writer_wal_snapshot_consistency`.
+  - `docs/engineering/STAGE_1_5_B_MONOTONIC_DATABASE_REVISION_TRACKING_REPORT.md`: Appended Section 13 errata and reconciliation.
+- **Unmodified:**
+  - `python/database/repositories/base.py`: Verified intact; no changes required.
+  - All financial logic, trading rules, and configuration files remain 100% untouched.
+
+---
+
+## 14. Final Stage 1.5-B.1 Verdict
+
+```
+================================================================================
+FINAL VERDICT: COMPLETE — GENUINE CONCURRENCY VERIFIED & REPORT RECONCILED
+================================================================================
+```
+
+*Stage 1.5-B.1 concluded. Antigravity assistant has halted awaiting human instruction.*
+
