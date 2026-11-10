@@ -712,7 +712,7 @@ def consolidate_scout_representations(
                         f"{map_key}[{cat}].updated_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
                     )
                 else:
-                    ts_val = None
+                    ts_val = _MISSING
                 rep_items.append((map_key, cat, {
                     "category_name": cat,
                     "description": _UNSPECIFIED,
@@ -758,13 +758,16 @@ def consolidate_scout_representations(
                         ts_field = f"{rep_key}[{idx}].updated_at_utc"
 
                     if raw_ts is not _UNSPECIFIED:
-                        ts_val, _ = resolve_historical_timestamp(
-                            raw_ts,
-                            ts_field,
-                            default_timestamp=default_timestamp,
-                            allow_date_only=allow_date_only,
-                            allow_naive_utc=allow_naive_utc,
-                        )
+                        if raw_ts is None and not require_timestamp:
+                            ts_val = None
+                        else:
+                            ts_val, _ = resolve_historical_timestamp(
+                                raw_ts,
+                                ts_field,
+                                default_timestamp=default_timestamp,
+                                allow_date_only=allow_date_only,
+                                allow_naive_utc=allow_naive_utc,
+                            )
                     elif default_timestamp:
                         ts_val, _ = resolve_historical_timestamp(
                             _UNSPECIFIED,
@@ -778,7 +781,7 @@ def consolidate_scout_representations(
                             f"{ts_field}: historical timestamp is missing; migration cannot fabricate provenance"
                         )
                     else:
-                        ts_val = None
+                        ts_val = _MISSING
 
                     rep_items.append((rep_key, cat, {
                         "category_name": cat,
@@ -802,7 +805,7 @@ def consolidate_scout_representations(
                             f"{rep_key}[{idx}].updated_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
                         )
                     else:
-                        ts_val = None
+                        ts_val = _MISSING
                     rep_items.append((rep_key, cat, {
                         "category_name": cat,
                         "description": _UNSPECIFIED,
@@ -851,7 +854,7 @@ def consolidate_scout_representations(
             # Compare timestamp
             prev_ts = prev.get("timestamp_utc")
             item_ts = item.get("timestamp_utc")
-            if prev_ts is not None and item_ts is not None and prev_ts != item_ts:
+            if prev_ts is not _MISSING and item_ts is not _MISSING and prev_ts != item_ts:
                 raise MigrationConflictError(
                     f"Conflicting duplicate scout category record for {cat} in {source_name}: "
                     f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
@@ -859,7 +862,7 @@ def consolidate_scout_representations(
 
             prev["tickers"] = prev_tickers if prev_tickers is not _UNSPECIFIED else item_tickers
             prev["description"] = prev_desc if prev_desc is not _UNSPECIFIED else item_desc
-            prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts
+            prev["timestamp_utc"] = prev_ts if prev_ts is not _MISSING else item_ts
             prev["updated_at_utc"] = prev["timestamp_utc"]
             sources_by_cat[cat].append(rep_name)
 
@@ -916,13 +919,16 @@ def consolidate_watchlist_representations(
                     ts_field = f"watchlist[{idx}].added_at_utc"
 
                 if raw_ts is not _UNSPECIFIED:
-                    ts_val, _ = resolve_historical_timestamp(
-                        raw_ts,
-                        ts_field,
-                        default_timestamp=default_timestamp,
-                        allow_date_only=allow_date_only,
-                        allow_naive_utc=allow_naive_utc,
-                    )
+                    if raw_ts is None and not require_timestamp:
+                        ts_val = None
+                    else:
+                        ts_val, _ = resolve_historical_timestamp(
+                            raw_ts,
+                            ts_field,
+                            default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
+                        )
                 elif default_timestamp:
                     ts_val, _ = resolve_historical_timestamp(
                         _UNSPECIFIED,
@@ -936,7 +942,7 @@ def consolidate_watchlist_representations(
                         f"{ts_field}: historical timestamp is missing; migration cannot fabricate provenance"
                     )
                 else:
-                    ts_val = None
+                    ts_val = _MISSING
                 rep_items.append(("watchlist", tk, {
                     "ticker": tk,
                     "status": status,
@@ -970,7 +976,7 @@ def consolidate_watchlist_representations(
                             f"{rep_key}[{idx}].added_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
                         )
                     else:
-                        ts_val = None
+                        ts_val = _MISSING
                     rep_items.append((rep_key, tk, {
                         "ticker": tk,
                         "status": _UNSPECIFIED,
@@ -999,13 +1005,16 @@ def consolidate_watchlist_representations(
                         ts_field = f"{rep_key}[{idx}].added_at_utc"
 
                     if raw_ts is not _UNSPECIFIED:
-                        ts_val, _ = resolve_historical_timestamp(
-                            raw_ts,
-                            ts_field,
-                            default_timestamp=default_timestamp,
-                            allow_date_only=allow_date_only,
-                            allow_naive_utc=allow_naive_utc,
-                        )
+                        if raw_ts is None and not require_timestamp:
+                            ts_val = None
+                        else:
+                            ts_val, _ = resolve_historical_timestamp(
+                                raw_ts,
+                                ts_field,
+                                default_timestamp=default_timestamp,
+                                allow_date_only=allow_date_only,
+                                allow_naive_utc=allow_naive_utc,
+                            )
                     elif default_timestamp:
                         ts_val, _ = resolve_historical_timestamp(
                             _UNSPECIFIED,
@@ -1019,7 +1028,7 @@ def consolidate_watchlist_representations(
                             f"{ts_field}: historical timestamp is missing; migration cannot fabricate provenance"
                         )
                     else:
-                        ts_val = None
+                        ts_val = _MISSING
                     rep_items.append((rep_key, tk, {
                         "ticker": tk,
                         "status": status,
@@ -1050,13 +1059,16 @@ def consolidate_watchlist_representations(
                         ts_field = f"{rep_key}[{tk_raw}].added_at_utc"
 
                     if raw_ts is not _UNSPECIFIED:
-                        ts_val, _ = resolve_historical_timestamp(
-                            raw_ts,
-                            ts_field,
-                            default_timestamp=default_timestamp,
-                            allow_date_only=allow_date_only,
-                            allow_naive_utc=allow_naive_utc,
-                        )
+                        if raw_ts is None and not require_timestamp:
+                            ts_val = None
+                        else:
+                            ts_val, _ = resolve_historical_timestamp(
+                                raw_ts,
+                                ts_field,
+                                default_timestamp=default_timestamp,
+                                allow_date_only=allow_date_only,
+                                allow_naive_utc=allow_naive_utc,
+                            )
                     elif default_timestamp:
                         ts_val, _ = resolve_historical_timestamp(
                             _UNSPECIFIED,
@@ -1070,7 +1082,7 @@ def consolidate_watchlist_representations(
                             f"{ts_field}: historical timestamp is missing; migration cannot fabricate provenance"
                         )
                     else:
-                        ts_val = None
+                        ts_val = _MISSING
                 else:
                     status = _UNSPECIFIED
                     notes = _UNSPECIFIED
@@ -1087,7 +1099,7 @@ def consolidate_watchlist_representations(
                             f"{rep_key}[{tk_raw}].added_at_utc: historical timestamp is missing; migration cannot fabricate provenance"
                         )
                     else:
-                        ts_val = None
+                        ts_val = _MISSING
                 rep_items.append((rep_key, tk, {
                     "ticker": tk,
                     "status": status,
@@ -1135,7 +1147,7 @@ def consolidate_watchlist_representations(
             # Compare timestamp
             prev_ts = prev.get("timestamp_utc")
             item_ts = item.get("timestamp_utc")
-            if prev_ts is not None and item_ts is not None and prev_ts != item_ts:
+            if prev_ts is not _MISSING and item_ts is not _MISSING and prev_ts != item_ts:
                 raise MigrationConflictError(
                     f"Conflicting duplicate watchlist record for {tk} in {source_name}: "
                     f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
@@ -1143,7 +1155,7 @@ def consolidate_watchlist_representations(
 
             prev["status"] = prev_status if prev_status is not _UNSPECIFIED else item_status
             prev["notes"] = prev_notes if prev_notes is not _UNSPECIFIED else item_notes
-            prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts
+            prev["timestamp_utc"] = prev_ts if prev_ts is not _MISSING else item_ts
             prev["added_at_utc"] = prev["timestamp_utc"]
             sources_by_tk[tk].append(rep_name)
 
@@ -1219,13 +1231,16 @@ def consolidate_position_representations(
                     ts_field = f"{rep_key}[{idx}].last_updated_at_utc"
 
                 if raw_ts is not _UNSPECIFIED:
-                    ts_val, _ = resolve_historical_timestamp(
-                        raw_ts,
-                        ts_field,
-                        default_timestamp=default_timestamp,
-                        allow_date_only=allow_date_only,
-                        allow_naive_utc=allow_naive_utc,
-                    )
+                    if raw_ts is None and not require_timestamp:
+                        ts_val = None
+                    else:
+                        ts_val, _ = resolve_historical_timestamp(
+                            raw_ts,
+                            ts_field,
+                            default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
+                        )
                 elif default_timestamp:
                     ts_val, _ = resolve_historical_timestamp(
                         _UNSPECIFIED,
@@ -1239,7 +1254,7 @@ def consolidate_position_representations(
                         f"{ts_field}: historical timestamp is missing; migration cannot fabricate provenance"
                     )
                 else:
-                    ts_val = None
+                    ts_val = _MISSING
 
                 pos_rec = {
                     "account_id": acc,
@@ -1305,7 +1320,7 @@ def consolidate_position_representations(
             # Compare timestamp
             prev_ts = prev.get("timestamp_utc")
             item_ts = item.get("timestamp_utc")
-            if prev_ts is not None and item_ts is not None and prev_ts != item_ts:
+            if prev_ts is not _MISSING and item_ts is not _MISSING and prev_ts != item_ts:
                 raise MigrationConflictError(
                     f"Conflicting duplicate position record for {key[0]}/{key[1]} in {source_name}: "
                     f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
@@ -1313,7 +1328,7 @@ def consolidate_position_representations(
 
             prev["wac_usd"] = prev_usd if prev_usd is not _UNSPECIFIED else item_usd
             prev["raw_wac_usd"] = prev.get("raw_wac_usd") if prev_usd is not _UNSPECIFIED else item.get("raw_wac_usd")
-            prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts
+            prev["timestamp_utc"] = prev_ts if prev_ts is not _MISSING else item_ts
             prev["last_updated_at_utc"] = prev["timestamp_utc"]
             sources_by_key[key].append(rep_name)
 
@@ -1385,13 +1400,16 @@ def consolidate_cash_representations(
                 ts_field = f"portfolio_cash[{idx}].last_updated_at_utc"
 
             if raw_ts is not _UNSPECIFIED:
-                ts_val, _ = resolve_historical_timestamp(
-                    raw_ts,
-                    ts_field,
-                    default_timestamp=default_timestamp,
-                    allow_date_only=allow_date_only,
-                    allow_naive_utc=allow_naive_utc,
-                )
+                if raw_ts is None and not require_timestamp:
+                    ts_val = None
+                else:
+                    ts_val, _ = resolve_historical_timestamp(
+                        raw_ts,
+                        ts_field,
+                        default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
+                    )
             elif default_timestamp:
                 ts_val, _ = resolve_historical_timestamp(
                     _UNSPECIFIED,
@@ -1405,7 +1423,7 @@ def consolidate_cash_representations(
                     f"{ts_field}: historical timestamp is missing; migration cannot fabricate provenance"
                 )
             else:
-                ts_val = None
+                ts_val = _MISSING
             rep_items.append(("portfolio_cash", (acc, curr), {
                 "account_id": acc,
                 "currency": curr,
@@ -1435,7 +1453,7 @@ def consolidate_cash_representations(
                     f"{field_key}: historical timestamp is missing; migration cannot fabricate provenance"
                 )
             else:
-                ts_val = None
+                ts_val = _MISSING
             rep_items.append((field_key, (default_account_id, curr), {
                 "account_id": default_account_id,
                 "currency": curr,
@@ -1473,13 +1491,13 @@ def consolidate_cash_representations(
             # Compare timestamp
             prev_ts = prev.get("timestamp_utc")
             item_ts = item.get("timestamp_utc")
-            if prev_ts is not None and item_ts is not None and prev_ts != item_ts:
+            if prev_ts is not _MISSING and item_ts is not _MISSING and prev_ts != item_ts:
                 raise MigrationConflictError(
                     f"Conflicting duplicate cash record for {key[0]}/{key[1]} in {source_name}: "
                     f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
                 )
 
-            prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts
+            prev["timestamp_utc"] = prev_ts if prev_ts is not _MISSING else item_ts
             prev["last_updated_at_utc"] = prev["timestamp_utc"]
             sources_by_key[key].append(rep_name)
 

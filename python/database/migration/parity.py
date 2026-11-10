@@ -21,6 +21,7 @@ from python.database.migration.models import (
     ParityResult,
     MigrationSource,
     MigrationConflictError,
+    MigrationValidationError,
 )
 from python.database.migration.contract import (
     EXTERNALLY_MANAGED_SECTIONS,
@@ -275,8 +276,119 @@ class SSoTParityVerifier:
                 - If default_timestamp is provided: checks projected value == default_timestamp.
                 - If default_timestamp is None: flags TIMESTAMP_MISMATCH for unexplained projected timestamp.
         """
-        # 1. Source value explicitly supplied
-        if legacy_val is not None and legacy_val is not _MISSING:
+        # 1. Source value genuinely missing (_MISSING)
+        if legacy_val is _MISSING:
+            if nullable:
+                if projected_val is None:
+                    return
+                summary.timestamp_mismatches += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain=domain,
+                    path=path,
+                    discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
+                    legacy_value=None,
+                    projected_value=projected_val,
+                    message=f"Nullable timestamp {path} expected None in projection, got '{projected_val}'",
+                    record_id=record_id,
+                ))
+                return
+
+            # Required timestamp missing from source: check authorized caller default
+            if default_timestamp is not None and str(default_timestamp).strip() != "":
+                try:
+                    exp_default, _ = resolve_historical_timestamp(
+                        _MISSING,
+                        field_name,
+                        default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
+                    )
+                except Exception as e:
+                    summary.unresolved += 1
+                    discrepancies.append(ParityDiscrepancy(
+                        domain=domain,
+                        path=path,
+                        discrepancy_type=DiscrepancyType.UNRESOLVED.value,
+                        legacy_value=None,
+                        projected_value=projected_val,
+                        message=f"Failed to resolve default timestamp: {e}",
+                        record_id=record_id,
+                    ))
+                    return
+
+                if projected_val == exp_default:
+                    summary.equivalent_values += 1
+                else:
+                    summary.timestamp_mismatches += 1
+                    discrepancies.append(ParityDiscrepancy(
+                        domain=domain,
+                        path=path,
+                        discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
+                        legacy_value=None,
+                        projected_value=projected_val,
+                        message=f"Timestamp {path} expected caller default '{exp_default}', got '{projected_val}'",
+                        record_id=record_id,
+                    ))
+                return
+
+            # Unexplained projected timestamp when source missing and no default authorized
+            if projected_val is not None:
+                summary.timestamp_mismatches += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain=domain,
+                    path=path,
+                    discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
+                    legacy_value=None,
+                    projected_value=projected_val,
+                    message=f"Unexplained projected timestamp '{projected_val}' for {path} when source is missing and no default provided",
+                    record_id=record_id,
+                ))
+            else:
+                summary.missing_records += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain=domain,
+                    path=path,
+                    discrepancy_type=DiscrepancyType.MISSING_RECORD.value,
+                    legacy_value=None,
+                    projected_value=None,
+                    message=f"Required timestamp {path} missing in both source and projection",
+                    record_id=record_id,
+                ))
+            return
+
+        # 2. Source value explicitly None
+        elif legacy_val is None:
+            if nullable:
+                if projected_val is None:
+                    return
+                summary.timestamp_mismatches += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain=domain,
+                    path=path,
+                    discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
+                    legacy_value=None,
+                    projected_value=projected_val,
+                    message=f"Nullable timestamp {path} expected None in projection, got '{projected_val}'",
+                    record_id=record_id,
+                ))
+                return
+            else:
+                # Explicit null for a non-nullable timestamp must report unresolved/invalid source timestamp,
+                # never adopting a caller-supplied default.
+                summary.unresolved += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain=domain,
+                    path=path,
+                    discrepancy_type=DiscrepancyType.UNRESOLVED.value,
+                    legacy_value=None,
+                    projected_value=projected_val,
+                    message=f"Explicit null supplied for non-nullable timestamp {path}",
+                    record_id=record_id,
+                ))
+                return
+
+        # 3. Source value explicitly supplied (string, number, collection, etc.)
+        else:
             try:
                 expected_ts, _ = resolve_historical_timestamp(
                     legacy_val,
@@ -314,85 +426,6 @@ class SSoTParityVerifier:
                 ))
             return
 
-        # 2. Source value missing or null
-        if nullable:
-            if projected_val is None:
-                pass
-            else:
-                summary.timestamp_mismatches += 1
-                discrepancies.append(ParityDiscrepancy(
-                    domain=domain,
-                    path=path,
-                    discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
-                    legacy_value=None,
-                    projected_value=projected_val,
-                    message=f"Nullable timestamp {path} expected None in projection, got '{projected_val}'",
-                    record_id=record_id,
-                ))
-            return
-
-        # 3. Required timestamp missing from source
-        if default_timestamp is not None and str(default_timestamp).strip() != "":
-            try:
-                exp_default, _ = resolve_historical_timestamp(
-                    _MISSING,
-                    field_name,
-                    default_timestamp=default_timestamp,
-                    allow_date_only=allow_date_only,
-                    allow_naive_utc=allow_naive_utc,
-                )
-            except Exception as e:
-                summary.unresolved += 1
-                discrepancies.append(ParityDiscrepancy(
-                    domain=domain,
-                    path=path,
-                    discrepancy_type=DiscrepancyType.UNRESOLVED.value,
-                    legacy_value=None,
-                    projected_value=projected_val,
-                    message=f"Failed to resolve default timestamp: {e}",
-                    record_id=record_id,
-                ))
-                return
-
-            if projected_val == exp_default:
-                summary.equivalent_values += 1
-            else:
-                summary.timestamp_mismatches += 1
-                discrepancies.append(ParityDiscrepancy(
-                    domain=domain,
-                    path=path,
-                    discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
-                    legacy_value=None,
-                    projected_value=projected_val,
-                    message=f"Timestamp {path} expected caller default '{exp_default}', got '{projected_val}'",
-                    record_id=record_id,
-                ))
-            return
-
-        # Unexplained projected timestamp when source missing and no default authorized
-        if projected_val is not None:
-            summary.timestamp_mismatches += 1
-            discrepancies.append(ParityDiscrepancy(
-                domain=domain,
-                path=path,
-                discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
-                legacy_value=None,
-                projected_value=projected_val,
-                message=f"Unexplained projected timestamp '{projected_val}' for {path} when source is missing and no default provided",
-                record_id=record_id,
-            ))
-        else:
-            summary.missing_records += 1
-            discrepancies.append(ParityDiscrepancy(
-                domain=domain,
-                path=path,
-                discrepancy_type=DiscrepancyType.MISSING_RECORD.value,
-                legacy_value=None,
-                projected_value=None,
-                message=f"Required timestamp {path} missing in both source and projection",
-                record_id=record_id,
-            ))
-
     # -----------------------------------------------------------------------
     # Domain Verifiers
     # -----------------------------------------------------------------------
@@ -424,7 +457,7 @@ class SSoTParityVerifier:
                 allow_naive_utc=allow_naive_utc,
                 require_timestamp=False,
             )
-        except MigrationConflictError as exc:
+        except (MigrationConflictError, MigrationValidationError) as exc:
             summary.unresolved += 1
             discrepancies.append(ParityDiscrepancy(
                 domain="portfolio_cash",
@@ -592,14 +625,11 @@ class SSoTParityVerifier:
                         summary.unresolved += 1
 
                     # Timestamp (R1)
-                    if "last_updated_at_utc" in leg_c:
-                        leg_c_ts = leg_c["last_updated_at_utc"]
-                    elif "timestamp_utc" in leg_c:
-                        leg_c_ts = leg_c["timestamp_utc"]
-                    else:
-                        leg_c_ts = _MISSING
+                    raw_c_ts = leg_c.get("last_updated_at_utc", _MISSING)
+                    if raw_c_ts is _MISSING:
+                        raw_c_ts = leg_c.get("timestamp_utc", _MISSING)
                     self._verify_timestamp_field(
-                        leg_c_ts,
+                        raw_c_ts,
                         proj_c.get("last_updated_at_utc"),
                         "last_updated_at_utc",
                         f"portfolio_cash[{acc}/{curr}].last_updated_at_utc",
@@ -648,7 +678,7 @@ class SSoTParityVerifier:
                 allow_naive_utc=allow_naive_utc,
                 require_timestamp=False,
             )
-        except MigrationConflictError as exc:
+        except (MigrationConflictError, MigrationValidationError) as exc:
             summary.unresolved += 1
             discrepancies.append(ParityDiscrepancy(
                 domain="portfolio_positions",
@@ -821,14 +851,11 @@ class SSoTParityVerifier:
                 ))
 
             # Compare Timestamp (R1)
-            if "last_updated_at_utc" in leg_p:
-                leg_ts = leg_p["last_updated_at_utc"]
-            elif "timestamp_utc" in leg_p:
-                leg_ts = leg_p["timestamp_utc"]
-            else:
-                leg_ts = _MISSING
+            raw_pos_ts = leg_p.get("last_updated_at_utc", _MISSING)
+            if raw_pos_ts is _MISSING:
+                raw_pos_ts = leg_p.get("timestamp_utc", _MISSING)
             self._verify_timestamp_field(
-                leg_ts,
+                raw_pos_ts,
                 proj_p.get("last_updated_at_utc"),
                 "last_updated_at_utc",
                 f"portfolio_snapshot[{pos_id}].last_updated_at_utc",
@@ -876,7 +903,7 @@ class SSoTParityVerifier:
                 allow_naive_utc=allow_naive_utc,
                 require_timestamp=False,
             )
-        except MigrationConflictError as exc:
+        except (MigrationConflictError, MigrationValidationError) as exc:
             summary.unresolved += 1
             discrepancies.append(ParityDiscrepancy(
                 domain="watchlist",
@@ -968,14 +995,11 @@ class SSoTParityVerifier:
                     ))
 
                 # Timestamp verification (R1)
-                if "added_at_utc" in leg_item:
-                    leg_ts = leg_item["added_at_utc"]
-                elif "timestamp_utc" in leg_item:
-                    leg_ts = leg_item["timestamp_utc"]
-                else:
-                    leg_ts = _MISSING
+                raw_wl_ts = leg_item.get("added_at_utc", _MISSING)
+                if raw_wl_ts is _MISSING:
+                    raw_wl_ts = leg_item.get("timestamp_utc", _MISSING)
                 self._verify_timestamp_field(
-                    leg_ts,
+                    raw_wl_ts,
                     proj_item.get("added_at_utc"),
                     "added_at_utc",
                     f"watchlist[{tk}].added_at_utc",
@@ -1022,7 +1046,7 @@ class SSoTParityVerifier:
                 allow_naive_utc=allow_naive_utc,
                 require_timestamp=False,
             )
-        except MigrationConflictError as exc:
+        except (MigrationConflictError, MigrationValidationError) as exc:
             summary.unresolved += 1
             discrepancies.append(ParityDiscrepancy(
                 domain="scout_categories",
@@ -1095,14 +1119,11 @@ class SSoTParityVerifier:
                     ))
 
                 # Timestamp verification (R1)
-                if "updated_at_utc" in leg_info:
-                    leg_ts = leg_info["updated_at_utc"]
-                elif "timestamp_utc" in leg_info:
-                    leg_ts = leg_info["timestamp_utc"]
-                else:
-                    leg_ts = _MISSING
+                raw_sc_ts = leg_info.get("updated_at_utc", _MISSING)
+                if raw_sc_ts is _MISSING:
+                    raw_sc_ts = leg_info.get("timestamp_utc", _MISSING)
                 self._verify_timestamp_field(
-                    leg_ts,
+                    raw_sc_ts,
                     proj_sc.get("updated_at_utc"),
                     "updated_at_utc",
                     f"scout_categories[{cat_name}].updated_at_utc",
@@ -1470,7 +1491,7 @@ class SSoTParityVerifier:
                     "ticker": ticker,
                     "votes": votes_val,
                     "transcript_text": d.get("transcript_text"),
-                    "timestamp_utc": d.get("timestamp_utc"),
+                    "timestamp_utc": d.get("timestamp_utc", _MISSING),
                 }
                 _match_and_verify(exp_rec, f"decision_log[{session_id}/{action}/{ticker}]")
 

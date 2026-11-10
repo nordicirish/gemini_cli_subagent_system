@@ -3675,5 +3675,358 @@ class TestStage15D1122StrictValueAndTimestampCorrectiveRegressions(BaseMigration
         self.assertEqual(proj["decision_log"][0]["timestamp_utc"], self.default_ts)
 
 
+class TestStage16TimestampParityRemediationRegressions(BaseMigrationTestCase):
+    """
+    Stage 1.6: Targeted regression tests for timestamp parity verification remediation (F3 carry-forward).
+    Strictly verifies the three-way timestamp partition:
+    - Genuinely missing (_MISSING): follows nullable policy / caller default if authorized, else unexplained timestamp mismatch.
+    - Explicit None: accepted only if projected is None on nullable field; fails closed as UNRESOLVED on non-nullable field, never adopting caller default.
+    - Explicit string: rejects empty/whitespace as UNRESOLVED; normalizes valid UTC timestamps to 'Z'.
+    """
+
+    def test_explicit_none_non_nullable_timestamp_with_caller_default_reports_unresolved(self):
+        """1. Explicit None for non-nullable timestamp with valid caller default reports UNRESOLVED and does NOT adopt default."""
+        # Test on trade_lessons created_at_utc (non-nullable)
+        legacy = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-201",
+                    "directive_text": "Risk management first",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": None,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        proj = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-201",
+                    "directive_text": "Risk management first",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        # Verifier has authorized default_timestamp=self.default_ts
+        res = self.verifier.compare(legacy, proj)
+        self.assertFalse(res.is_parity)
+        self.assertGreaterEqual(res.summary.unresolved, 1)
+        self.assertTrue(any(
+            "Explicit null supplied for non-nullable timestamp" in d.message
+            for d in res.discrepancies
+        ))
+
+        # Test on portfolio_cash last_updated_at_utc (non-nullable)
+        legacy_cash = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "1000.00", "last_updated_at_utc": None}
+            ]
+        }
+        proj_cash = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "1000.00", "last_updated_at_utc": self.default_ts}
+            ]
+        }
+        res_cash = self.verifier.compare(legacy_cash, proj_cash)
+        self.assertFalse(res_cash.is_parity)
+        self.assertGreaterEqual(res_cash.summary.unresolved, 1)
+        self.assertTrue(any(
+            "Explicit null supplied for non-nullable timestamp" in d.message
+            for d in res_cash.discrepancies
+        ))
+
+        # Test on decision_log timestamp_utc (non-nullable)
+        legacy_decision = {
+            "decision_log": [
+                {
+                    "session_id": "S-101",
+                    "action_proposed": "BUY",
+                    "decision_outcome": "EXECUTED",
+                    "ticker": "AAPL",
+                    "votes": {},
+                    "transcript_text": "debate",
+                    "timestamp_utc": None,
+                }
+            ]
+        }
+        proj_decision = {
+            "decision_log": [
+                {
+                    "session_id": "S-101",
+                    "action_proposed": "BUY",
+                    "decision_outcome": "EXECUTED",
+                    "ticker": "AAPL",
+                    "votes": {},
+                    "transcript_text": "debate",
+                    "timestamp_utc": self.default_ts,
+                }
+            ]
+        }
+        res_decision = self.verifier.compare(legacy_decision, proj_decision)
+        self.assertFalse(res_decision.is_parity)
+        self.assertGreaterEqual(res_decision.summary.unresolved, 1)
+        self.assertTrue(any(
+            "Explicit null supplied for non-nullable timestamp" in d.message
+            for d in res_decision.discrepancies
+        ))
+
+    def test_explicit_none_non_nullable_timestamp_without_caller_default_reports_unresolved(self):
+        """2. Explicit None for non-nullable timestamp without caller default reports UNRESOLVED."""
+        verifier_no_default = SSoTParityVerifier(self.generator, default_timestamp=None)
+        legacy = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-202",
+                    "directive_text": "Preserve capital",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": None,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        proj = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-202",
+                    "directive_text": "Preserve capital",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        res = verifier_no_default.compare(legacy, proj)
+        self.assertFalse(res.is_parity)
+        self.assertGreaterEqual(res.summary.unresolved, 1)
+        self.assertTrue(any(
+            "Explicit null supplied for non-nullable timestamp" in d.message
+            for d in res.discrepancies
+        ))
+
+    def test_explicit_none_nullable_timestamp_with_projected_none_accepted(self):
+        """3. Explicit None for nullable last_reviewed_at_utc with projected None is accepted as parity."""
+        legacy = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-203",
+                    "directive_text": "Wait for confirmation",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        proj = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-203",
+                    "directive_text": "Wait for confirmation",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        res = self.verifier.compare(legacy, proj)
+        self.assertTrue(res.is_parity)
+        self.assertEqual(len(res.discrepancies), 0)
+
+    def test_explicit_none_nullable_timestamp_with_non_null_projected_flags_mismatch(self):
+        """4. Explicit None for nullable timestamp with non-null projected value flags TIMESTAMP_MISMATCH."""
+        legacy = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-204",
+                    "directive_text": "Keep position small",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        proj = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-204",
+                    "directive_text": "Keep position small",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": "2026-11-10T15:00:00Z",
+                }
+            ]
+        }
+        res = self.verifier.compare(legacy, proj)
+        self.assertFalse(res.is_parity)
+        self.assertGreaterEqual(res.summary.timestamp_mismatches, 1)
+        self.assertTrue(any(
+            d.discrepancy_type == DiscrepancyType.TIMESTAMP_MISMATCH.value and "last_reviewed_at_utc" in d.path
+            for d in res.discrepancies
+        ))
+
+    def test_missing_timestamp_with_authorized_caller_default_accepted(self):
+        """5. Missing timestamp (_MISSING / omitted) with caller default matches projected default value."""
+        # Omitted created_at_utc in trade_lessons
+        legacy = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-205",
+                    "directive_text": "Do not average down",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                }
+            ]
+        }
+        proj = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-205",
+                    "directive_text": "Do not average down",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        res = self.verifier.compare(legacy, proj)
+        self.assertTrue(res.is_parity)
+
+        # Omitted last_updated_at_utc in portfolio_cash
+        legacy_cash = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "500.00"}
+            ]
+        }
+        proj_cash = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "500.00", "last_updated_at_utc": self.default_ts}
+            ],
+            "unallocated_cash_eur": "500.00",
+        }
+        res_cash = self.verifier.compare(legacy_cash, proj_cash)
+        self.assertTrue(res_cash.is_parity)
+
+    def test_missing_timestamp_without_caller_default_flags_mismatch(self):
+        """6. Missing timestamp (_MISSING / omitted) without caller default flags TIMESTAMP_MISMATCH (unexplained timestamp)."""
+        verifier_no_default = SSoTParityVerifier(self.generator, default_timestamp=None)
+        legacy = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-206",
+                    "directive_text": "Never double down on losers",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                }
+            ]
+        }
+        proj = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-206",
+                    "directive_text": "Never double down on losers",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        res = verifier_no_default.compare(legacy, proj)
+        self.assertFalse(res.is_parity)
+        self.assertGreaterEqual(res.summary.timestamp_mismatches, 1)
+        self.assertTrue(any(
+            "Unexplained projected timestamp" in d.message
+            for d in res.discrepancies
+        ))
+
+    def test_empty_and_whitespace_timestamps_reported_as_unresolved(self):
+        """7. Empty string and whitespace strings for timestamps are reported as UNRESOLVED."""
+        # Empty string in trade_lessons created_at_utc
+        legacy_empty = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-207",
+                    "directive_text": "Follow stop loss",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": "",
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        proj = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-207",
+                    "directive_text": "Follow stop loss",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+        res_empty = self.verifier.compare(legacy_empty, proj)
+        self.assertFalse(res_empty.is_parity)
+        self.assertGreaterEqual(res_empty.summary.unresolved, 1)
+        self.assertTrue(any("cannot be empty or whitespace" in d.message for d in res_empty.discrepancies))
+
+        # Whitespace string in portfolio_cash
+        legacy_ws = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00", "last_updated_at_utc": "   "}
+            ]
+        }
+        proj_cash = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00", "last_updated_at_utc": self.default_ts}
+            ]
+        }
+        res_ws = self.verifier.compare(legacy_ws, proj_cash)
+        self.assertFalse(res_ws.is_parity)
+        self.assertGreaterEqual(res_ws.summary.unresolved, 1)
+
+    def test_valid_timezone_aware_timestamps_normalized_and_verified(self):
+        """8. Valid timezone-aware timestamps with non-UTC offset (+02:00) are normalized to UTC 'Z' and verified for parity."""
+        # "2026-11-10T14:00:00+02:00" == "2026-11-10T12:00:00Z"
+        legacy = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-208",
+                    "directive_text": "Respect market regime",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": "2026-11-10T14:00:00+02:00",
+                    "last_reviewed_at_utc": "2026-11-10T15:30:00+03:30",  # also 12:00:00Z
+                }
+            ]
+        }
+        proj = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-208",
+                    "directive_text": "Respect market regime",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": "2026-11-10T12:00:00Z",
+                    "last_reviewed_at_utc": "2026-11-10T12:00:00Z",
+                }
+            ]
+        }
+        res = self.verifier.compare(legacy, proj)
+        self.assertTrue(res.is_parity)
+        self.assertEqual(len(res.discrepancies), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
