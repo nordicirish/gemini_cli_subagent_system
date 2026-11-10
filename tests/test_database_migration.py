@@ -2810,5 +2810,390 @@ class TestStage15D112ParityAndConflictingRepresentations(BaseMigrationTestCase):
             self.assertEqual(item_a["timestamp_utc"], item_b["timestamp_utc"])
 
 
+class TestStage15D1121CorrectiveRegressions(BaseMigrationTestCase):
+    """
+    Stage 1.5-D.1.1.2.1 Regression Suite for Findings F2 and F3:
+    - F2: Elimination of remaining truthiness-based parity comparisons.
+    - F3: Complementary representation consolidation, order invariance, and conflict detection.
+    """
+
+    def test_f2_trade_lessons_truthiness_elimination_parity(self):
+        """F2: Verifies trade lessons category and status parity distinguishes explicit empty/None from missing."""
+        base_proj = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-901",
+                    "directive_text": "Always verify bounds",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": None,
+                }
+            ]
+        }
+
+        # 1. Missing category in legacy defaults to "MANDATE" and matches projected
+        legacy_missing_cat = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-901",
+                    "directive_text": "Always verify bounds",
+                    "created_at_utc": self.default_ts,
+                }
+            ]
+        }
+        res1 = self.verifier.compare(legacy_missing_cat, base_proj)
+        self.assertTrue(res1.is_parity)
+
+        # 2. Explicit empty string category does NOT default to "MANDATE" and flags discrepancy
+        legacy_empty_cat = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-901",
+                    "directive_text": "Always verify bounds",
+                    "category": "",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                }
+            ]
+        }
+        res2 = self.verifier.compare(legacy_empty_cat, base_proj)
+        self.assertFalse(res2.is_parity)
+        cat_discs = [d for d in res2.discrepancies if d.path == "trade_lessons[L-901].category"]
+        self.assertEqual(len(cat_discs), 1)
+        self.assertIn("Category mismatch", cat_discs[0].message)
+
+        # 3. Explicit None category flags discrepancy
+        legacy_none_cat = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-901",
+                    "directive_text": "Always verify bounds",
+                    "category": None,
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                }
+            ]
+        }
+        res3 = self.verifier.compare(legacy_none_cat, base_proj)
+        self.assertFalse(res3.is_parity)
+        self.assertTrue(any(d.path == "trade_lessons[L-901].category" for d in res3.discrepancies))
+
+        # 4. Explicit empty string status does NOT default to "ACTIVE" and flags discrepancy
+        legacy_empty_status = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-901",
+                    "directive_text": "Always verify bounds",
+                    "category": "MANDATE",
+                    "status": "",
+                    "created_at_utc": self.default_ts,
+                }
+            ]
+        }
+        res4 = self.verifier.compare(legacy_empty_status, base_proj)
+        self.assertFalse(res4.is_parity)
+        status_discs = [d for d in res4.discrepancies if d.path == "trade_lessons[L-901].status"]
+        self.assertEqual(len(status_discs), 1)
+        self.assertIn("Status mismatch", status_discs[0].message)
+
+        # 5. Explicit None status flags discrepancy
+        legacy_none_status = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-901",
+                    "directive_text": "Always verify bounds",
+                    "category": "MANDATE",
+                    "status": None,
+                    "created_at_utc": self.default_ts,
+                }
+            ]
+        }
+        res5 = self.verifier.compare(legacy_none_status, base_proj)
+        self.assertFalse(res5.is_parity)
+        self.assertTrue(any(d.path == "trade_lessons[L-901].status" for d in res5.discrepancies))
+
+    def test_f2_watchlist_status_truthiness_elimination_parity(self):
+        """F2: Verifies watchlist status parity distinguishes explicit empty/None from missing."""
+        base_proj = {
+            "watched_tickers": ["AAPL"],
+            "watchlist": [
+                {
+                    "ticker": "AAPL",
+                    "status": "ACTIVE",
+                    "notes": None,
+                    "added_at_utc": self.default_ts,
+                }
+            ],
+        }
+
+        # 1. Missing status in legacy defaults to "ACTIVE" and matches projected
+        legacy_missing = {
+            "watchlist": [
+                {
+                    "ticker": "AAPL",
+                    "added_at_utc": self.default_ts,
+                }
+            ]
+        }
+        res1 = self.verifier.compare(legacy_missing, base_proj)
+        self.assertTrue(res1.is_parity)
+
+        # 2. Explicit empty string status does NOT default to "ACTIVE" and flags discrepancy
+        legacy_empty = {
+            "watchlist": [
+                {
+                    "ticker": "AAPL",
+                    "status": "",
+                    "added_at_utc": self.default_ts,
+                }
+            ]
+        }
+        res2 = self.verifier.compare(legacy_empty, base_proj)
+        self.assertFalse(res2.is_parity)
+        status_discs = [d for d in res2.discrepancies if d.path == "watchlist[AAPL].status"]
+        self.assertEqual(len(status_discs), 1)
+        self.assertIn("Status mismatch", status_discs[0].message)
+
+        # 3. Explicit None status flags discrepancy
+        legacy_none = {
+            "watchlist": [
+                {
+                    "ticker": "AAPL",
+                    "status": None,
+                    "added_at_utc": self.default_ts,
+                }
+            ]
+        }
+        res3 = self.verifier.compare(legacy_none, base_proj)
+        self.assertFalse(res3.is_parity)
+        self.assertTrue(any(d.path == "watchlist[AAPL].status" for d in res3.discrepancies))
+
+    def test_f2_decision_log_votes_truthiness_elimination_parity(self):
+        """F2: Verifies decision log votes parity distinguishes missing from explicit None/dict."""
+        base_proj = {
+            "decision_log": [
+                {
+                    "session_id": "S-100",
+                    "action_proposed": "BUY",
+                    "decision_outcome": "APPROVED",
+                    "ticker": "AAPL",
+                    "votes": {},
+                    "transcript_text": "Debate transcript",
+                    "timestamp_utc": self.default_ts,
+                }
+            ]
+        }
+
+        # 1. Missing votes in legacy defaults to {} and matches projected {}
+        legacy_missing = {
+            "decision_log": [
+                {
+                    "session_id": "S-100",
+                    "action_proposed": "BUY",
+                    "decision_outcome": "APPROVED",
+                    "ticker": "AAPL",
+                    "transcript_text": "Debate transcript",
+                    "timestamp_utc": self.default_ts,
+                }
+            ]
+        }
+        res1 = self.verifier.compare(legacy_missing, base_proj)
+        self.assertTrue(res1.is_parity)
+
+        # 2. Explicit None votes does NOT collapse to {} and flags discrepancy
+        legacy_none = {
+            "decision_log": [
+                {
+                    "session_id": "S-100",
+                    "action_proposed": "BUY",
+                    "decision_outcome": "APPROVED",
+                    "ticker": "AAPL",
+                    "votes": None,
+                    "transcript_text": "Debate transcript",
+                    "timestamp_utc": self.default_ts,
+                }
+            ]
+        }
+        res2 = self.verifier.compare(legacy_none, base_proj)
+        self.assertFalse(res2.is_parity)
+        vote_discs = [d for d in res2.discrepancies if d.path == "decision_log[S-100/BUY/AAPL].votes"]
+        self.assertEqual(len(vote_discs), 1)
+
+        # 3. Differing votes dict flags discrepancy
+        legacy_diff = {
+            "decision_log": [
+                {
+                    "session_id": "S-100",
+                    "action_proposed": "BUY",
+                    "decision_outcome": "APPROVED",
+                    "ticker": "AAPL",
+                    "votes": {"bull": "YES"},
+                    "transcript_text": "Debate transcript",
+                    "timestamp_utc": self.default_ts,
+                }
+            ]
+        }
+        res3 = self.verifier.compare(legacy_diff, base_proj)
+        self.assertFalse(res3.is_parity)
+        self.assertTrue(any(d.path == "decision_log[S-100/BUY/AAPL].votes" for d in res3.discrepancies))
+
+    def test_f3_scout_complementary_consolidation_and_order_invariance(self):
+        """F3: Verifies scout representations consolidate complementary data order-invariantly and reject conflicts."""
+        # Representation A: SCOUT_TICKER_MAP provides tickers, no description
+        # Representation B: scout_categories provides description and matching tickers
+        source_order_ab = {
+            "SCOUT_TICKER_MAP": {"TECH": ["AAPL", "NVDA"]},
+            "scout_categories": [
+                {"category_name": "TECH", "description": "Technology sector", "tickers": ["AAPL", "NVDA"], "updated_at_utc": self.default_ts}
+            ],
+        }
+        source_order_ba = {
+            "scout_categories": [
+                {"category_name": "TECH", "description": "Technology sector", "tickers": ["AAPL", "NVDA"], "updated_at_utc": self.default_ts}
+            ],
+            "SCOUT_TICKER_MAP": {"TECH": ["AAPL", "NVDA"]},
+        }
+
+        res_ab = consolidate_scout_representations(source_order_ab, default_timestamp=self.default_ts)
+        res_ba = consolidate_scout_representations(source_order_ba, default_timestamp=self.default_ts)
+
+        self.assertEqual(len(res_ab), 1)
+        self.assertEqual(len(res_ba), 1)
+        self.assertEqual(res_ab[0]["category_name"], "TECH")
+        self.assertEqual(res_ab[0]["description"], "Technology sector")
+        self.assertEqual(res_ab[0]["tickers"], ["AAPL", "NVDA"])
+        self.assertEqual(res_ab, res_ba)
+
+        # Conflicting descriptions between representations raise MigrationConflictError
+        conflict_desc = {
+            "scout_categories": [
+                {"category_name": "TECH", "description": "Tech Leaders", "tickers": ["AAPL"], "updated_at_utc": self.default_ts},
+                {"category_name": "TECH", "description": "Tech Infrastructure", "tickers": ["AAPL"], "updated_at_utc": self.default_ts},
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_scout_representations(conflict_desc, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate scout category record for TECH", str(ctx.exception))
+
+    def test_f3_watchlist_complementary_consolidation_and_order_invariance(self):
+        """F3: Verifies watchlist representations consolidate complementary data order-invariantly and reject conflicts."""
+        # Representation A: watched_tickers plain string list (status and notes unspecified)
+        # Representation B: watchlist structured dict providing notes and active status
+        source_order_ab = {
+            "watched_tickers": ["AAPL"],
+            "watchlist": [
+                {"ticker": "AAPL", "status": "ACTIVE", "notes": "Core tech holding", "added_at_utc": self.default_ts}
+            ],
+        }
+        source_order_ba = {
+            "watchlist": [
+                {"ticker": "AAPL", "status": "ACTIVE", "notes": "Core tech holding", "added_at_utc": self.default_ts}
+            ],
+            "watched_tickers": ["AAPL"],
+        }
+
+        res_ab = consolidate_watchlist_representations(source_order_ab, default_timestamp=self.default_ts)
+        res_ba = consolidate_watchlist_representations(source_order_ba, default_timestamp=self.default_ts)
+
+        self.assertEqual(len(res_ab), 1)
+        self.assertEqual(len(res_ba), 1)
+        self.assertEqual(res_ab[0]["ticker"], "AAPL")
+        self.assertEqual(res_ab[0]["status"], "ACTIVE")
+        self.assertEqual(res_ab[0]["notes"], "Core tech holding")
+        self.assertEqual(res_ab, res_ba)
+
+        # Conflicting status between representations raises MigrationConflictError
+        conflict_status = {
+            "watchlist": [
+                {"ticker": "AAPL", "status": "ACTIVE", "added_at_utc": self.default_ts}
+            ],
+            "watched_tickers": {
+                "AAPL": {"status": "PAUSED", "added_at_utc": self.default_ts}
+            },
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_watchlist_representations(conflict_status, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate watchlist record for AAPL", str(ctx.exception))
+
+    def test_f3_position_complementary_consolidation_and_order_invariance(self):
+        """F3: Verifies position representations consolidate complementary wac_usd order-invariantly and reject conflicts."""
+        # Representation A: positions without wac_usd
+        # Representation B: portfolio_positions with wac_usd
+        source_order_ab = {
+            "positions": [
+                {"account_id": "PRIMARY", "ticker": "MSFT", "shares": "50", "wac_eur": "300.00", "last_updated_at_utc": self.default_ts}
+            ],
+            "portfolio_positions": [
+                {"account_id": "PRIMARY", "ticker": "MSFT", "shares": "50", "wac_eur": "300.00", "wac_usd": "330.00", "last_updated_at_utc": self.default_ts}
+            ],
+        }
+        source_order_ba = {
+            "portfolio_positions": [
+                {"account_id": "PRIMARY", "ticker": "MSFT", "shares": "50", "wac_eur": "300.00", "wac_usd": "330.00", "last_updated_at_utc": self.default_ts}
+            ],
+            "positions": [
+                {"account_id": "PRIMARY", "ticker": "MSFT", "shares": "50", "wac_eur": "300.00", "last_updated_at_utc": self.default_ts}
+            ],
+        }
+
+        res_ab = consolidate_position_representations(source_order_ab, default_timestamp=self.default_ts)
+        res_ba = consolidate_position_representations(source_order_ba, default_timestamp=self.default_ts)
+
+        self.assertEqual(len(res_ab), 1)
+        self.assertEqual(len(res_ba), 1)
+        self.assertEqual(res_ab[0]["ticker"], "MSFT")
+        self.assertEqual(res_ab[0]["shares"], Decimal("50"))
+        self.assertEqual(res_ab[0]["wac_eur"], Decimal("300.00"))
+        self.assertEqual(res_ab[0]["wac_usd"], Decimal("330.00"))
+        self.assertEqual(res_ab, res_ba)
+
+        # Conflicting wac_usd raises MigrationConflictError
+        conflict_wac = {
+            "portfolio_positions": [
+                {"account_id": "PRIMARY", "ticker": "MSFT", "shares": "50", "wac_eur": "300.00", "wac_usd": "330.00", "last_updated_at_utc": self.default_ts},
+                {"account_id": "PRIMARY", "ticker": "MSFT", "shares": "50", "wac_eur": "300.00", "wac_usd": "340.00", "last_updated_at_utc": self.default_ts},
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_position_representations(conflict_wac, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate position record for PRIMARY/MSFT", str(ctx.exception))
+
+    def test_f3_cash_complementary_consolidation_and_order_invariance(self):
+        """F3: Verifies scalar cash (no ts) and structured cash (with ts) consolidate cleanly and order-invariantly."""
+        source_order_ab = {
+            "unallocated_cash_eur": "7500.00",
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "7500.00", "last_updated_at_utc": self.default_ts}
+            ],
+        }
+        source_order_ba = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "7500.00", "last_updated_at_utc": self.default_ts}
+            ],
+            "unallocated_cash_eur": "7500.00",
+        }
+
+        res_ab = consolidate_cash_representations(source_order_ab, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        res_ba = consolidate_cash_representations(source_order_ba, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+
+        self.assertEqual(len(res_ab), 1)
+        self.assertEqual(len(res_ba), 1)
+        self.assertEqual(res_ab[0]["amount"], Decimal("7500.00"))
+        self.assertEqual(res_ab[0]["timestamp_utc"], self.default_ts)
+        self.assertEqual(res_ab, res_ba)
+
+        # Conflicting amount raises MigrationConflictError
+        conflict_amt = {
+            "unallocated_cash_eur": "7500.00",
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "8000.00", "last_updated_at_utc": self.default_ts}
+            ],
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            consolidate_cash_representations(conflict_amt, default_account_id="PRIMARY", default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate cash record for PRIMARY/EUR", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

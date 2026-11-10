@@ -42,6 +42,8 @@ from database.schema import (
     SchemaVersionMismatchError,
     SchemaIntegrityError,
     CURRENT_SCHEMA_VERSION,
+    PREVIOUS_SUPPORTED_CORE_SCHEMA_VERSIONS,
+    CORE_SCHEMA_STATEMENTS,
 )
 from database.backup import (
     BackupManager,
@@ -2623,6 +2625,222 @@ class TestStage15A2BackupRestoreQuiescenceAndCleanupSafety(unittest.TestCase):
             self.assertIn(".pre_restore_", ctx.exception.fallback_path)
         finally:
             os.replace = real_replace
+
+
+class TestStage15D112SchemaVersionUpgradeAndCompatibility(unittest.TestCase):
+    """
+    Stage 1.5-D.1.1.2.1 Regression Suite for Finding F1 (Schema Version Compatibility & Verification).
+    Validates:
+    - Fresh DB initializes at version 2 with nullable last_reviewed_at_utc and passes verification.
+    - Core database at version 1 upgrades transactionally to version 2 via table rebuild.
+    - All original records, timestamps, and values are strictly preserved during upgrade.
+    - Inserting lessons with last_reviewed_at_utc=None succeeds on upgraded v2 DB.
+    - Attempted insertion of NULL on un-migrated v1 table fails with IntegrityError.
+    - Injected upgrade verification failures roll back completely, preserving v1 table and data intact.
+    - Temporary migration table is absent after rollback.
+    - Idempotent re-initialization of v2 DB succeeds and verifies schema integrity.
+    - Unsupported schema versions (older unhandled versions, future versions) fail closed with no data changes.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "stage15d112_core.db")
+        self.manager = DatabaseManager(self.db_path, profile=PRIMARY_FINANCIAL_PROFILE)
+
+    def tearDown(self):
+        try:
+            self.manager.close()
+        except Exception:
+            pass
+        self.temp_dir.cleanup()
+
+    def _create_v1_database(self, conn: sqlite3.Connection):
+        """Helper to create a fully valid v1 database where trade_lessons has NOT NULL last_reviewed_at_utc."""
+        for stmt in CORE_SCHEMA_STATEMENTS:
+            if "CREATE TABLE IF NOT EXISTS trade_lessons" in stmt:
+                stmt = stmt.replace("last_reviewed_at_utc TEXT\n    );", "last_reviewed_at_utc TEXT NOT NULL\n    );")
+            conn.execute(stmt)
+        conn.execute(
+            "INSERT INTO database_metadata (id, schema_version, db_revision, created_at_utc, last_updated_at_utc) "
+            "VALUES (1, 1, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');"
+        )
+
+    def test_fresh_db_initializes_at_version_2(self):
+        """Fresh database initialisation creates schema version 2 with nullable last_reviewed_at_utc."""
+        with self.manager.connection() as conn:
+            version = SchemaMigrator.initialize_core_schema(conn)
+            self.assertEqual(version, 2)
+            self.assertEqual(CURRENT_SCHEMA_VERSION, 2)
+            self.assertIn(1, PREVIOUS_SUPPORTED_CORE_SCHEMA_VERSIONS)
+
+            # Verify last_reviewed_at_utc can be NULL
+            conn.execute("""
+                INSERT INTO trade_lessons (
+                    rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
+                ) VALUES ('RULE_NULL_REVIEW', 'Test directive', 'MANDATE', 'ACTIVE', '2026-11-10T12:00:00Z', NULL);
+            """)
+
+            cursor = conn.cursor()
+            cursor.execute("SELECT rule_code, last_reviewed_at_utc FROM trade_lessons WHERE rule_code = 'RULE_NULL_REVIEW';")
+            row = cursor.fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[0], "RULE_NULL_REVIEW")
+            self.assertIsNone(row[1])
+
+            # Passes complete schema integrity verification
+            SchemaMigrator.verify_core_schema_integrity(conn)
+
+    def test_v1_to_v2_upgrade_preserves_records_and_relaxes_constraint(self):
+        """Upgrading v1 database with existing lessons preserves all records and allows NULL review timestamp."""
+        with self.manager.connection() as conn:
+            self._create_v1_database(conn)
+
+            # Insert v1 records with different values and non-null last_reviewed_at_utc
+            conn.execute("""
+                INSERT INTO trade_lessons (
+                    rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
+                ) VALUES ('RULE_V1_A', 'Directive A', 'MANDATE', 'ACTIVE', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+            """)
+            conn.execute("""
+                INSERT INTO trade_lessons (
+                    rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
+                ) VALUES ('RULE_V1_B', 'Directive B', 'RISK', 'ACTIVE', '2026-02-01T00:00:00Z', '2026-02-02T00:00:00Z');
+            """)
+
+            # On v1, inserting NULL fails NOT NULL constraint
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute("""
+                    INSERT INTO trade_lessons (
+                        rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
+                    ) VALUES ('RULE_V1_FAIL', 'Directive F', 'RISK', 'ACTIVE', '2026-02-01T00:00:00Z', NULL);
+                """)
+
+            # Run schema migration via initialize_core_schema
+            new_version = SchemaMigrator.initialize_core_schema(conn)
+            self.assertEqual(new_version, 2)
+
+            # Verify database_metadata row
+            cursor = conn.cursor()
+            cursor.execute("SELECT schema_version FROM database_metadata WHERE id = 1;")
+            self.assertEqual(cursor.fetchone()[0], 2)
+
+            # Verify existing records and timestamps are preserved intact
+            cursor.execute("SELECT rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc FROM trade_lessons ORDER BY rule_code;")
+            rows = cursor.fetchall()
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0], ('RULE_V1_A', 'Directive A', 'MANDATE', 'ACTIVE', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'))
+            self.assertEqual(rows[1], ('RULE_V1_B', 'Directive B', 'RISK', 'ACTIVE', '2026-02-01T00:00:00Z', '2026-02-02T00:00:00Z'))
+
+            # Verify new record with NULL last_reviewed_at_utc is now accepted
+            conn.execute("""
+                INSERT INTO trade_lessons (
+                    rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
+                ) VALUES ('RULE_V2_NEW', 'Directive New', 'EXECUTION', 'ACTIVE', '2026-03-01T00:00:00Z', NULL);
+            """)
+            cursor.execute("SELECT rule_code, last_reviewed_at_utc FROM trade_lessons WHERE rule_code = 'RULE_V2_NEW';")
+            self.assertIsNone(cursor.fetchone()[1])
+
+            # Verify full schema integrity passes and constraints/indexes valid
+            SchemaMigrator.verify_core_schema_integrity(conn)
+
+    def test_v1_to_v2_upgrade_atomic_rollback_on_failure(self):
+        """Injected verification failure rolls back atomically, leaving v1 table and records intact."""
+        with self.manager.connection() as conn:
+            self._create_v1_database(conn)
+
+            conn.execute("""
+                INSERT INTO trade_lessons (
+                    rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
+                ) VALUES ('RULE_V1_SAFE', 'Directive Safe', 'MANDATE', 'ACTIVE', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+            """)
+
+            real_verify = SchemaMigrator.verify_core_schema_integrity
+
+            def faulty_verify(target_conn):
+                raise SchemaIntegrityError("Injected failure during migration verification")
+
+            SchemaMigrator.verify_core_schema_integrity = faulty_verify
+
+            try:
+                with self.assertRaises(SchemaError) as ctx:
+                    SchemaMigrator.initialize_core_schema(conn)
+                self.assertIn("Injected failure during migration verification", str(ctx.exception))
+            finally:
+                SchemaMigrator.verify_core_schema_integrity = real_verify
+
+            # Verify database remains at version 1
+            cursor = conn.cursor()
+            cursor.execute("SELECT schema_version FROM database_metadata WHERE id = 1;")
+            self.assertEqual(cursor.fetchone()[0], 1)
+
+            # Verify original record is intact
+            cursor.execute("SELECT rule_code, directive_text FROM trade_lessons;")
+            rows = cursor.fetchall()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0], ('RULE_V1_SAFE', 'Directive Safe'))
+
+            # Verify NOT NULL constraint is still enforced on v1
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute("""
+                    INSERT INTO trade_lessons (
+                        rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
+                    ) VALUES ('RULE_V1_FAIL', 'Directive F', 'RISK', 'ACTIVE', '2026-02-01T00:00:00Z', NULL);
+                """)
+
+            # Verify temporary migration table is absent
+            cursor.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='trade_lessons_migration_v2';")
+            self.assertEqual(cursor.fetchone()[0], 0)
+
+    def test_idempotent_reinitialization_of_v2_db(self):
+        """Re-initialization of v2 database succeeds idempotently and verifies integrity."""
+        with self.manager.connection() as conn:
+            v1 = SchemaMigrator.initialize_core_schema(conn)
+            cursor = conn.cursor()
+            conn.execute("""
+                INSERT INTO trade_lessons (
+                    rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
+                ) VALUES ('RULE_IDEMP', 'Directive Idemp', 'MANDATE', 'ACTIVE', '2026-01-01T00:00:00Z', NULL);
+            """)
+
+            v2 = SchemaMigrator.initialize_core_schema(conn)
+            self.assertEqual(v1, 2)
+            self.assertEqual(v2, 2)
+
+            # Verify no data changed
+            cursor.execute("SELECT count(*) FROM trade_lessons WHERE rule_code = 'RULE_IDEMP';")
+            self.assertEqual(cursor.fetchone()[0], 1)
+
+            SchemaMigrator.verify_core_schema_integrity(conn)
+
+    def test_unsupported_versions_fail_closed(self):
+        """Schema versions outside CURRENT_SCHEMA_VERSION and PREVIOUS_SUPPORTED_CORE_SCHEMA_VERSIONS fail closed."""
+        with self.manager.connection() as conn:
+            self._create_v1_database(conn)
+            conn.execute("""
+                INSERT INTO trade_lessons (
+                    rule_code, directive_text, category, status, created_at_utc, last_reviewed_at_utc
+                ) VALUES ('RULE_IMMUTABLE', 'Directive Immutable', 'MANDATE', 'ACTIVE', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+            """)
+
+            # Test unsupported version 0
+            conn.execute("UPDATE database_metadata SET schema_version = 0 WHERE id = 1;")
+            with self.assertRaises(SchemaVersionMismatchError):
+                SchemaMigrator.initialize_core_schema(conn)
+
+            # Test unsupported older version (e.g. -1)
+            conn.execute("UPDATE database_metadata SET schema_version = -1 WHERE id = 1;")
+            with self.assertRaises(SchemaVersionMismatchError):
+                SchemaMigrator.initialize_core_schema(conn)
+
+            # Test unsupported future version (e.g. 3)
+            conn.execute("UPDATE database_metadata SET schema_version = 3 WHERE id = 1;")
+            with self.assertRaises(SchemaVersionMismatchError):
+                SchemaMigrator.initialize_core_schema(conn)
+
+            # Verify data remains unchanged after rejections
+            cursor = conn.cursor()
+            cursor.execute("SELECT rule_code FROM trade_lessons WHERE rule_code = 'RULE_IMMUTABLE';")
+            self.assertEqual(cursor.fetchone()[0], "RULE_IMMUTABLE")
 
 
 if __name__ == "__main__":

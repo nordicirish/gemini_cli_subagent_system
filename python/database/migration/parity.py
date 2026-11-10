@@ -35,6 +35,7 @@ from python.database.migration.contract import (
     consolidate_watchlist_representations,
     consolidate_position_representations,
     consolidate_cash_representations,
+    _MISSING,
 )
 
 __all__ = ["SSoTParityVerifier"]
@@ -591,7 +592,7 @@ class SSoTParityVerifier:
                         summary.unresolved += 1
 
                     # Timestamp (R1)
-                    leg_c_ts = leg_c.get("last_updated_at_utc") or leg_c.get("timestamp_utc")
+                    leg_c_ts = leg_c.get("last_updated_at_utc") if leg_c.get("last_updated_at_utc") is not None else leg_c.get("timestamp_utc")
                     self._verify_timestamp_field(
                         leg_c_ts,
                         proj_c.get("last_updated_at_utc"),
@@ -656,7 +657,8 @@ class SSoTParityVerifier:
 
         leg_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
         for p in consolidated_positions:
-            acc = str(p.get("account_id") or "PRIMARY").strip().upper()
+            raw_acc = p.get("account_id", _MISSING)
+            acc = "PRIMARY" if raw_acc is _MISSING else str(raw_acc).strip().upper()
             norm_tk = str(p["ticker"]).strip().upper()
             leg_map[(acc, norm_tk)] = p
 
@@ -664,7 +666,8 @@ class SSoTParityVerifier:
         proj_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
         for p in proj_positions:
             if isinstance(p, dict) and p.get("ticker"):
-                acc = str(p.get("account_id") or "PRIMARY").strip().upper()
+                raw_acc = p.get("account_id", _MISSING)
+                acc = "PRIMARY" if raw_acc is _MISSING else str(raw_acc).strip().upper()
                 norm_tk = str(p["ticker"]).strip().upper()
                 proj_map[(acc, norm_tk)] = p
 
@@ -795,8 +798,10 @@ class SSoTParityVerifier:
                     summary.unresolved += 1
 
             # Compare Account ID (R2: explicit comparison)
-            leg_acc = str(leg_p.get("account_id") or "PRIMARY").strip().upper()
-            proj_acc = str(proj_p.get("account_id") or "PRIMARY").strip().upper()
+            raw_leg_acc = leg_p.get("account_id", _MISSING)
+            leg_acc = "PRIMARY" if raw_leg_acc is _MISSING else str(raw_leg_acc).strip().upper()
+            raw_proj_acc = proj_p.get("account_id", _MISSING)
+            proj_acc = "PRIMARY" if raw_proj_acc is _MISSING else str(raw_proj_acc).strip().upper()
             if leg_acc != proj_acc:
                 has_mismatch = True
                 summary.identity_mismatches += 1
@@ -811,7 +816,7 @@ class SSoTParityVerifier:
                 ))
 
             # Compare Timestamp (R1)
-            leg_ts = leg_p.get("last_updated_at_utc") or leg_p.get("timestamp_utc")
+            leg_ts = leg_p.get("last_updated_at_utc") if leg_p.get("last_updated_at_utc") is not None else leg_p.get("timestamp_utc")
             self._verify_timestamp_field(
                 leg_ts,
                 proj_p.get("last_updated_at_utc"),
@@ -921,8 +926,10 @@ class SSoTParityVerifier:
             proj_item = proj_items.get(tk)
             if proj_item is not None:
                 # Status: explicit comparison with default ACTIVE
-                leg_status = leg_item.get("status") or "ACTIVE"
-                proj_status = proj_item.get("status") or "ACTIVE"
+                raw_leg_status = leg_item.get("status", _MISSING)
+                leg_status = "ACTIVE" if raw_leg_status is _MISSING else leg_item.get("status")
+                raw_proj_status = proj_item.get("status", _MISSING)
+                proj_status = "ACTIVE" if raw_proj_status is _MISSING else proj_item.get("status")
                 if leg_status != proj_status:
                     summary.unresolved += 1
                     discrepancies.append(ParityDiscrepancy(
@@ -931,7 +938,7 @@ class SSoTParityVerifier:
                         discrepancy_type=DiscrepancyType.UNRESOLVED.value,
                         legacy_value=leg_item.get("status"),
                         projected_value=proj_item.get("status"),
-                        message=f"Status mismatch for watchlist item {tk}: legacy={leg_status} != projected={proj_status}",
+                        message=f"Status mismatch for watchlist item {tk}: legacy={leg_status!r} != projected={proj_status!r}",
                         record_id=tk,
                     ))
 
@@ -951,7 +958,7 @@ class SSoTParityVerifier:
                     ))
 
                 # Timestamp verification (R1)
-                leg_ts = leg_item.get("added_at_utc") or leg_item.get("timestamp_utc")
+                leg_ts = leg_item.get("added_at_utc") if leg_item.get("added_at_utc") is not None else leg_item.get("timestamp_utc")
                 self._verify_timestamp_field(
                     leg_ts,
                     proj_item.get("added_at_utc"),
@@ -1073,7 +1080,7 @@ class SSoTParityVerifier:
                     ))
 
                 # Timestamp verification (R1)
-                leg_ts = leg_info.get("updated_at_utc") or leg_info.get("timestamp_utc")
+                leg_ts = leg_info.get("updated_at_utc") if leg_info.get("updated_at_utc") is not None else leg_info.get("timestamp_utc")
                 self._verify_timestamp_field(
                     leg_ts,
                     proj_sc.get("updated_at_utc"),
@@ -1177,8 +1184,10 @@ class SSoTParityVerifier:
                 has_mismatch = True
 
             # Verify category (R2: explicit comparison with default MANDATE)
-            leg_cat = item.get("category") or "MANDATE"
-            proj_cat = proj_l.get("category") or "MANDATE"
+            raw_leg_cat = item.get("category", _MISSING)
+            leg_cat = "MANDATE" if raw_leg_cat is _MISSING else item.get("category")
+            raw_proj_cat = proj_l.get("category", _MISSING)
+            proj_cat = "MANDATE" if raw_proj_cat is _MISSING else proj_l.get("category")
             if leg_cat != proj_cat:
                 summary.unresolved += 1
                 discrepancies.append(ParityDiscrepancy(
@@ -1187,14 +1196,16 @@ class SSoTParityVerifier:
                     discrepancy_type=DiscrepancyType.UNRESOLVED.value,
                     legacy_value=item.get("category"),
                     projected_value=proj_l.get("category"),
-                    message=f"Category mismatch for trade lesson {norm_code}: legacy={leg_cat} != projected={proj_cat}",
+                    message=f"Category mismatch for trade lesson {norm_code}: legacy={leg_cat!r} != projected={proj_cat!r}",
                     record_id=norm_code,
                 ))
                 has_mismatch = True
 
             # Verify status (R2: explicit comparison with default ACTIVE)
-            leg_status = item.get("status") or "ACTIVE"
-            proj_status = proj_l.get("status") or "ACTIVE"
+            raw_leg_status = item.get("status", _MISSING)
+            leg_status = "ACTIVE" if raw_leg_status is _MISSING else item.get("status")
+            raw_proj_status = proj_l.get("status", _MISSING)
+            proj_status = "ACTIVE" if raw_proj_status is _MISSING else proj_l.get("status")
             if leg_status != proj_status:
                 summary.unresolved += 1
                 discrepancies.append(ParityDiscrepancy(
@@ -1203,7 +1214,7 @@ class SSoTParityVerifier:
                     discrepancy_type=DiscrepancyType.UNRESOLVED.value,
                     legacy_value=item.get("status"),
                     projected_value=proj_l.get("status"),
-                    message=f"Status mismatch for trade lesson {norm_code}: legacy={leg_status} != projected={proj_status}",
+                    message=f"Status mismatch for trade lesson {norm_code}: legacy={leg_status!r} != projected={proj_status!r}",
                     record_id=norm_code,
                 ))
                 has_mismatch = True
@@ -1329,7 +1340,11 @@ class SSoTParityVerifier:
                 has_diff = True
 
             # 4. Votes dict
-            if not deep_equal(exp.get("votes") or {}, matching.get("votes") or {}):
+            raw_leg_votes = exp.get("votes", _MISSING)
+            leg_votes = {} if raw_leg_votes is _MISSING else exp.get("votes")
+            raw_proj_votes = matching.get("votes", _MISSING)
+            proj_votes = {} if raw_proj_votes is _MISSING else matching.get("votes")
+            if not deep_equal(leg_votes, proj_votes):
                 summary.unresolved += 1
                 discrepancies.append(ParityDiscrepancy(
                     domain="decision_log",
@@ -1337,7 +1352,7 @@ class SSoTParityVerifier:
                     discrepancy_type=DiscrepancyType.UNRESOLVED.value,
                     legacy_value=exp.get("votes"),
                     projected_value=matching.get("votes"),
-                    message=f"Votes mismatch for {path_prefix}",
+                    message=f"Votes mismatch for {path_prefix}: legacy={leg_votes!r} != projected={proj_votes!r}",
                     record_id=sid,
                 ))
                 has_diff = True
@@ -1423,12 +1438,14 @@ class SSoTParityVerifier:
                 action = str(d["action_proposed"]).strip()
                 outcome = str(d["decision_outcome"]).strip()
                 ticker = str(d.get("ticker")).strip().upper() if d.get("ticker") else None
+                raw_votes = d.get("votes", _MISSING)
+                votes_val = {} if raw_votes is _MISSING else d.get("votes")
                 exp_rec = {
                     "session_id": session_id,
                     "action_proposed": action,
                     "decision_outcome": outcome,
                     "ticker": ticker,
-                    "votes": d.get("votes") or {},
+                    "votes": votes_val,
                     "transcript_text": d.get("transcript_text"),
                     "timestamp_utc": d.get("timestamp_utc"),
                 }

@@ -84,6 +84,9 @@ SCOUT_CATEGORY_EQUALITY_FIELDS = ("category_name", "description", "tickers", "ti
 TRADE_LESSON_EQUALITY_FIELDS = ("rule_code", "directive_text", "category", "status", "created_at_utc", "last_reviewed_at_utc")
 DECISION_LOG_EQUALITY_FIELDS = ("session_id", "action_proposed", "decision_outcome", "ticker", "votes", "transcript_text", "timestamp_utc")
 
+_UNSPECIFIED = object()
+_MISSING = object()
+
 
 def deep_equal(v1: Any, v2: Any) -> bool:
     """
@@ -678,7 +681,7 @@ def consolidate_scout_representations(
                     ts_val = None
                 rep_items.append((map_key, cat, {
                     "category_name": cat,
-                    "description": None,
+                    "description": _UNSPECIFIED,
                     "tickers": parsed_tickers,
                     "updated_at_utc": ts_val,
                     "timestamp_utc": ts_val,
@@ -695,7 +698,10 @@ def consolidate_scout_representations(
                         continue
                     cat = str(raw_name).strip()
                     parsed_tickers = sorted(list({parse_ticker(t, f"{rep_key}[{idx}].ticker") for t in (entry.get("tickers") or []) if t}))
-                    desc = str(entry["description"]).strip() if entry.get("description") is not None else None
+                    if "description" in entry:
+                        desc = str(entry["description"]).strip() if entry["description"] is not None else None
+                    else:
+                        desc = _UNSPECIFIED
                     raw_ts = entry.get("updated_at_utc") or entry.get("timestamp_utc")
                     if raw_ts is not None:
                         ts_val, _ = resolve_historical_timestamp(
@@ -744,7 +750,7 @@ def consolidate_scout_representations(
                         ts_val = None
                     rep_items.append((rep_key, cat, {
                         "category_name": cat,
-                        "description": None,
+                        "description": _UNSPECIFIED,
                         "tickers": [],
                         "updated_at_utc": ts_val,
                         "timestamp_utc": ts_val,
@@ -780,7 +786,7 @@ def consolidate_scout_representations(
             # Compare description
             prev_desc = prev.get("description")
             item_desc = item.get("description")
-            if prev_desc is not None and item_desc is not None and prev_desc != item_desc:
+            if prev_desc is not _UNSPECIFIED and item_desc is not _UNSPECIFIED and prev_desc != item_desc:
                 raise MigrationConflictError(
                     f"Conflicting duplicate scout category record for {cat} in {source_name}: "
                     f"existing {prev} != incoming {item} (representation '{prev_source}' description '{prev_desc}' != '{rep_name}' '{item_desc}')"
@@ -795,18 +801,15 @@ def consolidate_scout_representations(
                     f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
                 )
 
-            # Any other equality field conflict
-            if not records_equal(prev, item, SCOUT_CATEGORY_EQUALITY_FIELDS):
-                raise MigrationConflictError(
-                    f"Conflicting duplicate scout category record for {cat} in {source_name}: "
-                    f"existing {prev} != incoming {item}"
-                )
-
             prev["tickers"] = prev_tickers if prev_tickers else item_tickers
-            prev["description"] = prev_desc if prev_desc is not None else item_desc
+            prev["description"] = prev_desc if prev_desc is not _UNSPECIFIED else item_desc
             prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts
             prev["updated_at_utc"] = prev["timestamp_utc"]
             sources_by_cat[cat].append(rep_name)
+
+    for rec in records_by_cat.values():
+        if rec.get("description") is _UNSPECIFIED:
+            rec["description"] = None
 
     return sorted(records_by_cat.values(), key=lambda x: x["category_name"])
 
@@ -836,8 +839,14 @@ def consolidate_watchlist_representations(
         for idx, entry in enumerate(data["watchlist"]):
             if isinstance(entry, dict):
                 tk = parse_ticker(entry.get("ticker"), f"watchlist[{idx}].ticker")
-                status = str(entry.get("status") or "ACTIVE").strip().upper()
-                notes = str(entry["notes"]).strip() if entry.get("notes") is not None else None
+                if "status" in entry:
+                    status = str(entry["status"]).strip().upper() if entry["status"] is not None else None
+                else:
+                    status = _UNSPECIFIED
+                if "notes" in entry:
+                    notes = str(entry["notes"]).strip() if entry["notes"] is not None else None
+                else:
+                    notes = _UNSPECIFIED
                 raw_ts = entry.get("added_at_utc") or entry.get("timestamp_utc")
                 if raw_ts is not None:
                     ts_val, _ = resolve_historical_timestamp(
@@ -897,15 +906,21 @@ def consolidate_watchlist_representations(
                         ts_val = None
                     rep_items.append((rep_key, tk, {
                         "ticker": tk,
-                        "status": "ACTIVE",
-                        "notes": None,
+                        "status": _UNSPECIFIED,
+                        "notes": _UNSPECIFIED,
                         "added_at_utc": ts_val,
                         "timestamp_utc": ts_val,
                     }))
                 elif isinstance(entry, dict):
                     tk = parse_ticker(entry.get("ticker"), f"{rep_key}[{idx}].ticker")
-                    status = str(entry.get("status") or "ACTIVE").strip().upper()
-                    notes = str(entry["notes"]).strip() if entry.get("notes") is not None else None
+                    if "status" in entry:
+                        status = str(entry["status"]).strip().upper() if entry["status"] is not None else None
+                    else:
+                        status = _UNSPECIFIED
+                    if "notes" in entry:
+                        notes = str(entry["notes"]).strip() if entry["notes"] is not None else None
+                    else:
+                        notes = _UNSPECIFIED
                     raw_ts = entry.get("added_at_utc") or entry.get("timestamp_utc")
                     if raw_ts is not None:
                         ts_val, _ = resolve_historical_timestamp(
@@ -940,8 +955,14 @@ def consolidate_watchlist_representations(
             for tk_raw, details in raw_list.items():
                 tk = parse_ticker(tk_raw, f"{rep_key}[{tk_raw}]")
                 if isinstance(details, dict):
-                    status = str(details.get("status") or "ACTIVE").strip().upper()
-                    notes = str(details["notes"]).strip() if details.get("notes") is not None else None
+                    if "status" in details:
+                        status = str(details["status"]).strip().upper() if details["status"] is not None else None
+                    else:
+                        status = _UNSPECIFIED
+                    if "notes" in details:
+                        notes = str(details["notes"]).strip() if details["notes"] is not None else None
+                    else:
+                        notes = _UNSPECIFIED
                     raw_ts = details.get("added_at_utc") or details.get("timestamp_utc")
                     if raw_ts is not None:
                         ts_val, _ = resolve_historical_timestamp(
@@ -966,8 +987,8 @@ def consolidate_watchlist_representations(
                     else:
                         ts_val = None
                 else:
-                    status = "ACTIVE"
-                    notes = None
+                    status = _UNSPECIFIED
+                    notes = _UNSPECIFIED
                     if default_timestamp:
                         ts_val, _ = resolve_historical_timestamp(
                             None,
@@ -1011,7 +1032,7 @@ def consolidate_watchlist_representations(
             # Compare status
             prev_status = prev.get("status")
             item_status = item.get("status")
-            if prev_status is not None and item_status is not None and prev_status != item_status:
+            if prev_status is not _UNSPECIFIED and item_status is not _UNSPECIFIED and prev_status != item_status:
                 raise MigrationConflictError(
                     f"Conflicting duplicate watchlist record for {tk} in {source_name}: "
                     f"existing {prev} != incoming {item} (representation '{prev_source}' status '{prev_status}' != '{rep_name}' '{item_status}')"
@@ -1020,7 +1041,7 @@ def consolidate_watchlist_representations(
             # Compare notes
             prev_notes = prev.get("notes")
             item_notes = item.get("notes")
-            if prev_notes is not None and item_notes is not None and prev_notes != item_notes:
+            if prev_notes is not _UNSPECIFIED and item_notes is not _UNSPECIFIED and prev_notes != item_notes:
                 raise MigrationConflictError(
                     f"Conflicting duplicate watchlist record for {tk} in {source_name}: "
                     f"existing {prev} != incoming {item} (representation '{prev_source}' notes '{prev_notes}' != '{rep_name}' '{item_notes}')"
@@ -1035,17 +1056,17 @@ def consolidate_watchlist_representations(
                     f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
                 )
 
-            if not records_equal(prev, item, WATCHLIST_EQUALITY_FIELDS):
-                raise MigrationConflictError(
-                    f"Conflicting duplicate watchlist record for {tk} in {source_name}: "
-                    f"existing {prev} != incoming {item}"
-                )
-
-            prev["status"] = prev_status if prev_status is not None else item_status
-            prev["notes"] = prev_notes if prev_notes is not None else item_notes
+            prev["status"] = prev_status if prev_status is not _UNSPECIFIED else item_status
+            prev["notes"] = prev_notes if prev_notes is not _UNSPECIFIED else item_notes
             prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts
             prev["added_at_utc"] = prev["timestamp_utc"]
             sources_by_tk[tk].append(rep_name)
+
+    for rec in records_by_tk.values():
+        if rec.get("status") is _UNSPECIFIED:
+            rec["status"] = "ACTIVE"
+        if rec.get("notes") is _UNSPECIFIED:
+            rec["notes"] = None
 
     return sorted(records_by_tk.values(), key=lambda x: x["ticker"])
 
@@ -1087,12 +1108,13 @@ def consolidate_position_representations(
                 if wac_eur_raw is None:
                     raise MigrationValidationError(f"{rep_key}[{idx}] missing required wac/wac_eur")
                 wac_eur = parse_financial_decimal(wac_eur_raw, f"{rep_key}[{idx}].wac_eur", max_scale=4)
-                wac_usd_raw = entry.get("wac_usd")
-                wac_usd = (
-                    parse_financial_decimal(wac_usd_raw, f"{rep_key}[{idx}].wac_usd", max_scale=4)
-                    if wac_usd_raw is not None
-                    else None
-                )
+                raw_wac_usd = entry.get("wac_usd", _UNSPECIFIED)
+                if raw_wac_usd is _UNSPECIFIED:
+                    wac_usd = _UNSPECIFIED
+                elif raw_wac_usd is not None:
+                    wac_usd = parse_financial_decimal(raw_wac_usd, f"{rep_key}[{idx}].wac_usd", max_scale=4)
+                else:
+                    wac_usd = None
                 raw_ts = entry.get("last_updated_at_utc") or entry.get("timestamp_utc")
                 if raw_ts is not None:
                     ts_val, _ = resolve_historical_timestamp(
@@ -1125,7 +1147,7 @@ def consolidate_position_representations(
                     "wac_usd": wac_usd,
                     "raw_shares": entry.get("shares"),
                     "raw_wac": wac_eur_raw,
-                    "raw_wac_usd": wac_usd_raw,
+                    "raw_wac_usd": raw_wac_usd if raw_wac_usd is not _UNSPECIFIED else None,
                     "last_updated_at_utc": ts_val,
                     "timestamp_utc": ts_val,
                 }
@@ -1166,16 +1188,17 @@ def consolidate_position_representations(
             # Compare WAC USD
             prev_usd = prev.get("wac_usd")
             item_usd = item.get("wac_usd")
-            if (prev_usd is None) != (item_usd is None):
-                raise MigrationConflictError(
-                    f"Conflicting duplicate position record for {key[0]}/{key[1]} in {source_name}: "
-                    f"existing {prev} != incoming {item} (representation '{prev_source}' wac_usd {prev_usd} != '{rep_name}' {item_usd})"
-                )
-            if prev_usd is not None and item_usd is not None and Decimal(str(prev_usd)) != Decimal(str(item_usd)):
-                raise MigrationConflictError(
-                    f"Conflicting duplicate position record for {key[0]}/{key[1]} in {source_name}: "
-                    f"existing {prev} != incoming {item} (representation '{prev_source}' wac_usd {prev_usd} != '{rep_name}' {item_usd})"
-                )
+            if prev_usd is not _UNSPECIFIED and item_usd is not _UNSPECIFIED:
+                if (prev_usd is None) != (item_usd is None):
+                    raise MigrationConflictError(
+                        f"Conflicting duplicate position record for {key[0]}/{key[1]} in {source_name}: "
+                        f"existing {prev} != incoming {item} (representation '{prev_source}' wac_usd {prev_usd} != '{rep_name}' {item_usd})"
+                    )
+                if prev_usd is not None and item_usd is not None and Decimal(str(prev_usd)) != Decimal(str(item_usd)):
+                    raise MigrationConflictError(
+                        f"Conflicting duplicate position record for {key[0]}/{key[1]} in {source_name}: "
+                        f"existing {prev} != incoming {item} (representation '{prev_source}' wac_usd {prev_usd} != '{rep_name}' {item_usd})"
+                    )
 
             # Compare timestamp
             prev_ts = prev.get("timestamp_utc")
@@ -1186,15 +1209,15 @@ def consolidate_position_representations(
                     f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
                 )
 
-            if not records_equal(prev, item, POSITION_EQUALITY_FIELDS):
-                raise MigrationConflictError(
-                    f"Conflicting duplicate position record for {key[0]}/{key[1]} in {source_name}: "
-                    f"existing {prev} != incoming {item}"
-                )
-
+            prev["wac_usd"] = prev_usd if prev_usd is not _UNSPECIFIED else item_usd
+            prev["raw_wac_usd"] = prev.get("raw_wac_usd") if prev_usd is not _UNSPECIFIED else item.get("raw_wac_usd")
             prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts
             prev["last_updated_at_utc"] = prev["timestamp_utc"]
             sources_by_key[key].append(rep_name)
+
+    for rec in records_by_key.values():
+        if rec.get("wac_usd") is _UNSPECIFIED:
+            rec["wac_usd"] = None
 
     return sorted(records_by_key.values(), key=lambda x: (x["account_id"], x["ticker"]))
 
@@ -1325,12 +1348,6 @@ def consolidate_cash_representations(
                 raise MigrationConflictError(
                     f"Conflicting duplicate cash record for {key[0]}/{key[1]} in {source_name}: "
                     f"existing {prev} != incoming {item} (representation '{prev_source}' timestamp '{prev_ts}' != '{rep_name}' '{item_ts}')"
-                )
-
-            if not records_equal(prev, item, CASH_EQUALITY_FIELDS):
-                raise MigrationConflictError(
-                    f"Conflicting duplicate cash record for {key[0]}/{key[1]} in {source_name}: "
-                    f"existing {prev} != incoming {item}"
                 )
 
             prev["timestamp_utc"] = prev_ts if prev_ts is not None else item_ts

@@ -985,7 +985,6 @@ class SchemaMigrator:
                 return existing_version
             if existing_version in PREVIOUS_SUPPORTED_CORE_SCHEMA_VERSIONS:
                 cls._migrate_core_schema(conn, from_version=existing_version, to_version=CURRENT_SCHEMA_VERSION)
-                cls.verify_core_schema_integrity(conn)
                 return CURRENT_SCHEMA_VERSION
             raise SchemaVersionMismatchError(
                 f"Database schema version {existing_version} is unsupported and cannot be migrated."
@@ -1010,6 +1009,8 @@ class SchemaMigrator:
                 """,
                 (CURRENT_SCHEMA_VERSION, now_iso, now_iso),
             )
+            # Verify integrity of newly initialized schema before commit
+            cls.verify_core_schema_integrity(conn)
             conn.execute("COMMIT;")
         except Exception as e:
             try:
@@ -1018,8 +1019,6 @@ class SchemaMigrator:
                 pass
             raise SchemaError(f"Failed to initialize core database schema: {e}") from e
 
-        # Verify integrity of newly initialized schema
-        cls.verify_core_schema_integrity(conn)
         return CURRENT_SCHEMA_VERSION
 
     @classmethod
@@ -1042,6 +1041,7 @@ class SchemaMigrator:
         Rebuilds trade_lessons table to relax last_reviewed_at_utc NOT NULL constraint to nullable,
         preserving all existing records, column types, ordering, primary keys, and CHECK constraints.
         Advances schema_version in database_metadata to 2.
+        Verifies resulting structural integrity before committing (Stage 1.5-D.1.1.2.1 R1.1).
         """
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         try:
@@ -1080,6 +1080,9 @@ class SchemaMigrator:
                 WHERE id = 1;
             """, (now_iso,))
 
+            # 5. Verify complete resulting schema integrity inside the transaction before committing (R1.1)
+            cls.verify_core_schema_integrity(conn)
+
             conn.execute("COMMIT;")
         except Exception as e:
             try:
@@ -1110,12 +1113,23 @@ class SchemaMigrator:
                 if existing_version == CURRENT_SCHEMA_VERSION:
                     cls.verify_cache_schema_integrity(conn)
                     return existing_version
-                if existing_version in (1, CURRENT_SCHEMA_VERSION):
+                if existing_version == 1:
                     cls.verify_cache_schema_integrity(conn)
-                    conn.execute(
-                        "UPDATE cache_metadata SET schema_version = ? WHERE id = 1;",
-                        (CURRENT_SCHEMA_VERSION,),
-                    )
+                    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    try:
+                        conn.execute("BEGIN IMMEDIATE;")
+                        conn.execute(
+                            "UPDATE cache_metadata SET schema_version = ?, last_updated_at_utc = ? WHERE id = 1;",
+                            (CURRENT_SCHEMA_VERSION, now_iso),
+                        )
+                        cls.verify_cache_schema_integrity(conn)
+                        conn.execute("COMMIT;")
+                    except Exception as e:
+                        try:
+                            conn.execute("ROLLBACK;")
+                        except Exception:
+                            pass
+                        raise SchemaError(f"Failed to advance cache schema metadata: {e}") from e
                     return CURRENT_SCHEMA_VERSION
                 raise SchemaVersionMismatchError(
                     f"Cache database schema version {existing_version} is unsupported."
@@ -1137,6 +1151,8 @@ class SchemaMigrator:
                 """,
                 (CURRENT_SCHEMA_VERSION, now_iso, now_iso),
             )
+            # Verify integrity of newly initialized schema before commit
+            cls.verify_cache_schema_integrity(conn)
             conn.execute("COMMIT;")
         except Exception as e:
             try:
@@ -1145,7 +1161,6 @@ class SchemaMigrator:
                 pass
             raise SchemaError(f"Failed to initialize cache database schema: {e}") from e
 
-        cls.verify_cache_schema_integrity(conn)
         return CURRENT_SCHEMA_VERSION
 
     @staticmethod
