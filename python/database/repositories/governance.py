@@ -27,6 +27,7 @@ from python.database.repositories.base import (
     AppendOnlyViolationError,
     RepositoryError,
     validate_identifier,
+    decimal_to_canonical_str,
     utc_now_iso,
     _resolve_effective_actor,
     validate_timestamp_utc,
@@ -420,7 +421,7 @@ class DecisionLogRepository(BaseRepository):
         norm_action = validate_identifier(action_proposed, "action_proposed")
         norm_outcome = validate_identifier(decision_outcome, "decision_outcome")
         norm_ticker = validate_identifier(ticker, "ticker").upper() if ticker else None
-        votes_json = json.dumps(votes or {}, sort_keys=True)
+        votes_json = json.dumps(votes or {}, sort_keys=True, default=decimal_to_canonical_str)
         valid_ts = validate_timestamp_utc(timestamp_utc)
 
         payload = {

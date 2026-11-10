@@ -64,15 +64,32 @@ class ParityDiscrepancy:
     legacy_value: Any
     projected_value: Any
     message: str
+    record_id: Optional[str] = None
+    source_file: Optional[str] = None
+    explanation: Optional[str] = None
+
+    @property
+    def field_path(self) -> str:
+        return self.path
+
+    @property
+    def source_value(self) -> Any:
+        return self.legacy_value
 
     def to_dict(self) -> Dict[str, Any]:
+        expl = self.explanation or self.message
         return {
             "domain": self.domain,
             "path": self.path,
+            "field_path": self.path,
             "discrepancy_type": self.discrepancy_type,
             "legacy_value": self._sanitize_value(self.legacy_value),
+            "source_value": self._sanitize_value(self.legacy_value),
             "projected_value": self._sanitize_value(self.projected_value),
-            "message": self.message,
+            "message": self.message or expl,
+            "explanation": expl,
+            "record_id": self.record_id,
+            "source_file": self.source_file,
         }
 
     @staticmethod

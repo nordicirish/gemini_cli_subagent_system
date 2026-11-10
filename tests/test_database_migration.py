@@ -53,6 +53,9 @@ from python.database.migration.contract import (
     parse_financial_decimal,
     parse_ticker,
     parse_iso_timestamp,
+    resolve_historical_timestamp,
+    load_strict_json,
+    load_strict_json_file,
     validate_migration_destination,
     extract_rule_code_and_directive,
 )
@@ -135,16 +138,28 @@ class TestSourceValidation(BaseMigrationTestCase):
         self.assertEqual(len(plan.position_records), 1)
 
     def test_duplicate_identifiers_detected(self):
+        # Conflicting duplicate position records must raise MigrationConflictError (D-04)
         dup_data = {
             "portfolio_snapshot": [
                 {"ticker": "SPY", "shares": "10.0", "wac": "500.0"},
                 {"ticker": "SPY", "shares": "20.0", "wac": "510.0"},
             ]
         }
-        plan = self.importer.plan_migration(dup_data, default_timestamp=self.default_ts)
+        with self.assertRaises(MigrationConflictError):
+            self.importer.plan_migration(dup_data, default_timestamp=self.default_ts)
+
+    def test_exact_duplicate_records_deduplicated(self):
+        # Exact duplicate position records must be deduplicated safely (D-04)
+        exact_dup_data = {
+            "portfolio_snapshot": [
+                {"ticker": "SPY", "shares": "10.0", "wac": "500.0"},
+                {"ticker": "SPY", "shares": "10.0", "wac": "500.0"},
+            ]
+        }
+        plan = self.importer.plan_migration(exact_dup_data, default_timestamp=self.default_ts)
         self.assertEqual(len(plan.position_records), 1)
         self.assertEqual(len(plan.discrepancies), 1)
-        self.assertIn("Duplicate position record", plan.discrepancies[0]["message"])
+        self.assertEqual(plan.discrepancies[0]["type"], "EXACT_DUPLICATE_DEDUPLICATED")
 
     def test_invalid_decimal_values_rejected(self):
         with self.assertRaises(MigrationValidationError):
@@ -825,6 +840,457 @@ class TestRealLegacyFilesAuditAndDryRun(BaseMigrationTestCase):
 
         parity = self.verifier.compare(loaded, proj)
         self.assertEqual(parity.summary.missing_records, 0)
+
+    def test_actual_context_decision_log_import_and_parity(self):
+        """Audits actual context/decision_log.json import into disposable database and verifies parity (D-06)."""
+        dl_path = self.importer.repository_root / "context" / "decision_log.json"
+        self.assertTrue(dl_path.exists())
+
+        loaded = self.importer.load_source_file(dl_path)
+        res = self.importer.import_into(loaded, self.db_manager, default_timestamp=self.default_ts)
+        self.assertTrue(res.success)
+        # 1 date-based record + 5 deliberation sub-decisions = 6 imported
+        self.assertEqual(res.imported_counts["decision_log"], 6)
+
+        with self.db_manager.connection() as conn:
+            proj = self.generator.generate(conn)
+
+        parity = self.verifier.compare(loaded, proj)
+        self.assertTrue(parity.is_parity)
+        self.assertEqual(parity.summary.missing_records, 0)
+        self.assertEqual(parity.summary.financial_mismatches, 0)
+        self.assertEqual(parity.summary.exact_matches, 6)
+
+
+# ===========================================================================
+# I. Stage 1.5-D.1 Corrective Regressions Tests (D-01 through D-07)
+# ===========================================================================
+
+class TestStage15D1CorrectiveRegressions(BaseMigrationTestCase):
+    """
+    Exhaustive regression test suite verifying fixes for independent review findings D-01 to D-07.
+    """
+
+    # -----------------------------------------------------------------------
+    # D-01: Timestamp Provenance
+    # -----------------------------------------------------------------------
+
+    def test_missing_historical_timestamp_is_not_fabricated(self):
+        """Verifies that missing timestamps are not implicitly fabricated with current time (D-01)."""
+        source = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"}
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            self.importer.import_into(source, self.db_manager, default_timestamp=None)
+        self.assertIn("historical timestamp is missing", str(ctx.exception))
+
+    def test_scalar_cash_missing_timestamp_fails_closed(self):
+        """Verifies scalar cash without caller default timestamp fails closed (D-01)."""
+        source = {"unallocated_cash_eur": "500.00"}
+        with self.assertRaises(MigrationValidationError) as ctx:
+            self.importer.import_into(source, self.db_manager, default_timestamp=None)
+        self.assertIn("historical timestamp is missing", str(ctx.exception))
+
+    def test_caller_supplied_default_timestamp_is_strictly_honored(self):
+        """Verifies explicit caller supplied default timestamp is used when source lacks one (D-01)."""
+        source = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00"}
+            ]
+        }
+        res = self.importer.import_into(source, self.db_manager, default_timestamp="2026-01-01T00:00:00Z")
+        self.assertTrue(res.success)
+        with self.db_manager.connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT last_updated_at_utc FROM portfolio_cash WHERE currency = 'EUR';")
+            self.assertEqual(cur.fetchone()[0], "2026-01-01T00:00:00Z")
+
+    # -----------------------------------------------------------------------
+    # D-02: Complete Field Parity Verification
+    # -----------------------------------------------------------------------
+
+    def test_trade_lesson_directive_mutation_detected_by_parity(self):
+        """Verifies that mutating trade lesson directive in DB breaks parity (D-02)."""
+        source = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-101",
+                    "directive_text": "Original directive",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": self.default_ts,
+                }
+            ]
+        }
+        self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+
+        with self.db_manager.connection() as conn:
+            conn.execute("UPDATE trade_lessons SET directive_text = 'Mutated directive' WHERE rule_code = 'L-101';")
+            conn.commit()
+            proj = self.generator.generate(conn)
+
+        parity = self.verifier.compare(source, proj)
+        self.assertFalse(parity.is_parity)
+        self.assertEqual(parity.summary.unresolved, 1)
+        self.assertTrue(any(d.path == "trade_lessons[L-101].directive_text" for d in parity.discrepancies))
+
+    def test_trade_lesson_category_mutation_detected_by_parity(self):
+        """Verifies that mutating trade lesson category in DB breaks parity (D-02)."""
+        source = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-102",
+                    "directive_text": "Test directive",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": self.default_ts,
+                    "last_reviewed_at_utc": self.default_ts,
+                }
+            ]
+        }
+        self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+
+        with self.db_manager.connection() as conn:
+            conn.execute("UPDATE trade_lessons SET category = 'EXECUTION' WHERE rule_code = 'L-102';")
+            conn.commit()
+            proj = self.generator.generate(conn)
+
+        parity = self.verifier.compare(source, proj)
+        self.assertFalse(parity.is_parity)
+        self.assertEqual(parity.summary.unresolved, 1)
+        self.assertTrue(any(d.path == "trade_lessons[L-102].category" for d in parity.discrepancies))
+
+    def test_position_wac_usd_mutation_detected_by_parity(self):
+        """Verifies that mutating position wac_usd in DB breaks parity with FINANCIAL_MISMATCH (D-02)."""
+        source = {
+            "portfolio_positions": [
+                {
+                    "account_id": "PRIMARY",
+                    "ticker": "SPY",
+                    "shares": "10.0000",
+                    "wac_eur": "500.0000",
+                    "wac_usd": "540.0000",
+                    "last_updated_at_utc": self.default_ts,
+                }
+            ]
+        }
+        self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+
+        with self.db_manager.connection() as conn:
+            conn.execute("UPDATE portfolio_positions SET wac_usd = '555.0000' WHERE ticker = 'SPY';")
+            conn.commit()
+            proj = self.generator.generate(conn)
+
+        parity = self.verifier.compare(source, proj)
+        self.assertFalse(parity.is_parity)
+        self.assertEqual(parity.summary.financial_mismatches, 1)
+        self.assertTrue(any(d.path == "portfolio_snapshot[SPY].wac_usd" for d in parity.discrepancies))
+
+    def test_decision_log_votes_mutation_detected_by_parity(self):
+        """Verifies that mutating decision log votes in DB breaks parity (D-02)."""
+        source = {
+            "decision_log": [
+                {
+                    "session_id": "SESSION-TEST-01",
+                    "action_proposed": "BUY",
+                    "decision_outcome": "APPROVED",
+                    "ticker": "AAPL",
+                    "votes": {"bullish": "YES", "red_team": "NO"},
+                    "transcript_text": "Debate transcript",
+                    "timestamp_utc": self.default_ts,
+                }
+            ]
+        }
+        self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+
+        with self.db_manager.connection() as conn:
+            conn.execute("UPDATE decision_log SET votes_json = '{\"bullish\": \"MUTATED\"}' WHERE session_id = 'SESSION-TEST-01';")
+            conn.commit()
+            proj = self.generator.generate(conn)
+
+        parity = self.verifier.compare(source, proj)
+        self.assertFalse(parity.is_parity)
+        self.assertEqual(parity.summary.unresolved, 1)
+        self.assertTrue(any("votes" in d.path for d in parity.discrepancies))
+
+    def test_decision_log_transcript_mutation_detected_by_parity(self):
+        """Verifies that mutating decision log transcript in DB breaks parity (D-02)."""
+        source = {
+            "decision_log": [
+                {
+                    "session_id": "SESSION-TEST-02",
+                    "action_proposed": "HOLD",
+                    "decision_outcome": "APPROVED",
+                    "ticker": "MSFT",
+                    "votes": {},
+                    "transcript_text": "Original transcript",
+                    "timestamp_utc": self.default_ts,
+                }
+            ]
+        }
+        self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+
+        with self.db_manager.connection() as conn:
+            conn.execute("UPDATE decision_log SET transcript_text = 'Tampered text' WHERE session_id = 'SESSION-TEST-02';")
+            conn.commit()
+            proj = self.generator.generate(conn)
+
+        parity = self.verifier.compare(source, proj)
+        self.assertFalse(parity.is_parity)
+        self.assertEqual(parity.summary.unresolved, 1)
+        self.assertTrue(any("transcript_text" in d.path for d in parity.discrepancies))
+
+    # -----------------------------------------------------------------------
+    # D-03: Field-Aware Idempotency Verification
+    # -----------------------------------------------------------------------
+
+    def test_existing_cash_with_different_timestamp_raises_conflict(self):
+        """Verifies cash with conflicting timestamp raises MigrationConflictError (D-03)."""
+        source1 = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00", "last_updated_at_utc": "2026-01-01T00:00:00Z"}
+            ]
+        }
+        self.importer.import_into(source1, self.db_manager)
+
+        source2 = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00", "last_updated_at_utc": "2026-02-01T00:00:00Z"}
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            self.importer.import_into(source2, self.db_manager)
+        self.assertIn("Cash balance conflict", str(ctx.exception))
+
+    def test_existing_position_with_different_wac_usd_raises_conflict(self):
+        """Verifies position with conflicting wac_usd raises MigrationConflictError (D-03)."""
+        source1 = {
+            "portfolio_positions": [
+                {"account_id": "PRIMARY", "ticker": "SPY", "shares": "10.0", "wac_eur": "500.0", "wac_usd": "540.0", "last_updated_at_utc": self.default_ts}
+            ]
+        }
+        self.importer.import_into(source1, self.db_manager)
+
+        source2 = {
+            "portfolio_positions": [
+                {"account_id": "PRIMARY", "ticker": "SPY", "shares": "10.0", "wac_eur": "500.0", "wac_usd": "550.0", "last_updated_at_utc": self.default_ts}
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            self.importer.import_into(source2, self.db_manager)
+        self.assertIn("Position conflict", str(ctx.exception))
+
+    def test_existing_watchlist_with_different_notes_raises_conflict(self):
+        """Verifies watchlist with conflicting notes raises MigrationConflictError (D-03)."""
+        source1 = {
+            "watchlist": [
+                {"ticker": "NVDA", "status": "ACTIVE", "notes": "Initial note", "added_at_utc": self.default_ts}
+            ]
+        }
+        self.importer.import_into(source1, self.db_manager)
+
+        source2 = {
+            "watchlist": [
+                {"ticker": "NVDA", "status": "ACTIVE", "notes": "Altered note", "added_at_utc": self.default_ts}
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            self.importer.import_into(source2, self.db_manager)
+        self.assertIn("Watchlist conflict", str(ctx.exception))
+
+    def test_existing_trade_lesson_with_different_directive_raises_conflict(self):
+        """Verifies trade lesson with conflicting directive raises MigrationConflictError (D-03)."""
+        source1 = {
+            "trade_lessons": [
+                {"rule_code": "L-201", "directive_text": "Original text", "category": "MANDATE", "status": "ACTIVE", "created_at_utc": self.default_ts, "last_reviewed_at_utc": self.default_ts}
+            ]
+        }
+        self.importer.import_into(source1, self.db_manager)
+
+        source2 = {
+            "trade_lessons": [
+                {"rule_code": "L-201", "directive_text": "Conflicting text", "category": "MANDATE", "status": "ACTIVE", "created_at_utc": self.default_ts, "last_reviewed_at_utc": self.default_ts}
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            self.importer.import_into(source2, self.db_manager)
+        self.assertIn("Trade lesson conflict", str(ctx.exception))
+
+    # -----------------------------------------------------------------------
+    # D-04: Conflicting Duplicate Source Records
+    # -----------------------------------------------------------------------
+
+    def test_conflicting_duplicate_cash_in_source_raises_conflict(self):
+        """Verifies conflicting duplicate cash in source raises MigrationConflictError (D-04)."""
+        source = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00", "last_updated_at_utc": self.default_ts},
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "200.00", "last_updated_at_utc": self.default_ts},
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            self.importer.plan_migration(source)
+        self.assertIn("Conflicting duplicate cash record", str(ctx.exception))
+
+    def test_conflicting_duplicate_watchlist_in_source_raises_conflict(self):
+        """Verifies conflicting duplicate watchlist in source raises MigrationConflictError (D-04)."""
+        source = {
+            "watchlist": [
+                {"ticker": "AMD", "status": "ACTIVE", "notes": "A", "added_at_utc": self.default_ts},
+                {"ticker": "AMD", "status": "PAUSED", "notes": "B", "added_at_utc": self.default_ts},
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            self.importer.plan_migration(source)
+        self.assertIn("Conflicting duplicate watchlist record", str(ctx.exception))
+
+    def test_conflicting_duplicate_trade_lessons_in_source_raises_conflict(self):
+        """Verifies conflicting duplicate trade lessons in source raise MigrationConflictError (D-04)."""
+        source = {
+            "trade_lessons": [
+                {"rule_code": "L-301", "directive_text": "Dir A", "category": "MANDATE", "status": "ACTIVE", "created_at_utc": self.default_ts, "last_reviewed_at_utc": self.default_ts},
+                {"rule_code": "L-301", "directive_text": "Dir B", "category": "MANDATE", "status": "ACTIVE", "created_at_utc": self.default_ts, "last_reviewed_at_utc": self.default_ts},
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            self.importer.plan_migration(source)
+        self.assertIn("Conflicting duplicate trade lesson record", str(ctx.exception))
+
+    def test_exact_duplicates_across_all_domains_are_safely_deduplicated(self):
+        """Verifies exact duplicate records across domains are deduplicated cleanly (D-04)."""
+        source = {
+            "portfolio_cash": [
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00", "last_updated_at_utc": self.default_ts},
+                {"account_id": "PRIMARY", "currency": "EUR", "amount": "100.00", "last_updated_at_utc": self.default_ts},
+            ],
+            "portfolio_positions": [
+                {"account_id": "PRIMARY", "ticker": "SPY", "shares": "10.0", "wac_eur": "500.0", "wac_usd": None, "last_updated_at_utc": self.default_ts},
+                {"account_id": "PRIMARY", "ticker": "SPY", "shares": "10.0", "wac_eur": "500.0", "wac_usd": None, "last_updated_at_utc": self.default_ts},
+            ],
+            "watchlist": [
+                {"ticker": "QQQ", "status": "ACTIVE", "notes": "ETF", "added_at_utc": self.default_ts},
+                {"ticker": "QQQ", "status": "ACTIVE", "notes": "ETF", "added_at_utc": self.default_ts},
+            ],
+        }
+        plan = self.importer.plan_migration(source)
+        self.assertEqual(len(plan.cash_records), 1)
+        self.assertEqual(len(plan.position_records), 1)
+        self.assertEqual(len(plan.watchlist_records), 1)
+        self.assertEqual(len(plan.discrepancies), 3)
+        self.assertTrue(all(d["type"] == "EXACT_DUPLICATE_DEDUPLICATED" for d in plan.discrepancies))
+
+    # -----------------------------------------------------------------------
+    # D-05: Strict JSON Loading
+    # -----------------------------------------------------------------------
+
+    def test_parity_uses_strict_json_rejects_nan_and_infinity(self):
+        """Verifies parity verifier rejects NaN and Infinity using strict JSON loader (D-05)."""
+        nan_file = self.temp_path / "nan_source.json"
+        nan_file.write_text('{"portfolio_positions": [{"ticker": "SPY", "shares": NaN}]}', encoding="utf-8")
+
+        with self.assertRaises(MigrationValidationError):
+            self.verifier.compare(nan_file, {})
+
+        inf_file = self.temp_path / "inf_source.json"
+        inf_file.write_text('{"portfolio_positions": [{"ticker": "SPY", "shares": Infinity}]}', encoding="utf-8")
+
+        with self.assertRaises(MigrationValidationError):
+            self.verifier.compare(inf_file, {})
+
+    def test_importer_uses_strict_json_rejects_nan_and_infinity(self):
+        """Verifies importer rejects NaN and Infinity using strict JSON loader (D-05)."""
+        nan_file = self.temp_path / "nan_import.json"
+        nan_file.write_text('{"unallocated_cash_eur": NaN}', encoding="utf-8")
+
+        with self.assertRaises(MigrationValidationError):
+            self.importer.load_source_file(nan_file)
+
+    # -----------------------------------------------------------------------
+    # D-06: Legacy Decision Log Mapping
+    # -----------------------------------------------------------------------
+
+    def test_decision_log_legacy_date_mapping_is_deterministic(self):
+        """Verifies date-based legacy records map deterministically to LEGACY-SESSION-{date} (D-06)."""
+        source = {
+            "decision_log": [
+                {
+                    "date": "2026-09-22",
+                    "lesson": "Stage 0 Council boot sequence",
+                    "outcome": "AUTO_LOGGED",
+                }
+            ]
+        }
+        plan = self.importer.plan_migration(source, default_timestamp=self.default_ts)
+        self.assertEqual(len(plan.decision_log_records), 1)
+        rec = plan.decision_log_records[0]
+        self.assertEqual(rec["session_id"], "LEGACY-SESSION-2026-09-22")
+        self.assertEqual(rec["decision_outcome"], "AUTO_LOGGED")
+        self.assertEqual(rec["timestamp_utc"], "2026-09-22T00:00:00Z")
+
+    def test_decision_log_legacy_deliberation_mapping_is_deterministic(self):
+        """Verifies nested council debate records map deterministically with sub-decisions (D-06)."""
+        source = {
+            "decision_log": [
+                {
+                    "timestamp": "2026-09-22T15:01:03",
+                    "trigger_context": "STAGE_0_BOOT_SYNC",
+                    "council_debate": {"bullish": "Suppressed volatility", "neutral": "Normal"},
+                    "decisions": [
+                        {"ticker": "UMAC", "trade_state": "HOLD"},
+                        {"ticker": "DFTX", "trade_state": "HOLD"},
+                    ],
+                }
+            ]
+        }
+        plan = self.importer.plan_migration(source, default_timestamp=self.default_ts)
+        self.assertEqual(len(plan.decision_log_records), 2)
+        r1, r2 = plan.decision_log_records
+        self.assertEqual(r1["session_id"], "SESSION-2026-09-22-STAGE_0_BOOT_SYNC")
+        self.assertEqual(r1["ticker"], "UMAC")
+        self.assertEqual(r1["decision_outcome"], "HOLD")
+        self.assertEqual(r2["session_id"], "SESSION-2026-09-22-STAGE_0_BOOT_SYNC")
+        self.assertEqual(r2["ticker"], "DFTX")
+
+    # -----------------------------------------------------------------------
+    # D-07: Destination Safety Claims
+    # -----------------------------------------------------------------------
+
+    def test_destination_guard_rejects_traversal_aliases(self):
+        """Verifies path traversal aliases to production database are rejected fail-closed (D-07)."""
+        traversal_path = self.importer.repository_root / "tests" / ".." / "context" / "gem.db"
+        with self.assertRaises(MigrationSafetyError) as ctx:
+            validate_migration_destination(traversal_path, self.importer.repository_root)
+        self.assertIn("resolves to protected production database", str(ctx.exception))
+
+    def test_destination_guard_rejects_case_variations(self):
+        """Verifies case variations on Windows are rejected fail-closed (D-07)."""
+        case_variations = [
+            self.importer.repository_root / "CONTEXT" / "GEM.DB",
+            self.importer.repository_root / "Context" / "Gem.db",
+            self.importer.repository_root / "CACHE" / "MARKET_DATA.DB",
+        ]
+        for p in case_variations:
+            with self.assertRaises(MigrationSafetyError) as ctx:
+                validate_migration_destination(p, self.importer.repository_root)
+            self.assertIn("resolves to protected production database", str(ctx.exception))
+
+    def test_destination_guard_rejects_relative_aliases(self):
+        """Verifies relative aliases are rejected fail-closed (D-07)."""
+        with self.assertRaises(MigrationSafetyError):
+            validate_migration_destination("context/gem.db", self.importer.repository_root)
+        with self.assertRaises(MigrationSafetyError):
+            validate_migration_destination("./context/gem.db", self.importer.repository_root)
+        with self.assertRaises(MigrationSafetyError):
+            validate_migration_destination("cache/market_data.db", self.importer.repository_root)
+
+    def test_destination_guard_permits_safe_disposable_paths(self):
+        """Verifies valid disposable paths outside production locations are accepted (D-07)."""
+        safe_path = self.temp_path / "disposable_test.db"
+        validated = validate_migration_destination(safe_path, self.importer.repository_root)
+        self.assertEqual(validated.resolve(), safe_path.resolve())
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ Governed by Stage 1.5-D Architecture and Agent Governance Framework.
 """
 
 from decimal import Decimal, InvalidOperation
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -28,8 +29,13 @@ __all__ = [
     "parse_financial_decimal",
     "parse_ticker",
     "parse_iso_timestamp",
+    "resolve_historical_timestamp",
+    "load_strict_json",
+    "load_strict_json_file",
     "validate_migration_destination",
     "extract_rule_code_and_directive",
+    "_validate_json_dict_keys",
+    "_reject_json_constant",
 ]
 
 MIGRATION_CONTRACT_VERSION = "1.0"
@@ -55,6 +61,80 @@ EXTERNALLY_MANAGED_SECTIONS = frozenset({
 
 def _reject_json_constant(value: str) -> None:
     raise ValueError(f"Non-standard JSON constant is forbidden: {value}")
+
+
+def _validate_json_dict_keys(data: Any, path: str = "root") -> None:
+    """Recursively verifies that all dictionary keys in data are strings."""
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if not isinstance(k, str):
+                raise MigrationValidationError(
+                    f"{path}: Dictionary keys must be strings; received {type(k).__name__}"
+                )
+            _validate_json_dict_keys(v, f"{path}.{k}")
+    elif isinstance(data, (list, tuple)):
+        for idx, item in enumerate(data):
+            _validate_json_dict_keys(item, f"{path}[{idx}]")
+
+
+def load_strict_json(raw_text: str, source_name: str = "json_document") -> Any:
+    """
+    Strictly parses a JSON string:
+    - Rejects non-standard constants (NaN, Infinity, -Infinity).
+    - Decodes numbers as exact Decimal to prevent binary float precision loss.
+    - Validates that dictionary keys are strings recursively.
+    """
+    if not isinstance(raw_text, str):
+        raise MigrationValidationError(f"{source_name} must be a string, got {type(raw_text).__name__}")
+    if not raw_text.strip():
+        raise MigrationValidationError(f"{source_name} cannot be empty")
+
+    try:
+        data = json.loads(
+            raw_text,
+            parse_float=Decimal,
+            parse_constant=_reject_json_constant,
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise MigrationValidationError(f"{source_name} is not valid strict JSON: {exc}") from exc
+
+    _validate_json_dict_keys(data, path=source_name)
+    return data
+
+
+def load_strict_json_file(
+    file_path: Union[Path, str],
+    repository_root: Optional[Union[Path, str]] = None,
+) -> Tuple[Any, str, Path]:
+    """
+    Reads and strictly parses a JSON file from disk into native Python/Decimal objects (D-05).
+    Returns (parsed_data, sha256_hex, resolved_path).
+    """
+    p = Path(file_path)
+    if not p.is_absolute() and repository_root is not None:
+        p = (Path(repository_root) / p).resolve()
+    else:
+        p = p.resolve()
+
+    if not p.exists() or not p.is_file():
+        raise FileNotFoundError(f"Legacy source file does not exist: {p}")
+
+    raw_bytes = p.read_bytes()
+    sha256 = hashlib.sha256(raw_bytes).hexdigest()
+
+    try:
+        raw_text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise MigrationValidationError(f"Source file {p.name} is not valid UTF-8: {exc}") from exc
+
+    data = load_strict_json(raw_text, source_name=p.name)
+
+    if not isinstance(data, dict):
+        raise MigrationValidationError(
+            f"Source file {p.name} root must be a JSON object (dict), got {type(data).__name__}"
+        )
+
+    return data, sha256, p
 
 
 def parse_financial_decimal(
@@ -138,64 +218,108 @@ def parse_iso_timestamp(value: Any, field_name: str = "timestamp") -> str:
         raise MigrationValidationError(f"{field_name}: invalid UTC timestamp: {e}") from e
 
 
+def resolve_historical_timestamp(
+    source_value: Any,
+    field_name: str,
+    *,
+    nullable: bool = False,
+    default_timestamp: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Resolves historical timestamp without implicit current-time fabrication (D-01).
+    - If source_value is present, parses and validates as ISO-8601 UTC.
+    - If missing: uses explicit default_timestamp if provided.
+    - If missing and nullable=True, returns None.
+    - Otherwise raises MigrationValidationError fail-closed.
+    """
+    if source_value is not None and str(source_value).strip() != "":
+        return parse_iso_timestamp(source_value, field_name)
+
+    if default_timestamp is not None and str(default_timestamp).strip() != "":
+        return parse_iso_timestamp(default_timestamp, f"{field_name} (default)")
+
+    if nullable:
+        return None
+
+    raise MigrationValidationError(
+        f"{field_name}: historical timestamp is missing; migration cannot fabricate provenance"
+    )
+
+
 def validate_migration_destination(
     destination: Union[Path, str, Any],
     repository_root: Optional[Union[Path, str]] = None,
 ) -> Path:
     """
-    Validates that a destination database path is strictly isolated and disposable.
-    Fails closed if the path matches or resides within protected production database locations.
+    Validates that a destination database path is strictly isolated and disposable (D-07).
+    Fails closed if the path matches or resolves into protected production database locations
+    via relative paths, absolute paths, traversal (..), symlinks, or case variations.
     """
+    if destination is None:
+        raise MigrationSafetyError("Destination database cannot be None")
+
     if hasattr(destination, "db_path"):
-        # DatabaseManager instance
-        dest_path = Path(destination.db_path)
+        dest_str = str(destination.db_path)
     elif hasattr(destination, "cursor"):
-        # sqlite3.Connection or ManagedConnection
         cur = destination.cursor()
         cur.execute("PRAGMA database_list;")
         rows = cur.fetchall()
         main_db = next((r[2] for r in rows if r[1] == "main"), "")
         if not main_db or main_db == ":memory:":
             return Path(":memory:")
-        dest_path = Path(main_db)
+        dest_str = str(main_db)
+    elif isinstance(destination, (str, Path)):
+        dest_str = str(destination)
     else:
-        dest_path = Path(destination)
+        raise MigrationSafetyError(f"Unsupported destination type: {type(destination).__name__}")
 
-    if str(dest_path) == ":memory:":
-        return dest_path
+    if dest_str == ":memory:":
+        return Path(":memory:")
 
-    resolved_dest = dest_path.resolve()
+    dest_path = Path(dest_str)
 
     if repository_root is None:
-        # Repository root inferred relative to this file: python/database/migration/contract.py -> 4 levels up
         repo_root = Path(__file__).resolve().parent.parent.parent.parent
     else:
         repo_root = Path(repository_root).resolve()
 
-    protected_targets = {
-        (repo_root / "context" / "gem.db").resolve(),
-        (repo_root / "cache" / "market_data.db").resolve(),
-    }
+    # Canonicalize paths using both realpath (resolving symlinks and ..) and normcase (handling case-insensitivity)
+    dest_real = Path(os.path.realpath(dest_path))
+    dest_norm = os.path.normcase(str(dest_real))
 
-    if resolved_dest in protected_targets:
+    # Also resolve destination relative to repo_root if it's relative
+    if not dest_path.is_absolute():
+        dest_rel_to_repo = (repo_root / dest_path).resolve()
+        dest_rel_norm = os.path.normcase(os.path.realpath(dest_rel_to_repo))
+    else:
+        dest_rel_norm = dest_norm
+
+    prod_gem_real = os.path.normcase(os.path.realpath(repo_root / "context" / "gem.db"))
+    prod_market_real = os.path.normcase(os.path.realpath(repo_root / "cache" / "market_data.db"))
+
+    context_dir_real = os.path.normcase(os.path.realpath(repo_root / "context"))
+    cache_dir_real = os.path.normcase(os.path.realpath(repo_root / "cache"))
+
+    # Direct resolution check against protected targets
+    if dest_norm in (prod_gem_real, prod_market_real) or dest_rel_norm in (prod_gem_real, prod_market_real):
         raise MigrationSafetyError(
-            f"Operation refused: destination path is a protected production database: {resolved_dest}"
+            f"Operation refused: destination path resolves to protected production database: {dest_path}"
         )
 
-    # Directory containment safety: prevent placing gem.db directly in context/ or market_data.db in cache/
-    context_dir = (repo_root / "context").resolve()
-    if resolved_dest.parent == context_dir and resolved_dest.name.lower() == "gem.db":
-        raise MigrationSafetyError(
-            f"Operation refused: destination database cannot be created in production context dir: {resolved_dest}"
-        )
+    # Containment check: prevent creating gem.db inside context dir or market_data.db inside cache dir
+    for candidate in (dest_norm, dest_rel_norm):
+        parent_dir = os.path.dirname(candidate)
+        base_name = os.path.basename(candidate)
+        if parent_dir == context_dir_real and base_name == "gem.db":
+            raise MigrationSafetyError(
+                f"Operation refused: destination database cannot be created in production context dir: {dest_path}"
+            )
+        if parent_dir == cache_dir_real and base_name == "market_data.db":
+            raise MigrationSafetyError(
+                f"Operation refused: destination database cannot be created in production cache dir: {dest_path}"
+            )
 
-    cache_dir = (repo_root / "cache").resolve()
-    if resolved_dest.parent == cache_dir and resolved_dest.name.lower() == "market_data.db":
-        raise MigrationSafetyError(
-            f"Operation refused: destination database cannot be created in production cache dir: {resolved_dest}"
-        )
-
-    return resolved_dest
+    return dest_real
 
 
 def extract_rule_code_and_directive(rule_text: str) -> Tuple[Optional[str], str]:
