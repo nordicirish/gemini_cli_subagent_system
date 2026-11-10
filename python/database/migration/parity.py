@@ -28,6 +28,8 @@ from python.database.migration.contract import (
     transform_legacy_decision_case_b,
     transform_legacy_decision_case_c,
     parse_ticker,
+    resolve_historical_timestamp,
+    deep_equal,
 )
 
 __all__ = ["SSoTParityVerifier"]
@@ -42,10 +44,12 @@ class SSoTParityVerifier:
     def __init__(
         self,
         generator: Optional[SSoTProjectionGenerator] = None,
+        default_timestamp: Optional[str] = None,
         allow_date_only: bool = False,
         allow_naive_utc: bool = False,
     ):
         self._generator = generator or SSoTProjectionGenerator()
+        self.default_timestamp = default_timestamp
         self._allow_date_only = allow_date_only
         self._allow_naive_utc = allow_naive_utc
 
@@ -55,6 +59,7 @@ class SSoTParityVerifier:
         projected_document: Dict[str, Any],
         base_document: Optional[Dict[str, Any]] = None,
         source_names: Optional[List[str]] = None,
+        default_timestamp: Optional[str] = None,
         allow_date_only: Optional[bool] = None,
         allow_naive_utc: Optional[bool] = None,
     ) -> ParityResult:
@@ -68,11 +73,9 @@ class SSoTParityVerifier:
         - Missing or unexpected records
         - Unresolvable legacy discrepancies
         """
+        eff_default_ts = default_timestamp if default_timestamp is not None else self.default_timestamp
         eff_allow_date_only = self._allow_date_only if allow_date_only is None else allow_date_only
         eff_allow_naive_utc = self._allow_naive_utc if allow_naive_utc is None else allow_naive_utc
-        - Missing or unexpected records
-        - Unresolvable legacy discrepancies
-        """
         summary = ParitySummary()
         discrepancies: List[ParityDiscrepancy] = []
 
@@ -136,27 +139,67 @@ class SSoTParityVerifier:
         # -------------------------------------------------------------------
         # 2. Verification: Portfolio Cash Domain
         # -------------------------------------------------------------------
-        self._verify_cash_domain(legacy_state, projected_document, summary, discrepancies)
+        self._verify_cash_domain(
+            legacy_state,
+            projected_document,
+            summary,
+            discrepancies,
+            default_timestamp=eff_default_ts,
+            allow_date_only=eff_allow_date_only,
+            allow_naive_utc=eff_allow_naive_utc,
+        )
 
         # -------------------------------------------------------------------
         # 3. Verification: Portfolio Positions Domain
         # -------------------------------------------------------------------
-        self._verify_positions_domain(legacy_state, projected_document, summary, discrepancies)
+        self._verify_positions_domain(
+            legacy_state,
+            projected_document,
+            summary,
+            discrepancies,
+            default_timestamp=eff_default_ts,
+            allow_date_only=eff_allow_date_only,
+            allow_naive_utc=eff_allow_naive_utc,
+        )
 
         # -------------------------------------------------------------------
         # 4. Verification: Watchlist Domain
         # -------------------------------------------------------------------
-        self._verify_watchlist_domain(legacy_state, projected_document, summary, discrepancies)
+        self._verify_watchlist_domain(
+            legacy_state,
+            projected_document,
+            summary,
+            discrepancies,
+            default_timestamp=eff_default_ts,
+            allow_date_only=eff_allow_date_only,
+            allow_naive_utc=eff_allow_naive_utc,
+        )
 
         # -------------------------------------------------------------------
         # 5. Verification: Scout Categories Domain
         # -------------------------------------------------------------------
-        self._verify_scout_categories_domain(legacy_state, projected_document, summary, discrepancies)
+        self._verify_scout_categories_domain(
+            legacy_state,
+            projected_document,
+            summary,
+            discrepancies,
+            default_timestamp=eff_default_ts,
+            allow_date_only=eff_allow_date_only,
+            allow_naive_utc=eff_allow_naive_utc,
+        )
 
         # -------------------------------------------------------------------
         # 6. Verification: Trade Lessons Domain
         # -------------------------------------------------------------------
-        self._verify_trade_lessons_domain(legacy_state, projected_document, summary, discrepancies)
+        self._verify_trade_lessons_domain(
+            legacy_state,
+            projected_document,
+            summary,
+            discrepancies,
+            default_timestamp=eff_default_ts,
+            allow_date_only=eff_allow_date_only,
+            allow_naive_utc=eff_allow_naive_utc,
+        )
 
         # -------------------------------------------------------------------
         # 7. Verification: Decision Log Domain
@@ -166,6 +209,7 @@ class SSoTParityVerifier:
             projected_document,
             summary,
             discrepancies,
+            default_timestamp=eff_default_ts,
             allow_date_only=eff_allow_date_only,
             allow_naive_utc=eff_allow_naive_utc,
         )
@@ -198,6 +242,152 @@ class SSoTParityVerifier:
         )
 
     # -----------------------------------------------------------------------
+    # Timestamp Field Verification Helper (R1)
+    # -----------------------------------------------------------------------
+
+    def _verify_timestamp_field(
+        self,
+        legacy_val: Any,
+        projected_val: Any,
+        field_name: str,
+        path: str,
+        domain: str,
+        record_id: Optional[str],
+        summary: ParitySummary,
+        discrepancies: List[ParityDiscrepancy],
+        nullable: bool = False,
+        default_timestamp: Optional[str] = None,
+        allow_date_only: bool = False,
+        allow_naive_utc: bool = False,
+    ) -> None:
+        """
+        Explicitly compares timestamp presence, provenance, and canonical values (R1).
+        - Source value present: resolves and normalizes, then checks equality against projection.
+        - Source value missing/null:
+            - If nullable=True: projected value MUST be None. If non-null, flags TIMESTAMP_MISMATCH.
+            - If nullable=False:
+                - If default_timestamp is provided: checks projected value == default_timestamp.
+                - If default_timestamp is None: flags TIMESTAMP_MISMATCH for unexplained projected timestamp.
+        """
+        # 1. Source value present
+        if legacy_val is not None and str(legacy_val).strip() != "":
+            try:
+                expected_ts, _ = resolve_historical_timestamp(
+                    legacy_val,
+                    field_name,
+                    nullable=nullable,
+                    default_timestamp=default_timestamp,
+                    allow_date_only=allow_date_only,
+                    allow_naive_utc=allow_naive_utc,
+                )
+            except Exception as e:
+                summary.unresolved += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain=domain,
+                    path=path,
+                    discrepancy_type=DiscrepancyType.UNRESOLVED.value,
+                    legacy_value=legacy_val,
+                    projected_value=projected_val,
+                    message=f"Failed to resolve legacy timestamp: {e}",
+                    record_id=record_id,
+                ))
+                return
+
+            if expected_ts == projected_val:
+                pass
+            else:
+                summary.timestamp_mismatches += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain=domain,
+                    path=path,
+                    discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
+                    legacy_value=legacy_val,
+                    projected_value=projected_val,
+                    message=f"Timestamp mismatch for {path}: legacy {expected_ts} != projected {projected_val}",
+                    record_id=record_id,
+                ))
+            return
+
+        # 2. Source value missing / None
+        if nullable:
+            if projected_val is None:
+                pass
+            else:
+                summary.timestamp_mismatches += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain=domain,
+                    path=path,
+                    discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
+                    legacy_value=None,
+                    projected_value=projected_val,
+                    message=f"Nullable timestamp {path} expected None in projection, got '{projected_val}'",
+                    record_id=record_id,
+                ))
+            return
+
+        # 3. Required timestamp missing from source
+        if default_timestamp is not None and str(default_timestamp).strip() != "":
+            try:
+                exp_default, _ = resolve_historical_timestamp(
+                    None,
+                    field_name,
+                    default_timestamp=default_timestamp,
+                    allow_date_only=allow_date_only,
+                    allow_naive_utc=allow_naive_utc,
+                )
+            except Exception as e:
+                summary.unresolved += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain=domain,
+                    path=path,
+                    discrepancy_type=DiscrepancyType.UNRESOLVED.value,
+                    legacy_value=None,
+                    projected_value=projected_val,
+                    message=f"Failed to resolve default timestamp: {e}",
+                    record_id=record_id,
+                ))
+                return
+
+            if projected_val == exp_default:
+                summary.equivalent_values += 1
+            else:
+                summary.timestamp_mismatches += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain=domain,
+                    path=path,
+                    discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
+                    legacy_value=None,
+                    projected_value=projected_val,
+                    message=f"Timestamp {path} expected caller default '{exp_default}', got '{projected_val}'",
+                    record_id=record_id,
+                ))
+            return
+
+        # Unexplained projected timestamp when source missing and no default authorized
+        if projected_val is not None:
+            summary.timestamp_mismatches += 1
+            discrepancies.append(ParityDiscrepancy(
+                domain=domain,
+                path=path,
+                discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
+                legacy_value=None,
+                projected_value=projected_val,
+                message=f"Unexplained projected timestamp '{projected_val}' for {path} when source is missing and no default provided",
+                record_id=record_id,
+            ))
+        else:
+            summary.missing_records += 1
+            discrepancies.append(ParityDiscrepancy(
+                domain=domain,
+                path=path,
+                discrepancy_type=DiscrepancyType.MISSING_RECORD.value,
+                legacy_value=None,
+                projected_value=None,
+                message=f"Required timestamp {path} missing in both source and projection",
+                record_id=record_id,
+            ))
+
+    # -----------------------------------------------------------------------
     # Domain Verifiers
     # -----------------------------------------------------------------------
 
@@ -207,8 +397,18 @@ class SSoTParityVerifier:
         projected: Dict[str, Any],
         summary: ParitySummary,
         discrepancies: List[ParityDiscrepancy],
+        default_timestamp: Optional[str] = None,
+        allow_date_only: bool = False,
+        allow_naive_utc: bool = False,
     ) -> None:
-        """Compares cash amounts using exact Decimal math and validates structured records (D-02, D1.2)."""
+        """Compares cash amounts using exact Decimal math and validates structured records (D-02, D1.2, R1)."""
+        proj_cash_list = projected.get("portfolio_cash", [])
+        proj_cash_map = {
+            (c.get("account_id"), c.get("currency")): c
+            for c in proj_cash_list
+            if isinstance(c, dict) and c.get("account_id") and c.get("currency")
+        }
+
         # EUR Cash
         leg_eur = legacy.get("unallocated_cash_eur")
         if leg_eur is None and isinstance(legacy.get("mutable_state"), dict):
@@ -260,15 +460,18 @@ class SSoTParityVerifier:
                 message="EUR cash present in legacy source but missing in projection",
             ))
         elif leg_eur is None and proj_eur is not None:
-            summary.unexpected_records += 1
-            discrepancies.append(ParityDiscrepancy(
-                domain="portfolio_cash",
-                path="unallocated_cash_eur",
-                discrepancy_type=DiscrepancyType.UNEXPECTED_RECORD.value,
-                legacy_value=None,
-                projected_value=proj_eur,
-                message="EUR cash present in projection but missing in legacy source",
-            ))
+            # Only unexpected if SQLite actually has a EUR record or non-zero EUR cash
+            is_real_unexpected = ("PRIMARY", "EUR") in proj_cash_map or Decimal(str(proj_eur)) != Decimal("0.00")
+            if is_real_unexpected:
+                summary.unexpected_records += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain="portfolio_cash",
+                    path="unallocated_cash_eur",
+                    discrepancy_type=DiscrepancyType.UNEXPECTED_RECORD.value,
+                    legacy_value=None,
+                    projected_value=proj_eur,
+                    message="EUR cash present in projection but missing in legacy source",
+                ))
 
         # USD Cash
         leg_usd = legacy.get("unallocated_cash_usd")
@@ -313,23 +516,21 @@ class SSoTParityVerifier:
                 message="USD cash present in legacy source but missing in projection",
             ))
         elif leg_usd is None and proj_usd is not None:
-            summary.unexpected_records += 1
-            discrepancies.append(ParityDiscrepancy(
-                domain="portfolio_cash",
-                path="unallocated_cash_usd",
-                discrepancy_type=DiscrepancyType.UNEXPECTED_RECORD.value,
-                legacy_value=None,
-                projected_value=proj_usd,
-                message="USD cash present in projection but missing in legacy source",
-            ))
+            # Only unexpected if SQLite actually has a USD record or non-zero USD cash
+            is_real_unexpected = ("PRIMARY", "USD") in proj_cash_map or Decimal(str(proj_usd)) != Decimal("0.00")
+            if is_real_unexpected:
+                summary.unexpected_records += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain="portfolio_cash",
+                    path="unallocated_cash_usd",
+                    discrepancy_type=DiscrepancyType.UNEXPECTED_RECORD.value,
+                    legacy_value=None,
+                    projected_value=proj_usd,
+                    message="USD cash present in projection but missing in legacy source",
+                ))
 
         # Structured Portfolio Cash verification
-        proj_cash_list = projected.get("portfolio_cash", [])
-        proj_cash_map = {
-            (c.get("account_id"), c.get("currency")): c
-            for c in proj_cash_list
-            if isinstance(c, dict) and c.get("account_id") and c.get("currency")
-        }
+        leg_cash_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
         if isinstance(legacy.get("portfolio_cash"), list):
             leg_cash_map = {
                 (c.get("account_id", "PRIMARY"), c.get("currency", "EUR")): c
@@ -371,23 +572,23 @@ class SSoTParityVerifier:
                     except (InvalidOperation, ValueError):
                         summary.unresolved += 1
 
-                    # Timestamp
-                    if (
-                        leg_c.get("last_updated_at_utc")
-                        and leg_c.get("last_updated_at_utc") != proj_c.get("last_updated_at_utc")
-                    ):
-                        summary.timestamp_mismatches += 1
-                        discrepancies.append(ParityDiscrepancy(
-                            domain="portfolio_cash",
-                            path=f"portfolio_cash[{acc}/{curr}].last_updated_at_utc",
-                            discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
-                            legacy_value=leg_c.get("last_updated_at_utc"),
-                            projected_value=proj_c.get("last_updated_at_utc"),
-                            message=f"Portfolio cash timestamp mismatch for {acc}/{curr}",
-                            record_id=f"{acc}/{curr}",
-                        ))
+                    # Timestamp (R1)
+                    self._verify_timestamp_field(
+                        leg_c.get("last_updated_at_utc"),
+                        proj_c.get("last_updated_at_utc"),
+                        "last_updated_at_utc",
+                        f"portfolio_cash[{acc}/{curr}].last_updated_at_utc",
+                        "portfolio_cash",
+                        f"{acc}/{curr}",
+                        summary,
+                        discrepancies,
+                        nullable=False,
+                        default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
+                    )
 
-            # Reverse check for structured portfolio cash
+            # Reverse check for structured portfolio cash (R5)
             for key, proj_c in proj_cash_map.items():
                 if key not in leg_cash_map:
                     acc, curr = key
@@ -408,29 +609,33 @@ class SSoTParityVerifier:
         projected: Dict[str, Any],
         summary: ParitySummary,
         discrepancies: List[ParityDiscrepancy],
+        default_timestamp: Optional[str] = None,
+        allow_date_only: bool = False,
+        allow_naive_utc: bool = False,
     ) -> None:
-        """Compares portfolio positions across shares, cost bases (EUR and USD), and metadata (D-02, D1.2)."""
+        """Compares portfolio snapshot positions using composite (account_id, ticker) key (D-02, D1.2, R1)."""
         leg_positions = (
             legacy.get("portfolio_snapshot")
             or legacy.get("portfolio_positions")
             or (legacy.get("mutable_state", {}).get("portfolio_snapshot") if isinstance(legacy.get("mutable_state"), dict) else None)
-            or (legacy.get("mutable_state", {}).get("portfolio_positions") if isinstance(legacy.get("mutable_state"), dict) else None)
+            or legacy.get("positions")
             or []
         )
+        leg_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for p in leg_positions:
+            if isinstance(p, dict) and p.get("ticker"):
+                acc = str(p.get("account_id") or "PRIMARY").strip().upper()
+                norm_tk = str(p["ticker"]).strip().upper()
+                leg_map[(acc, norm_tk)] = p
+
         proj_positions = projected.get("portfolio_snapshot", [])
+        proj_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for p in proj_positions:
+            if isinstance(p, dict) and p.get("ticker"):
+                acc = str(p.get("account_id") or "PRIMARY").strip().upper()
+                norm_tk = str(p["ticker"]).strip().upper()
+                proj_map[(acc, norm_tk)] = p
 
-        leg_map = {
-            (str(p.get("account_id") or "PRIMARY").strip(), str(p.get("ticker")).strip().upper()): p
-            for p in leg_positions
-            if isinstance(p, dict) and p.get("ticker")
-        }
-        proj_map = {
-            (str(p.get("account_id") or "PRIMARY").strip(), str(p.get("ticker")).strip().upper()): p
-            for p in proj_positions
-            if isinstance(p, dict) and p.get("ticker")
-        }
-
-        # Check legacy positions against projected
         for (acc, ticker), leg_p in leg_map.items():
             pos_id = ticker if acc == "PRIMARY" else f"{acc}/{ticker}"
             if (acc, ticker) not in proj_map:
@@ -548,23 +753,23 @@ class SSoTParityVerifier:
                     record_id=pos_id,
                 ))
 
-            # Compare Timestamp (D-02)
-            if (
-                leg_p.get("last_updated_at_utc")
-                and leg_p.get("last_updated_at_utc") != proj_p.get("last_updated_at_utc")
-            ):
-                summary.timestamp_mismatches += 1
-                discrepancies.append(ParityDiscrepancy(
-                    domain="portfolio_positions",
-                    path=f"portfolio_snapshot[{pos_id}].last_updated_at_utc",
-                    discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
-                    legacy_value=leg_p.get("last_updated_at_utc"),
-                    projected_value=proj_p.get("last_updated_at_utc"),
-                    message=f"Timestamp mismatch for position {pos_id}",
-                    record_id=pos_id,
-                ))
+            # Compare Timestamp (R1)
+            self._verify_timestamp_field(
+                leg_p.get("last_updated_at_utc"),
+                proj_p.get("last_updated_at_utc"),
+                "last_updated_at_utc",
+                f"portfolio_snapshot[{pos_id}].last_updated_at_utc",
+                "portfolio_positions",
+                pos_id,
+                summary,
+                discrepancies,
+                nullable=False,
+                default_timestamp=default_timestamp,
+                allow_date_only=allow_date_only,
+                allow_naive_utc=allow_naive_utc,
+            )
 
-        # Check for unexpected projected positions (reverse check)
+        # Check for unexpected projected positions (reverse check, R5)
         for (acc, ticker), proj_p in proj_map.items():
             if (acc, ticker) not in leg_map:
                 pos_id = ticker if acc == "PRIMARY" else f"{acc}/{ticker}"
@@ -575,7 +780,7 @@ class SSoTParityVerifier:
                     discrepancy_type=DiscrepancyType.UNEXPECTED_RECORD.value,
                     legacy_value=None,
                     projected_value=proj_p,
-                    message=f"Unexpected position for {pos_id} present in projection but absent from legacy source",
+                    message=f"Unexpected position for {pos_id} in projection",
                     record_id=pos_id,
                 ))
 
@@ -585,113 +790,123 @@ class SSoTParityVerifier:
         projected: Dict[str, Any],
         summary: ParitySummary,
         discrepancies: List[ParityDiscrepancy],
+        default_timestamp: Optional[str] = None,
+        allow_date_only: bool = False,
+        allow_naive_utc: bool = False,
     ) -> None:
-        """Compares watched tickers and structured watchlist records."""
-        leg_wl = (
-            legacy.get("watched_tickers")
-            or (legacy.get("mutable_state", {}).get("watched_tickers") if isinstance(legacy.get("mutable_state"), dict) else None)
-            or legacy.get("WATCHLIST")
-            or []
-        )
-        if isinstance(leg_wl, list) and leg_wl and isinstance(leg_wl[0], dict):
-            leg_set = {str(item.get("ticker")).strip().upper() for item in leg_wl if item.get("ticker")}
-        else:
-            leg_set = {str(t).strip().upper() for t in leg_wl if t}
+        """Compares watched tickers and structured watchlist records with unified normalization (R1, R4, R5)."""
+        leg_items: Dict[str, Dict[str, Any]] = {}
 
+        # 1. Normalize all accepted legacy watchlist input shapes (R4)
+        for source_key in ("watched_tickers", "WATCHLIST", "watchlist"):
+            raw_val = legacy.get(source_key)
+            if raw_val is None and source_key == "watched_tickers" and isinstance(legacy.get("mutable_state"), dict):
+                raw_val = legacy["mutable_state"].get("watched_tickers")
+
+            if isinstance(raw_val, list):
+                for item in raw_val:
+                    if isinstance(item, dict) and item.get("ticker"):
+                        tk = str(item["ticker"]).strip().upper()
+                        leg_items[tk] = item
+                    elif isinstance(item, str) and item.strip():
+                        tk = str(item).strip().upper()
+                        leg_items.setdefault(tk, {"ticker": tk})
+
+        leg_set = set(leg_items.keys())
         proj_wl = projected.get("watched_tickers", [])
         proj_set = {str(t).strip().upper() for t in proj_wl if t}
 
-        if leg_set == proj_set:
-            summary.exact_matches += len(leg_set)
-        else:
-            for missing in (leg_set - proj_set):
-                summary.missing_records += 1
-                discrepancies.append(ParityDiscrepancy(
-                    domain="watchlist",
-                    path=f"watched_tickers[{missing}]",
-                    discrepancy_type=DiscrepancyType.MISSING_RECORD.value,
-                    legacy_value=missing,
-                    projected_value=None,
-                    message=f"Watched ticker {missing} in legacy source is missing in projection",
-                    record_id=missing,
-                ))
-            for unexpected in (proj_set - leg_set):
+        proj_items = {
+            str(item.get("ticker")).strip().upper(): item
+            for item in projected.get("watchlist", [])
+            if isinstance(item, dict) and item.get("ticker")
+        }
+
+        # Compare ticker identities
+        missing_tickers = leg_set - proj_set
+        unexpected_tickers = proj_set - leg_set
+
+        for missing in sorted(missing_tickers):
+            summary.missing_records += 1
+            discrepancies.append(ParityDiscrepancy(
+                domain="watchlist",
+                path=f"watched_tickers[{missing}]",
+                discrepancy_type=DiscrepancyType.MISSING_RECORD.value,
+                legacy_value=missing,
+                projected_value=None,
+                message=f"Watched ticker {missing} in legacy source is missing in projection",
+                record_id=missing,
+            ))
+
+        for unexpected in sorted(unexpected_tickers):
+            summary.unexpected_records += 1
+            discrepancies.append(ParityDiscrepancy(
+                domain="watchlist",
+                path=f"watched_tickers[{unexpected}]",
+                discrepancy_type=DiscrepancyType.UNEXPECTED_RECORD.value,
+                legacy_value=None,
+                projected_value=unexpected,
+                message=f"Unexpected watched ticker {unexpected} in projection",
+                record_id=unexpected,
+            ))
+
+        common_tickers = leg_set & proj_set
+        for tk in sorted(common_tickers):
+            summary.exact_matches += 1
+            leg_item = leg_items[tk]
+            proj_item = proj_items.get(tk)
+            if proj_item is not None:
+                if leg_item.get("status") and leg_item.get("status") != proj_item.get("status"):
+                    summary.unresolved += 1
+                    discrepancies.append(ParityDiscrepancy(
+                        domain="watchlist",
+                        path=f"watchlist[{tk}].status",
+                        discrepancy_type=DiscrepancyType.UNRESOLVED.value,
+                        legacy_value=leg_item.get("status"),
+                        projected_value=proj_item.get("status"),
+                        message=f"Status mismatch for watchlist item {tk}",
+                        record_id=tk,
+                    ))
+                if leg_item.get("notes") and leg_item.get("notes") != proj_item.get("notes"):
+                    summary.unresolved += 1
+                    discrepancies.append(ParityDiscrepancy(
+                        domain="watchlist",
+                        path=f"watchlist[{tk}].notes",
+                        discrepancy_type=DiscrepancyType.UNRESOLVED.value,
+                        legacy_value=leg_item.get("notes"),
+                        projected_value=proj_item.get("notes"),
+                        message=f"Notes mismatch for watchlist item {tk}",
+                        record_id=tk,
+                    ))
+                # Timestamp verification (R1)
+                self._verify_timestamp_field(
+                    leg_item.get("added_at_utc"),
+                    proj_item.get("added_at_utc"),
+                    "added_at_utc",
+                    f"watchlist[{tk}].added_at_utc",
+                    "watchlist",
+                    tk,
+                    summary,
+                    discrepancies,
+                    nullable=False,
+                    default_timestamp=default_timestamp,
+                    allow_date_only=allow_date_only,
+                    allow_naive_utc=allow_naive_utc,
+                )
+
+        # Reverse check for structured watchlist items (R5)
+        for tk, proj_item in proj_items.items():
+            if tk not in leg_items and tk not in unexpected_tickers:
                 summary.unexpected_records += 1
                 discrepancies.append(ParityDiscrepancy(
                     domain="watchlist",
-                    path=f"watched_tickers[{unexpected}]",
+                    path=f"watchlist[{tk}]",
                     discrepancy_type=DiscrepancyType.UNEXPECTED_RECORD.value,
                     legacy_value=None,
-                    projected_value=unexpected,
-                    message=f"Unexpected watched ticker {unexpected} in projection",
-                    record_id=unexpected,
+                    projected_value=proj_item,
+                    message=f"Unexpected structured watchlist item {tk} in projection",
+                    record_id=tk,
                 ))
-
-        # Structured watchlist comparison (D-02, D1.2)
-        if isinstance(legacy.get("watchlist"), list) and legacy["watchlist"] and isinstance(legacy["watchlist"][0], dict):
-            proj_items = {
-                str(item.get("ticker")).strip().upper(): item
-                for item in projected.get("watchlist", [])
-                if isinstance(item, dict) and item.get("ticker")
-            }
-            leg_items = {
-                str(leg_item.get("ticker")).strip().upper(): leg_item
-                for leg_item in legacy["watchlist"]
-                if isinstance(leg_item, dict) and leg_item.get("ticker")
-            }
-            for tk, leg_item in leg_items.items():
-                if tk in proj_items:
-                    proj_item = proj_items[tk]
-                    if leg_item.get("status") and leg_item.get("status") != proj_item.get("status"):
-                        summary.unresolved += 1
-                        discrepancies.append(ParityDiscrepancy(
-                            domain="watchlist",
-                            path=f"watchlist[{tk}].status",
-                            discrepancy_type=DiscrepancyType.UNRESOLVED.value,
-                            legacy_value=leg_item.get("status"),
-                            projected_value=proj_item.get("status"),
-                            message=f"Status mismatch for watchlist item {tk}",
-                            record_id=tk,
-                        ))
-                    if leg_item.get("notes") != proj_item.get("notes"):
-                        summary.unresolved += 1
-                        discrepancies.append(ParityDiscrepancy(
-                            domain="watchlist",
-                            path=f"watchlist[{tk}].notes",
-                            discrepancy_type=DiscrepancyType.UNRESOLVED.value,
-                            legacy_value=leg_item.get("notes"),
-                            projected_value=proj_item.get("notes"),
-                            message=f"Notes mismatch for watchlist item {tk}",
-                            record_id=tk,
-                        ))
-                    if (
-                        leg_item.get("added_at_utc")
-                        and leg_item.get("added_at_utc") != proj_item.get("added_at_utc")
-                    ):
-                        summary.timestamp_mismatches += 1
-                        discrepancies.append(ParityDiscrepancy(
-                            domain="watchlist",
-                            path=f"watchlist[{tk}].added_at_utc",
-                            discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
-                            legacy_value=leg_item.get("added_at_utc"),
-                            projected_value=proj_item.get("added_at_utc"),
-                            message=f"Timestamp mismatch for watchlist item {tk}",
-                            record_id=tk,
-                        ))
-
-            # Reverse check for structured watchlist (D1.2)
-            for tk, proj_item in proj_items.items():
-                if tk not in leg_items:
-                    summary.unexpected_records += 1
-                    discrepancies.append(ParityDiscrepancy(
-                        domain="watchlist",
-                        path=f"watchlist[{tk}]",
-                        discrepancy_type=DiscrepancyType.UNEXPECTED_RECORD.value,
-                        legacy_value=None,
-                        projected_value=proj_item,
-                        message=f"Unexpected structured watchlist item {tk} in projection",
-                        record_id=tk,
-                    ))
 
     def _verify_scout_categories_domain(
         self,
@@ -699,32 +914,63 @@ class SSoTParityVerifier:
         projected: Dict[str, Any],
         summary: ParitySummary,
         discrepancies: List[ParityDiscrepancy],
+        default_timestamp: Optional[str] = None,
+        allow_date_only: bool = False,
+        allow_naive_utc: bool = False,
     ) -> None:
-        """Compares scout categories and ticker mappings."""
-        leg_map: Dict[str, Set[str]] = {}
+        """Compares scout categories and ticker mappings with unified normalization (R1, R4, R5)."""
+        leg_categories: Dict[str, Dict[str, Any]] = {}
+
+        # 1. Normalize all accepted scout category representations (R4)
         if "SCOUT_TICKER_MAP" in legacy and isinstance(legacy["SCOUT_TICKER_MAP"], dict):
-            leg_map = {k: set(v) for k, v in legacy["SCOUT_TICKER_MAP"].items()}
-        elif "scout_category_records" in legacy and isinstance(legacy["scout_category_records"], list):
-            leg_map = {r.get("category_name"): set(r.get("tickers", [])) for r in legacy["scout_category_records"]}
+            for k, v in legacy["SCOUT_TICKER_MAP"].items():
+                if isinstance(v, (list, tuple, set)):
+                    leg_categories[str(k).strip()] = {
+                        "category_name": str(k).strip(),
+                        "tickers": {str(t).strip().upper() for t in v if t},
+                    }
+
+        for source_key in ("scout_category_records", "scout_categories"):
+            if source_key in legacy and isinstance(legacy[source_key], list):
+                for item in legacy[source_key]:
+                    if isinstance(item, dict) and item.get("category_name"):
+                        cn = str(item["category_name"]).strip()
+                        raw_tickers = item.get("tickers") or []
+                        tickers_set = {str(t).strip().upper() for t in raw_tickers if t}
+                        existing = leg_categories.setdefault(cn, {"category_name": cn, "tickers": tickers_set})
+                        existing.update({k: v for k, v in item.items() if k != "tickers"})
+                        existing["tickers"] = tickers_set
+                    elif isinstance(item, str) and item.strip():
+                        cn = item.strip()
+                        leg_categories.setdefault(cn, {"category_name": cn, "tickers": set()})
 
         proj_records = projected.get("scout_category_records", [])
-        proj_map = {r.get("category_name"): set(r.get("tickers", [])) for r in proj_records if isinstance(r, dict)}
-        proj_cat_objs = {r.get("category_name"): r for r in proj_records if isinstance(r, dict)}
+        proj_map = {
+            r.get("category_name"): {str(t).strip().upper() for t in r.get("tickers", []) if t}
+            for r in proj_records
+            if isinstance(r, dict) and r.get("category_name")
+        }
+        proj_cat_objs = {
+            r.get("category_name"): r
+            for r in proj_records
+            if isinstance(r, dict) and r.get("category_name")
+        }
 
-        for cat_name, leg_tickers in leg_map.items():
+        for cat_name, leg_info in leg_categories.items():
             if cat_name not in proj_map:
                 summary.missing_records += 1
                 discrepancies.append(ParityDiscrepancy(
                     domain="scout_categories",
                     path=f"scout_categories[{cat_name}]",
                     discrepancy_type=DiscrepancyType.MISSING_RECORD.value,
-                    legacy_value=sorted(list(leg_tickers)),
+                    legacy_value=sorted(list(leg_info.get("tickers", set()))),
                     projected_value=None,
                     message=f"Scout category '{cat_name}' missing in projection",
                     record_id=cat_name,
                 ))
             else:
                 proj_tickers = proj_map[cat_name]
+                leg_tickers = leg_info.get("tickers", set())
                 if leg_tickers == proj_tickers:
                     summary.exact_matches += 1
                 else:
@@ -739,9 +985,38 @@ class SSoTParityVerifier:
                         record_id=cat_name,
                     ))
 
-        # Reverse check for scout categories (D1.2)
+                proj_sc = proj_cat_objs[cat_name]
+                if leg_info.get("description") and leg_info.get("description") != proj_sc.get("description"):
+                    summary.unresolved += 1
+                    discrepancies.append(ParityDiscrepancy(
+                        domain="scout_categories",
+                        path=f"scout_categories[{cat_name}].description",
+                        discrepancy_type=DiscrepancyType.UNRESOLVED.value,
+                        legacy_value=leg_info.get("description"),
+                        projected_value=proj_sc.get("description"),
+                        message=f"Description mismatch for scout category '{cat_name}'",
+                        record_id=cat_name,
+                    ))
+
+                # Timestamp verification (R1)
+                self._verify_timestamp_field(
+                    leg_info.get("updated_at_utc"),
+                    proj_sc.get("updated_at_utc"),
+                    "updated_at_utc",
+                    f"scout_categories[{cat_name}].updated_at_utc",
+                    "scout_categories",
+                    cat_name,
+                    summary,
+                    discrepancies,
+                    nullable=False,
+                    default_timestamp=default_timestamp,
+                    allow_date_only=allow_date_only,
+                    allow_naive_utc=allow_naive_utc,
+                )
+
+        # Reverse check for scout categories (R5)
         for cat_name, proj_tickers in proj_map.items():
-            if cat_name not in leg_map:
+            if cat_name not in leg_categories:
                 summary.unexpected_records += 1
                 discrepancies.append(ParityDiscrepancy(
                     domain="scout_categories",
@@ -753,49 +1028,17 @@ class SSoTParityVerifier:
                     record_id=cat_name,
                 ))
 
-        # Structured scout categories comparison (D-02)
-        leg_structured = legacy.get("scout_category_records") or legacy.get("scout_categories")
-        if isinstance(leg_structured, list) and leg_structured and isinstance(leg_structured[0], dict):
-            for sc in leg_structured:
-                if not isinstance(sc, dict):
-                    continue
-                cn = sc.get("category_name")
-                if cn in proj_cat_objs:
-                    proj_sc = proj_cat_objs[cn]
-                    if sc.get("description") != proj_sc.get("description"):
-                        summary.unresolved += 1
-                        discrepancies.append(ParityDiscrepancy(
-                            domain="scout_categories",
-                            path=f"scout_categories[{cn}].description",
-                            discrepancy_type=DiscrepancyType.UNRESOLVED.value,
-                            legacy_value=sc.get("description"),
-                            projected_value=proj_sc.get("description"),
-                            message=f"Description mismatch for scout category '{cn}'",
-                            record_id=cn,
-                        ))
-                    if (
-                        sc.get("updated_at_utc")
-                        and sc.get("updated_at_utc") != proj_sc.get("updated_at_utc")
-                    ):
-                        summary.timestamp_mismatches += 1
-                        discrepancies.append(ParityDiscrepancy(
-                            domain="scout_categories",
-                            path=f"scout_categories[{cn}].updated_at_utc",
-                            discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
-                            legacy_value=sc.get("updated_at_utc"),
-                            projected_value=proj_sc.get("updated_at_utc"),
-                            message=f"Timestamp mismatch for scout category '{cn}'",
-                            record_id=cn,
-                        ))
-
     def _verify_trade_lessons_domain(
         self,
         legacy: Dict[str, Any],
         projected: Dict[str, Any],
         summary: ParitySummary,
         discrepancies: List[ParityDiscrepancy],
+        default_timestamp: Optional[str] = None,
+        allow_date_only: bool = False,
+        allow_naive_utc: bool = False,
     ) -> None:
-        """Compares trade lessons across rule codes, directives, categories, and timestamps (D-02)."""
+        """Compares trade lessons across rule codes, directives, categories, and timestamps (R1, R2, R5)."""
         leg_lessons = legacy.get("trade_lessons", [])
         proj_lessons = projected.get("trade_lessons", [])
         proj_map = {l.get("rule_code"): l for l in proj_lessons if isinstance(l, dict) and l.get("rule_code")}
@@ -812,13 +1055,12 @@ class SSoTParityVerifier:
                     leg_directive = extracted_dir or str(item["rule"])
 
             if rule_code is None:
-                # Documented legacy limitation (e.g. items 16/17 without rule code)
                 summary.unresolved += 1
                 discrepancies.append(ParityDiscrepancy(
                     domain="trade_lessons",
                     path=f"trade_lessons[id={item.get('id')}]",
                     discrepancy_type=DiscrepancyType.UNRESOLVED.value,
-                    legacy_value=item.get("rule", "")[:40],
+                    legacy_value=str(item.get("rule", ""))[:40],
                     projected_value=None,
                     message="Legacy trade lesson has uncodified format without 'L-xxx' prefix; not importable.",
                     record_id=str(item.get("id")),
@@ -828,111 +1070,112 @@ class SSoTParityVerifier:
             norm_code = str(rule_code).strip().upper()
             leg_rule_codes.add(norm_code)
 
-            if rule_code not in proj_map:
+            if norm_code not in proj_map:
                 summary.missing_records += 1
                 discrepancies.append(ParityDiscrepancy(
                     domain="trade_lessons",
-                    path=f"trade_lessons[{rule_code}]",
+                    path=f"trade_lessons[{norm_code}]",
                     discrepancy_type=DiscrepancyType.MISSING_RECORD.value,
-                    legacy_value=rule_code,
+                    legacy_value=norm_code,
                     projected_value=None,
-                    message=f"Trade lesson {rule_code} present in legacy source is missing in projection",
-                    record_id=rule_code,
+                    message=f"Trade lesson {norm_code} present in legacy source is missing in projection",
+                    record_id=norm_code,
                 ))
                 continue
 
-            proj_l = proj_map[rule_code]
+            proj_l = proj_map[norm_code]
             has_mismatch = False
 
-            # Verify directive text (D-02)
+            # Verify directive text
             if leg_directive and leg_directive != proj_l.get("directive_text"):
                 summary.unresolved += 1
                 discrepancies.append(ParityDiscrepancy(
                     domain="trade_lessons",
-                    path=f"trade_lessons[{rule_code}].directive_text",
+                    path=f"trade_lessons[{norm_code}].directive_text",
                     discrepancy_type=DiscrepancyType.UNRESOLVED.value,
                     legacy_value=leg_directive,
                     projected_value=proj_l.get("directive_text"),
-                    message=f"Directive text mismatch for trade lesson {rule_code}",
-                    record_id=rule_code,
+                    message=f"Directive text mismatch for trade lesson {norm_code}",
+                    record_id=norm_code,
                 ))
                 has_mismatch = True
 
-            # Verify category (D-02)
+            # Verify category
             if item.get("category") and item.get("category") != proj_l.get("category"):
                 summary.unresolved += 1
                 discrepancies.append(ParityDiscrepancy(
                     domain="trade_lessons",
-                    path=f"trade_lessons[{rule_code}].category",
+                    path=f"trade_lessons[{norm_code}].category",
                     discrepancy_type=DiscrepancyType.UNRESOLVED.value,
                     legacy_value=item.get("category"),
                     projected_value=proj_l.get("category"),
-                    message=f"Category mismatch for trade lesson {rule_code}",
-                    record_id=rule_code,
+                    message=f"Category mismatch for trade lesson {norm_code}",
+                    record_id=norm_code,
                 ))
                 has_mismatch = True
 
-            # Verify status (D-02)
+            # Verify status
             if item.get("status") and item.get("status") != proj_l.get("status"):
                 summary.unresolved += 1
                 discrepancies.append(ParityDiscrepancy(
                     domain="trade_lessons",
-                    path=f"trade_lessons[{rule_code}].status",
+                    path=f"trade_lessons[{norm_code}].status",
                     discrepancy_type=DiscrepancyType.UNRESOLVED.value,
                     legacy_value=item.get("status"),
                     projected_value=proj_l.get("status"),
-                    message=f"Status mismatch for trade lesson {rule_code}",
-                    record_id=rule_code,
+                    message=f"Status mismatch for trade lesson {norm_code}",
+                    record_id=norm_code,
                 ))
                 has_mismatch = True
 
-            # Verify created_at_utc (D-02)
-            if item.get("created_at_utc") and item.get("created_at_utc") != proj_l.get("created_at_utc"):
-                summary.timestamp_mismatches += 1
-                discrepancies.append(ParityDiscrepancy(
-                    domain="trade_lessons",
-                    path=f"trade_lessons[{rule_code}].created_at_utc",
-                    discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
-                    legacy_value=item.get("created_at_utc"),
-                    projected_value=proj_l.get("created_at_utc"),
-                    message=f"Created timestamp mismatch for trade lesson {rule_code}",
-                    record_id=rule_code,
-                ))
-                has_mismatch = True
+            # Verify created_at_utc (R1)
+            self._verify_timestamp_field(
+                item.get("created_at_utc"),
+                proj_l.get("created_at_utc"),
+                "created_at_utc",
+                f"trade_lessons[{norm_code}].created_at_utc",
+                "trade_lessons",
+                norm_code,
+                summary,
+                discrepancies,
+                nullable=False,
+                default_timestamp=default_timestamp,
+                allow_date_only=allow_date_only,
+                allow_naive_utc=allow_naive_utc,
+            )
 
-            # Verify last_reviewed_at_utc (D-02)
-            if (
-                item.get("last_reviewed_at_utc")
-                and item.get("last_reviewed_at_utc") != proj_l.get("last_reviewed_at_utc")
-            ):
-                summary.timestamp_mismatches += 1
-                discrepancies.append(ParityDiscrepancy(
-                    domain="trade_lessons",
-                    path=f"trade_lessons[{rule_code}].last_reviewed_at_utc",
-                    discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
-                    legacy_value=item.get("last_reviewed_at_utc"),
-                    projected_value=proj_l.get("last_reviewed_at_utc"),
-                    message=f"Last reviewed timestamp mismatch for trade lesson {rule_code}",
-                    record_id=rule_code,
-                ))
-                has_mismatch = True
+            # Verify last_reviewed_at_utc (R1, R2) - intentionally nullable
+            self._verify_timestamp_field(
+                item.get("last_reviewed_at_utc"),
+                proj_l.get("last_reviewed_at_utc"),
+                "last_reviewed_at_utc",
+                f"trade_lessons[{norm_code}].last_reviewed_at_utc",
+                "trade_lessons",
+                norm_code,
+                summary,
+                discrepancies,
+                nullable=True,
+                default_timestamp=None,
+                allow_date_only=allow_date_only,
+                allow_naive_utc=allow_naive_utc,
+            )
 
             if not has_mismatch:
                 summary.exact_matches += 1
 
-        # Reverse check for trade lessons (D1.2)
+        # Reverse check for trade lessons (R5)
         for rule_code, proj_l in proj_map.items():
             norm_code = str(rule_code).strip().upper()
             if norm_code not in leg_rule_codes:
                 summary.unexpected_records += 1
                 discrepancies.append(ParityDiscrepancy(
                     domain="trade_lessons",
-                    path=f"trade_lessons[{rule_code}]",
+                    path=f"trade_lessons[{norm_code}]",
                     discrepancy_type=DiscrepancyType.UNEXPECTED_RECORD.value,
                     legacy_value=None,
                     projected_value=proj_l,
-                    message=f"Unexpected trade lesson {rule_code} present in projection but absent from legacy source",
-                    record_id=rule_code,
+                    message=f"Unexpected trade lesson {norm_code} in projection",
+                    record_id=norm_code,
                 ))
 
     def _verify_decision_log_domain(
@@ -941,18 +1184,19 @@ class SSoTParityVerifier:
         projected: Dict[str, Any],
         summary: ParitySummary,
         discrepancies: List[ParityDiscrepancy],
+        default_timestamp: Optional[str] = None,
         allow_date_only: bool = False,
         allow_naive_utc: bool = False,
     ) -> None:
-        """Compares decision log entries across all 7 contract fields with reverse checks (D-02, D-06, D1.2, D1.3)."""
+        """Compares decision log entries across all 7 contract fields with strict collision-proof reverse checks (R1, R3, R5)."""
         leg_decisions = legacy.get("decision_log", [])
         proj_decisions = projected.get("decision_log", [])
         proj_by_session: Dict[str, List[Dict[str, Any]]] = {}
         for d in proj_decisions:
             if isinstance(d, dict) and d.get("session_id"):
-                proj_by_session.setdefault(d["session_id"], []).append(d)
+                proj_by_session.setdefault(str(d["session_id"]).strip(), []).append(d)
 
-        seen_expected_keys: Set[Tuple[str, str, Optional[str]]] = set()
+        matched_projected_ids: Set[int] = set()
 
         def _verify_decision_record_fields(
             exp: Dict[str, Any],
@@ -1005,7 +1249,7 @@ class SSoTParityVerifier:
                 has_diff = True
 
             # 4. Votes dict
-            if (exp.get("votes") or {}) != (matching.get("votes") or {}):
+            if not deep_equal(exp.get("votes") or {}, matching.get("votes") or {}):
                 summary.unresolved += 1
                 discrepancies.append(ParityDiscrepancy(
                     domain="decision_log",
@@ -1032,21 +1276,62 @@ class SSoTParityVerifier:
                 ))
                 has_diff = True
 
-            # 6. Timestamp UTC
-            if exp.get("timestamp_utc") and matching.get("timestamp_utc") != exp.get("timestamp_utc"):
-                summary.timestamp_mismatches += 1
-                discrepancies.append(ParityDiscrepancy(
-                    domain="decision_log",
-                    path=f"{path_prefix}.timestamp_utc",
-                    discrepancy_type=DiscrepancyType.TIMESTAMP_MISMATCH.value,
-                    legacy_value=exp.get("timestamp_utc"),
-                    projected_value=matching.get("timestamp_utc"),
-                    message=f"Timestamp mismatch for {path_prefix}",
-                    record_id=sid,
-                ))
-                has_diff = True
+            # 6. Timestamp UTC (R1)
+            self._verify_timestamp_field(
+                exp.get("timestamp_utc"),
+                matching.get("timestamp_utc"),
+                "timestamp_utc",
+                f"{path_prefix}.timestamp_utc",
+                "decision_log",
+                sid,
+                summary,
+                discrepancies,
+                nullable=False,
+                default_timestamp=default_timestamp,
+                allow_date_only=allow_date_only,
+                allow_naive_utc=allow_naive_utc,
+            )
 
             return not has_diff
+
+        def _match_and_verify(exp_rec: Dict[str, Any], path_desc: str) -> None:
+            sid = exp_rec["session_id"]
+            action = exp_rec["action_proposed"]
+            ticker = exp_rec["ticker"]
+            candidates = proj_by_session.get(sid, [])
+
+            matching = None
+            # Find an unmatched candidate
+            for c in candidates:
+                if id(c) in matched_projected_ids:
+                    continue
+                if c.get("action_proposed") == action and c.get("ticker") == ticker:
+                    matching = c
+                    break
+
+            if not matching and ticker:
+                for c in candidates:
+                    if id(c) in matched_projected_ids:
+                        continue
+                    if c.get("ticker") == ticker:
+                        matching = c
+                        break
+
+            if not matching:
+                summary.missing_records += 1
+                discrepancies.append(ParityDiscrepancy(
+                    domain="decision_log",
+                    path=path_desc,
+                    discrepancy_type=DiscrepancyType.MISSING_RECORD.value,
+                    legacy_value=exp_rec,
+                    projected_value=None,
+                    message=f"Decision log entry {sid}/{action}/{ticker} missing in projection",
+                    record_id=sid,
+                ))
+            else:
+                matched_projected_ids.add(id(matching))
+                if _verify_decision_record_fields(exp_rec, matching, path_desc):
+                    summary.exact_matches += 1
 
         for idx, d in enumerate(leg_decisions):
             if not isinstance(d, dict):
@@ -1067,35 +1352,14 @@ class SSoTParityVerifier:
                     "transcript_text": d.get("transcript_text"),
                     "timestamp_utc": d.get("timestamp_utc"),
                 }
-                seen_expected_keys.add((session_id, action, ticker))
-
-                candidates = proj_by_session.get(session_id, [])
-                matching = None
-                for c in candidates:
-                    if c.get("action_proposed") == action and c.get("ticker") == ticker:
-                        matching = c
-                        break
-
-                if not matching:
-                    summary.missing_records += 1
-                    discrepancies.append(ParityDiscrepancy(
-                        domain="decision_log",
-                        path=f"decision_log[{session_id}/{action}/{ticker}]",
-                        discrepancy_type=DiscrepancyType.MISSING_RECORD.value,
-                        legacy_value=d,
-                        projected_value=None,
-                        message=f"Decision log entry {session_id}/{action} missing in projection",
-                        record_id=session_id,
-                    ))
-                else:
-                    if _verify_decision_record_fields(exp_rec, matching, f"decision_log[{session_id}]"):
-                        summary.exact_matches += 1
+                _match_and_verify(exp_rec, f"decision_log[{session_id}/{action}/{ticker}]")
 
             # Case B: Date-based legacy record (D-06, D1.3)
             elif "date" in d and ("lesson" in d or "action" in d or "outcome" in d):
                 try:
                     trans_b = transform_legacy_decision_case_b(
                         d,
+                        default_timestamp=default_timestamp,
                         allow_date_only=allow_date_only,
                     )
                 except Exception as exc:
@@ -1111,40 +1375,14 @@ class SSoTParityVerifier:
                     ))
                     continue
 
-                sid = trans_b["session_id"]
-                action = trans_b["action_proposed"]
-                ticker = trans_b["ticker"]
-                seen_expected_keys.add((sid, action, ticker))
+                _match_and_verify(trans_b, f"decision_log[{trans_b['session_id']}]")
 
-                candidates = proj_by_session.get(sid, [])
-                matching = None
-                for c in candidates:
-                    if c.get("action_proposed") == action and c.get("ticker") == ticker:
-                        matching = c
-                        break
-                if not matching and candidates:
-                    matching = candidates[0]
-
-                if not matching:
-                    summary.missing_records += 1
-                    discrepancies.append(ParityDiscrepancy(
-                        domain="decision_log",
-                        path=f"decision_log[{sid}]",
-                        discrepancy_type=DiscrepancyType.MISSING_RECORD.value,
-                        legacy_value=d,
-                        projected_value=None,
-                        message=f"Legacy date-based decision log {sid} missing in projection",
-                        record_id=sid,
-                    ))
-                else:
-                    if _verify_decision_record_fields(trans_b, matching, f"decision_log[{sid}]"):
-                        summary.exact_matches += 1
-
-            # Case C: Nested council debate record (D-06, D1.3)
+            # Case C: Nested council debate record (D-06, D1.3, R3)
             elif "decisions" in d and isinstance(d["decisions"], list):
                 try:
                     trans_c_list = transform_legacy_decision_case_c(
                         d,
+                        default_timestamp=default_timestamp,
                         allow_naive_utc=allow_naive_utc,
                     )
                 except Exception as exc:
@@ -1162,36 +1400,8 @@ class SSoTParityVerifier:
 
                 for sub_exp in trans_c_list:
                     sid = sub_exp["session_id"]
-                    action = sub_exp["action_proposed"]
                     ticker = sub_exp["ticker"]
-                    seen_expected_keys.add((sid, action, ticker))
-
-                    candidates = proj_by_session.get(sid, [])
-                    sub_matching = None
-                    for c in candidates:
-                        if c.get("ticker") == ticker and c.get("action_proposed") == action:
-                            sub_matching = c
-                            break
-                    if not sub_matching and ticker:
-                        for c in candidates:
-                            if c.get("ticker") == ticker:
-                                sub_matching = c
-                                break
-
-                    if not sub_matching:
-                        summary.missing_records += 1
-                        discrepancies.append(ParityDiscrepancy(
-                            domain="decision_log",
-                            path=f"decision_log[{sid}/{ticker}]",
-                            discrepancy_type=DiscrepancyType.MISSING_RECORD.value,
-                            legacy_value=sub_exp,
-                            projected_value=None,
-                            message=f"Sub-decision for {ticker} in {sid} missing in projection",
-                            record_id=f"{sid}/{ticker}",
-                        ))
-                    else:
-                        if _verify_decision_record_fields(sub_exp, sub_matching, f"decision_log[{sid}/{ticker}]"):
-                            summary.exact_matches += 1
+                    _match_and_verify(sub_exp, f"decision_log[{sid}/{ticker}]")
 
             else:
                 summary.unresolved += 1
@@ -1205,15 +1415,15 @@ class SSoTParityVerifier:
                     record_id=str(idx),
                 ))
 
-        # Reverse check for unexpected projected decisions (D1.2)
+        # Reverse check for unexpected projected decisions (R5)
+        # Every projected decision must be mapped to a distinct legacy record (prevent collision evasion)
         for proj_d in proj_decisions:
             if not isinstance(proj_d, dict):
                 continue
-            p_sid = str(proj_d.get("session_id") or "").strip()
-            p_action = str(proj_d.get("action_proposed") or "").strip()
-            p_ticker = str(proj_d.get("ticker")).strip().upper() if proj_d.get("ticker") else None
-            p_key = (p_sid, p_action, p_ticker)
-            if p_key not in seen_expected_keys:
+            if id(proj_d) not in matched_projected_ids:
+                p_sid = str(proj_d.get("session_id") or "").strip()
+                p_action = str(proj_d.get("action_proposed") or "").strip()
+                p_ticker = str(proj_d.get("ticker")).strip().upper() if proj_d.get("ticker") else None
                 summary.unexpected_records += 1
                 discrepancies.append(ParityDiscrepancy(
                     domain="decision_log",
@@ -1241,26 +1451,3 @@ class SSoTParityVerifier:
 
             if in_proj or in_base or in_leg:
                 summary.expected_external_sections += 1
-                if in_base and not in_proj:
-                    summary.missing_records += 1
-                    discrepancies.append(ParityDiscrepancy(
-                        domain="external_sections",
-                        path=ext_key,
-                        discrepancy_type=DiscrepancyType.MISSING_RECORD.value,
-                        legacy_value=base_document.get(ext_key),
-                        projected_value=None,
-                        message=f"Externally managed section {ext_key} was not preserved in projection",
-                    ))
-                elif in_base and in_proj:
-                    if base_document[ext_key] == projected[ext_key]:
-                        summary.exact_matches += 1
-                    else:
-                        summary.unresolved += 1
-                        discrepancies.append(ParityDiscrepancy(
-                            domain="external_sections",
-                            path=ext_key,
-                            discrepancy_type=DiscrepancyType.UNRESOLVED.value,
-                            legacy_value=base_document.get(ext_key),
-                            projected_value=projected.get(ext_key),
-                            message=f"Externally managed section {ext_key} modified during projection",
-                        ))

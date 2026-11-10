@@ -522,7 +522,8 @@ class LegacyJsonImporter:
                         ts_reviewed, _ = resolve_historical_timestamp(
                             item.get("last_reviewed_at_utc"),
                             f"{src.name}: trade_lessons[{idx}].last_reviewed_at_utc",
-                            default_timestamp=default_timestamp,
+                            nullable=True,
+                            default_timestamp=None,
                             allow_date_only=allow_date_only,
                             allow_naive_utc=allow_naive_utc,
                         )
@@ -579,7 +580,7 @@ class LegacyJsonImporter:
                                     "category": "MANDATE",
                                     "status": "ACTIVE",
                                     "created_at_utc": default_timestamp,
-                                    "last_reviewed_at_utc": default_timestamp,
+                                    "last_reviewed_at_utc": None,
                                 }
                                 if extracted_code in seen_lesson_records:
                                     prev = seen_lesson_records[extracted_code]
@@ -922,6 +923,7 @@ class LegacyJsonImporter:
                             status=tl["status"],
                             caller_role="System",
                             timestamp_utc=tl["created_at_utc"],
+                            last_reviewed_at_utc=tl["last_reviewed_at_utc"],
                         )
                         imported_counts["trade_lessons"] += 1
 

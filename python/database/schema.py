@@ -157,7 +157,7 @@ CORE_SCHEMA_STATEMENTS = [
         category TEXT NOT NULL CHECK (category IN ('MANDATE', 'EXECUTION', 'STRUCTURAL', 'RISK', 'HEURISTIC')),
         status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'DEPRECATED', 'SUSPENDED')),
         created_at_utc TEXT NOT NULL,
-        last_reviewed_at_utc TEXT NOT NULL
+        last_reviewed_at_utc TEXT
     );
     """,
 
@@ -359,7 +359,7 @@ EXPECTED_CORE_TABLE_DEFS: Dict[str, Dict[str, Tuple[str, bool, int, Optional[str
         "category": ("TEXT", True, 0, None),
         "status": ("TEXT", True, 0, "'ACTIVE'"),
         "created_at_utc": ("TEXT", True, 0, None),
-        "last_reviewed_at_utc": ("TEXT", True, 0, None),
+        "last_reviewed_at_utc": ("TEXT", False, 0, None),
     },
     "decision_log": {
         "id": ("INTEGER", False, 1, None),

@@ -84,8 +84,8 @@ class BaseMigrationTestCase(unittest.TestCase):
 
         self.importer = LegacyJsonImporter()
         self.generator = SSoTProjectionGenerator(self.db_manager)
-        self.verifier = SSoTParityVerifier(self.generator)
         self.default_ts = "2026-11-10T12:00:00Z"
+        self.verifier = SSoTParityVerifier(self.generator, default_timestamp=self.default_ts)
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -1792,6 +1792,389 @@ class TestStage15D11CorrectiveRegressions(BaseMigrationTestCase):
         self.assertEqual(dl_sha, loaded_dl_sha)
         self.assertEqual(len(dl_data.get("decision_log", [])), 2)
         self.assertEqual(len(dl_data.get("decision_log", [])[1].get("decisions", [])), 5)
+
+
+# ===========================================================================
+# Stage 1.5-D.1.1.1 Corrective Regression Tests (R1 - R5)
+# ===========================================================================
+
+class TestStage15D111CorrectiveRegressions(BaseMigrationTestCase):
+    """
+    Focused regression test suite for Stage 1.5-D.1.1.1:
+    - R1: Parity rejects unexplained projected timestamp when source missing.
+    - R1: Parity accepts explicit caller default timestamp.
+    - R2: Nullable trade lesson review timestamp remains null in SQLite & parity.
+    - R2: Trade lesson review timestamp persisted on insert.
+    - R2: Trade lesson review timestamp conflict detected.
+    - R3: Fail-closed on Case C malformed sub-decisions (non-dict, null, empty).
+    - R3: Case C imports every valid sub-decision.
+    - R4: Canonical normalization of structured-only watchlist & scout categories.
+    - R4: Mixed legacy & structured inputs without double-counting.
+    - R5: Complete bidirectional parity & collision-proof decision projection checks.
+    """
+
+    def test_parity_rejects_unexplained_projected_timestamp_when_source_missing(self):
+        """Verifies parity rejects an unexplained projected timestamp when source timestamp is missing (R1)."""
+        source = {
+            "watchlist": [
+                {"ticker": "NVDA", "notes": "No timestamp in source", "status": "ACTIVE"}
+            ]
+        }
+        res = self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+        self.assertTrue(res.success)
+
+        with self.db_manager.connection() as conn:
+            proj = self.generator.generate(conn)
+
+        # Verifier without default_timestamp cannot explain the projected default timestamp
+        verifier_no_default = SSoTParityVerifier(self.generator, default_timestamp=None)
+        parity = verifier_no_default.compare(source, proj)
+        self.assertFalse(parity.is_parity)
+        self.assertGreaterEqual(len(parity.discrepancies), 1)
+        ts_mismatches = [
+            d for d in parity.discrepancies
+            if "added_at_utc" in d.path and d.discrepancy_type == DiscrepancyType.TIMESTAMP_MISMATCH.value
+        ]
+        self.assertEqual(len(ts_mismatches), 1)
+
+    def test_parity_accepts_explicit_caller_default_timestamp(self):
+        """Verifies parity accepts projected timestamp when caller explicitly authorizes matching default (R1)."""
+        source = {
+            "watchlist": [
+                {"ticker": "NVDA", "notes": "Authorized default timestamp", "status": "ACTIVE"}
+            ]
+        }
+        res = self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+        self.assertTrue(res.success)
+
+        with self.db_manager.connection() as conn:
+            proj = self.generator.generate(conn)
+
+        verifier_with_default = SSoTParityVerifier(self.generator, default_timestamp=self.default_ts)
+        parity = verifier_with_default.compare(source, proj)
+        self.assertTrue(parity.is_parity)
+        self.assertEqual(len(parity.discrepancies), 0)
+        self.assertEqual(parity.summary.exact_matches, 1)
+
+    def test_nullable_review_timestamp_must_remain_null(self):
+        """Verifies trade lesson without review timestamp persists genuine NULL in SQLite and verifies as None (R2)."""
+        source = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-999",
+                    "directive_text": "Preserve genuine null for unreviewed lessons",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": "2026-11-01T10:00:00Z",
+                }
+            ]
+        }
+        res = self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+        self.assertTrue(res.success)
+
+        with self.db_manager.connection() as conn:
+            row = conn.execute(
+                "SELECT created_at_utc, last_reviewed_at_utc FROM trade_lessons WHERE rule_code = 'L-999'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[0], "2026-11-01T10:00:00Z")
+            self.assertIsNone(row[1])
+
+            proj = self.generator.generate(conn)
+
+        # Check projected lesson has None
+        proj_lessons = proj.get("trade_lessons", [])
+        self.assertEqual(len(proj_lessons), 1)
+        self.assertIsNone(proj_lessons[0].get("last_reviewed_at_utc"))
+
+        # Verify parity passes and matches None to None
+        parity = self.verifier.compare(source, proj)
+        self.assertTrue(parity.is_parity)
+        self.assertEqual(parity.summary.exact_matches, 1)
+
+    def test_trade_lesson_review_timestamp_persisted_on_insert(self):
+        """Verifies trade lesson with valid review timestamp persists to SQLite and projects faithfully (R2)."""
+        source = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-888",
+                    "directive_text": "Explicit review history persisted faithfully",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": "2026-10-01T10:00:00Z",
+                    "last_reviewed_at_utc": "2026-10-15T14:30:00Z",
+                }
+            ]
+        }
+        res = self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+        self.assertTrue(res.success)
+
+        with self.db_manager.connection() as conn:
+            row = conn.execute(
+                "SELECT created_at_utc, last_reviewed_at_utc FROM trade_lessons WHERE rule_code = 'L-888'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[0], "2026-10-01T10:00:00Z")
+            self.assertEqual(row[1], "2026-10-15T14:30:00Z")
+
+            proj = self.generator.generate(conn)
+
+        proj_lessons = proj.get("trade_lessons", [])
+        self.assertEqual(len(proj_lessons), 1)
+        self.assertEqual(proj_lessons[0].get("last_reviewed_at_utc"), "2026-10-15T14:30:00Z")
+
+        parity = self.verifier.compare(source, proj)
+        self.assertTrue(parity.is_parity)
+        self.assertEqual(parity.summary.exact_matches, 1)
+
+    def test_trade_lesson_review_timestamp_conflict_detected(self):
+        """Verifies duplicate trade lesson with conflicting review timestamps is rejected (R2)."""
+        source = {
+            "trade_lessons": [
+                {
+                    "rule_code": "L-777",
+                    "directive_text": "Same directive",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": "2026-10-01T10:00:00Z",
+                    "last_reviewed_at_utc": "2026-10-15T14:30:00Z",
+                },
+                {
+                    "rule_code": "L-777",
+                    "directive_text": "Same directive",
+                    "category": "MANDATE",
+                    "status": "ACTIVE",
+                    "created_at_utc": "2026-10-01T10:00:00Z",
+                    "last_reviewed_at_utc": "2026-10-20T16:00:00Z",
+                },
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            self.importer.plan_migration(source, default_timestamp=self.default_ts)
+        self.assertIn("Conflicting duplicate trade lesson record", str(ctx.exception))
+
+    def test_case_c_rejects_non_dict_subdecision(self):
+        """Verifies Case C decision rejects non-dictionary sub-decision fail-closed (R3)."""
+        source = {
+            "decision_log": [
+                {
+                    "timestamp": "2026-09-22T15:01:03Z",
+                    "trigger_context": "STAGE_0_BOOT_SYNC",
+                    "council_debate": {"bullish": "Positive"},
+                    "decisions": ["NOT_A_DICT_ENTRY"],
+                }
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            self.importer.plan_migration(source, default_timestamp=self.default_ts)
+        self.assertIn("sub-decision must be a dict", str(ctx.exception))
+        self.assertIn("decisions[0]", str(ctx.exception))
+
+    def test_case_c_rejects_null_subdecision(self):
+        """Verifies Case C decision rejects null sub-decision fail-closed (R3)."""
+        source = {
+            "decision_log": [
+                {
+                    "timestamp": "2026-09-22T15:01:03Z",
+                    "trigger_context": "STAGE_0_BOOT_SYNC",
+                    "council_debate": {"bullish": "Positive"},
+                    "decisions": [None],
+                }
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            self.importer.plan_migration(source, default_timestamp=self.default_ts)
+        self.assertIn("sub-decision must be a dict, got NoneType", str(ctx.exception))
+        self.assertIn("decisions[0]", str(ctx.exception))
+
+    def test_case_c_rejects_empty_invalid_subdecision(self):
+        """Verifies Case C decision rejects empty sub-decision missing required fields fail-closed (R3)."""
+        source = {
+            "decision_log": [
+                {
+                    "timestamp": "2026-09-22T15:01:03Z",
+                    "trigger_context": "STAGE_0_BOOT_SYNC",
+                    "council_debate": {"bullish": "Positive"},
+                    "decisions": [{}],
+                }
+            ]
+        }
+        with self.assertRaises(MigrationValidationError) as ctx:
+            self.importer.plan_migration(source, default_timestamp=self.default_ts)
+        self.assertIn("sub-decision cannot be empty", str(ctx.exception))
+        self.assertIn("decisions[0]", str(ctx.exception))
+
+    def test_case_c_imports_every_valid_subdecision(self):
+        """Verifies Case C deliberation with multiple sub-decisions imports every entry (R3)."""
+        source = {
+            "decision_log": [
+                {
+                    "timestamp": "2026-09-22T15:01:03Z",
+                    "trigger_context": "STAGE_0_BOOT_SYNC",
+                    "council_debate": {"bullish": "Positive", "neutral": "Neutral"},
+                    "decisions": [
+                        {"ticker": "UMAC", "trade_state": "HOLD", "scrutiny_audit": {"final_posture": "STABLE"}},
+                        {"ticker": "SPY", "trade_state": "BUY", "scrutiny_audit": {"final_posture": "ACCUMULATE"}},
+                        {"ticker": "QQQ", "trade_state": "NO_TRADE", "scrutiny_audit": {"final_posture": "CAUTION"}},
+                    ],
+                }
+            ]
+        }
+        res = self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+        self.assertTrue(res.success)
+        self.assertEqual(res.imported_counts["decision_log"], 3)
+
+        with self.db_manager.connection() as conn:
+            rows = conn.execute("SELECT ticker, action_proposed FROM decision_log ORDER BY ticker").fetchall()
+            self.assertEqual(len(rows), 3)
+            self.assertEqual([r[0] for r in rows], ["QQQ", "SPY", "UMAC"])
+            proj = self.generator.generate(conn)
+
+        parity = self.verifier.compare(source, proj)
+        self.assertTrue(parity.is_parity)
+        self.assertEqual(parity.summary.exact_matches, 3)
+
+    def test_structured_only_watchlist_parity(self):
+        """Verifies structured-only watchlist input format is normalized and verified in parity (R4)."""
+        source = {
+            "watchlist": [
+                {"ticker": "NVDA", "notes": "AI accelerator", "status": "ACTIVE", "added_at_utc": self.default_ts}
+            ]
+        }
+        res = self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+        self.assertTrue(res.success)
+        self.assertEqual(res.imported_counts["watchlist"], 1)
+
+        with self.db_manager.connection() as conn:
+            proj = self.generator.generate(conn)
+
+        parity = self.verifier.compare(source, proj)
+        self.assertTrue(parity.is_parity)
+        self.assertEqual(parity.summary.missing_records, 0)
+        self.assertEqual(parity.summary.unexpected_records, 0)
+        self.assertEqual(parity.summary.exact_matches, 1)
+
+    def test_structured_only_scout_categories_parity(self):
+        """Verifies structured-only scout categories format is normalized and verified in parity (R4)."""
+        source = {
+            "scout_categories": [
+                {"category_name": "CORE_RADAR", "tickers": ["MSFT"], "description": "Core radar", "updated_at_utc": self.default_ts}
+            ]
+        }
+        res = self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+        self.assertTrue(res.success)
+        self.assertEqual(res.imported_counts["scout_categories"], 1)
+
+        with self.db_manager.connection() as conn:
+            proj = self.generator.generate(conn)
+
+        parity = self.verifier.compare(source, proj)
+        self.assertTrue(parity.is_parity)
+        self.assertEqual(parity.summary.missing_records, 0)
+        self.assertEqual(parity.summary.unexpected_records, 0)
+        self.assertEqual(parity.summary.exact_matches, 1)
+
+    def test_mixed_legacy_and_structured_watchlist_no_double_count(self):
+        """Verifies mixed legacy and structured watchlist inputs are deduplicated without double-counting (R4)."""
+        source = {
+            "watched_tickers": ["AAPL"],
+            "watchlist": [
+                {"ticker": "AAPL", "status": "ACTIVE", "added_at_utc": self.default_ts}
+            ],
+        }
+        res = self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+        self.assertTrue(res.success)
+        self.assertEqual(res.imported_counts["watchlist"], 1)
+
+        with self.db_manager.connection() as conn:
+            proj = self.generator.generate(conn)
+
+        parity = self.verifier.compare(source, proj)
+        self.assertTrue(parity.is_parity)
+        self.assertEqual(parity.summary.missing_records, 0)
+        self.assertEqual(parity.summary.unexpected_records, 0)
+        self.assertEqual(parity.summary.exact_matches, 1)
+
+    def test_mixed_legacy_and_structured_scout_no_double_count(self):
+        """Verifies mixed legacy and structured scout category inputs are deduplicated without double-counting (R4)."""
+        source = {
+            "scout_candidates": {"CORE_RADAR": ["TSLA"]},
+            "scout_categories": [
+                {"category_name": "CORE_RADAR", "tickers": ["TSLA"], "updated_at_utc": self.default_ts}
+            ],
+        }
+        res = self.importer.import_into(source, self.db_manager, default_timestamp=self.default_ts)
+        self.assertTrue(res.success)
+        self.assertEqual(res.imported_counts["scout_categories"], 1)
+
+        with self.db_manager.connection() as conn:
+            proj = self.generator.generate(conn)
+
+        parity = self.verifier.compare(source, proj)
+        self.assertTrue(parity.is_parity)
+        self.assertEqual(parity.summary.missing_records, 0)
+        self.assertEqual(parity.summary.unexpected_records, 0)
+        self.assertEqual(parity.summary.exact_matches, 1)
+
+    def test_decision_projection_duplicate_identity_detected(self):
+        """Verifies collision-proof reverse checks detect duplicate projected decisions mapped to one source (R5)."""
+        legacy = {
+            "decision_log": [
+                {
+                    "session_id": "S1",
+                    "ticker": "SPY",
+                    "action_proposed": "HOLD",
+                    "decision_outcome": "APPROVED",
+                    "timestamp_utc": self.default_ts,
+                }
+            ]
+        }
+        # Simulated projected state with two decisions matching the same legacy record
+        projected = {
+            "decision_log": [
+                {
+                    "session_id": "S1",
+                    "ticker": "SPY",
+                    "action_proposed": "HOLD",
+                    "decision_outcome": "APPROVED",
+                    "timestamp_utc": self.default_ts,
+                },
+                {
+                    "session_id": "S1",
+                    "ticker": "SPY",
+                    "action_proposed": "HOLD",
+                    "decision_outcome": "APPROVED",
+                    "timestamp_utc": self.default_ts,
+                },
+            ]
+        }
+        res = self.verifier.compare(legacy, projected)
+        self.assertFalse(res.is_parity)
+        self.assertGreaterEqual(res.summary.unexpected_records, 1)
+        unexpected_decisions = [
+            d for d in res.discrepancies
+            if d.domain == "decision_log" and d.discrepancy_type == DiscrepancyType.UNEXPECTED_RECORD.value
+        ]
+        self.assertEqual(len(unexpected_decisions), 1)
+
+    def test_case_c_duplicate_subdecision_conflict_rejected(self):
+        """Verifies Case C decision with colliding sub-decision identities raises MigrationConflictError (R3)."""
+        source = {
+            "decision_log": [
+                {
+                    "timestamp": "2026-09-22T15:01:03Z",
+                    "trigger_context": "STAGE_0_BOOT_SYNC",
+                    "council_debate": {"bullish": "Positive"},
+                    "decisions": [
+                        {"ticker": "UMAC", "trade_state": "HOLD", "scrutiny_audit": {"final_posture": "STABLE"}},
+                        {"ticker": "UMAC", "trade_state": "HOLD", "scrutiny_audit": {"final_posture": "CONFLICT"}},
+                    ],
+                }
+            ]
+        }
+        with self.assertRaises(MigrationConflictError) as ctx:
+            self.importer.plan_migration(source, default_timestamp=self.default_ts)
+        self.assertIn("duplicate/colliding canonical sub-decision identity", str(ctx.exception))
 
 
 if __name__ == "__main__":

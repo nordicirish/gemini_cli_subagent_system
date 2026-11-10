@@ -22,6 +22,7 @@ from python.database.migration.models import (
     TimestampProvenance,
     MigrationSafetyError,
     MigrationValidationError,
+    MigrationConflictError,
 )
 
 __all__ = [
@@ -80,6 +81,47 @@ TRADE_LESSON_EQUALITY_FIELDS = ("rule_code", "directive_text", "category", "stat
 DECISION_LOG_EQUALITY_FIELDS = ("session_id", "action_proposed", "decision_outcome", "ticker", "votes", "transcript_text", "timestamp_utc")
 
 
+def deep_equal(v1: Any, v2: Any) -> bool:
+    """
+    Recursively compares two values with Decimal numerical equivalence,
+    sorted collection comparison, and recursive dict evaluation (D1.1, D1.1.1).
+    """
+    if v1 is None and v2 is None:
+        return True
+    if v1 is None or v2 is None:
+        return False
+
+    # Decimal / numerical comparison
+    if isinstance(v1, Decimal) or isinstance(v2, Decimal):
+        try:
+            return Decimal(str(v1)) == Decimal(str(v2))
+        except (InvalidOperation, ValueError):
+            return False
+
+    # Collection comparison (e.g. tickers list/tuple/set)
+    if isinstance(v1, (list, tuple, set)) and isinstance(v2, (list, tuple, set)):
+        if len(v1) != len(v2):
+            return False
+        # For sets or simple hashable collections of scalars (like tickers)
+        if isinstance(v1, set) or isinstance(v2, set):
+            try:
+                s1 = sorted(list(v1))
+                s2 = sorted(list(v2))
+                return all(deep_equal(x, y) for x, y in zip(s1, s2))
+            except TypeError:
+                pass
+        return all(deep_equal(x, y) for x, y in zip(v1, v2))
+
+    # Dictionary comparison (e.g. votes)
+    if isinstance(v1, dict) and isinstance(v2, dict):
+        if set(v1.keys()) != set(v2.keys()):
+            return False
+        return all(deep_equal(v1[k], v2[k]) for k in v1)
+
+    # Standard equality
+    return bool(v1 == v2)
+
+
 def records_equal(
     rec1: Dict[str, Any],
     rec2: Dict[str, Any],
@@ -94,38 +136,8 @@ def records_equal(
     - String and None exact comparison.
     """
     for f in fields:
-        v1 = rec1.get(f)
-        v2 = rec2.get(f)
-        if v1 is None and v2 is None:
-            continue
-        if v1 is None or v2 is None:
+        if not deep_equal(rec1.get(f), rec2.get(f)):
             return False
-
-        # Decimal / numerical comparison
-        if isinstance(v1, Decimal) or isinstance(v2, Decimal):
-            try:
-                if Decimal(str(v1)) != Decimal(str(v2)):
-                    return False
-                continue
-            except (InvalidOperation, ValueError):
-                return False
-
-        # Collection comparison (e.g. tickers list/tuple/set)
-        if isinstance(v1, (list, tuple, set)) and isinstance(v2, (list, tuple, set)):
-            if sorted(list(v1)) != sorted(list(v2)):
-                return False
-            continue
-
-        # Dictionary comparison (e.g. votes)
-        if isinstance(v1, dict) and isinstance(v2, dict):
-            if v1 != v2:
-                return False
-            continue
-
-        # Standard equality
-        if v1 != v2:
-            return False
-
     return True
 
 
@@ -480,13 +492,37 @@ def transform_legacy_decision_case_c(
     transcript = json.dumps(council_debate, sort_keys=True) if isinstance(council_debate, dict) else str(council_debate)
 
     sub_records: List[Dict[str, Any]] = []
+    seen_sub_identities: Set[Tuple[str, Optional[str]]] = set()
+
     for sub_idx, sub_d in enumerate(record["decisions"]):
         if not isinstance(sub_d, dict):
-            continue
+            raise MigrationValidationError(
+                f"decision_log.decisions[{sub_idx}]: sub-decision must be a dict, got {type(sub_d).__name__}"
+            )
+        if not sub_d:
+            raise MigrationValidationError(
+                f"decision_log.decisions[{sub_idx}]: sub-decision cannot be empty"
+            )
+
         sub_ticker_raw = sub_d.get("ticker")
         sub_ticker = parse_ticker(sub_ticker_raw) if sub_ticker_raw else None
-        sub_action = str(sub_d.get("trade_state") or sub_d.get("action") or trigger_ctx).strip()
+        raw_action = sub_d.get("trade_state") or sub_d.get("action")
+        if not raw_action and not sub_ticker and not sub_d.get("outcome"):
+            raise MigrationValidationError(
+                f"decision_log.decisions[{sub_idx}]: required fields (action/trade_state/ticker) cannot be derived from sub-decision"
+            )
+        sub_action = str(raw_action or trigger_ctx).strip()
         sub_outcome = str(sub_d.get("trade_state") or sub_d.get("outcome") or "APPROVED").strip()
+
+        # R3/R5: Detect duplicate or colliding canonical sub-decision identities within the session
+        sub_key = (sub_action, sub_ticker)
+        if sub_key in seen_sub_identities:
+            raise MigrationConflictError(
+                f"decision_log.decisions[{sub_idx}]: duplicate/colliding canonical sub-decision identity "
+                f"'{sub_key}' within session '{session_id}'"
+            )
+        seen_sub_identities.add(sub_key)
+
         sub_votes = sub_d.get("scrutiny_audit") or council_debate or {}
         sub_ts_raw = sub_d.get("timestamp") or ts_raw
         sub_ts, _ = resolve_historical_timestamp(
@@ -505,13 +541,6 @@ def transform_legacy_decision_case_c(
             "timestamp_utc": sub_ts,
         })
     return sub_records
-
-    if nullable:
-        return None
-
-    raise MigrationValidationError(
-        f"{field_name}: historical timestamp is missing; migration cannot fabricate provenance"
-    )
 
 
 def validate_migration_destination(

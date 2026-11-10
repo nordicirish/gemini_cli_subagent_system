@@ -221,6 +221,9 @@ class ScoutCategoryRepository(BaseRepository):
             return deleted
 
 
+_UNSET = object()
+
+
 # ---------------------------------------------------------------------------
 # Trade Lesson Repository
 # ---------------------------------------------------------------------------
@@ -302,6 +305,7 @@ class TradeLessonRepository(BaseRepository):
         status: str = "ACTIVE",
         caller_role: Optional[str] = None,
         timestamp_utc: Optional[str] = None,
+        last_reviewed_at_utc: Any = _UNSET,
     ) -> TradeLesson:
         """Upserts a trade lesson with authorization check, transaction safety, and revision tracking (R1/R3/R5/R6)."""
         self._check_active()
@@ -316,6 +320,12 @@ class TradeLessonRepository(BaseRepository):
             raise ValidationError(f"Invalid status '{norm_status}'. Must be one of {sorted(self.VALID_STATUSES)}")
 
         valid_ts = validate_timestamp_utc(timestamp_utc)
+        if last_reviewed_at_utc is _UNSET:
+            valid_rev_ts = valid_ts
+        elif last_reviewed_at_utc is None:
+            valid_rev_ts = None
+        else:
+            valid_rev_ts = validate_timestamp_utc(last_reviewed_at_utc)
         target_resource = f"trade_lessons/{norm_code}"
         payload = {
             "rule_code": norm_code,
@@ -350,7 +360,7 @@ class TradeLessonRepository(BaseRepository):
                         status = excluded.status,
                         last_reviewed_at_utc = excluded.last_reviewed_at_utc
                     """,
-                    (norm_code, norm_directive, norm_cat, norm_status, created_at, valid_ts),
+                    (norm_code, norm_directive, norm_cat, norm_status, created_at, valid_rev_ts),
                 )
 
                 # Atomically increment database revision with mutation
@@ -364,7 +374,7 @@ class TradeLessonRepository(BaseRepository):
             category=norm_cat,
             status=norm_status,
             created_at_utc=created_at,
-            last_reviewed_at_utc=valid_ts,
+            last_reviewed_at_utc=valid_rev_ts,
         )
 
     def delete_lesson(self, rule_code: str, caller_role: Optional[str] = None) -> bool:

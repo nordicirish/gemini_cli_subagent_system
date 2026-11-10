@@ -122,7 +122,7 @@ class TradeLesson:
     category: str
     status: str
     created_at_utc: str
-    last_reviewed_at_utc: str
+    last_reviewed_at_utc: Optional[str] = None
 
 
 @dataclass(frozen=True)
