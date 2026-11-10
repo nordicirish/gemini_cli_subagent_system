@@ -13,6 +13,7 @@ G. Atomic Writer Safety (atomic replacement, failure preservation, temp cleanup,
 H. Read-Only Invariants (zero DB writes, zero changelog/audit entries, zero revision increment, isolated domain helpers).
 """
 
+import concurrent.futures
 from decimal import Decimal
 import json
 import math
@@ -20,6 +21,8 @@ import os
 from pathlib import Path
 import sqlite3
 import tempfile
+import threading
+from typing import Any, Dict, Optional
 import unittest
 from unittest.mock import patch
 
@@ -32,6 +35,7 @@ from python.database.schema import SchemaMigrator
 from python.database.repositories.base import (
     RepositoryError,
     ValidationError,
+    TransactionIntegrityError,
     decimal_to_canonical_str,
     get_db_revision,
     increment_db_revision,
@@ -784,6 +788,422 @@ class TestReadOnlyInvariants(BaseProjectionTestCase):
             self.assertEqual(len(dec_proj["decision_log"]), 2)
             self.assertEqual(dec_proj["decision_log"][0]["session_id"], "SESSION_001")
             self.assertEqual(dec_proj["decision_log"][1]["session_id"], "SESSION_002")
+
+
+# ===========================================================================
+# I. Strict JSON Validation Before Filesystem Changes (Stage 1.5-C.1 C-01)
+# ===========================================================================
+
+class TestAtomicWriterValidation(BaseProjectionTestCase):
+    """Verifies that atomic_write_json strictly validates JSON before modifying filesystem."""
+
+    def test_malformed_json_rejected_before_filesystem_changes(self):
+        dest_file = Path(self.temp_dir.name) / "malformed.json"
+        with self.assertRaises(ValidationError) as ctx:
+            atomic_write_json(dest_file, '{"invalid": ')
+        self.assertIn("not valid strict JSON", str(ctx.exception))
+        self.assertFalse(dest_file.exists(), "Destination file must not be created on validation failure")
+
+    def test_empty_input_rejected_before_filesystem_changes(self):
+        dest_file = Path(self.temp_dir.name) / "empty.json"
+        with self.assertRaises(ValidationError):
+            atomic_write_json(dest_file, "")
+        with self.assertRaises(ValidationError):
+            atomic_write_json(dest_file, "   \n\t  ")
+        self.assertFalse(dest_file.exists(), "Destination must not exist for empty JSON input")
+
+    def test_trailing_non_whitespace_content_rejected(self):
+        dest_file = Path(self.temp_dir.name) / "trailing.json"
+        with self.assertRaises(ValidationError) as ctx:
+            atomic_write_json(dest_file, '{"valid": true} trailing_garbage')
+        self.assertIn("not valid strict JSON", str(ctx.exception))
+        self.assertFalse(dest_file.exists())
+
+    def test_nan_and_infinity_rejected(self):
+        dest_file = Path(self.temp_dir.name) / "constants.json"
+        with self.assertRaises(ValidationError) as ctx1:
+            atomic_write_json(dest_file, '{"value": NaN}')
+        self.assertIn("Non-standard JSON constant is forbidden", str(ctx1.exception))
+
+        with self.assertRaises(ValidationError) as ctx2:
+            atomic_write_json(dest_file, '{"value": Infinity}')
+        self.assertIn("Non-standard JSON constant is forbidden", str(ctx2.exception))
+
+        with self.assertRaises(ValidationError) as ctx3:
+            atomic_write_json(dest_file, '{"value": -Infinity}')
+        self.assertIn("Non-standard JSON constant is forbidden", str(ctx3.exception))
+        self.assertFalse(dest_file.exists())
+
+    def test_existing_destination_byte_for_byte_unchanged_on_validation_failure(self):
+        dest_file = Path(self.temp_dir.name) / "keep_intact.json"
+        initial_bytes = b'{"original": "authoritative_content", "checksum": 42}\n'
+        dest_file.write_bytes(initial_bytes)
+
+        # Attempt to write invalid JSON payloads
+        with self.assertRaises(ValidationError):
+            atomic_write_json(dest_file, '{"corrupt": ')
+        with self.assertRaises(ValidationError):
+            atomic_write_json(dest_file, '{"corrupt": NaN}')
+        with self.assertRaises(ValidationError):
+            atomic_write_json(dest_file, "")
+
+        self.assertEqual(
+            dest_file.read_bytes(),
+            initial_bytes,
+            "Existing destination file must remain byte-for-byte unchanged on validation failure",
+        )
+
+    def test_nonexistent_parent_directory_not_created_on_validation_failure(self):
+        deep_dest = Path(self.temp_dir.name) / "new_dir_1" / "new_dir_2" / "target.json"
+        self.assertFalse(deep_dest.parent.exists())
+
+        with self.assertRaises(ValidationError):
+            atomic_write_json(deep_dest, '{"malformed": ')
+
+        self.assertFalse(
+            deep_dest.parent.exists(),
+            "Nonexistent parent directory must NOT be created when JSON validation fails",
+        )
+
+    def test_no_temporary_file_created_on_validation_failure(self):
+        work_dir = Path(self.temp_dir.name) / "clean_dir"
+        work_dir.mkdir(parents=True, exist_ok=True)
+        dest_file = work_dir / "target.json"
+
+        with self.assertRaises(ValidationError):
+            atomic_write_json(dest_file, '{"unclosed": [1, 2,')
+
+        temp_files = list(work_dir.glob("*.tmp")) + list(work_dir.glob(".*.tmp"))
+        self.assertEqual(temp_files, [], "No temporary file must be created when JSON validation fails")
+
+    def test_valid_utf8_json_writes_correctly(self):
+        dest_file = Path(self.temp_dir.name) / "valid_utf8.json"
+        valid_json = '{"currency":"EUR","symbols":["α","β","γ"],"value":"123.45"}'
+        atomic_write_json(dest_file, valid_json)
+
+        self.assertTrue(dest_file.exists())
+        with open(dest_file, "r", encoding="utf-8") as f:
+            self.assertEqual(f.read(), valid_json)
+
+
+# ===========================================================================
+# J. Transaction Cleanup Integrity & Rollback Fault-Injection (Stage 1.5-C.1 C-02)
+# ===========================================================================
+
+class InjectedExecutionConnection:
+    """Wrapper around sqlite3.Connection / ManagedConnection to inject query and rollback faults."""
+
+    def __init__(
+        self,
+        target: Any,
+        fail_rollback: bool = False,
+        fail_query_match: Optional[str] = None,
+    ):
+        self._target = target
+        self._fail_rollback = fail_rollback
+        self._fail_query_match = fail_query_match
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._target, name)
+
+    def execute(self, sql: str, *args: Any, **kwargs: Any) -> Any:
+        if self._fail_rollback and sql.strip().upper() == "ROLLBACK;":
+            raise sqlite3.OperationalError("Injected failure during ROLLBACK;")
+        if self._fail_query_match and self._fail_query_match in sql:
+            raise sqlite3.OperationalError(f"Injected failure during query: {self._fail_query_match}")
+        return self._target.execute(sql, *args, **kwargs)
+
+    def cursor(self, *args: Any, **kwargs: Any) -> Any:
+        cur = self._target.cursor(*args, **kwargs)
+        fail_query_match = self._fail_query_match
+
+        class InjectedCursor:
+            def __init__(self, target_cur: Any):
+                self._cur = target_cur
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(self._cur, name)
+
+            def execute(self, sql: str, *cur_args: Any, **cur_kwargs: Any) -> Any:
+                if fail_query_match and fail_query_match in sql:
+                    raise sqlite3.OperationalError(f"Injected failure during query: {fail_query_match}")
+                return self._cur.execute(sql, *cur_args, **cur_kwargs)
+
+        return InjectedCursor(cur)
+
+
+class TestTransactionCleanupIntegrity(BaseProjectionTestCase):
+    """Verifies fail-closed read transaction cleanup under normal and fault-injected conditions."""
+
+    def test_successful_projection_rollback_failure_raises_transaction_integrity_error(self):
+        """Fault-injection 1: Successful projection followed by injected rollback failure."""
+        with self.core_manager.connection() as conn:
+            self._seed_standard_database(conn)
+            self.assertFalse(conn.in_transaction)
+
+            proxy = InjectedExecutionConnection(conn, fail_rollback=True)
+            with self.assertRaises(TransactionIntegrityError) as ctx:
+                self.generator.generate(proxy)
+
+            self.assertIn("owned read transaction could not be released", str(ctx.exception))
+            self.assertIsInstance(ctx.exception.rollback_error, sqlite3.OperationalError)
+            self.assertIsInstance(ctx.exception.__cause__, sqlite3.OperationalError)
+
+    def test_read_failure_with_successful_rollback_propagates_original_error_and_releases_tx(self):
+        """Fault-injection 2: Projection read failure followed by successful rollback."""
+        with self.core_manager.connection() as conn:
+            self._seed_standard_database(conn)
+            self.assertFalse(conn.in_transaction)
+
+            # Inject query failure during portfolio_cash list query
+            proxy = InjectedExecutionConnection(conn, fail_rollback=False, fail_query_match="portfolio_cash")
+            with self.assertRaises(sqlite3.OperationalError) as ctx:
+                self.generator.generate(proxy)
+
+            self.assertIn("Injected failure during query: portfolio_cash", str(ctx.exception))
+            self.assertFalse(conn.in_transaction, "Connection must no longer be in transaction after successful rollback")
+
+    def test_read_failure_with_rollback_failure_preserves_both_errors(self):
+        """Fault-injection 3: Projection read failure followed by rollback failure preserves both errors."""
+        with self.core_manager.connection() as conn:
+            self._seed_standard_database(conn)
+            self.assertFalse(conn.in_transaction)
+
+            proxy = InjectedExecutionConnection(conn, fail_rollback=True, fail_query_match="portfolio_cash")
+            with self.assertRaises(TransactionIntegrityError) as ctx:
+                self.generator.generate(proxy)
+
+            tie = ctx.exception
+            self.assertIn("could not be released", str(tie))
+            # Original read failure preserved as cause
+            self.assertIsInstance(tie.__cause__, sqlite3.OperationalError)
+            self.assertIn("Injected failure during query: portfolio_cash", str(tie.__cause__))
+            # Rollback failure preserved in attribute
+            self.assertIsInstance(tie.rollback_error, sqlite3.OperationalError)
+            self.assertIn("Injected failure during ROLLBACK", str(tie.rollback_error))
+            # Note attached if supported
+            if hasattr(tie.__cause__, "__notes__") and tie.__cause__.__notes__:
+                self.assertTrue(any("rollback failed" in str(n) for n in tie.__cause__.__notes__))
+
+    def test_caller_owned_transaction_not_rolled_back_or_committed(self):
+        """Fault-injection 4: Caller-owned transaction is never committed or rolled back by generator."""
+        with self.core_manager.connection() as conn:
+            self._seed_standard_database(conn)
+            conn.execute("BEGIN IMMEDIATE;")
+            self.assertTrue(conn.in_transaction)
+
+            # Even if rollback would fail if executed, it must NOT be executed for caller transaction
+            proxy = InjectedExecutionConnection(conn, fail_rollback=True)
+            proj = self.generator.generate(proxy)
+
+            # Caller retains full transaction control
+            self.assertTrue(conn.in_transaction, "Caller transaction must remain open")
+            self.assertEqual(proj["unallocated_cash_eur"], "2359.80")
+
+            # Caller safely commits
+            conn.execute("COMMIT;")
+            self.assertFalse(conn.in_transaction)
+
+    def test_normal_successful_projection_releases_owned_transaction(self):
+        """Fault-injection 5: Normal successful projection releases generator-owned transaction cleanly."""
+        with self.core_manager.connection() as conn:
+            self._seed_standard_database(conn)
+            self.assertFalse(conn.in_transaction)
+
+            proj = self.generator.generate(conn)
+            self.assertFalse(conn.in_transaction, "Generator-owned transaction must be released on normal exit")
+            self.assertEqual(proj["_projection_metadata"]["status"], "HEALTHY")
+
+
+# ===========================================================================
+# K. Genuine Concurrent Snapshot Consistency Verification (Stage 1.5-C.1 C-03)
+# ===========================================================================
+
+class TestConcurrentSnapshotConsistency(BaseProjectionTestCase):
+    """
+    Verifies genuine WAL-mode snapshot consistency under concurrent writers.
+    Proves that a separate writer committing during a projection read cannot
+    produce a mixed-state projection document combining old revision with new data
+    or new revision with old data.
+    """
+
+    def _execute_concurrency_iteration(self, iteration: int) -> None:
+        # 1. Seed initial known state
+        with execution_role_context("System"):
+            with self.core_manager.connection() as setup_conn:
+                CashRepository(setup_conn).set_cash_balance(
+                    account_id="PRIMARY",
+                    currency="EUR",
+                    amount=Decimal("1000.00"),
+                    caller_role="System",
+                )
+                PositionRepository(setup_conn).upsert_position(
+                    account_id="PRIMARY",
+                    ticker="AAPL",
+                    shares=Decimal("10.0000"),
+                    wac_eur=Decimal("150.0000"),
+                    wac_usd=None,
+                    caller_role="System",
+                )
+                initial_revision = get_db_revision(setup_conn)
+
+        snapshot_established = threading.Event()
+        writer_committed = threading.Event()
+        original_list_positions = PositionRepository.list_positions
+        conn_holder: Dict[str, Any] = {}
+
+        def coordinated_list_positions(repo_self):
+            # Intercept only on the active reader thread's connection
+            if repo_self.connection == conn_holder.get("reader"):
+                snapshot_established.set()
+                if not writer_committed.wait(timeout=10.0):
+                    raise TimeoutError(f"Iteration {iteration}: Reader timed out waiting for writer commit")
+            return original_list_positions(repo_self)
+
+        def reader_task():
+            reader_conn = self.core_manager.connect()
+            conn_holder["reader"] = reader_conn
+            try:
+                return self.generator.generate(reader_conn)
+            finally:
+                reader_conn.close()
+
+        with patch.object(PositionRepository, "list_positions", side_effect=coordinated_list_positions, autospec=True):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                reader_future = executor.submit(reader_task)
+
+                # Wait for reader to establish snapshot and query database_metadata & cash
+                if not snapshot_established.wait(timeout=10.0):
+                    raise TimeoutError(f"Iteration {iteration}: Reader failed to establish snapshot within timeout")
+
+                # Writer performs mutations on an independent connection
+                writer_conn = self.core_manager.connect()
+                try:
+                    with execution_role_context("System"):
+                        CashRepository(writer_conn).set_cash_balance(
+                            account_id="PRIMARY",
+                            currency="EUR",
+                            amount=Decimal("2500.00"),
+                            caller_role="System",
+                        )
+                        PositionRepository(writer_conn).upsert_position(
+                            account_id="PRIMARY",
+                            ticker="AAPL",
+                            shares=Decimal("50.0000"),
+                            wac_eur=Decimal("160.0000"),
+                            wac_usd=None,
+                            caller_role="System",
+                        )
+                    writer_revision = get_db_revision(writer_conn)
+                finally:
+                    writer_conn.close()
+
+                # Signal writer committed
+                writer_committed.set()
+
+                # Retrieve reader projection and propagate any worker exception
+                proj_initial = reader_future.result(timeout=10.0)
+
+        # 7. Verify reader projection contains COMPLETE pre-write state
+        self.assertEqual(
+            proj_initial["_projection_metadata"]["db_revision"],
+            initial_revision,
+            f"Iteration {iteration}: Reader must see pre-write revision",
+        )
+        self.assertEqual(
+            proj_initial["unallocated_cash_eur"],
+            "1000.00",
+            f"Iteration {iteration}: Reader must see pre-write cash",
+        )
+        self.assertEqual(
+            len(proj_initial["portfolio_snapshot"]),
+            1,
+        )
+        self.assertEqual(
+            proj_initial["portfolio_snapshot"][0]["shares"],
+            "10.0000",
+            f"Iteration {iteration}: Reader must see pre-write shares, not post-write shares",
+        )
+
+        # 8-9. Run new projection after writer commits
+        with self.core_manager.connection() as post_conn:
+            proj_post = self.generator.generate(post_conn)
+
+        self.assertEqual(
+            proj_post["_projection_metadata"]["db_revision"],
+            writer_revision,
+            f"Iteration {iteration}: Post-write projection must see writer revision",
+        )
+        self.assertEqual(
+            proj_post["unallocated_cash_eur"],
+            "2500.00",
+            f"Iteration {iteration}: Post-write projection must see updated cash",
+        )
+        self.assertEqual(
+            proj_post["portfolio_snapshot"][0]["shares"],
+            "50.0000",
+            f"Iteration {iteration}: Post-write projection must see updated shares",
+        )
+
+    def test_genuine_concurrent_writer_during_read_snapshot_maintains_snapshot_isolation(self):
+        """Executes genuine WAL-mode snapshot consistency test across 10 iterations."""
+        for i in range(10):
+            with self.subTest(iteration=i):
+                self._execute_concurrency_iteration(i)
+
+
+# ===========================================================================
+# L. Projection Dictionary Key Validation (Stage 1.5-C.1 C-05)
+# ===========================================================================
+
+class TestProjectionDictionaryKeyValidation(unittest.TestCase):
+    """Verifies that normalize_projection_value strictly rejects non-string dictionary keys."""
+
+    def test_rejects_integer_key(self):
+        with self.assertRaises(TypeError) as ctx:
+            normalize_projection_value({1: "numeric_value"})
+        self.assertIn("must be strings", str(ctx.exception))
+        self.assertIn("int", str(ctx.exception))
+
+    def test_rejects_boolean_key(self):
+        with self.assertRaises(TypeError) as ctx:
+            normalize_projection_value({True: "boolean_key_value"})
+        self.assertIn("must be strings", str(ctx.exception))
+        self.assertIn("bool", str(ctx.exception))
+
+    def test_rejects_mixed_integer_string_collision(self):
+        bad_dict = {1: "numeric", "1": "string"}
+        with self.assertRaises(TypeError) as ctx:
+            normalize_projection_value(bad_dict)
+        self.assertIn("must be strings", str(ctx.exception))
+
+    def test_rejects_nested_invalid_key(self):
+        nested_dict = {
+            "valid_top": {
+                "valid_mid": {
+                    42: "nested_int_key"
+                }
+            }
+        }
+        with self.assertRaises(TypeError) as ctx:
+            normalize_projection_value(nested_dict)
+        self.assertIn("must be strings", str(ctx.exception))
+        self.assertIn("int", str(ctx.exception))
+
+    def test_valid_string_key_dictionaries_remain_deterministic(self):
+        data = {
+            "zeta": Decimal("10.50"),
+            "alpha": {"beta": 1, "gamma": "text"},
+            "items": [{"name": "item1"}, {"name": "item2"}],
+        }
+        normalized = normalize_projection_value(data)
+        self.assertEqual(normalized["zeta"], "10.50")
+        self.assertEqual(normalized["alpha"], {"beta": 1, "gamma": "text"})
+        self.assertEqual(list(normalized.keys()), ["zeta", "alpha", "items"])
+        serialized = serialize_projection(data)
+        self.assertTrue(
+            serialized.startswith('{"alpha":{"beta":1,"gamma":"text"},"items":[{"name":"item1"},{"name":"item2"}],"zeta":"10.50"}')
+        )
 
 
 if __name__ == "__main__":

@@ -252,7 +252,7 @@ Executed via: `.venv\Scripts\python.exe -m unittest tests/test_database_projecti
 | **Backup Concurrency** | `.venv\Scripts\python.exe -m unittest tests/test_database_backup_concurrency.py` | 74 | 73 | 1* | 0 | 0 | 7.12s | 0 |
 | **Full Repository Discovery** | `.venv\Scripts\python.exe -m unittest discover -s tests` | 532 | 531 | 1* | 0 | 0 | 62.58s | 0 |
 
-*\*Note: 1 test skipped in backup concurrency suite is the platform-gated POSIX `fcntl` locking test on Windows (`test_posix_flock_semantics`), accurately identified as skipped on win32.*
+*\*Note: 1 test skipped in backup concurrency suite is the platform-gated POSIX `fcntl` locking test on Windows (`test_r5_04_posix_unlock_failure_injection`), accurately identified as skipped on win32.*
 
 ### 9.3 Package Integrity & Compilation
 
@@ -335,4 +335,130 @@ All generator and writer tests executed strictly against temporary directories (
 All completion criteria for Stage 1.5-C have been achieved. The implementation is isolated, test-verified, and does not alter production databases or authoritative legacy state files.
 
 The human repository owner may review the uncommitted changes and proceed to Git commit and push at their discretion. Progression to **Stage 1.5-D** is recommended once human sign-off is granted.
+
+---
+
+## 15. Stage 1.5-C.1 Corrective Addendum: Projection Writer Validation, Transaction Cleanup Integrity & Genuine Snapshot Concurrency Verification
+
+**Date:** 2026-11-10  
+**Baseline HEAD:** `c7e1a4b85a4d27d114326e49911ef71094939b00`  
+**Stage:** 1.5-C.1 (Corrective Closeout)  
+**Status:** COMPLETE  
+
+### 15.1 Findings and Resolutions Summary
+
+| Finding | Defect Description | Resolution & Architecture Applied | Affected Files & Functions |
+|---|---|---|---|
+| **C-01** | `atomic_write_json()` checked only `isinstance(serialized_json, str)` without JSON validation, allowing malformed JSON or non-standard tokens (`NaN`, `Infinity`) to create directories or temporary files. | Added `_reject_json_constant()` and `_validate_serialized_json()` called at the entry point of `atomic_write_json()`. Strictly parses JSON with `parse_constant` rejecting `NaN`/`Infinity`/`-Infinity`, rejecting malformed syntax and empty input before any filesystem modification. | `python/database/projections.py` (`_reject_json_constant`, `_validate_serialized_json`, `atomic_write_json`) |
+| **C-02** | In `SSoTProjectionGenerator.generate()`, the `finally` block suppressed every exception from `conn.execute("ROLLBACK;")`, concealing failed releases of internally owned transactions and reporting successful projection on an uncertain connection state. | Refactored transaction cleanup using explicit `try...except BaseException...else:` semantics. Rolled back ONLY if `we_started_tx` is true. Caller-owned transactions are never touched. Rollback failure raises `TransactionIntegrityError` (preserving `.rollback_error` attribute). If projection read fails and rollback also fails, `TransactionIntegrityError` chains the original error, preserves rollback error, and attaches diagnostic note. | `python/database/projections.py` (`SSoTProjectionGenerator.generate`), `python/database/projection.py` (re-export `TransactionIntegrityError`) |
+| **C-03** | Stage 1.5-C test suite verified sequential revision updates and caller-owned transactions, but did not verify genuine concurrent WAL-mode snapshot consistency where a separate writer commits during an active projection read. | Added genuine WAL-mode concurrency test coordinating independent reader and writer connections via `threading.Event`. Paused reader after metadata read pins the WAL snapshot; committed writer mutations to cash, positions, and monotonic revision; resumed reader; proved reader returned 100% pre-write state without mixed data, while subsequent projection returned 100% post-write state. Executed across 10 iterations. | `tests/test_database_projections.py` (`TestConcurrentSnapshotConsistency`) |
+| **C-04** | Stage 1.5-C report Section 9.2 documented the Windows platform-skipped test as `test_posix_flock_semantics`. | Corrected documentation note in Section 9.2 to reflect the actual test name in `tests/test_database_backup_concurrency.py`: `test_r5_04_posix_unlock_failure_injection`. | `docs/engineering/STAGE_1_5_C_DETERMINISTIC_SSOT_PROJECTION_REPORT.md` (Section 9.2 note corrected) |
+| **C-05** | `normalize_projection_value()` converted dictionary keys via `str(key)`, which silently collapses colliding keys (e.g., `{1: "a", "1": "b"}`). | Enforced strict string key validation (`not isinstance(key, str)`) before recursively normalizing values, raising `TypeError` fail-closed on integer, boolean, float, or nested non-string dictionary keys. | `python/database/projections.py` (`normalize_projection_value`) |
+
+### 15.2 Implementation Inventory
+
+1. **`python/database/projections.py`:**
+   - Imported `TransactionIntegrityError` from `python.database.repositories.base`.
+   - Exported `TransactionIntegrityError` in `__all__`.
+   - `normalize_projection_value(value, allow_floats=False)`: Added fail-closed string validation on dictionary keys (`isinstance(key, str)` check; raises `TypeError` with received type name).
+   - Added `_reject_json_constant(value)`: Raises `ValueError` for non-standard JSON tokens.
+   - Added `_validate_serialized_json(serialized_json)`: Validates strict JSON via `json.loads(..., parse_constant=_reject_json_constant)` before filesystem access, raising `ValidationError`.
+   - `atomic_write_json(destination, serialized_json)`: Calls `_validate_serialized_json()` at entry before parent directory check/creation, tempfile generation, or `os.replace()`.
+   - `SSoTProjectionGenerator.generate(conn, ...)`: Replaced silent rollback suppression in `finally:` with fail-closed transaction lifecycle in `except BaseException as operation_error:` and `else:` blocks, raising `TransactionIntegrityError` if rollback fails.
+
+2. **`python/database/projection.py`:**
+   - Added `TransactionIntegrityError` import and re-export in `__all__` for complete compatibility.
+
+3. **`tests/test_database_projections.py`:**
+   - Added 19 dedicated test cases across 4 new test classes.
+
+### 15.3 New Test Inventory & Evidence
+
+19 new unit and integration tests added to `tests/test_database_projections.py`:
+
+| Class | Test Function | Purpose / Validation | Exit Status |
+|---|---|---|---|
+| `TestAtomicWriterValidation` | `test_malformed_json_rejected_before_filesystem_changes` | Proves malformed JSON raises `ValidationError` without creating destination file | PASS |
+| `TestAtomicWriterValidation` | `test_empty_input_rejected_before_filesystem_changes` | Proves empty string and whitespace-only input raise `ValidationError` | PASS |
+| `TestAtomicWriterValidation` | `test_trailing_non_whitespace_content_rejected` | Proves extra non-whitespace tokens after valid JSON raise `ValidationError` | PASS |
+| `TestAtomicWriterValidation` | `test_nan_and_infinity_rejected` | Proves `NaN`, `Infinity`, and `-Infinity` tokens raise `ValidationError` | PASS |
+| `TestAtomicWriterValidation` | `test_existing_destination_byte_for_byte_unchanged_on_validation_failure` | Proves pre-existing destination is untouched and byte-for-byte identical after invalid write attempt | PASS |
+| `TestAtomicWriterValidation` | `test_nonexistent_parent_directory_not_created_on_validation_failure` | Proves non-existent parent directory is NOT created when JSON validation fails | PASS |
+| `TestAtomicWriterValidation` | `test_no_temporary_file_created_on_validation_failure` | Proves zero temporary files (`*.tmp` or `.*.tmp`) remain or are created on validation failure | PASS |
+| `TestAtomicWriterValidation` | `test_valid_utf8_json_writes_correctly` | Proves valid UTF-8 JSON payloads write and replace atomically | PASS |
+| `TestTransactionCleanupIntegrity` | `test_successful_projection_rollback_failure_raises_transaction_integrity_error` | Proves rollback failure following successful read raises `TransactionIntegrityError` without returning projection | PASS |
+| `TestTransactionCleanupIntegrity` | `test_read_failure_with_successful_rollback_propagates_original_error_and_releases_tx` | Proves read failure propagates original exception directly and releases owned transaction | PASS |
+| `TestTransactionCleanupIntegrity` | `test_read_failure_with_rollback_failure_preserves_both_errors` | Proves double failure preserves both query error (`__cause__`) and rollback error (`rollback_error` attribute and note) | PASS |
+| `TestTransactionCleanupIntegrity` | `test_caller_owned_transaction_not_rolled_back_or_committed` | Proves caller-owned transaction is never rolled back or committed by generator | PASS |
+| `TestTransactionCleanupIntegrity` | `test_normal_successful_projection_releases_owned_transaction` | Proves normal projection cleanly releases generator-owned transaction (`conn.in_transaction == False`) | PASS |
+| `TestConcurrentSnapshotConsistency` | `test_genuine_concurrent_writer_during_read_snapshot_maintains_snapshot_isolation` | Proves genuine WAL-mode snapshot consistency: reader paused after metadata read never sees concurrent writer mutations (revision, cash, positions); subsequent projection sees complete post-write state. (10 iterations) | PASS |
+| `TestProjectionDictionaryKeyValidation` | `test_rejects_integer_key` | Proves integer dictionary keys raise `TypeError` fail-closed | PASS |
+| `TestProjectionDictionaryKeyValidation` | `test_rejects_boolean_key` | Proves boolean dictionary keys raise `TypeError` fail-closed | PASS |
+| `TestProjectionDictionaryKeyValidation` | `test_rejects_mixed_integer_string_collision` | Proves colliding integer and string keys raise `TypeError` without data loss | PASS |
+| `TestProjectionDictionaryKeyValidation` | `test_rejects_nested_invalid_key` | Proves nested non-string keys raise `TypeError` fail-closed | PASS |
+| `TestProjectionDictionaryKeyValidation` | `test_valid_string_key_dictionaries_remain_deterministic` | Proves valid string-key dictionaries serialize deterministically with sorted keys | PASS |
+
+### 15.4 Concurrency Verification Details (C-03)
+
+- **Coordination Mechanism:** Deterministic thread signaling using two `threading.Event` synchronization primitives (`snapshot_established` and `writer_committed`) with zero production delays or arbitrary sleeps.
+- **Seam:** Reader connection interception on `PositionRepository.list_positions` after `database_metadata` and `CashRepository` queries established the WAL read snapshot.
+- **Writer Action:** Separate `writer_conn` on independent lifecycle updated `portfolio_cash` (EUR 1000.00 -> EUR 2500.00), upserted `portfolio_positions` (AAPL 10.0000 -> 50.0000 shares), and advanced `db_revision` within its own committed transaction.
+- **Verification Result:**
+  - Reader projection returned: `db_revision=initial`, `unallocated_cash_eur="1000.00"`, `shares="10.0000"`.
+  - Zero mixed state: never combined old revision with new positions or new cash with old revision.
+  - Subsequent post-write projection returned: `db_revision=writer_revision`, `unallocated_cash_eur="2500.00"`, `shares="50.0000"`.
+  - 10 repeated test executions (100 total iterations) completed with 100% pass rate.
+
+### 15.5 Test Suite Totals & Reconciliation
+
+| Test Suite | Command | Discovered | Passed | Skipped | Failed | Errors | Runtime | Exit Code |
+|---|---|---|---|---|---|---|---|---|
+| **Focused Projections** | `.venv\Scripts\python.exe -m unittest tests/test_database_projections.py` | 54 (+19) | 54 | 0 | 0 | 0 | 4.95s | 0 |
+| **Concurrency Stress (10 runs)** | Custom 10-run harness (`TestConcurrentSnapshotConsistency`) | 10 (100 iter) | 10 | 0 | 0 | 0 | 7.12s | 0 |
+| **Repository Suite** | `.venv\Scripts\python.exe -m unittest tests/test_database_repositories.py` | 254 | 254 | 0 | 0 | 0 | 19.33s | 0 |
+| **Core Database** | `.venv\Scripts\python.exe -m unittest tests/test_database_core.py` | 115 | 115 | 0 | 0 | 0 | 5.90s | 0 |
+| **Backup Concurrency** | `.venv\Scripts\python.exe -m unittest tests/test_database_backup_concurrency.py` | 74 | 73 | 1* | 0 | 0 | 8.22s | 0 |
+| **Full Repository Discovery** | `.venv\Scripts\python.exe -m unittest discover -s tests` | **551** (+19) | **550** | **1\*** | **0** | **0** | 70.31s | **0** |
+
+*\*Note: 1 test skipped in backup concurrency suite is the platform-gated POSIX `fcntl` locking test on Windows (`test_r5_04_posix_unlock_failure_injection`), accurately identified as skipped on win32.*
+
+**Reconciliation:**
+- Stage 1.5-C Baseline: 532 tests (531 passed, 1 skipped).
+- Tests Added in Stage 1.5-C.1: 19 tests in `tests/test_database_projections.py`.
+- Stage 1.5-C.1 Total: 551 discovered (550 passed, 1 skipped).
+
+### 15.6 Package Integrity & Compilation
+
+- **`pip check`:** `No broken requirements found.` (Exit code: 0)
+- **`compileall`:**
+  ```
+  .venv\Scripts\python.exe -m compileall python/database/projections.py python/database/projection.py tests/test_database_projections.py
+  ```
+  Completed with exit code 0 and zero compilation errors.
+
+### 15.7 Authoritative File Invariance & Database Non-Existence Evidence
+
+All 8 authoritative files remain byte-for-byte invariant against established baseline hashes:
+
+| Authoritative File | Expected Baseline SHA-256 | Current Working Copy SHA-256 | Status |
+|---|---|---|---|
+| `context/ssot.json` | `0a2ba4d8c125d213c5772b36164637df74094ca95e28e2ca0afc2da5e55414da` | `0a2ba4d8c125d213c5772b36164637df74094ca95e28e2ca0afc2da5e55414da` | **MATCH (100% Invariant)** |
+| `context/trade_lessons.json` | `0c4ac816009cb348f4bc923d94124f41f5c6d1ec8722a487bba9115f66029463` | `0c4ac816009cb348f4bc923d94124f41f5c6d1ec8722a487bba9115f66029463` | **MATCH (100% Invariant)** |
+| `context/decision_log.json` | `757e0b4855458ce7075ec16697798b3047ccc72a6214cded6d7bbb1346700af2` | `757e0b4855458ce7075ec16697798b3047ccc72a6214cded6d7bbb1346700af2` | **MATCH (100% Invariant)** |
+| `context/config.json` | `30ea2b67dd0ecac4b16e3e726c9644948119729023d382c385301f9db72099d5` | `30ea2b67dd0ecac4b16e3e726c9644948119729023d382c385301f9db72099d5` | **MATCH (100% Invariant)** |
+| `context/user_config.json` | `88e00f3ef6609eba02066cdfb3750152bfa2b97667aceed5cfba30b5db607183` | `88e00f3ef6609eba02066cdfb3750152bfa2b97667aceed5cfba30b5db607183` | **MATCH (100% Invariant)** |
+| `context/agent_logs/agent-events.jsonl` | `58a830fe4a59a02bb16d33df10c1a09b3e76a2b6250377e26ee37a8d73d8bc3d` | `58a830fe4a59a02bb16d33df10c1a09b3e76a2b6250377e26ee37a8d73d8bc3d` | **MATCH (100% Invariant)** |
+| `config.json` | `10c005efa15940d9c503aae62bbcb9a195ddbe249387c8335a4cb0f836064ee3` | `10c005efa15940d9c503aae62bbcb9a195ddbe249387c8335a4cb0f836064ee3` | **MATCH (100% Invariant)** |
+| `gem_trading_rules/rules.md` | `04ea36c0762de30c841bb25ac35bdffeb6845cccfba19a9b94d343743c075056` | `04ea36c0762de30c841bb25ac35bdffeb6845cccfba19a9b94d343743c075056` | **MATCH (100% Invariant)** |
+
+**Production Database Non-Existence Confirmation:**
+- `context/gem.db` exists: `False` (absent)
+- `cache/market_data.db` exists: `False` (absent)
+
+### 15.8 Remaining Limitations & Stage 1.5-D Boundary
+
+1. **Standalone Corrective Closeout:** Stage 1.5-C.1 hardens writer validation, transaction cleanup, concurrency proofs, and dictionary normalization without altering database schemas or runtime wiring.
+2. **Offline Decoupled Operation:** Projections remain strictly offline and decoupled from live daemons and runtime tools.
+3. **No Migration / Parity Reconciliation:** Migration of legacy JSON documents and parity reconciliation against legacy shapes remains the explicit mission of Stage 1.5-D (`DataMigrationService`).
+4. **Autonomous Git Prohibition:** Git commit and push operations remain strictly under human repository owner control.
 

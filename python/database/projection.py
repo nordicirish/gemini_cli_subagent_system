@@ -11,6 +11,7 @@ from python.database.projections import (
     serialize_projection,
     atomic_write_json,
     SSoTProjectionGenerator,
+    TransactionIntegrityError,
 )
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     "serialize_projection",
     "atomic_write_json",
     "SSoTProjectionGenerator",
+    "TransactionIntegrityError",
 ]
 

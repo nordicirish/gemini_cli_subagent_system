@@ -31,6 +31,7 @@ from python.database.repositories.base import (
     validate_timestamp_utc,
     RepositoryError,
     ValidationError,
+    TransactionIntegrityError,
 )
 from python.database.repositories.financial import (
     CashRepository,
@@ -51,6 +52,7 @@ __all__ = [
     "serialize_projection",
     "atomic_write_json",
     "SSoTProjectionGenerator",
+    "TransactionIntegrityError",
 ]
 
 PROJECTION_FORMAT_VERSION = "1.0"
@@ -96,10 +98,17 @@ def normalize_projection_value(value: Any, allow_floats: bool = False) -> Any:
         return decimal_to_canonical_str(value)
 
     if isinstance(value, dict):
-        return {
-            str(key): normalize_projection_value(item, allow_floats=allow_floats)
-            for key, item in value.items()
-        }
+        normalized: Dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(
+                    f"Projection dictionary keys must be strings; received {type(key).__name__}"
+                )
+            normalized[key] = normalize_projection_value(
+                item,
+                allow_floats=allow_floats,
+            )
+        return normalized
 
     if isinstance(value, (list, tuple)):
         return [
@@ -148,19 +157,44 @@ def serialize_projection(projection: Dict[str, Any], allow_floats: bool = False)
     )
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Non-standard JSON constant is forbidden: {value}")
+
+
+def _validate_serialized_json(serialized_json: str) -> None:
+    """
+    Validates that serialized_json is a strictly valid JSON document before touching the filesystem.
+    Rejects malformed syntax, empty input, trailing non-whitespace data, and non-standard constants (NaN, Infinity).
+    """
+    if not isinstance(serialized_json, str):
+        raise ValidationError(
+            f"serialized_json must be a str, got {type(serialized_json).__name__}"
+        )
+
+    try:
+        json.loads(
+            serialized_json,
+            parse_constant=_reject_json_constant,
+        )
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise ValidationError(
+            f"serialized_json is not valid strict JSON: {exc}"
+        ) from exc
+
+
 def atomic_write_json(destination: Union[Path, str], serialized_json: str) -> None:
     """
     Atomically writes serialized JSON string to an explicitly supplied destination path.
-    1. Validates destination path and pre-serialized content.
-    2. Ensures parent directory exists.
-    3. Writes to a hidden temporary file in the destination directory (ensuring same filesystem).
-    4. Explicitly flushes and fsyncs the temporary file handle.
-    5. Closes file handle prior to replacement (Windows-safe).
-    6. Replaces the destination file atomically via os.replace.
-    7. Cleans up temporary file in finally block upon any write failure.
+    1. Strictly validates serialized JSON document before touching the filesystem.
+    2. Validates destination path.
+    3. Ensures parent directory exists.
+    4. Writes to a hidden temporary file in the destination directory (ensuring same filesystem).
+    5. Explicitly flushes and fsyncs the temporary file handle.
+    6. Closes file handle prior to replacement (Windows-safe).
+    7. Replaces the destination file atomically via os.replace.
+    8. Cleans up temporary file in finally block upon any write failure.
     """
-    if not isinstance(serialized_json, str):
-        raise ValidationError(f"serialized_json must be a str, got {type(serialized_json).__name__}")
+    _validate_serialized_json(serialized_json)
 
     dest = Path(destination)
     if dest.exists() and dest.is_dir():
@@ -380,12 +414,34 @@ class SSoTProjectionGenerator:
                 for d in sorted(decisions, key=lambda x: x.id)
             ]
 
-        finally:
+        except BaseException as operation_error:
             if we_started_tx:
                 try:
                     conn.execute("ROLLBACK;")
-                except Exception:
-                    pass
+                except Exception as rollback_error:
+                    if hasattr(operation_error, "add_note"):
+                        operation_error.add_note(
+                            f"Additionally, owned read transaction rollback failed: {rollback_error!r}. "
+                            f"Connection state is uncertain."
+                        )
+                    tie = TransactionIntegrityError(
+                        f"Projection failed and its owned read transaction could not be released: {rollback_error!r}. "
+                        f"Connection state is uncertain."
+                    )
+                    tie.rollback_error = rollback_error
+                    raise tie from operation_error
+            raise
+        else:
+            if we_started_tx:
+                try:
+                    conn.execute("ROLLBACK;")
+                except Exception as rollback_error:
+                    tie = TransactionIntegrityError(
+                        f"Projection completed, but its owned read transaction could not be released: {rollback_error!r}. "
+                        f"Connection state is uncertain."
+                    )
+                    tie.rollback_error = rollback_error
+                    raise tie from rollback_error
 
         # -------------------------------------------------------------------
         # Build Canonical In-Memory Projection with Non-Tabular Preservation
