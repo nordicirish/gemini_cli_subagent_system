@@ -261,6 +261,10 @@ class SSoTProjectionGenerator:
         """
         if conn is None:
             raise ValidationError("Database connection cannot be None")
+
+        if hasattr(conn, "connection") and not hasattr(conn, "cursor"):
+            conn = conn.connection
+
         if not hasattr(conn, "cursor"):
             raise ValidationError(f"Invalid database connection object: {type(conn).__name__}")
 
@@ -526,8 +530,20 @@ class SSoTProjectionGenerator:
         self.write_atomic(projection, destination, allow_floats=allow_floats)
         return projection
 
-    def project_trade_lessons(self, conn: sqlite3.Connection) -> Dict[str, Any]:
+    def project_trade_lessons(
+        self,
+        conn: sqlite3.Connection,
+    ) -> Dict[str, Any]:
         """Generates an isolated trade_lessons projection matching context/trade_lessons.json shape."""
+        if conn is None:
+            raise ValidationError("Database connection cannot be None")
+
+        if hasattr(conn, "connection") and not hasattr(conn, "cursor"):
+            conn = conn.connection
+
+        if not hasattr(conn, "cursor"):
+            raise ValidationError(f"Invalid database connection object: {type(conn).__name__}")
+
         repo = TradeLessonRepository(conn)
         lessons = repo.list_lessons()
         return {
@@ -544,8 +560,20 @@ class SSoTProjectionGenerator:
             ]
         }
 
-    def project_decision_log(self, conn: sqlite3.Connection) -> Dict[str, Any]:
+    def project_decision_log(
+        self,
+        conn: sqlite3.Connection,
+    ) -> Dict[str, Any]:
         """Generates an isolated decision_log projection matching context/decision_log.json shape."""
+        if conn is None:
+            raise ValidationError("Database connection cannot be None")
+
+        if hasattr(conn, "connection") and not hasattr(conn, "cursor"):
+            conn = conn.connection
+
+        if not hasattr(conn, "cursor"):
+            raise ValidationError(f"Invalid database connection object: {type(conn).__name__}")
+
         repo = DecisionLogRepository(conn)
         decisions = repo.list_decisions()
         return {

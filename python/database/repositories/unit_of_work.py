@@ -356,6 +356,17 @@ class UnitOfWork:
                 f"The database connection is in an uncertain state and must not be committed."
             ) from rollback_error
 
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """The underlying sqlite3.Connection managed by this UnitOfWork."""
+        if self._is_poisoned:
+            raise TransactionIntegrityError(
+                f"Cannot access connection: UnitOfWork transaction is poisoned: {self._poison_reason}"
+            ) from self._poison_cause
+        if not self._is_active or self._conn is None:
+            raise RepositoryError("UnitOfWork is not active.")
+        return self._conn
+
     def get_db_revision(self) -> int:
         """Returns the current monotonic database revision for the UnitOfWork connection."""
         if self._is_poisoned:

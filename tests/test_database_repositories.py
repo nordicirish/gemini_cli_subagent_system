@@ -86,6 +86,11 @@ from python.tool_registry import (
     GLOBAL_OWNER_APPROVAL,
     compute_payload_digest,
 )
+from python.database.projections import (
+    SSoTProjectionGenerator,
+    atomic_write_json,
+    serialize_projection,
+)
 
 
 def _mint_test_capability(
@@ -5854,6 +5859,308 @@ class TestStage15BMonotonicDatabaseRevisionTracking(BaseRepositoryTestCase):
             self.assertEqual(get_db_revision(conn), initial)
             self.assertIsNotNone(audit_repo.get_event(ev_id))
 
+
+
+# ===========================================================================
+# 20. Stage 1.6 Integration Alignment Tests
+# ===========================================================================
+
+class TestStage16RepositoryCapabilityProjectionIntegration(BaseRepositoryTestCase):
+    """
+    Integration alignment tests governed by Stage 1.6 specification.
+    Verifies interaction across:
+    1. Repository transaction boundaries and UnitOfWork lifecycle.
+    2. Capability and authorization enforcement at repository boundaries.
+    3. Deterministic SSoT projection generation and snapshot consistency.
+    4. Migration/parity compatibility and poison safety.
+    """
+
+    def test_stage16_multi_repository_atomicity_after_mid_operation_failure(self):
+        """Scenario 1: Mid-operation failure rolls back multi-repository writes leaving zero partial state."""
+        with self.assertRaises(RuntimeError):
+            with UnitOfWork(self.core_manager) as uow:
+                with execution_role_context("Terminal Orchestrator"):
+                    uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("1000.00"))
+                    uow.positions.upsert_position("PRIMARY", "AAPL", Decimal("10"), Decimal("150.00"), Decimal("150.00"))
+                    uow.watchlist.upsert_watchlist_item("MSFT", notes="Watching")
+                    uow.scout_categories.upsert_category("AI", tickers=["NVDA"])
+                    uow.trade_lessons.upsert_lesson("L1", "Stick to plan", "RISK", "ACTIVE")
+                    raise RuntimeError("Injected mid-operation failure")
+
+        with self.core_manager.connection() as conn:
+            self.assertEqual(len(CashRepository(conn).list_cash()), 0)
+            self.assertEqual(len(PositionRepository(conn).list_positions()), 0)
+            self.assertEqual(len(WatchlistRepository(conn).list_watchlist()), 0)
+            self.assertEqual(len(ScoutCategoryRepository(conn).list_categories()), 0)
+            self.assertEqual(len(TradeLessonRepository(conn).list_lessons()), 0)
+            self.assertEqual(get_db_revision(conn), 0)
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM financial_changelog")
+            self.assertEqual(cur.fetchone()[0], 0)
+
+    def test_stage16_nested_transaction_rollback_without_unintended_outer_commit(self):
+        """Scenario 2: Nested savepoint rollback preserves outer uncommitted state without premature commit."""
+        with self.core_manager.connection() as conn:
+            with execution_role_context("Terminal Orchestrator"):
+                with repository_transaction(conn):
+                    WatchlistRepository(conn).upsert_watchlist_item("GOOGL")
+                    try:
+                        with repository_transaction(conn):
+                            WatchlistRepository(conn).upsert_watchlist_item("AMZN")
+                            raise ValueError("Injected nested failure")
+                    except ValueError:
+                        pass
+                    WatchlistRepository(conn).upsert_watchlist_item("MSFT")
+
+            items = [item.ticker for item in WatchlistRepository(conn).list_watchlist()]
+            self.assertIn("GOOGL", items)
+            self.assertNotIn("AMZN", items)
+            self.assertIn("MSFT", items)
+
+        # Outer failure case: all rolled back
+        with self.core_manager.connection() as conn:
+            with self.assertRaises(RuntimeError):
+                with execution_role_context("Terminal Orchestrator"):
+                    with repository_transaction(conn):
+                        WatchlistRepository(conn).upsert_watchlist_item("NVDA")
+                        with repository_transaction(conn):
+                            WatchlistRepository(conn).upsert_watchlist_item("TSLA")
+                        raise RuntimeError("Outer failure after nested success")
+
+            items = [item.ticker for item in WatchlistRepository(conn).list_watchlist()]
+            self.assertNotIn("NVDA", items)
+            self.assertNotIn("TSLA", items)
+
+    def test_stage16_db_revision_monotonicity_across_commit_rollback_and_nested_ops(self):
+        """Scenario 3: Revision advances monotonically on commit, never on rollback or failed nested ops."""
+        with self.core_manager.connection() as conn:
+            self.assertEqual(get_db_revision(conn), 0)
+
+        # Successful commit -> revision 1
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"))
+
+        with self.core_manager.connection() as conn:
+            self.assertEqual(get_db_revision(conn), 1)
+
+        # Rolled back operation -> revision remains 1
+        with self.assertRaises(RuntimeError):
+            with UnitOfWork(self.core_manager) as uow:
+                with execution_role_context("Terminal Orchestrator"):
+                    uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("200.00"))
+                    raise RuntimeError("Rollback")
+
+        with self.core_manager.connection() as conn:
+            self.assertEqual(get_db_revision(conn), 1)
+            self.assertEqual(CashRepository(conn).get_cash("PRIMARY", "EUR").amount, Decimal("100.00"))
+
+        # Compound commit -> revision 2
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("300.00"))
+
+        with self.core_manager.connection() as conn:
+            self.assertEqual(get_db_revision(conn), 2)
+
+    def test_stage16_concurrent_writers_and_revision_monotonicity(self):
+        """Scenario 4: Concurrent writers serialize via WAL and maintain strict revision monotonicity."""
+        barrier = Barrier(2)
+        errors = []
+
+        def write_worker(curr: str, amt: str):
+            try:
+                barrier.wait(timeout=5)
+                with UnitOfWork(self.core_manager) as uow:
+                    with execution_role_context("Terminal Orchestrator"):
+                        uow.cash.set_cash_balance("PRIMARY", curr, Decimal(amt))
+            except Exception as exc:
+                errors.append(exc)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            f1 = executor.submit(write_worker, "EUR", "500.00")
+            f2 = executor.submit(write_worker, "USD", "600.00")
+            f1.result()
+            f2.result()
+
+        self.assertEqual(len(errors), 0)
+        with self.core_manager.connection() as conn:
+            self.assertEqual(get_db_revision(conn), 2)
+            eur = CashRepository(conn).get_cash("PRIMARY", "EUR")
+            usd = CashRepository(conn).get_cash("PRIMARY", "USD")
+            self.assertEqual(eur.amount, Decimal("500.00"))
+            self.assertEqual(usd.amount, Decimal("600.00"))
+
+    def test_stage16_authorization_denial_before_mutation(self):
+        """Scenario 5: Unauthorized execution role is rejected before write mutation occurs."""
+        with self.core_manager.connection() as conn:
+            cash_repo = CashRepository(conn)
+            with self.assertRaises(PermissionError) as ctx:
+                with execution_role_context("Macro Sentinel"):
+                    cash_repo.set_cash_balance("PRIMARY", "EUR", Decimal("999.00"))
+            self.assertIn("not authorized", str(ctx.exception))
+            self.assertEqual(get_db_revision(conn), 0)
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM portfolio_cash")
+            self.assertEqual(cur.fetchone()[0], 0)
+            cur.execute("SELECT count(*) FROM financial_changelog")
+            self.assertEqual(cur.fetchone()[0], 0)
+
+    def test_stage16_no_partial_writes_after_authorization_or_execution_failure(self):
+        """Scenario 6: Authorization rejection leaves zero partial records in financial state or changelog."""
+        with self.core_manager.connection() as conn:
+            pos_repo = PositionRepository(conn)
+            with self.assertRaises(PermissionError):
+                with execution_role_context("Junior Analyst"):
+                    pos_repo.upsert_position("PRIMARY", "ASML.AS", Decimal("10"), Decimal("800.00"), Decimal("800.00"))
+
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM portfolio_positions")
+            self.assertEqual(cur.fetchone()[0], 0)
+            cur.execute("SELECT count(*) FROM financial_changelog")
+            self.assertEqual(cur.fetchone()[0], 0)
+            self.assertEqual(get_db_revision(conn), 0)
+
+    def test_stage16_projection_revision_and_records_from_same_sqlite_snapshot(self):
+        """Scenario 7: SSoT projection directly accepts UnitOfWork, reading uncommitted snapshot without disturbing transaction."""
+        generator = SSoTProjectionGenerator(self.core_manager)
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("1234.50"))
+                uow.positions.upsert_position("PRIMARY", "ASML.AS", Decimal("10"), Decimal("800.00"), Decimal("800.00"))
+                uow.trade_lessons.upsert_lesson("L1", "Keep stops", "RISK", "ACTIVE")
+
+            # Read projection directly from the active UnitOfWork (db_revision = 3)
+            projection = generator.generate(uow)
+            self.assertEqual(projection["_projection_metadata"]["db_revision"], 3)
+            self.assertEqual(projection["unallocated_cash_eur"], "1234.50")
+            self.assertEqual(len(projection["portfolio_snapshot"]), 1)
+            self.assertEqual(projection["portfolio_snapshot"][0]["ticker"], "ASML.AS")
+            self.assertEqual(len(projection["trade_lessons"]), 1)
+
+            # Verify UoW transaction is still active and committable
+            self.assertTrue(uow.connection.in_transaction)
+
+        # After uow commits, independent connection sees identical committed projection
+        with self.core_manager.connection() as conn:
+            committed_proj = generator.generate(conn)
+            self.assertEqual(committed_proj["_projection_metadata"]["db_revision"], 3)
+            self.assertEqual(committed_proj["unallocated_cash_eur"], "1234.50")
+            self.assertEqual(committed_proj["portfolio_snapshot"], projection["portfolio_snapshot"])
+
+    def test_stage16_concurrent_database_mutation_during_projection_generation(self):
+        """Scenario 8: WAL-mode read snapshot isolates projection from concurrent committed mutations."""
+        # Seed baseline data at revision 1
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("100.00"))
+
+        reader_conn = self.core_manager.connect()
+        try:
+            # Begin explicit read transaction for snapshot isolation
+            reader_conn.execute("BEGIN;")
+            cur = reader_conn.cursor()
+            cur.execute("SELECT db_revision FROM database_metadata WHERE id = 1")
+            snap_rev = cur.fetchone()[0]
+            self.assertEqual(snap_rev, 1)
+
+            # Concurrent writer mutates and commits
+            with UnitOfWork(self.core_manager) as writer_uow:
+                with execution_role_context("Terminal Orchestrator"):
+                    writer_uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("999.00"))
+
+            # Independent connection sees revision 2
+            with self.core_manager.connection() as conn:
+                self.assertEqual(get_db_revision(conn), 2)
+
+            # Reader in WAL mode continues its snapshot: still sees revision 1 and 100.00
+            generator = SSoTProjectionGenerator(self.core_manager)
+            proj = generator.generate(reader_conn)
+            self.assertEqual(proj["_projection_metadata"]["db_revision"], 1)
+            self.assertEqual(proj["unallocated_cash_eur"], "100.00")
+
+            reader_conn.execute("ROLLBACK;")
+        finally:
+            reader_conn.close()
+
+    def test_stage16_projection_writer_failure_preserves_valid_output_and_cleans_temp(self):
+        """Scenario 9: Atomic writer failure preserves destination file and cleans up temporary files."""
+        dest_path = Path(self.temp_dir.name) / "projected_ssot.json"
+        valid_content = json.dumps({"status": "VALID_ORIGINAL"}, indent=2)
+        dest_path.write_text(valid_content, encoding="utf-8")
+
+        # 1. Invalid JSON validation failure preserves file without touching fs
+        with self.assertRaises(ValidationError):
+            atomic_write_json(dest_path, "MALFORMED_JSON_CONTENT{{{")
+        self.assertEqual(dest_path.read_text(encoding="utf-8"), valid_content)
+
+        # 2. Filesystem replacement failure preserves destination and cleans temp file
+        with patch("os.replace", side_effect=OSError("Simulated filesystem error")):
+            with self.assertRaises(OSError):
+                atomic_write_json(dest_path, json.dumps({"status": "NEW_DATA"}))
+
+        self.assertEqual(dest_path.read_text(encoding="utf-8"), valid_content)
+        temp_files = list(Path(self.temp_dir.name).glob(".*.tmp"))
+        self.assertEqual(len(temp_files), 0)
+
+    def test_stage16_deterministic_repeated_projection_generation(self):
+        """Scenario 10: Repeated projection generation produces byte-for-byte identical output."""
+        with UnitOfWork(self.core_manager) as uow:
+            with execution_role_context("Terminal Orchestrator"):
+                uow.cash.set_cash_balance("PRIMARY", "USD", Decimal("500.00"))
+                uow.cash.set_cash_balance("PRIMARY", "EUR", Decimal("1000.00"))
+                uow.positions.upsert_position("PRIMARY", "MSFT", Decimal("5"), Decimal("400.00"), Decimal("400.00"))
+                uow.positions.upsert_position("PRIMARY", "AAPL", Decimal("10"), Decimal("150.00"), Decimal("150.00"))
+                uow.watchlist.upsert_watchlist_item("GOOGL")
+                uow.watchlist.upsert_watchlist_item("AMZN")
+                uow.scout_categories.upsert_category("SEMIS", tickers=["ASML.AS", "NVDA"])
+                uow.trade_lessons.upsert_lesson("L2", "Stop loss mandatory", "RISK", "ACTIVE")
+                uow.trade_lessons.upsert_lesson("L1", "Trade plan", "EXECUTION", "ACTIVE")
+                uow.decision_log.append_decision(
+                    session_id="S1",
+                    action_proposed="BUY",
+                    decision_outcome="APPROVED",
+                    ticker="AAPL",
+                    votes={"votes": 3},
+                    transcript_text="Transcript",
+                    timestamp_utc="2026-11-10T10:00:00Z",
+                )
+
+        generator = SSoTProjectionGenerator(self.core_manager)
+        hashes = set()
+        with self.core_manager.connection() as conn:
+            for _ in range(10):
+                proj = generator.generate(conn, generation_timestamp="2026-11-10T12:00:00Z")
+                serialized = generator.serialize(proj)
+                hashes.add(hashlib.sha256(serialized.encode("utf-8")).hexdigest())
+
+        self.assertEqual(len(hashes), 1, "Projections must be byte-for-byte deterministic across 10 iterations")
+
+    def test_stage16_uow_connection_property_lifecycle_and_poison_safety(self):
+        """Scenario 11: UnitOfWork connection property enforces strict active, closed, and poisoned lifecycle states."""
+        uow = UnitOfWork(self.core_manager)
+
+        # Before enter: not active
+        with self.assertRaises(RepositoryError):
+            _ = uow.connection
+
+        # Inside active block: connection is valid and open
+        with uow:
+            conn = uow.connection
+            self.assertIsInstance(conn, sqlite3.Connection)
+            self.assertTrue(conn.in_transaction)
+
+        # After clean exit: connection closed/cleared
+        with self.assertRaises(RepositoryError):
+            _ = uow.connection
+
+        # Poisoned block: raises TransactionIntegrityError fail-closed
+        poison_uow = UnitOfWork(self.core_manager)
+        with self.assertRaises(TransactionIntegrityError):
+            with poison_uow:
+                conn = poison_uow.connection
+                poison_uow.poison("Simulated poison condition")
+                _ = poison_uow.connection
 
 
 if __name__ == "__main__":
