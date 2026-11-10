@@ -17,6 +17,15 @@ from python.database.repositories.base import RepositoryError, ValidationError
 # Migration Exception Hierarchy
 # ---------------------------------------------------------------------------
 
+class TimestampProvenance(str, Enum):
+    """Historical timestamp provenance classification."""
+    SOURCE_PROVIDED = "SOURCE_PROVIDED"
+    CALLER_SUPPLIED_DEFAULT = "CALLER_SUPPLIED_DEFAULT"
+    DERIVED = "DERIVED"
+    MISSING = "MISSING"
+    AMBIGUOUS = "AMBIGUOUS"
+
+
 class MigrationError(RepositoryError):
     """Base exception for all offline migration and parity verification errors."""
     pass

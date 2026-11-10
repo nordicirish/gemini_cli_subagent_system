@@ -36,6 +36,13 @@ from python.database.migration.contract import (
     MIGRATION_CONTRACT_VERSION,
     SQLITE_OWNED_DOMAINS,
     EXTERNALLY_MANAGED_SECTIONS,
+    CASH_EQUALITY_FIELDS,
+    POSITION_EQUALITY_FIELDS,
+    WATCHLIST_EQUALITY_FIELDS,
+    SCOUT_CATEGORY_EQUALITY_FIELDS,
+    TRADE_LESSON_EQUALITY_FIELDS,
+    DECISION_LOG_EQUALITY_FIELDS,
+    records_equal,
     _reject_json_constant,
     _validate_json_dict_keys,
     load_strict_json,
@@ -44,6 +51,8 @@ from python.database.migration.contract import (
     parse_ticker,
     parse_iso_timestamp,
     resolve_historical_timestamp,
+    transform_legacy_decision_case_b,
+    transform_legacy_decision_case_c,
     validate_migration_destination,
     extract_rule_code_and_directive,
 )
@@ -148,6 +157,8 @@ class LegacyJsonImporter:
         sources: Union[Dict[str, Any], Sequence[Union[Path, str, MigrationSource]]],
         default_timestamp: Optional[str] = None,
         default_account_id: str = "PRIMARY",
+        allow_date_only: bool = False,
+        allow_naive_utc: bool = False,
     ) -> MigrationPlan:
         """
         Constructs an in-memory migration plan without modifying any database.
@@ -191,10 +202,12 @@ class LegacyJsonImporter:
                     if currency not in ("EUR", "USD"):
                         raise MigrationValidationError(f"{src.name}: unsupported currency '{currency}'")
                     amount = parse_financial_decimal(c.get("amount"), f"portfolio_cash[{idx}].amount", max_scale=2)
-                    ts_valid = resolve_historical_timestamp(
+                    ts_valid, _ = resolve_historical_timestamp(
                         c.get("last_updated_at_utc"),
                         f"{src.name}: portfolio_cash[{idx}].last_updated_at_utc",
                         default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
                     )
                     key = (account, currency)
                     cash_rec = {
@@ -205,7 +218,7 @@ class LegacyJsonImporter:
                     }
                     if key in seen_cash_records:
                         prev = seen_cash_records[key]
-                        if prev["amount"] == amount:
+                        if records_equal(prev, cash_rec, CASH_EQUALITY_FIELDS):
                             plan.discrepancies.append({
                                 "domain": "portfolio_cash",
                                 "key": key,
@@ -215,7 +228,7 @@ class LegacyJsonImporter:
                         else:
                             raise MigrationConflictError(
                                 f"Conflicting duplicate cash record for {account}/{currency} in {src.name}: "
-                                f"existing amount {prev['amount']} != incoming {amount}"
+                                f"existing {prev} != incoming {cash_rec}"
                             )
                     else:
                         seen_cash_records[key] = cash_rec
@@ -228,10 +241,12 @@ class LegacyJsonImporter:
                     val = data["mutable_state"].get(field_key)
                 if val is not None:
                     amount = parse_financial_decimal(val, f"{src.name}.{field_key}", max_scale=2)
-                    ts_valid = resolve_historical_timestamp(
+                    ts_valid, _ = resolve_historical_timestamp(
                         None,
                         f"{src.name}.{field_key}",
                         default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
                     )
                     key = (default_account_id, curr)
                     cash_rec = {
@@ -242,7 +257,7 @@ class LegacyJsonImporter:
                     }
                     if key in seen_cash_records:
                         prev = seen_cash_records[key]
-                        if prev["amount"] == amount:
+                        if records_equal(prev, cash_rec, CASH_EQUALITY_FIELDS):
                             plan.discrepancies.append({
                                 "domain": "portfolio_cash",
                                 "key": key,
@@ -252,7 +267,7 @@ class LegacyJsonImporter:
                         else:
                             raise MigrationConflictError(
                                 f"Conflicting duplicate cash record for {default_account_id}/{curr} in {src.name}.{field_key}: "
-                                f"existing amount {prev['amount']} != incoming {amount}"
+                                f"existing {prev} != incoming {cash_rec}"
                             )
                     else:
                         seen_cash_records[key] = cash_rec
@@ -285,10 +300,12 @@ class LegacyJsonImporter:
                         else None
                     )
 
-                    ts_valid = resolve_historical_timestamp(
+                    ts_valid, _ = resolve_historical_timestamp(
                         p.get("last_updated_at_utc"),
                         f"{src.name}: portfolio_snapshot[{idx}].last_updated_at_utc",
                         default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
                     )
 
                     key = (account, ticker)
@@ -302,11 +319,7 @@ class LegacyJsonImporter:
                     }
                     if key in seen_position_records:
                         prev = seen_position_records[key]
-                        if (
-                            prev["shares"] == shares
-                            and prev["wac_eur"] == wac_eur
-                            and prev["wac_usd"] == wac_usd
-                        ):
+                        if records_equal(prev, pos_rec, POSITION_EQUALITY_FIELDS):
                             plan.discrepancies.append({
                                 "domain": "portfolio_positions",
                                 "key": key,
@@ -316,8 +329,7 @@ class LegacyJsonImporter:
                         else:
                             raise MigrationConflictError(
                                 f"Conflicting duplicate position record for {account}/{ticker} in {src.name}: "
-                                f"existing (shares={prev['shares']}, wac_eur={prev['wac_eur']}, wac_usd={prev['wac_usd']}) != "
-                                f"incoming (shares={shares}, wac_eur={wac_eur}, wac_usd={wac_usd})"
+                                f"existing {prev} != incoming {pos_rec}"
                             )
                     else:
                         seen_position_records[key] = pos_rec
@@ -333,10 +345,12 @@ class LegacyJsonImporter:
                     ticker = parse_ticker(item.get("ticker"), f"watchlist[{idx}].ticker")
                     status = str(item.get("status") or "ACTIVE").strip().upper()
                     notes = item.get("notes")
-                    ts_valid = resolve_historical_timestamp(
+                    ts_valid, _ = resolve_historical_timestamp(
                         item.get("added_at_utc"),
                         f"{src.name}: watchlist[{idx}].added_at_utc",
                         default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
                     )
                     wl_rec = {
                         "ticker": ticker,
@@ -346,7 +360,7 @@ class LegacyJsonImporter:
                     }
                     if ticker in seen_watchlist_records:
                         prev = seen_watchlist_records[ticker]
-                        if prev["status"] == status and prev["notes"] == notes:
+                        if records_equal(prev, wl_rec, WATCHLIST_EQUALITY_FIELDS):
                             plan.discrepancies.append({
                                 "domain": "watchlist",
                                 "ticker": ticker,
@@ -356,8 +370,7 @@ class LegacyJsonImporter:
                         else:
                             raise MigrationConflictError(
                                 f"Conflicting duplicate watchlist record for {ticker} in {src.name}: "
-                                f"existing (status={prev['status']}, notes={prev['notes']}) != "
-                                f"incoming (status={status}, notes={notes})"
+                                f"existing {prev} != incoming {wl_rec}"
                             )
                     else:
                         seen_watchlist_records[ticker] = wl_rec
@@ -371,10 +384,12 @@ class LegacyJsonImporter:
                 if isinstance(raw_tickers, list):
                     for item in raw_tickers:
                         ticker = parse_ticker(item, f"{src.name}.watched_tickers")
-                        ts_valid = resolve_historical_timestamp(
+                        ts_valid, _ = resolve_historical_timestamp(
                             None,
                             f"{src.name}.watched_tickers[{ticker}]",
                             default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
                         )
                         wl_rec = {
                             "ticker": ticker,
@@ -384,7 +399,7 @@ class LegacyJsonImporter:
                         }
                         if ticker in seen_watchlist_records:
                             prev = seen_watchlist_records[ticker]
-                            if prev["status"] == "ACTIVE" and prev["notes"] is None:
+                            if records_equal(prev, wl_rec, WATCHLIST_EQUALITY_FIELDS):
                                 plan.discrepancies.append({
                                     "domain": "watchlist",
                                     "ticker": ticker,
@@ -394,8 +409,7 @@ class LegacyJsonImporter:
                             else:
                                 raise MigrationConflictError(
                                     f"Conflicting duplicate watchlist record for {ticker} in {src.name}: "
-                                    f"existing (status={prev['status']}, notes={prev['notes']}) != "
-                                    f"incoming (status=ACTIVE, notes=None)"
+                                    f"existing {prev} != incoming {wl_rec}"
                                 )
                         else:
                             seen_watchlist_records[ticker] = wl_rec
@@ -412,10 +426,12 @@ class LegacyJsonImporter:
                     if not norm_cat:
                         continue
                     parsed_tickers = [parse_ticker(t, f"scout[{norm_cat}].ticker") for t in (tickers or [])]
-                    ts_valid = resolve_historical_timestamp(
+                    ts_valid, _ = resolve_historical_timestamp(
                         None,
                         f"{src.name}.SCOUT_TICKER_MAP[{norm_cat}]",
                         default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
                     )
                     cat_rec = {
                         "category_name": norm_cat,
@@ -425,7 +441,7 @@ class LegacyJsonImporter:
                     }
                     if norm_cat in seen_category_records:
                         prev = seen_category_records[norm_cat]
-                        if prev["description"] is None and prev["tickers"] == sorted(parsed_tickers):
+                        if records_equal(prev, cat_rec, SCOUT_CATEGORY_EQUALITY_FIELDS):
                             plan.discrepancies.append({
                                 "domain": "scout_categories",
                                 "category_name": norm_cat,
@@ -435,7 +451,7 @@ class LegacyJsonImporter:
                         else:
                             raise MigrationConflictError(
                                 f"Conflicting duplicate scout category record for '{norm_cat}' in {src.name}: "
-                                f"existing tickers={prev['tickers']} != incoming {sorted(parsed_tickers)}"
+                                f"existing {prev} != incoming {cat_rec}"
                             )
                     else:
                         seen_category_records[norm_cat] = cat_rec
@@ -450,10 +466,12 @@ class LegacyJsonImporter:
                         continue
                     desc = sc.get("description")
                     parsed_tickers = [parse_ticker(t, f"scout[{norm_cat}].ticker") for t in (sc.get("tickers") or [])]
-                    ts_valid = resolve_historical_timestamp(
+                    ts_valid, _ = resolve_historical_timestamp(
                         sc.get("updated_at_utc"),
                         f"{src.name}: scout[{norm_cat}].updated_at_utc",
                         default_timestamp=default_timestamp,
+                        allow_date_only=allow_date_only,
+                        allow_naive_utc=allow_naive_utc,
                     )
                     cat_rec = {
                         "category_name": norm_cat,
@@ -463,7 +481,7 @@ class LegacyJsonImporter:
                     }
                     if norm_cat in seen_category_records:
                         prev = seen_category_records[norm_cat]
-                        if prev["description"] == desc and prev["tickers"] == sorted(parsed_tickers):
+                        if records_equal(prev, cat_rec, SCOUT_CATEGORY_EQUALITY_FIELDS):
                             plan.discrepancies.append({
                                 "domain": "scout_categories",
                                 "category_name": norm_cat,
@@ -473,8 +491,7 @@ class LegacyJsonImporter:
                         else:
                             raise MigrationConflictError(
                                 f"Conflicting duplicate scout category record for '{norm_cat}' in {src.name}: "
-                                f"existing (desc={prev['description']}, tickers={prev['tickers']}) != "
-                                f"incoming (desc={desc}, tickers={sorted(parsed_tickers)})"
+                                f"existing {prev} != incoming {cat_rec}"
                             )
                     else:
                         seen_category_records[norm_cat] = cat_rec
@@ -495,15 +512,19 @@ class LegacyJsonImporter:
                         directive = str(item["directive_text"]).strip()
                         category = str(item.get("category") or "MANDATE").strip().upper()
                         status = str(item.get("status") or "ACTIVE").strip().upper()
-                        ts_created = resolve_historical_timestamp(
+                        ts_created, _ = resolve_historical_timestamp(
                             item.get("created_at_utc"),
                             f"{src.name}: trade_lessons[{idx}].created_at_utc",
                             default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
                         )
-                        ts_reviewed = resolve_historical_timestamp(
+                        ts_reviewed, _ = resolve_historical_timestamp(
                             item.get("last_reviewed_at_utc"),
                             f"{src.name}: trade_lessons[{idx}].last_reviewed_at_utc",
-                            default_timestamp=ts_created,
+                            default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
                         )
                         lesson_rec = {
                             "rule_code": code,
@@ -515,11 +536,7 @@ class LegacyJsonImporter:
                         }
                         if code in seen_lesson_records:
                             prev = seen_lesson_records[code]
-                            if (
-                                prev["directive_text"] == directive
-                                and prev["category"] == category
-                                and prev["status"] == status
-                            ):
+                            if records_equal(prev, lesson_rec, TRADE_LESSON_EQUALITY_FIELDS):
                                 plan.discrepancies.append({
                                     "domain": "trade_lessons",
                                     "rule_code": code,
@@ -529,7 +546,7 @@ class LegacyJsonImporter:
                             else:
                                 raise MigrationConflictError(
                                     f"Conflicting duplicate trade lesson record for '{code}' in {src.name}: "
-                                    f"existing directive='{prev['directive_text']}' != incoming '{directive}'"
+                                    f"existing {prev} != incoming {lesson_rec}"
                                 )
                         else:
                             seen_lesson_records[code] = lesson_rec
@@ -566,11 +583,7 @@ class LegacyJsonImporter:
                                 }
                                 if extracted_code in seen_lesson_records:
                                     prev = seen_lesson_records[extracted_code]
-                                    if (
-                                        prev["directive_text"] == (directive or raw_rule)
-                                        and prev["category"] == "MANDATE"
-                                        and prev["status"] == "ACTIVE"
-                                    ):
+                                    if records_equal(prev, lesson_rec, TRADE_LESSON_EQUALITY_FIELDS):
                                         plan.discrepancies.append({
                                             "domain": "trade_lessons",
                                             "rule_code": extracted_code,
@@ -580,7 +593,7 @@ class LegacyJsonImporter:
                                     else:
                                         raise MigrationConflictError(
                                             f"Conflicting duplicate trade lesson record for '{extracted_code}' in {src.name}: "
-                                            f"existing directive='{prev['directive_text']}' != incoming '{directive or raw_rule}'"
+                                            f"existing {prev} != incoming {lesson_rec}"
                                         )
                                 else:
                                     seen_lesson_records[extracted_code] = lesson_rec
@@ -611,12 +624,7 @@ class LegacyJsonImporter:
                 d_key = (session_id, action_proposed, ticker)
                 if d_key in seen_decision_records:
                     prev = seen_decision_records[d_key]
-                    if (
-                        prev["decision_outcome"] == decision_outcome
-                        and prev["votes"] == votes
-                        and prev["transcript_text"] == transcript_text
-                        and prev["timestamp_utc"] == timestamp_utc
-                    ):
+                    if records_equal(prev, dec_rec, DECISION_LOG_EQUALITY_FIELDS):
                         plan.discrepancies.append({
                             "domain": "decision_log",
                             "session_id": session_id,
@@ -626,8 +634,7 @@ class LegacyJsonImporter:
                     else:
                         raise MigrationConflictError(
                             f"Conflicting duplicate decision log record for {session_id}/{action_proposed}/{ticker} in {src_name}: "
-                            f"existing (outcome={prev['decision_outcome']}, ts={prev['timestamp_utc']}) != "
-                            f"incoming (outcome={decision_outcome}, ts={timestamp_utc})"
+                            f"existing {prev} != incoming {dec_rec}"
                         )
                 else:
                     seen_decision_records[d_key] = dec_rec
@@ -647,10 +654,12 @@ class LegacyJsonImporter:
                         ticker = parse_ticker(d["ticker"]) if d.get("ticker") else None
                         votes = d.get("votes") or {}
                         transcript = d.get("transcript_text")
-                        ts = resolve_historical_timestamp(
+                        ts, _ = resolve_historical_timestamp(
                             d.get("timestamp_utc"),
                             f"{src.name}: decision_log[{idx}].timestamp_utc",
                             default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
+                            allow_naive_utc=allow_naive_utc,
                         )
                         _add_decision_record(
                             session_id=session_id,
@@ -665,79 +674,38 @@ class LegacyJsonImporter:
 
                     # Case B: Date-based legacy record
                     elif "date" in d and ("lesson" in d or "action" in d or "outcome" in d):
-                        date_str = str(d["date"]).strip()
-                        session_id = f"LEGACY-SESSION-{date_str}"
-                        lesson = d.get("lesson") or d.get("action") or "Legacy session log"
-                        action = str(lesson).strip()
-                        outcome = str(d.get("outcome") or "AUTO_LOGGED").strip()
-                        raw_ticker = d.get("ticker")
-                        ticker = parse_ticker(raw_ticker) if (raw_ticker and str(raw_ticker).strip().upper() != "SESSION") else None
-                        transcript = str(lesson) if d.get("lesson") else None
-                        votes = {}
-                        ts_candidate = f"{date_str}T00:00:00Z" if "T" not in date_str else (date_str if date_str.endswith("Z") else date_str + "Z")
-                        ts = resolve_historical_timestamp(
-                            ts_candidate,
-                            f"{src.name}: decision_log[{idx}].date",
+                        trans_b = transform_legacy_decision_case_b(
+                            d,
                             default_timestamp=default_timestamp,
+                            allow_date_only=allow_date_only,
                         )
                         _add_decision_record(
-                            session_id=session_id,
-                            action_proposed=action,
-                            decision_outcome=outcome,
-                            ticker=ticker,
-                            votes=votes,
-                            transcript_text=transcript,
-                            timestamp_utc=ts,
+                            session_id=trans_b["session_id"],
+                            action_proposed=trans_b["action_proposed"],
+                            decision_outcome=trans_b["decision_outcome"],
+                            ticker=trans_b["ticker"],
+                            votes=trans_b["votes"],
+                            transcript_text=trans_b["transcript_text"],
+                            timestamp_utc=trans_b["timestamp_utc"],
                             src_name=src.name,
                         )
 
                     # Case C: Nested council debate record
                     elif "decisions" in d and isinstance(d["decisions"], list):
-                        ts_raw = d.get("timestamp")
-                        ts_norm = (
-                            ts_raw + "Z"
-                            if (isinstance(ts_raw, str) and "T" in ts_raw and not (ts_raw.endswith("Z") or "+00:00" in ts_raw))
-                            else ts_raw
-                        )
-                        ts = resolve_historical_timestamp(
-                            ts_norm,
-                            f"{src.name}: decision_log[{idx}].timestamp",
+                        trans_c_list = transform_legacy_decision_case_c(
+                            d,
                             default_timestamp=default_timestamp,
+                            allow_naive_utc=allow_naive_utc,
                         )
-                        date_part = ts[:10] if ts else "UNKNOWN"
-                        trigger_ctx = str(d.get("trigger_context") or "DELIBERATION").strip()
-                        sanitized_trigger = re.sub(r'[^A-Za-z0-9_]+', '_', trigger_ctx).strip('_')
-                        session_id = f"SESSION-{date_part}-{sanitized_trigger}"
-                        council_debate = d.get("council_debate") or {}
-                        transcript = json.dumps(council_debate, sort_keys=True) if isinstance(council_debate, dict) else str(council_debate)
-
-                        for sub_idx, sub_d in enumerate(d["decisions"]):
-                            if not isinstance(sub_d, dict):
-                                continue
-                            sub_ticker_raw = sub_d.get("ticker")
-                            sub_ticker = parse_ticker(sub_ticker_raw) if sub_ticker_raw else None
-                            sub_action = str(sub_d.get("trade_state") or sub_d.get("action") or trigger_ctx).strip()
-                            sub_outcome = str(sub_d.get("trade_state") or sub_d.get("outcome") or "APPROVED").strip()
-                            sub_votes = sub_d.get("scrutiny_audit") or council_debate or {}
-                            sub_ts_raw = sub_d.get("timestamp") or ts
-                            sub_ts_norm = (
-                                sub_ts_raw + "Z"
-                                if (isinstance(sub_ts_raw, str) and "T" in sub_ts_raw and not (sub_ts_raw.endswith("Z") or "+00:00" in sub_ts_raw))
-                                else sub_ts_raw
-                            )
-                            sub_ts = resolve_historical_timestamp(
-                                sub_ts_norm,
-                                f"{src.name}: decision_log[{idx}].decisions[{sub_idx}].timestamp",
-                                default_timestamp=default_timestamp,
-                            )
+                        for trans_c in trans_c_list:
                             _add_decision_record(
-                                session_id=session_id,
-                                action_proposed=sub_action,
-                                decision_outcome=sub_outcome,
-                                ticker=sub_ticker,
-                                votes=sub_votes,
-                                transcript_text=transcript,
-                                timestamp_utc=sub_ts,
+                                session_id=trans_c["session_id"],
+                                action_proposed=trans_c["action_proposed"],
+                                decision_outcome=trans_c["decision_outcome"],
+                                ticker=trans_c["ticker"],
+                                votes=trans_c["votes"],
+                                transcript_text=trans_c["transcript_text"],
+                                timestamp_utc=trans_c["timestamp_utc"],
                                 src_name=src.name,
                             )
 
@@ -759,6 +727,8 @@ class LegacyJsonImporter:
         default_timestamp: Optional[str] = None,
         default_account_id: str = "PRIMARY",
         initialize_schema: bool = True,
+        allow_date_only: bool = False,
+        allow_naive_utc: bool = False,
     ) -> MigrationResult:
         """
         Executes an atomic migration import against an explicitly validated disposable database.
@@ -778,6 +748,8 @@ class LegacyJsonImporter:
             sources,
             default_timestamp=default_timestamp,
             default_account_id=default_account_id,
+            allow_date_only=allow_date_only,
+            allow_naive_utc=allow_naive_utc,
         )
 
         # Obtain or initialize DatabaseManager

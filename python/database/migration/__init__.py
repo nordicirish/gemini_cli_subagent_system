@@ -4,6 +4,7 @@ Governed by Stage 1.5-D Directive and Agent Governance Framework.
 """
 
 from .models import (
+    TimestampProvenance,
     MigrationError,
     MigrationSafetyError,
     MigrationValidationError,
@@ -35,6 +36,7 @@ __all__ = [
     "MIGRATION_CONTRACT_VERSION",
     "SQLITE_OWNED_DOMAINS",
     "EXTERNALLY_MANAGED_SECTIONS",
+    "TimestampProvenance",
     "MigrationError",
     "MigrationSafetyError",
     "MigrationValidationError",
