@@ -1342,7 +1342,8 @@ def determine_market_freshness(price, obs_time, current_ny=None, session_status=
 def validate_historical_dataframe(hist: pd.DataFrame, existing_df: pd.DataFrame | None = None) -> tuple[bool, str]:
     """
     Validates an incoming historical price DataFrame against structural, content,
-    and material completeness requirements before updating cache.
+    OHLCV relationships, index validity, and material completeness requirements
+    before updating cache.
     
     Returns:
         (is_valid: bool, reason: str)
@@ -1351,34 +1352,109 @@ def validate_historical_dataframe(hist: pd.DataFrame, existing_df: pd.DataFrame 
         return False, "Not a pandas DataFrame"
     if hist.empty:
         return False, "Empty DataFrame"
-    if "Close" not in hist.columns:
-        return False, "Missing required 'Close' column"
 
-    close_col = hist["Close"]
-    if isinstance(close_col, pd.DataFrame):
-        close_col = close_col.iloc[:, 0]
-
-    total_rows = len(close_col)
+    total_rows = len(hist)
     if total_rows == 0:
-        return False, "Zero rows in Close series"
+        return False, "Zero rows in DataFrame"
 
-    # 1. Content validation: Check non-finite, invalid, or non-positive closes
-    valid_closes = [
-        c_val for c in close_col
-        if (c_val := to_float(c)) is not None and c_val > 0
-    ]
-    valid_count = len(valid_closes)
+    # 1. Index validation: Must be DatetimeIndex, non-null, unique, and monotonically increasing
+    if not isinstance(hist.index, pd.DatetimeIndex):
+        try:
+            if not pd.api.types.is_datetime64_any_dtype(hist.index):
+                return False, "Index must be a DatetimeIndex"
+        except Exception:
+            return False, "Index is not a valid DatetimeIndex"
 
-    # Require at least 5 valid closes and at least 95% valid rows (rejects single-valid-close corrupted responses)
+    if hist.index.isna().any():
+        return False, "Index contains NaT or invalid timestamps"
+    if not hist.index.is_unique:
+        return False, "Index contains duplicate timestamps"
+    if not hist.index.is_monotonic_increasing:
+        return False, "Index timestamps must be monotonically increasing (sorted)"
+
+    # 2. Structural validation: Required OHLCV fields
+    required_cols = ["Open", "High", "Low", "Close", "Volume"]
+    extracted = {}
+    for col_name in required_cols:
+        col = None
+        if col_name in hist.columns:
+            col = hist[col_name]
+        elif isinstance(hist.columns, pd.MultiIndex):
+            for c in hist.columns:
+                if c[0] == col_name:
+                    col = hist[c]
+                    break
+        if col is None:
+            return False, f"Missing required OHLCV column: {col_name}"
+        if isinstance(col, pd.DataFrame):
+            col = col.iloc[:, 0]
+        extracted[col_name] = col
+
+    # 3. Numeric conversion and validity checks
+    open_s = pd.to_numeric(extracted["Open"], errors="coerce")
+    high_s = pd.to_numeric(extracted["High"], errors="coerce")
+    low_s = pd.to_numeric(extracted["Low"], errors="coerce")
+    close_s = pd.to_numeric(extracted["Close"], errors="coerce")
+    vol_s = pd.to_numeric(extracted["Volume"], errors="coerce")
+
+    # Check for infinity in any OHLCV column
+    for col_name, s in [("Open", open_s), ("High", high_s), ("Low", low_s), ("Close", close_s), ("Volume", vol_s)]:
+        arr = np.asarray(s, dtype=float)
+        if np.isinf(arr).any():
+            return False, f"Non-finite infinity detected in {col_name}"
+
+    # Check for negative volume
+    neg_vol_mask = vol_s < 0
+    if neg_vol_mask.any():
+        return False, "Negative volume detected in historical data"
+
+    # Row is valid if all O, H, L, C are finite and > 0, and V is finite and >= 0
+    valid_mask = (
+        open_s.notna() & (open_s > 0) &
+        high_s.notna() & (high_s > 0) &
+        low_s.notna() & (low_s > 0) &
+        close_s.notna() & (close_s > 0) &
+        vol_s.notna() & (vol_s >= 0)
+    )
+
+    # For valid rows, check sensible OHLC relationships (with 1e-6 epsilon for float precision)
+    tolerance = 1e-6
+    rel_invalid_mask = valid_mask & (
+        (high_s < (low_s - tolerance)) |
+        (high_s < (open_s - tolerance)) |
+        (high_s < (close_s - tolerance)) |
+        (low_s > (open_s + tolerance)) |
+        (low_s > (high_s + tolerance)) |
+        (low_s > (close_s + tolerance))
+    )
+    if rel_invalid_mask.any():
+        idx_first = rel_invalid_mask.idxmax()
+        return False, f"Invalid OHLC relationship at {idx_first}: High must be >= Open, Low, Close and Low must be <= Open, High, Close"
+
+    valid_count = int(valid_mask.sum())
+    # Require at least 5 valid OHLCV rows and at least 95% valid rows
     if valid_count < 5 or (valid_count / total_rows) < 0.95:
-        return False, f"Excessive invalid or non-finite closes ({valid_count}/{total_rows} valid)"
+        return False, f"Excessive invalid or non-finite OHLCV rows ({valid_count}/{total_rows} valid)"
 
-    # Latest close must be finite and positive
-    latest_close = to_float(close_col.iloc[-1])
-    if latest_close is None or latest_close <= 0:
+    # Latest row validation: Open, High, Low, Close must be finite and positive, Volume non-negative
+    latest_c = to_float(close_s.iloc[-1])
+    latest_o = to_float(open_s.iloc[-1])
+    latest_h = to_float(high_s.iloc[-1])
+    latest_l = to_float(low_s.iloc[-1])
+    latest_v = to_float(vol_s.iloc[-1])
+
+    if latest_c is None or latest_c <= 0:
         return False, "Latest close in history is non-finite or non-positive"
+    if latest_o is None or latest_o <= 0:
+        return False, "Latest open in history is non-finite or non-positive"
+    if latest_h is None or latest_h <= 0:
+        return False, "Latest high in history is non-finite or non-positive"
+    if latest_l is None or latest_l <= 0:
+        return False, "Latest low in history is non-finite or non-positive"
+    if latest_v is None or latest_v < 0:
+        return False, "Latest volume in history is non-finite or negative"
 
-    # 2. Material truncation check relative to existing valid cache
+    # Material truncation check relative to existing valid cache
     if existing_df is not None and isinstance(existing_df, pd.DataFrame) and not existing_df.empty:
         existing_len = len(existing_df)
         # If existing has substantial history (>= 30 bars), incoming cannot be materially truncated (< 75% of existing)
@@ -3185,7 +3261,22 @@ def build_daemon_final_output(
     scout_data = []
     for item in data:
         if item.get("_isScout"):
-            if item.get("rsi", 50.0) <= SCOUT_MAX_RSI:
+            # Independent actionability check for scout entries:
+            # Must be ACTIVE, VALID price, and CURRENT or DELAYED freshness
+            item_status = item.get("status")
+            item_validity = item.get("price_validity")
+            item_freshness = item.get("freshness")
+            item_price = item.get("price")
+
+            is_item_actionable = (
+                item_status == "ACTIVE"
+                and item_validity == "VALID"
+                and item_freshness in ("CURRENT", "DELAYED")
+                and item_price is not None
+                and item_price > 0
+            )
+
+            if is_item_actionable and item.get("rsi", 50.0) <= SCOUT_MAX_RSI:
                 scout_data.append(item)
         else:
             non_scout_data.append(item)
@@ -3240,6 +3331,27 @@ def build_daemon_final_output(
             "trade_lessons": supplemental_lessons,
             "merton_optimal_allocation": merton_alloc,
         }
+
+
+def get_macro_telemetry_context():
+    """
+    Computes current macro telemetry context (VIX price, volatility regime, VIXY ROC).
+    Fails closed: if observation is not actionable, volatility_regime is 'UNAVAILABLE'
+    and numeric prices/rates are None.
+    """
+    if is_price_actionable('^VIX'):
+        v_p = float(cache.prices.get('^VIX', 0.0))
+        v_regime = "HIGH_VOL" if v_p > 20.0 else "LOW_VOL" if (v_p < 12.0 and v_p > 0) else "NORMAL"
+    else:
+        v_p = None
+        v_regime = "UNAVAILABLE"
+
+    if is_price_actionable('VIXY'):
+        v_roc = round(float(cache.gaps.get('VIXY', 0.0)), 2)
+    else:
+        v_roc = None
+
+    return v_p, v_regime, v_roc
 
 
 # -----------------------------
@@ -3434,9 +3546,9 @@ def run_daemon():
             data = []
 
             macro_state = {
-                'IEF': {'price': 0.0, 'gap': 0.0, 'trend': 'FLAT'},
-                '^VIX': {'price': 0.0, 'gap': 0.0},
-                'VIXY': {'price': 0.0, 'gap': 0.0}
+                'IEF': {'price': None, 'gap': 0.0, 'trend': 'UNAVAILABLE', 'status': 'UNAVAILABLE'},
+                '^VIX': {'price': None, 'gap': 0.0, 'status': 'UNAVAILABLE'},
+                'VIXY': {'price': None, 'gap': 0.0, 'status': 'UNAVAILABLE'}
             }
 
             needs_save = False
@@ -3487,6 +3599,7 @@ def run_daemon():
                 vwap = cache.vwaps.get(sym, 0.0)
                 techs = cache.technicals.get(sym, {})
                 score, note = calculate_score(sym)
+                cur_vix_p, cur_vol_regime, cur_vixy_roc = get_macro_telemetry_context()
 
                 if p is None or p <= 0 or cache.price_validity.get(sym) in ("INVALID", "UNAVAILABLE"):
                     print(f"{sym:<8} {RED}NO DATA{RESET}")
@@ -3525,9 +3638,9 @@ def run_daemon():
                         "vwap": 0.0,
                         "distance_from_vwap": 0.0,
                         "trend_score": 0,
-                        "vix_price": 0.0,
-                        "volatility_regime": "NORMAL",
-                        "vixy_roc": 0.0,
+                        "vix_price": cur_vix_p,
+                        "volatility_regime": cur_vol_regime,
+                        "vixy_roc": cur_vixy_roc,
                         "net_gex_total": 0.0,
                         "gex_exposure": 0.0,
                         "dealer_posture": "NEUTRAL",
@@ -3548,12 +3661,21 @@ def run_daemon():
                     continue
 
                 if sym == 'IEF':
-                    trend = "BULLISH (Safe)" if session_change > 0 else "BEARISH (Risk)"
-                    macro_state['IEF'] = {'price': p, 'gap': session_change, 'trend': trend}
+                    if is_price_actionable('IEF'):
+                        trend = "BULLISH (Safe)" if session_change > 0 else "BEARISH (Risk)"
+                        macro_state['IEF'] = {'price': p, 'gap': session_change, 'trend': trend, 'status': 'ACTIVE'}
+                    else:
+                        macro_state['IEF'] = {'price': None, 'gap': 0.0, 'trend': 'UNAVAILABLE', 'status': 'UNAVAILABLE'}
                 if sym == '^VIX':
-                    macro_state['^VIX'] = {'price': p, 'gap': session_change}
+                    if is_price_actionable('^VIX'):
+                        macro_state['^VIX'] = {'price': p, 'gap': session_change, 'status': 'ACTIVE'}
+                    else:
+                        macro_state['^VIX'] = {'price': None, 'gap': 0.0, 'status': 'UNAVAILABLE'}
                 if sym == 'VIXY':
-                    macro_state['VIXY'] = {'price': p, 'gap': session_change}
+                    if is_price_actionable('VIXY'):
+                        macro_state['VIXY'] = {'price': p, 'gap': session_change, 'status': 'ACTIVE'}
+                    else:
+                        macro_state['VIXY'] = {'price': None, 'gap': 0.0, 'status': 'UNAVAILABLE'}
 
                 if i % 2 == 1:
                     ROW_BG = BG_STRIPE
@@ -3681,7 +3803,7 @@ def run_daemon():
                     # Halt scout classification if authoritative financial state is compromised
                     is_scout = False
                 else:
-                    is_scout = sym in ACTIVE_SCOUT_TICKERS and sym not in held_and_watched
+                    is_scout = actionable and sym in ACTIVE_SCOUT_TICKERS and sym not in held_and_watched
                 effective_reg_close = to_float(cache.regular_close.get(sym) or techs.get("Last_Reg_Close"))
                 effective_pre_price = to_float(cache.pre_market_price.get(sym))
                 item_dict = {
@@ -3732,9 +3854,9 @@ def run_daemon():
                     "trend_score": int(-techs.get("Trend_Score", 0)) if sym in INVERSE_MACRO else int(techs.get("Trend_Score", 0)),
                     
                     # Macro Context & Volatility Regime (Rules > VOLATILITY_REGIME_THRESHOLDS)
-                    "vix_price": float(cache.prices.get('^VIX', 0.0)),
-                    "volatility_regime": "HIGH_VOL" if cache.prices.get('^VIX', 0.0) > 20.0 else "LOW_VOL" if cache.prices.get('^VIX', 0.0) < 12.0 and cache.prices.get('^VIX', 0.0) > 0 else "NORMAL",
-                    "vixy_roc": round(float(macro_state.get('VIXY', {}).get('gap', 0.0)), 2),
+                    "vix_price": cur_vix_p,
+                    "volatility_regime": cur_vol_regime,
+                    "vixy_roc": cur_vixy_roc,
 
                     # GEX — field names per ENH_32 canonical schema in rules.json
                     "net_gex_total": _raw_gex,
@@ -3777,25 +3899,40 @@ def run_daemon():
 
             print("-" * table_width)
             ief = macro_state.get('IEF', {})
-            ief_gap = float(ief['gap'])
-            ief_price = float(ief['price'])
+            ief_status = ief.get('status', 'UNAVAILABLE')
+            ief_gap = float(ief.get('gap', 0.0))
+            ief_price = ief.get('price')
+            
             # IEF bond alert — threshold: gem_trading_rules/rules.md > system_thresholds > IEF_YIELD_ALERT_THRESHOLD (-0.15)
-            if ief_gap < -0.15:
+            if ief_status != 'ACTIVE' or ief_price is None or not is_price_actionable('IEF'):
+                print(f"   >>> BOND STATUS: 7-10Y Bond Price UNAVAILABLE {YELLOW}[DATA UNAVAILABLE]{RESET}")
+            elif ief_gap < -0.15:
                 print(f"   >>> BOND ALERT:  7-10Y Bond Price {ief_price:.2f} ({ief_gap:+.2f}%) {RED}[YIELDS RISING - RISK]{RESET}")
             else:
                 print(f"   >>> BOND STATUS: 7-10Y Bond Price {ief_price:.2f} ({ief_gap:+.2f}%) {GREEN}[YIELDS STABLE]{RESET}")
 
-            vix = macro_state['^VIX']
-            vix_price = float(vix['price'])
+            vix = macro_state.get('^VIX', {})
+            vix_status = vix.get('status', 'UNAVAILABLE')
+            vix_price = vix.get('price')
 
-            vixy = macro_state.get('VIXY', {'price': 0.0, 'gap': 0.0})
-            vixy_gap = float(vixy['gap'])
+            vixy = macro_state.get('VIXY', {})
+            vixy_status = vixy.get('status', 'UNAVAILABLE')
+            vixy_gap = float(vixy.get('gap', 0.0))
+
+            vix_active = (vix_status == 'ACTIVE' and vix_price is not None and is_price_actionable('^VIX'))
+            vixy_active = (vixy_status == 'ACTIVE' and is_price_actionable('VIXY'))
 
             # VIX fear alert — absolute trailing regime (VIX > 20.0) OR real-time velocity (VIXY ROC > 5.0%)
-            if vix_price > 20.0 or vixy_gap > 5.0:
-                print(f"   >>> FEAR ALERT:  VIX is {vix_price:.2f} | VIXY Velocity {vixy_gap:+.2f}% {RED}[CAUTION]{RESET}")
+            if not vix_active and not vixy_active:
+                print(f"   >>> FEAR STATUS: VIX/VIXY UNAVAILABLE {YELLOW}[DATA UNAVAILABLE]{RESET}")
+            elif (vix_active and vix_price > 20.0) or (vixy_active and vixy_gap > 5.0):
+                vix_str = f"VIX is {vix_price:.2f}" if vix_active else "VIX UNAVAILABLE"
+                vixy_str = f" | VIXY Velocity {vixy_gap:+.2f}%" if vixy_active else ""
+                print(f"   >>> FEAR ALERT:  {vix_str}{vixy_str} {RED}[CAUTION]{RESET}")
             else:
-                print(f"   >>> FEAR STATUS: VIX is {vix_price:.2f} | VIXY Velocity {vixy_gap:+.2f}% {GREEN}[STABLE]{RESET}")
+                vix_str = f"VIX is {vix_price:.2f}" if vix_active else "VIX UNAVAILABLE"
+                vixy_str = f" | VIXY Velocity {vixy_gap:+.2f}%" if vixy_active else ""
+                print(f"   >>> FEAR STATUS: {vix_str}{vixy_str} {GREEN}[STABLE]{RESET}")
 
             sleep_needed = REFRESH_RATE_SECONDS
             print("")

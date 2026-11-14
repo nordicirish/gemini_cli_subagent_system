@@ -42,8 +42,11 @@ from fetch_stocks import (
     get_live_chart_data,
     update_history_and_technicals,
     update_price_tick,
+    get_macro_telemetry_context,
+    build_daemon_final_output,
     cache,
 )
+from web_server import assemble_slim_tickers
 import tools
 
 
@@ -506,10 +509,7 @@ class TestMarketDataIntegrity(unittest.TestCase):
     # Test 14: Stale or unavailable ticker is published with status STALE or UNAVAILABLE
     # -------------------------------------------------------------------------
     def test_14_stale_or_unavailable_ticker_status_not_active(self):
-        """Verifies non-actionable tickers are published with explicit non-active statuses in web_server telemetry."""
-        from web_server import chat_endpoint
-
-        # Test telemetry default in web_server.py: missing freshness/validity must default to UNAVAILABLE
+        """Verifies non-actionable tickers default missing freshness/validity to UNAVAILABLE via assemble_slim_tickers."""
         simulated_live_state = {
             "tickers": [
                 {
@@ -527,15 +527,8 @@ class TestMarketDataIntegrity(unittest.TestCase):
                 },
             ]
         }
-        raw_tickers = simulated_live_state["tickers"]
-        slim = []
-        for t in raw_tickers:
-            slim.append({
-                "ticker": t.get("ticker"),
-                "price": t.get("price"),
-                "price_validity": t.get("price_validity", "UNAVAILABLE"),
-                "freshness": t.get("freshness", "UNAVAILABLE"),
-            })
+        # Exercise real production helper assemble_slim_tickers called by chat_endpoint()
+        slim = assemble_slim_tickers(simulated_live_state["tickers"])
 
         self.assertEqual(slim[0]["price_validity"], "UNAVAILABLE")
         self.assertEqual(slim[0]["freshness"], "UNAVAILABLE")
@@ -745,7 +738,7 @@ class TestMarketDataIntegrity(unittest.TestCase):
         """Verifies validate_historical_dataframe rejects responses where valid closes < 95%."""
         dates = pd.date_range("2026-05-01", periods=30, tz="UTC")
         # 1 valid close, 29 NaNs
-        closes = [float("nan")] * 29 + [150.0]
+        closes = [float("nan")] * 29 + [102.0]
         corrupted_df = pd.DataFrame(
             {
                 "Open": [100.0] * 30,
@@ -759,7 +752,7 @@ class TestMarketDataIntegrity(unittest.TestCase):
 
         is_valid, reason = validate_historical_dataframe(corrupted_df, None)
         self.assertFalse(is_valid)
-        self.assertIn("Excessive invalid or non-finite closes", reason)
+        self.assertIn("Excessive invalid or non-finite", reason)
 
     # -------------------------------------------------------------------------
     # Test 22: Valid complete response updates history and technicals normally
@@ -795,6 +788,429 @@ class TestMarketDataIntegrity(unittest.TestCase):
         self.assertIsNotNone(techs.get("RSI"))
         self.assertIsNotNone(techs.get("MACD"))
         self.assertIsNotNone(techs.get("ATR"))
+
+    # -------------------------------------------------------------------------
+    # Test 23: Stale or unavailable VIX produces explicitly UNAVAILABLE regime
+    # -------------------------------------------------------------------------
+    def test_23_stale_or_unavailable_vix_produces_unavailable_regime(self):
+        """Verifies stale or unavailable VIX produces UNAVAILABLE volatility_regime and None vix_price, never NORMAL."""
+        # Case A: VIX is stale (age exceeded)
+        cache.prices['^VIX'] = 25.0
+        cache.price_validity['^VIX'] = 'VALID'
+        cache.freshness['^VIX'] = 'STALE'
+
+        v_p, v_regime, _ = get_macro_telemetry_context()
+        self.assertIsNone(v_p)
+        self.assertEqual(v_regime, "UNAVAILABLE")
+        self.assertNotEqual(v_regime, "HIGH_VOL")
+        self.assertNotEqual(v_regime, "NORMAL")
+
+        # Case B: VIX price_validity is STALE
+        cache.price_validity['^VIX'] = 'STALE'
+        cache.freshness['^VIX'] = 'CURRENT'
+        v_p2, v_regime2, _ = get_macro_telemetry_context()
+        self.assertIsNone(v_p2)
+        self.assertEqual(v_regime2, "UNAVAILABLE")
+
+        # Case C: VIX is HISTORICAL
+        cache.price_validity['^VIX'] = 'VALID'
+        cache.freshness['^VIX'] = 'HISTORICAL'
+        cache.prices['^VIX'] = 11.0  # would be LOW_VOL if active
+        v_p3, v_regime3, _ = get_macro_telemetry_context()
+        self.assertIsNone(v_p3)
+        self.assertEqual(v_regime3, "UNAVAILABLE")
+        self.assertNotEqual(v_regime3, "LOW_VOL")
+
+        # Case D: VIX is completely absent from cache
+        cache.prices.pop('^VIX', None)
+        cache.price_validity.pop('^VIX', None)
+        cache.freshness.pop('^VIX', None)
+        v_p4, v_regime4, _ = get_macro_telemetry_context()
+        self.assertIsNone(v_p4)
+        self.assertEqual(v_regime4, "UNAVAILABLE")
+        self.assertNotEqual(v_regime4, "NORMAL")
+
+    # -------------------------------------------------------------------------
+    # Test 24: Valid actionable macro observations retain existing behaviour
+    # -------------------------------------------------------------------------
+    def test_24_valid_actionable_macro_observations_retain_existing_behaviour(self):
+        """Verifies valid actionable VIX and VIXY observations correctly classify regimes and velocity."""
+        # High volatility (> 20.0)
+        cache.prices['^VIX'] = 24.50
+        cache.price_validity['^VIX'] = 'VALID'
+        cache.freshness['^VIX'] = 'CURRENT'
+        cache.prices['VIXY'] = 15.0
+        cache.gaps['VIXY'] = 6.5
+        cache.price_validity['VIXY'] = 'VALID'
+        cache.freshness['VIXY'] = 'CURRENT'
+
+        v_p, v_regime, v_roc = get_macro_telemetry_context()
+        self.assertEqual(v_p, 24.50)
+        self.assertEqual(v_regime, "HIGH_VOL")
+        self.assertEqual(v_roc, 6.5)
+
+        # Normal volatility (12.0 - 20.0)
+        cache.prices['^VIX'] = 16.20
+        _, v_regime_norm, _ = get_macro_telemetry_context()
+        self.assertEqual(v_regime_norm, "NORMAL")
+
+        # Low volatility (< 12.0)
+        cache.prices['^VIX'] = 11.50
+        _, v_regime_low, _ = get_macro_telemetry_context()
+        self.assertEqual(v_regime_low, "LOW_VOL")
+
+    # -------------------------------------------------------------------------
+    # Test 25: Stale IEF and VIXY observations cannot generate macro warnings
+    # -------------------------------------------------------------------------
+    def test_25_stale_ief_and_vixy_observations_cannot_generate_macro_warnings(self):
+        """Verifies non-actionable IEF and VIXY observations fail closed and cannot trigger alerts."""
+        # IEF with negative gap that would trigger alert if active, but is STALE
+        cache.prices['IEF'] = 92.0
+        cache.price_validity['IEF'] = 'VALID'
+        cache.freshness['IEF'] = 'STALE'
+        self.assertFalse(is_price_actionable('IEF'))
+
+        # VIXY with positive spike that would trigger alert if active, but is UNAVAILABLE
+        cache.prices['VIXY'] = 15.0
+        cache.price_validity['VIXY'] = 'VALID'
+        cache.freshness['VIXY'] = 'UNAVAILABLE'
+        self.assertFalse(is_price_actionable('VIXY'))
+
+    # -------------------------------------------------------------------------
+    # Test 26: Stale or timestamp-unknown ticker cannot receive _isScout
+    # -------------------------------------------------------------------------
+    def test_26_stale_or_timestamp_unknown_ticker_cannot_receive_is_scout(self):
+        """Verifies candidate tickers with stale or timestamp-unknown observations cannot receive _isScout."""
+        sym = "SCOUT_CANDIDATE"
+        cache.prices[sym] = 55.0
+
+        # Case A: Stale observation
+        cache.price_validity[sym] = "VALID"
+        cache.freshness[sym] = "STALE"
+        self.assertFalse(is_price_actionable(sym))
+
+        # In run_daemon, is_scout = actionable and sym in ACTIVE_SCOUT_TICKERS...
+        is_scout_a = is_price_actionable(sym) and True
+        self.assertFalse(is_scout_a)
+
+        # Case B: Timestamp unknown (freshness UNAVAILABLE)
+        cache.price_validity[sym] = "VALID"
+        cache.freshness[sym] = "UNAVAILABLE"
+        self.assertFalse(is_price_actionable(sym))
+        is_scout_b = is_price_actionable(sym) and True
+        self.assertFalse(is_scout_b)
+
+    # -------------------------------------------------------------------------
+    # Test 27: build_daemon_final_output independently excludes non-actionable scouts
+    # -------------------------------------------------------------------------
+    def test_27_build_daemon_final_output_independently_excludes_non_actionable_scouts(self):
+        """Verifies build_daemon_final_output independently excludes non-actionable scout entries."""
+        candidate_data = [
+            {
+                "ticker": "SPY",
+                "price": 500.0,
+                "status": "ACTIVE",
+                "price_validity": "VALID",
+                "freshness": "CURRENT",
+                "_isScout": False,
+            },
+            {
+                "ticker": "STALE_SCOUT",
+                "price": 45.0,
+                "status": "STALE",
+                "price_validity": "STALE",
+                "freshness": "STALE",
+                "_isScout": True,
+                "score": 90,
+                "rsi": 40.0,
+            },
+            {
+                "ticker": "UNAVAIL_SCOUT",
+                "price": 35.0,
+                "status": "ACTIVE",
+                "price_validity": "VALID",
+                "freshness": "UNAVAILABLE",
+                "_isScout": True,
+                "score": 85,
+                "rsi": 42.0,
+            },
+            {
+                "ticker": "VALID_SCOUT",
+                "price": 75.0,
+                "status": "ACTIVE",
+                "price_validity": "VALID",
+                "freshness": "CURRENT",
+                "_isScout": True,
+                "score": 80,
+                "rsi": 48.0,
+            },
+        ]
+
+        mock_service = MagicMock()
+        mock_service.get_ssot_data.return_value = {"portfolio_snapshot": []}
+        mock_service.get_trade_lessons.return_value = []
+
+        out = build_daemon_final_output(
+            data=candidate_data,
+            status="OPEN",
+            service=mock_service,
+        )
+
+        tickers = out["tickers"]
+        tickers_map = {t["ticker"]: t for t in tickers}
+
+        # SPY remains non-scout
+        self.assertIn("SPY", tickers_map)
+        self.assertFalse(tickers_map["SPY"].get("_isScout"))
+
+        # VALID_SCOUT is present as active scout
+        self.assertIn("VALID_SCOUT", tickers_map)
+        self.assertTrue(tickers_map["VALID_SCOUT"].get("_isScout"))
+
+        # STALE_SCOUT and UNAVAIL_SCOUT must NOT be included in the active scout list
+        scout_tickers = [t["ticker"] for t in tickers if t.get("_isScout")]
+        self.assertEqual(scout_tickers, ["VALID_SCOUT"])
+
+    # -------------------------------------------------------------------------
+    # Test 28: Valid actionable scout candidates retain ranking and filtering
+    # -------------------------------------------------------------------------
+    def test_28_valid_actionable_scout_candidates_retain_ranking_and_filtering(self):
+        """Verifies actionable scouts are ranked by score descending, respect RSI ceiling, and limit to SCOUT_LIMIT."""
+        candidate_data = [
+            {"ticker": "SPY", "price": 500.0, "status": "ACTIVE", "price_validity": "VALID", "freshness": "CURRENT", "_isScout": False},
+            {"ticker": "SCOUT_HIGH", "price": 10.0, "status": "ACTIVE", "price_validity": "VALID", "freshness": "CURRENT", "_isScout": True, "score": 90, "rsi": 40.0},
+            {"ticker": "SCOUT_MID", "price": 20.0, "status": "ACTIVE", "price_validity": "VALID", "freshness": "CURRENT", "_isScout": True, "score": 70, "rsi": 50.0},
+            {"ticker": "SCOUT_LOW", "price": 30.0, "status": "ACTIVE", "price_validity": "VALID", "freshness": "CURRENT", "_isScout": True, "score": 50, "rsi": 60.0},
+            # Overbought candidate (RSI > SCOUT_MAX_RSI, e.g. 80.0) must be filtered out
+            {"ticker": "SCOUT_OVERBOUGHT", "price": 40.0, "status": "ACTIVE", "price_validity": "VALID", "freshness": "CURRENT", "_isScout": True, "score": 99, "rsi": 80.0},
+        ]
+
+        mock_service = MagicMock()
+        mock_service.get_ssot_data.return_value = {"portfolio_snapshot": []}
+        mock_service.get_trade_lessons.return_value = []
+
+        out = build_daemon_final_output(candidate_data, "OPEN", service=mock_service)
+        scouts = [t for t in out["tickers"] if t.get("_isScout")]
+
+        self.assertEqual(len(scouts), 3)
+        self.assertEqual([s["ticker"] for s in scouts], ["SCOUT_HIGH", "SCOUT_MID", "SCOUT_LOW"])
+
+    # -------------------------------------------------------------------------
+    # Test 29: Missing required OHLCV fields are rejected
+    # -------------------------------------------------------------------------
+    def test_29_missing_required_ohlcv_fields_rejected(self):
+        """Verifies validate_historical_dataframe rejects responses missing any of Open, High, Low, Close, Volume."""
+        dates = pd.date_range("2026-05-01", periods=10, tz="UTC")
+        base_df = pd.DataFrame(
+            {
+                "Open": [100.0] * 10,
+                "High": [105.0] * 10,
+                "Low": [95.0] * 10,
+                "Close": [102.0] * 10,
+                "Volume": [1000] * 10,
+            },
+            index=dates,
+        )
+
+        for col in ["Open", "High", "Low", "Close", "Volume"]:
+            dropped = base_df.drop(columns=[col])
+            is_valid, reason = validate_historical_dataframe(dropped)
+            self.assertFalse(is_valid)
+            self.assertIn(f"Missing required OHLCV column: {col}", reason)
+
+    # -------------------------------------------------------------------------
+    # Test 30: Non-finite or invalid OHLCV values are rejected
+    # -------------------------------------------------------------------------
+    def test_30_non_finite_or_invalid_ohlcv_values_rejected(self):
+        """Verifies validate_historical_dataframe rejects infinities, negative volumes, and non-positive prices."""
+        dates = pd.date_range("2026-05-01", periods=10, tz="UTC")
+
+        # Case A: Infinity in High
+        df_inf = pd.DataFrame(
+            {
+                "Open": [100.0] * 10,
+                "High": [105.0] * 9 + [float("inf")],
+                "Low": [95.0] * 10,
+                "Close": [102.0] * 10,
+                "Volume": [1000] * 10,
+            },
+            index=dates,
+        )
+        is_valid_inf, reason_inf = validate_historical_dataframe(df_inf)
+        self.assertFalse(is_valid_inf)
+        self.assertIn("Non-finite infinity", reason_inf)
+
+        # Case B: Negative volume
+        df_neg_v = pd.DataFrame(
+            {
+                "Open": [100.0] * 10,
+                "High": [105.0] * 10,
+                "Low": [95.0] * 10,
+                "Close": [102.0] * 10,
+                "Volume": [1000] * 9 + [-500],
+            },
+            index=dates,
+        )
+        is_valid_v, reason_v = validate_historical_dataframe(df_neg_v)
+        self.assertFalse(is_valid_v)
+        self.assertIn("Negative volume", reason_v)
+
+        # Case C: Non-positive price
+        df_zero_p = pd.DataFrame(
+            {
+                "Open": [100.0] * 9 + [0.0],
+                "High": [105.0] * 10,
+                "Low": [95.0] * 10,
+                "Close": [102.0] * 10,
+                "Volume": [1000] * 10,
+            },
+            index=dates,
+        )
+        is_valid_p, reason_p = validate_historical_dataframe(df_zero_p)
+        self.assertFalse(is_valid_p)
+
+    # -------------------------------------------------------------------------
+    # Test 31: Invalid OHLC relationships are rejected
+    # -------------------------------------------------------------------------
+    def test_31_invalid_ohlc_relationships_rejected(self):
+        """Verifies validate_historical_dataframe rejects High < Low, High < Open, High < Close, Low > High/Open/Close."""
+        dates = pd.date_range("2026-05-01", periods=10, tz="UTC")
+
+        # Case A: High < Low
+        df_a = pd.DataFrame(
+            {
+                "Open": [100.0] * 10,
+                "High": [105.0] * 9 + [90.0],
+                "Low": [95.0] * 9 + [100.0],
+                "Close": [98.0] * 10,
+                "Volume": [1000] * 10,
+            },
+            index=dates,
+        )
+        is_valid_a, reason_a = validate_historical_dataframe(df_a)
+        self.assertFalse(is_valid_a)
+        self.assertIn("Invalid OHLC relationship", reason_a)
+
+        # Case B: High < Open
+        df_b = pd.DataFrame(
+            {
+                "Open": [100.0] * 9 + [110.0],
+                "High": [105.0] * 9 + [102.0],
+                "Low": [95.0] * 10,
+                "Close": [98.0] * 10,
+                "Volume": [1000] * 10,
+            },
+            index=dates,
+        )
+        is_valid_b, reason_b = validate_historical_dataframe(df_b)
+        self.assertFalse(is_valid_b)
+        self.assertIn("Invalid OHLC relationship", reason_b)
+
+        # Case C: Low > Close
+        df_c = pd.DataFrame(
+            {
+                "Open": [100.0] * 10,
+                "High": [105.0] * 10,
+                "Low": [95.0] * 9 + [99.0],
+                "Close": [98.0] * 9 + [95.0],
+                "Volume": [1000] * 10,
+            },
+            index=dates,
+        )
+        is_valid_c, reason_c = validate_historical_dataframe(df_c)
+        self.assertFalse(is_valid_c)
+        self.assertIn("Invalid OHLC relationship", reason_c)
+
+    # -------------------------------------------------------------------------
+    # Test 32: Duplicate or unsorted historical timestamps are rejected
+    # -------------------------------------------------------------------------
+    def test_32_duplicate_or_unsorted_historical_timestamps_rejected(self):
+        """Verifies validate_historical_dataframe rejects duplicate timestamps, unsorted dates, and non-DatetimeIndex."""
+        # Case A: Duplicate timestamps
+        dup_dates = pd.to_datetime(["2026-05-01", "2026-05-02", "2026-05-02", "2026-05-03"], utc=True)
+        df_dup = pd.DataFrame(
+            {
+                "Open": [100.0] * 4,
+                "High": [105.0] * 4,
+                "Low": [95.0] * 4,
+                "Close": [102.0] * 4,
+                "Volume": [1000] * 4,
+            },
+            index=dup_dates,
+        )
+        is_valid_dup, reason_dup = validate_historical_dataframe(df_dup)
+        self.assertFalse(is_valid_dup)
+        self.assertIn("duplicate timestamps", reason_dup)
+
+        # Case B: Unsorted dates
+        unsorted_dates = pd.to_datetime(["2026-05-01", "2026-05-05", "2026-05-03", "2026-05-06"], utc=True)
+        df_unsorted = pd.DataFrame(
+            {
+                "Open": [100.0] * 4,
+                "High": [105.0] * 4,
+                "Low": [95.0] * 4,
+                "Close": [102.0] * 4,
+                "Volume": [1000] * 4,
+            },
+            index=unsorted_dates,
+        )
+        is_valid_unsorted, reason_unsorted = validate_historical_dataframe(df_unsorted)
+        self.assertFalse(is_valid_unsorted)
+        self.assertIn("monotonically increasing", reason_unsorted)
+
+        # Case C: Non-DatetimeIndex
+        df_int_index = pd.DataFrame(
+            {
+                "Open": [100.0] * 5,
+                "High": [105.0] * 5,
+                "Low": [95.0] * 5,
+                "Close": [102.0] * 5,
+                "Volume": [1000] * 5,
+            },
+            index=[0, 1, 2, 3, 4],
+        )
+        is_valid_idx, reason_idx = validate_historical_dataframe(df_int_index)
+        self.assertFalse(is_valid_idx)
+        self.assertIn("DatetimeIndex", reason_idx)
+
+    # -------------------------------------------------------------------------
+    # Test 33: Valid Yahoo and Polygon style historical data accepted
+    # -------------------------------------------------------------------------
+    def test_33_valid_yahoo_and_polygon_style_historical_data_accepted(self):
+        """Verifies standard valid Yahoo Finance and Polygon formatted DataFrames are accepted."""
+        dates = pd.date_range("2026-01-01", periods=50, tz="UTC")
+
+        # Yahoo Finance style: Open, High, Low, Close, Volume, Dividends, Stock Splits
+        yahoo_df = pd.DataFrame(
+            {
+                "Open": [150.0 + (i * 0.1) for i in range(50)],
+                "High": [155.0 + (i * 0.1) for i in range(50)],
+                "Low": [148.0 + (i * 0.1) for i in range(50)],
+                "Close": [152.0 + (i * 0.1) for i in range(50)],
+                "Volume": [2000000 + (i * 1000) for i in range(50)],
+                "Dividends": [0.0] * 50,
+                "Stock Splits": [0.0] * 50,
+            },
+            index=dates,
+        )
+        is_valid_y, reason_y = validate_historical_dataframe(yahoo_df)
+        self.assertTrue(is_valid_y)
+        self.assertEqual(reason_y, "Valid")
+
+        # Polygon style: Open, High, Low, Close, Volume
+        poly_df = pd.DataFrame(
+            {
+                "Open": [150.0 + (i * 0.1) for i in range(50)],
+                "High": [155.0 + (i * 0.1) for i in range(50)],
+                "Low": [148.0 + (i * 0.1) for i in range(50)],
+                "Close": [152.0 + (i * 0.1) for i in range(50)],
+                "Volume": [2000000 + (i * 1000) for i in range(50)],
+            },
+            index=dates,
+        )
+        is_valid_p, reason_p = validate_historical_dataframe(poly_df)
+        self.assertTrue(is_valid_p)
+        self.assertEqual(reason_p, "Valid")
 
 
 if __name__ == "__main__":

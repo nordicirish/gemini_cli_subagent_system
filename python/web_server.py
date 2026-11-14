@@ -526,6 +526,44 @@ def set_model(data: dict):
     active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
     return {"status": "success", "current_model": ORCHESTRATOR_MODEL, "warning": active_model_warning}
 
+def assemble_slim_tickers(raw_tickers: Any) -> list[dict]:
+    """
+    Assembles non-authoritative market feed telemetry for DATA_PACKET injection.
+    Fails closed: missing price_validity and freshness explicitly default to UNAVAILABLE.
+    """
+    slim_tickers = []
+    if isinstance(raw_tickers, list):
+        for t in raw_tickers:
+            if isinstance(t, dict):
+                slim_tickers.append({
+                    "ticker": t.get("ticker"),
+                    "price": t.get("price"),
+                    "price_validity": t.get("price_validity", "UNAVAILABLE"),
+                    "freshness": t.get("freshness", "UNAVAILABLE"),
+                    "price_source": t.get("price_source"),
+                    "observation_time": t.get("observation_time"),
+                    "retrieval_time": t.get("retrieval_time"),
+                    "session_change_pct": t.get("session_change_pct"),
+                    "gap_percent": t.get("gap_percent"),
+                    "rsi": t.get("rsi"),
+                    "macd": t.get("macd", 0.0),
+                    "macd_signal": t.get("macd_signal", 0.0),
+                    "macd_hist": t.get("macd_hist", 0.0),
+                    "macd_slope": t.get("macd_slope", "EXPANDING_POSITIVE"),
+                    "macd_status": t.get("macd_status", "NEUTRAL"),
+                    "atr_percent": t.get("atr_percent"),
+                    "vwap": t.get("vwap"),
+                    "trend": t.get("trend"),
+                    "signal": t.get("signal"),
+                    "score": t.get("score"),
+                    "dealer_posture": t.get("dealer_posture"),
+                    "net_gex_total": round(t.get("net_gex_total", 0.0), 3) if t.get("net_gex_total") is not None else 0.0,
+                    "fib_forecast": t.get("fib_forecast"),
+                    "note": t.get("note"),
+                })
+    return slim_tickers
+
+
 @app.post("/api/chat")
 def chat_endpoint(req: ChatRequest):
     """Primary chat route. Auto-injects live GLOBAL_STATE as DATA_PACKET before each user message."""
@@ -671,37 +709,7 @@ def chat_endpoint(req: ChatRequest):
         # 3. Optional Enrichment & Non-Authoritative Telemetry Assembly
         try:
             # Slim tickers — optional market feed telemetry
-            slim_tickers = []
-            raw_tickers = live_state.get("tickers")
-            if isinstance(raw_tickers, list):
-                for t in raw_tickers:
-                    if isinstance(t, dict):
-                        slim_tickers.append({
-                            "ticker": t.get("ticker"),
-                            "price": t.get("price"),
-                            "price_validity": t.get("price_validity", "UNAVAILABLE"),
-                            "freshness": t.get("freshness", "UNAVAILABLE"),
-                            "price_source": t.get("price_source"),
-                            "observation_time": t.get("observation_time"),
-                            "retrieval_time": t.get("retrieval_time"),
-                            "session_change_pct": t.get("session_change_pct"),
-                            "gap_percent": t.get("gap_percent"),
-                            "rsi": t.get("rsi"),
-                            "macd": t.get("macd", 0.0),
-                            "macd_signal": t.get("macd_signal", 0.0),
-                            "macd_hist": t.get("macd_hist", 0.0),
-                            "macd_slope": t.get("macd_slope", "EXPANDING_POSITIVE"),
-                            "macd_status": t.get("macd_status", "NEUTRAL"),
-                            "atr_percent": t.get("atr_percent"),
-                            "vwap": t.get("vwap"),
-                            "trend": t.get("trend"),
-                            "signal": t.get("signal"),
-                            "score": t.get("score"),
-                            "dealer_posture": t.get("dealer_posture"),
-                            "net_gex_total": round(t.get("net_gex_total", 0.0), 3) if t.get("net_gex_total") is not None else 0.0,
-                            "fib_forecast": t.get("fib_forecast"),
-                            "note": t.get("note"),
-                        })
+            slim_tickers = assemble_slim_tickers(live_state.get("tickers"))
 
             # Load trade lessons via persistence service (optional enrichment)
             trade_lessons = live_state.get("trade_lessons", [])
