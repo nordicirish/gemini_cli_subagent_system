@@ -153,13 +153,29 @@ These safeguards are mandatory and must not be described as overridable by ordin
 
 Production deployment, database initialisation or migration (`context/gem.db`, `cache/market_data.db`), data import, destructive actions, credential changes, cloud synchronisation (`sync_to_gdrive.py`), broker integrations, and automated order placement require separate explicit owner authorisation.
 
-## BASELINE AND VERIFICATION TESTING
+## BASELINE AND VERIFICATION TESTING & RISK-BASED TEST EXECUTION POLICY
 
 The repository-standard test runner is Python's standard library `unittest`:
 ```bash
 python -m unittest discover tests
 ```
 Do not mandate or install `pytest` or introduce external test dependencies. Baseline tests must be executed before code changes, and pre-existing failures must be reported transparently rather than silently modified. Targeted tests for authorised changes, `python -m compileall -q python tests`, and `python -m pip check` must be run where relevant.
+
+### RISK-BASED TEST EXECUTION POLICY
+
+Every implementation and remediation prompt must define an explicit test execution plan proportionate to the scope and risk of the authorised changes.
+
+Requirements:
+
+1. Run all relevant targeted tests and regression tests for modified functionality.
+2. Add tests for new requirements, identified defects and relevant failure paths.
+3. Run integration tests where shared interfaces, state, concurrency or component interactions are affected.
+4. Require the full relevant test suite for cross-cutting changes, architectural changes, financial integrity, security-sensitive changes and final stage remediation where interactions could introduce regressions.
+5. Do not require the entire repository test suite for every isolated, low-risk change unless repository instructions or the authorised specification require it.
+6. Never silently skip a required test. Report every test not run and the reason.
+7. Clearly distinguish agent-reported test results from independently verified results.
+8. Passing tests alone do not establish implementation correctness or governance compliance. ChatGPT must independently review implementation against the authorised specification and current repository instructions.
+9. Prompts must specify exact test commands and expected coverage wherever these can be established. If they cannot be established, the implementer must inspect the repository's existing test configuration and follow its instructions rather than inventing commands.
 
 ## ARCHITECTURAL PRINCIPLES
 

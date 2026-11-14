@@ -679,7 +679,7 @@ class BackgroundResultApplicator:
                         scout_cache_target[r.key.target] = {
                             "tickers": r.data,
                             "cached_at": time.time(),
-                            "timestamp": r.obs_time or time.time()
+                            "timestamp": r.obs_time if r.obs_time is not None else None
                         }
                         if isinstance(r.data, list):
                             for t in r.data:

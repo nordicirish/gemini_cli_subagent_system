@@ -14,6 +14,7 @@ Tests all mandatory requirements and negative tests:
 from __future__ import annotations
 
 import collections.abc
+import contextlib
 import os
 import queue
 import signal
@@ -52,7 +53,41 @@ from fetch_stocks import (
     query_gemini_news_grounding,
     get_background_coordinator,
     apply_background_intelligence_results,
+    enqueue_scout_discovery,
+    enqueue_news_grounding,
 )
+
+
+class IsolatedTestCoordinator(BackgroundIntelligenceCoordinator):
+    """Isolated coordinator for unit testing that does not spawn background worker threads."""
+    def _start_workers(self) -> None:
+        # Explicitly do NOT start any background worker threads
+        pass
+
+
+@contextlib.contextmanager
+def isolated_coordinator_context():
+    """
+    Context manager fixture that substitutes an IsolatedTestCoordinator (0 worker threads)
+    for fetch_stocks.BACKGROUND_COORDINATOR, patches raw AI execution functions,
+    and guarantees zero background jobs remain pending upon exit.
+    """
+    import fetch_stocks
+    dummy_coord = IsolatedTestCoordinator(max_workers=1, max_queue_size=50)
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(patch.object(fetch_stocks, "BACKGROUND_COORDINATOR", dummy_coord))
+        mock_scout_raw = stack.enter_context(patch.object(fetch_stocks, "_execute_scout_discovery_raw"))
+        mock_grounding_raw = stack.enter_context(patch.object(fetch_stocks, "_execute_news_grounding_raw"))
+        mock_runner = stack.enter_context(patch("agent_framework.AntigravityAgentRunner.run_prompt"))
+        if "python.fetch_stocks" in sys.modules:
+            p_fs = sys.modules["python.fetch_stocks"]
+            stack.enter_context(patch.object(p_fs, "BACKGROUND_COORDINATOR", dummy_coord))
+            stack.enter_context(patch.object(p_fs, "_execute_scout_discovery_raw", mock_scout_raw))
+            stack.enter_context(patch.object(p_fs, "_execute_news_grounding_raw", mock_grounding_raw))
+        try:
+            yield dummy_coord, mock_scout_raw, mock_grounding_raw, mock_runner
+        finally:
+            dummy_coord.shutdown(timeout=0.0)
 
 
 class TestStrictTimestampValidation(unittest.TestCase):
@@ -847,28 +882,62 @@ class TestStage21RemediationRequirements(unittest.TestCase):
         self.assertNotIn("GOOG", g)
 
     def test_18_production_grounding_integration_preserves_timestamp_semantics(self):
-        from python.fetch_stocks import enqueue_news_grounding, get_background_coordinator
-        coord = get_background_coordinator()
-        accepted, item = enqueue_news_grounding("AAPL", obs_time="2026-11-14T19:00:00Z")
-        self.assertTrue(accepted)
-        self.assertEqual(item.obs_time, "2026-11-14T19:00:00Z")
-        self.assertIsInstance(item.enqueued_time, float)
+        with isolated_coordinator_context() as (dummy, mock_scout_raw, mock_grounding_raw, mock_runner):
+            from fetch_stocks import enqueue_news_grounding
+            t0 = time.monotonic()
+            accepted, item = enqueue_news_grounding("AAPL", obs_time="2026-11-14T19:00:00Z")
+            t1 = time.monotonic()
+            self.assertTrue(accepted)
+            self.assertEqual(item.obs_time, "2026-11-14T19:00:00Z")
+            self.assertIsInstance(item.enqueued_time, float)
+            self.assertTrue(t0 <= item.enqueued_time <= t1)
 
-        accepted2, item2 = enqueue_news_grounding("NVDA", obs_time=None)
-        self.assertTrue(accepted2)
-        self.assertIsNone(item2.obs_time)
+            t2 = time.monotonic()
+            accepted2, item2 = enqueue_news_grounding("NVDA", obs_time=None)
+            t3 = time.monotonic()
+            self.assertTrue(accepted2)
+            self.assertIsNone(item2.obs_time)
+            self.assertIsInstance(item2.enqueued_time, float)
+            self.assertTrue(t2 <= item2.enqueued_time <= t3)
+
+            # Assert no worker threads started and no AI functions run
+            self.assertEqual(len(dummy._workers), 0)
+            mock_grounding_raw.assert_not_called()
+            mock_scout_raw.assert_not_called()
+            mock_runner.assert_not_called()
+
+        self.assertEqual(dummy.pending_count(), 0)
+        self.assertEqual(dummy.total_work_count(), 0)
+        self.assertEqual(get_background_coordinator().pending_count(), 0)
 
     def test_19_production_scout_integration_preserves_timestamp_semantics(self):
-        from python.fetch_stocks import enqueue_scout_discovery, get_background_coordinator
-        coord = get_background_coordinator()
-        accepted, item = enqueue_scout_discovery("Technology", obs_time="2026-11-14T19:00:00Z")
-        self.assertTrue(accepted)
-        self.assertEqual(item.obs_time, "2026-11-14T19:00:00Z")
-        self.assertIsInstance(item.enqueued_time, float)
+        with isolated_coordinator_context() as (dummy, mock_scout_raw, mock_grounding_raw, mock_runner):
+            from fetch_stocks import enqueue_scout_discovery
+            t0 = time.monotonic()
+            accepted, item = enqueue_scout_discovery("Technology", obs_time="2026-11-14T19:00:00Z")
+            t1 = time.monotonic()
+            self.assertTrue(accepted)
+            self.assertEqual(item.obs_time, "2026-11-14T19:00:00Z")
+            self.assertIsInstance(item.enqueued_time, float)
+            self.assertTrue(t0 <= item.enqueued_time <= t1)
 
-        accepted2, item2 = enqueue_scout_discovery("Healthcare", obs_time=None)
-        self.assertTrue(accepted2)
-        self.assertIsNone(item2.obs_time)
+            t2 = time.monotonic()
+            accepted2, item2 = enqueue_scout_discovery("Healthcare", obs_time=None)
+            t3 = time.monotonic()
+            self.assertTrue(accepted2)
+            self.assertIsNone(item2.obs_time)
+            self.assertIsInstance(item2.enqueued_time, float)
+            self.assertTrue(t2 <= item2.enqueued_time <= t3)
+
+            # Assert no worker threads started and no AI functions run
+            self.assertEqual(len(dummy._workers), 0)
+            mock_scout_raw.assert_not_called()
+            mock_grounding_raw.assert_not_called()
+            mock_runner.assert_not_called()
+
+        self.assertEqual(dummy.pending_count(), 0)
+        self.assertEqual(dummy.total_work_count(), 0)
+        self.assertEqual(get_background_coordinator().pending_count(), 0)
 
     def test_20_newer_work_issued_between_validation_and_publication_prevents_older(self):
         applicator = BackgroundResultApplicator()
@@ -1108,19 +1177,49 @@ class TestStage21FinalCorrectnessRequirements(unittest.TestCase):
 
     def test_08_scout_discovery_enqueue_time_never_represented_as_source_observation_time(self):
         """8. Scout discovery enqueue time is never represented as source observation time."""
-        from fetch_stocks import enqueue_scout_discovery
-        accepted, item = enqueue_scout_discovery("Technology", obs_time=None)
-        self.assertTrue(accepted)
-        self.assertIsNone(item.obs_time)
-        self.assertIsInstance(item.enqueued_time, float)
+        with isolated_coordinator_context() as (dummy, mock_scout_raw, mock_grounding_raw, mock_runner):
+            from fetch_stocks import enqueue_scout_discovery
+            t0 = time.monotonic()
+            accepted, item = enqueue_scout_discovery("Technology", obs_time=None)
+            t1 = time.monotonic()
+            self.assertTrue(accepted)
+            self.assertIsNone(item.obs_time)
+            self.assertIsInstance(item.enqueued_time, float)
+            self.assertTrue(t0 <= item.enqueued_time <= t1)
+            self.assertNotEqual(item.obs_time, item.enqueued_time)
+
+            # Assert no worker threads started and no AI functions run
+            self.assertEqual(len(dummy._workers), 0)
+            mock_scout_raw.assert_not_called()
+            mock_grounding_raw.assert_not_called()
+            mock_runner.assert_not_called()
+
+        self.assertEqual(dummy.pending_count(), 0)
+        self.assertEqual(dummy.total_work_count(), 0)
+        self.assertEqual(get_background_coordinator().pending_count(), 0)
 
     def test_09_news_grounding_enqueue_time_never_represented_as_source_observation_time(self):
         """9. News grounding enqueue time is never represented as source observation time."""
-        from fetch_stocks import enqueue_news_grounding
-        accepted, item = enqueue_news_grounding("AAPL", obs_time=None)
-        self.assertTrue(accepted)
-        self.assertIsNone(item.obs_time)
-        self.assertIsInstance(item.enqueued_time, float)
+        with isolated_coordinator_context() as (dummy, mock_scout_raw, mock_grounding_raw, mock_runner):
+            from fetch_stocks import enqueue_news_grounding
+            t0 = time.monotonic()
+            accepted, item = enqueue_news_grounding("AAPL", obs_time=None)
+            t1 = time.monotonic()
+            self.assertTrue(accepted)
+            self.assertIsNone(item.obs_time)
+            self.assertIsInstance(item.enqueued_time, float)
+            self.assertTrue(t0 <= item.enqueued_time <= t1)
+            self.assertNotEqual(item.obs_time, item.enqueued_time)
+
+            # Assert no worker threads started and no AI functions run
+            self.assertEqual(len(dummy._workers), 0)
+            mock_grounding_raw.assert_not_called()
+            mock_scout_raw.assert_not_called()
+            mock_runner.assert_not_called()
+
+        self.assertEqual(dummy.pending_count(), 0)
+        self.assertEqual(dummy.total_work_count(), 0)
+        self.assertEqual(get_background_coordinator().pending_count(), 0)
 
     def test_10_daemon_grounding_scheduling_does_not_fabricate_source_timestamps(self):
         """10. Daemon grounding scheduling does not fabricate source timestamps."""
@@ -1132,19 +1231,45 @@ class TestStage21FinalCorrectnessRequirements(unittest.TestCase):
 
     def test_11_generated_cache_timestamps_clearly_distinct_from_source_observation_timestamps(self):
         """11. Generated cache timestamps are clearly distinct from source observation timestamps."""
-        from fetch_stocks import DYNAMIC_SCOUT_CACHE, DYNAMIC_SCOUT_CACHE_LOCK
-        with DYNAMIC_SCOUT_CACHE_LOCK:
-            DYNAMIC_SCOUT_CACHE["TECHNOLOGY"] = {
-                "tickers": ["AAPL"],
-                "timestamp": 1000.0,
-                "cached_at": 2000.0,
-            }
-            self.assertIn("cached_at", DYNAMIC_SCOUT_CACHE["TECHNOLOGY"])
-            self.assertIn("timestamp", DYNAMIC_SCOUT_CACHE["TECHNOLOGY"])
-            self.assertNotEqual(
-                DYNAMIC_SCOUT_CACHE["TECHNOLOGY"]["timestamp"],
-                DYNAMIC_SCOUT_CACHE["TECHNOLOGY"]["cached_at"],
-            )
+        applicator = BackgroundResultApplicator()
+        scout_cache = {}
+        scout_map = {}
+
+        # 1. Scout result with valid source timestamp retains that timestamp
+        res_with_ts = WorkResult(
+            key=WorkKey("scout", "SEMICONDUCTORS"),
+            sequence=1,
+            obs_time="2026-11-14T19:00:00Z",
+            data=["NVDA", "TSM"],
+        )
+        t_before_1 = time.time()
+        applicator.apply_results([res_with_ts], {}, scout_cache, scout_map)
+        t_after_1 = time.time()
+
+        entry_1 = scout_cache["SEMICONDUCTORS"]
+        self.assertEqual(entry_1["timestamp"], "2026-11-14T19:00:00Z")
+        self.assertIsInstance(entry_1["cached_at"], float)
+        self.assertTrue(t_before_1 <= entry_1["cached_at"] <= t_after_1)
+        self.assertNotEqual(entry_1["timestamp"], entry_1["cached_at"])
+        self.assertEqual(entry_1["tickers"], ["NVDA", "TSM"])
+
+        # 2. Scout result without source timestamp receives None (never fabricated timestamp)
+        res_without_ts = WorkResult(
+            key=WorkKey("scout", "ENERGY"),
+            sequence=1,
+            obs_time=None,
+            data=["XOM", "CVX"],
+        )
+        t_before_2 = time.time()
+        applicator.apply_results([res_without_ts], {}, scout_cache, scout_map)
+        t_after_2 = time.time()
+
+        entry_2 = scout_cache["ENERGY"]
+        self.assertIsNone(entry_2["timestamp"], "Absence of source timestamp must be recorded as None")
+        self.assertIsInstance(entry_2["cached_at"], float)
+        self.assertTrue(t_before_2 <= entry_2["cached_at"] <= t_after_2)
+        self.assertNotEqual(entry_2["timestamp"], entry_2["cached_at"])
+        self.assertEqual(entry_2["tickers"], ["XOM", "CVX"])
 
     def test_12_windows_normal_enumeration_exhaustion_accepted(self):
         """12. Windows normal enumeration exhaustion is accepted (GetLastError() == 18)."""
@@ -1216,6 +1341,95 @@ class TestStage21FinalCorrectnessRequirements(unittest.TestCase):
         self.assertEqual(coord.pending_count(), 0)
         self.assertEqual(coord.in_flight_count(), 0)
         self.assertTrue(coord.shutdown(timeout=1.0))
+
+    def test_18_scout_cache_hit_uses_cached_at(self):
+        """18. Scout cache hit uses cached_at (< 4h TTL) and returns tickers immediately without enqueuing."""
+        from fetch_stocks import _get_dynamic_scout_tickers, DYNAMIC_SCOUT_CACHE, DYNAMIC_SCOUT_CACHE_LOCK
+        with isolated_coordinator_context() as (dummy, mock_scout_raw, mock_grounding_raw, mock_runner):
+            with DYNAMIC_SCOUT_CACHE_LOCK:
+                DYNAMIC_SCOUT_CACHE["TECH_HIT"] = {
+                    "tickers": ["AAPL", "MSFT"],
+                    "cached_at": time.time() - 300,  # 5 minutes old (< 14400s)
+                    "timestamp": None,
+                }
+            try:
+                tickers = _get_dynamic_scout_tickers("TECH_HIT")
+                self.assertEqual(tickers, ["AAPL", "MSFT"])
+                self.assertEqual(dummy.pending_count(), 0)
+                mock_scout_raw.assert_not_called()
+            finally:
+                with DYNAMIC_SCOUT_CACHE_LOCK:
+                    DYNAMIC_SCOUT_CACHE.pop("TECH_HIT", None)
+
+    def test_19_scout_cache_ttl_expiration_uses_cached_at(self):
+        """19. Scout cache expired by cached_at (>= 4h) enqueues discovery and returns fallback without blocking."""
+        from fetch_stocks import _get_dynamic_scout_tickers, DYNAMIC_SCOUT_CACHE, DYNAMIC_SCOUT_CACHE_LOCK
+        with isolated_coordinator_context() as (dummy, mock_scout_raw, mock_grounding_raw, mock_runner):
+            with DYNAMIC_SCOUT_CACHE_LOCK:
+                DYNAMIC_SCOUT_CACHE["TECH_EXP"] = {
+                    "tickers": ["STALE1", "STALE2"],
+                    "cached_at": time.time() - 15000,  # > 4h (14400s)
+                    "timestamp": None,
+                }
+            try:
+                tickers = _get_dynamic_scout_tickers("TECH_EXP")
+                # Expired: enqueues background discovery with obs_time=None
+                self.assertEqual(dummy.pending_count(), 1)
+                item = dummy._queue.queue[0]
+                self.assertEqual(item.key.target, "TECH_EXP")
+                self.assertIsNone(item.obs_time)
+                mock_scout_raw.assert_not_called()
+            finally:
+                with DYNAMIC_SCOUT_CACHE_LOCK:
+                    DYNAMIC_SCOUT_CACHE.pop("TECH_EXP", None)
+
+    def test_20_scout_cache_safe_fallback_when_cached_at_missing_or_none_or_string(self):
+        """20. Scout cache TTL check handles missing cached_at, None timestamps, and strings without TypeError."""
+        from fetch_stocks import _get_dynamic_scout_tickers, DYNAMIC_SCOUT_CACHE, DYNAMIC_SCOUT_CACHE_LOCK
+        # Case A: cached_at is missing, timestamp is None -> must not crash, treated as expired
+        with isolated_coordinator_context() as (dummy1, mock_scout_raw1, _, _):
+            with DYNAMIC_SCOUT_CACHE_LOCK:
+                DYNAMIC_SCOUT_CACHE["FALLBACK_NONE"] = {
+                    "tickers": ["OLD"],
+                    "timestamp": None,
+                }
+            try:
+                _get_dynamic_scout_tickers("FALLBACK_NONE")
+                self.assertEqual(dummy1.pending_count(), 1)
+            finally:
+                with DYNAMIC_SCOUT_CACHE_LOCK:
+                    DYNAMIC_SCOUT_CACHE.pop("FALLBACK_NONE", None)
+
+        # Case B: cached_at is None, timestamp is a string -> must not crash
+        with isolated_coordinator_context() as (dummy2, mock_scout_raw2, _, _):
+            with DYNAMIC_SCOUT_CACHE_LOCK:
+                DYNAMIC_SCOUT_CACHE["FALLBACK_STR"] = {
+                    "tickers": ["OLD"],
+                    "cached_at": None,
+                    "timestamp": "2020-01-01T00:00:00Z",
+                }
+            try:
+                _get_dynamic_scout_tickers("FALLBACK_STR")
+                self.assertEqual(dummy2.pending_count(), 1)
+            finally:
+                with DYNAMIC_SCOUT_CACHE_LOCK:
+                    DYNAMIC_SCOUT_CACHE.pop("FALLBACK_STR", None)
+
+        # Case C: cached_at is missing, timestamp is recent float -> cache hit
+        with isolated_coordinator_context() as (dummy3, _, _, _):
+            recent = time.time() - 60
+            with DYNAMIC_SCOUT_CACHE_LOCK:
+                DYNAMIC_SCOUT_CACHE["FALLBACK_RECENT"] = {
+                    "tickers": ["RECENT_TICKER"],
+                    "timestamp": recent,
+                }
+            try:
+                res = _get_dynamic_scout_tickers("FALLBACK_RECENT")
+                self.assertEqual(res, ["RECENT_TICKER"])
+                self.assertEqual(dummy3.pending_count(), 0)
+            finally:
+                with DYNAMIC_SCOUT_CACHE_LOCK:
+                    DYNAMIC_SCOUT_CACHE.pop("FALLBACK_RECENT", None)
 
 
 if __name__ == "__main__":
