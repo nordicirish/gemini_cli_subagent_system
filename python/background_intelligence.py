@@ -12,6 +12,7 @@ Stage 2.1:
 
 from __future__ import annotations
 
+import contextlib
 import enum
 import logging
 import queue
@@ -20,7 +21,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 logger = logging.getLogger("background_intelligence")
 
@@ -110,6 +111,34 @@ class WorkItem:
     cancel_event: threading.Event = field(default_factory=threading.Event)
     result: Any = None
     error: Optional[str] = None
+    child_sequences: Dict[WorkKey, int] = field(default_factory=dict)
+    result_key: Optional[WorkKey] = None
+
+
+@dataclass(frozen=True)
+class ObservedResult:
+    """
+    Carries a worker-discovered payload and its actual source observation timestamp
+    (strict UTC ISO-8601 string) without substituting enqueue, start, completion,
+    retrieval, or local wall-clock time.
+    """
+    data: Any
+    obs_time: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ChildObservedResult:
+    """Per-key observation produced within a batched worker execution."""
+    key: WorkKey
+    data: Any = None
+    obs_time: Optional[str] = None
+    error: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class BatchObservedResult:
+    """Container for batched worker execution yielding independent per-key results."""
+    items: Tuple[ChildObservedResult, ...]
 
 
 @dataclass(frozen=True)
@@ -280,11 +309,13 @@ class BackgroundIntelligenceCoordinator:
         fn: Callable[..., Any] = None,
         args: tuple = (),
         kwargs: Optional[dict] = None,
-        force: bool = False
+        force: bool = False,
+        child_keys: Optional[Sequence[WorkKey]] = None,
+        result_key: Optional[WorkKey] = None,
     ) -> Tuple[bool, Optional[WorkItem]]:
         """
         Enqueues work if not already queued, in-flight, or in cooldown.
-        Atomically assigns sequence under per-key lock.
+        Atomically assigns sequence (and optional per-child/result key sequences) under per-key locks.
         Separates source observation timestamp from monotonic enqueue time.
         Returns (accepted, work_item).
         """
@@ -297,14 +328,33 @@ class BackgroundIntelligenceCoordinator:
             validated_obs_time = validate_utc_iso8601_timestamp(obs_time)
         kwargs = kwargs or {}
 
+        extra_keys: List[WorkKey] = []
+        seen_extra = set()
+        if result_key is not None:
+            if not isinstance(result_key, WorkKey):
+                raise ValueError("result_key must be a WorkKey instance")
+            extra_keys.append(result_key)
+            seen_extra.add(result_key)
+        if child_keys is not None:
+            for ck in child_keys:
+                if not isinstance(ck, WorkKey):
+                    raise ValueError("child_keys must contain WorkKey instances")
+                if ck not in seen_extra:
+                    extra_keys.append(ck)
+                    seen_extra.add(ck)
+
         # 1. Cooldown check (before touching queue)
         if not force and self.cooldown_tracker.is_in_cooldown(key):
             remaining = self.cooldown_tracker.get_cooldown_remaining(key)
             logger.info(f"[BackgroundIntelligence] {key} skipped: in cooldown for {remaining:.1f}s")
             return False, None
 
-        key_lock = self.get_key_lock(key)
-        with key_lock:
+        # Acquire all relevant key locks in deterministic order before self._lock
+        lock_keys = sorted({key, *extra_keys}, key=lambda k: (k.work_type, k.target))
+        with contextlib.ExitStack() as lock_stack:
+            for lk in lock_keys:
+                lock_stack.enter_context(self.get_key_lock(lk))
+
             with self._lock:
                 if self._shutdown_event.is_set():
                     return False, None
@@ -338,10 +388,14 @@ class BackgroundIntelligenceCoordinator:
                     )
                     return False, None
 
-                # 5. Monotonic sequence assignment
+                # 5. Monotonic sequence assignment (staged, committed upon successful queue put)
                 seq = self._sequences.get(key, 0) + 1
-                self._sequences[key] = seq
-                self._latest_issued_sequence[key] = seq
+                child_sequences: Dict[WorkKey, int] = {}
+                for ck in extra_keys:
+                    if ck == key:
+                        child_sequences[ck] = seq
+                    else:
+                        child_sequences[ck] = self._sequences.get(ck, 0) + 1
 
                 item = WorkItem(
                     key=key,
@@ -351,7 +405,9 @@ class BackgroundIntelligenceCoordinator:
                     args=args,
                     kwargs=kwargs,
                     status=WorkStatus.QUEUED,
-                    enqueued_time=self.clock_fn()
+                    enqueued_time=self.clock_fn(),
+                    child_sequences=child_sequences,
+                    result_key=result_key,
                 )
                 self._pending_keys[key] = item
 
@@ -362,7 +418,28 @@ class BackgroundIntelligenceCoordinator:
                     logger.warning(f"[BackgroundIntelligence] Queue full on put_nowait for {key}")
                     return False, None
 
+                self._sequences[key] = seq
+                self._latest_issued_sequence[key] = seq
+                for ck, c_seq in child_sequences.items():
+                    if ck != key:
+                        self._sequences[ck] = c_seq
+                        self._latest_issued_sequence[ck] = c_seq
+
                 return True, item
+
+    def _enqueue_result_handoff(self, result: WorkResult) -> None:
+        """Non-blocking handoff of a single WorkResult into bounded queue or recoverable overflow store."""
+        try:
+            self._results_queue.put_nowait(result)
+        except queue.Full:
+            with self._lock:
+                existing = self._overflow_results.get(result.key)
+                if existing is None or result.sequence >= existing.sequence:
+                    self._overflow_results[result.key] = result
+                logger.warning(
+                    f"[BackgroundIntelligence] Result handoff capacity reached ({self.max_results_size}). "
+                    f"Preserving recoverable result for {result.key} sequence={result.sequence} in overflow store."
+                )
 
     def _worker_loop(self) -> None:
         while not self._shutdown_event.is_set():
@@ -432,27 +509,70 @@ class BackgroundIntelligenceCoordinator:
 
                 # Produce result for coordinator handoff if not cancelled
                 if item.status != WorkStatus.CANCELLED:
-                    result = WorkResult(
-                        key=item.key,
-                        sequence=item.sequence,
-                        obs_time=item.obs_time,
-                        data=data,
-                        error=err_msg,
-                        completed_time=self.clock_fn(),
-                        enqueued_time=item.enqueued_time
-                    )
-                    try:
-                        self._results_queue.put_nowait(result)
-                    except queue.Full:
-                        # Bounded handoff capacity reached: retain in recoverable overflow store
-                        with self._lock:
-                            existing = self._overflow_results.get(item.key)
-                            if existing is None or result.sequence >= existing.sequence:
-                                self._overflow_results[item.key] = result
-                            logger.warning(
-                                f"[BackgroundIntelligence] Result handoff capacity reached ({self.max_results_size}). "
-                                f"Preserving recoverable result for {item.key} sequence={result.sequence} in overflow store."
+                    completed_ts = self.clock_fn()
+                    if err_msg is None and isinstance(data, BatchObservedResult):
+                        for child in data.items:
+                            child_seq = item.child_sequences.get(child.key)
+                            if child_seq is None:
+                                self._enqueue_result_handoff(
+                                    WorkResult(
+                                        key=child.key,
+                                        sequence=0,
+                                        obs_time=None,
+                                        data=None,
+                                        error=f"Unregistered batch child key {child.key}",
+                                        completed_time=completed_ts,
+                                        enqueued_time=item.enqueued_time,
+                                    )
+                                )
+                            else:
+                                self._enqueue_result_handoff(
+                                    WorkResult(
+                                        key=child.key,
+                                        sequence=child_seq,
+                                        obs_time=child.obs_time,
+                                        data=child.data,
+                                        error=child.error,
+                                        completed_time=completed_ts,
+                                        enqueued_time=item.enqueued_time,
+                                    )
+                                )
+                    elif err_msg is None and isinstance(data, ObservedResult):
+                        out_key = item.result_key if item.result_key is not None else item.key
+                        out_seq = (
+                            item.child_sequences.get(out_key, item.sequence)
+                            if item.result_key is not None
+                            else item.sequence
+                        )
+                        self._enqueue_result_handoff(
+                            WorkResult(
+                                key=out_key,
+                                sequence=out_seq,
+                                obs_time=data.obs_time,
+                                data=data.data,
+                                error=None,
+                                completed_time=completed_ts,
+                                enqueued_time=item.enqueued_time,
                             )
+                        )
+                    else:
+                        out_key = item.result_key if item.result_key is not None else item.key
+                        out_seq = (
+                            item.child_sequences.get(out_key, item.sequence)
+                            if item.result_key is not None
+                            else item.sequence
+                        )
+                        self._enqueue_result_handoff(
+                            WorkResult(
+                                key=out_key,
+                                sequence=out_seq,
+                                obs_time=item.obs_time,
+                                data=data,
+                                error=err_msg,
+                                completed_time=completed_ts,
+                                enqueued_time=item.enqueued_time,
+                            )
+                        )
 
                 self._queue.task_done()
 

@@ -31,7 +31,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 from background_intelligence import (
     BackgroundIntelligenceCoordinator,
     BackgroundResultApplicator,
+    BatchObservedResult,
+    ChildObservedResult,
     FailureCooldownTracker,
+    ObservedResult,
     WorkItem,
     WorkKey,
     WorkResult,
@@ -2158,6 +2161,100 @@ class TestMarketDataResultApplication(unittest.TestCase):
         self.assertTrue(all(a[1] for a in audit))
         self.assertEqual([r.key.work_type for r in self.published], ["grounding", "market_data"])
         self.assertEqual(grounding["AAPL"], {"h": 1})
+
+    def test_observed_result_carries_worker_discovered_timestamp(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=1)
+        applicator = BackgroundResultApplicator(coordinator=coord)
+        try:
+            def worker():
+                return ObservedResult(data={"price": "188.50"}, obs_time=T2)
+
+            ok, item = coord.enqueue(MD, "AAPL", obs_time=None, fn=worker)
+            self.assertTrue(ok)
+            self.assertTrue(item.event.wait(timeout=3.0))
+            results = coord.drain_results()
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].obs_time, T2)
+            self.assertEqual(results[0].data, {"price": "188.50"})
+            audit = applicator.apply_results(results, {}, {}, {}, on_publish=self._publish)
+            self.assertEqual(len(audit), 1)
+            self.assertTrue(audit[0][1])
+            self.assertEqual(applicator.get_last_applied(WorkKey(MD, "AAPL")), (1, T2))
+        finally:
+            coord.shutdown()
+
+    def test_batch_observed_result_independent_per_child_sequences_and_timestamps(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=1)
+        applicator = BackgroundResultApplicator(coordinator=coord)
+        try:
+            k_aapl = WorkKey(MD, "QUOTE:AAPL")
+            k_nvda = WorkKey(MD, "QUOTE:NVDA")
+            k_msft = WorkKey(MD, "QUOTE:MSFT")
+
+            def batch_one():
+                return BatchObservedResult(items=(
+                    ChildObservedResult(key=k_aapl, data={"p": "100"}, obs_time=T1),
+                    ChildObservedResult(key=k_nvda, data={"p": "200"}, obs_time="2026-11-14T19:00:00"),  # naive -> fail closed
+                ))
+
+            def batch_two():
+                return BatchObservedResult(items=(
+                    ChildObservedResult(key=k_aapl, data={"p": "101"}, obs_time=T2),
+                    ChildObservedResult(key=k_msft, data={"p": "300"}, obs_time=T2),
+                ))
+
+            ok1, item1 = coord.enqueue(MD, "BATCH:1", fn=batch_one, child_keys=(k_aapl, k_nvda))
+            ok2, item2 = coord.enqueue(MD, "BATCH:2", fn=batch_two, child_keys=(k_aapl, k_msft))
+            self.assertTrue(ok1 and ok2)
+            self.assertEqual(item1.child_sequences[k_aapl], 1)
+            self.assertEqual(item2.child_sequences[k_aapl], 2)
+            self.assertEqual(coord.get_latest_issued_sequence(k_aapl), 2)
+            self.assertTrue(item1.event.wait(timeout=3.0))
+            self.assertTrue(item2.event.wait(timeout=3.0))
+
+            results = coord.drain_results()
+            audit = applicator.apply_results(results, {}, {}, {}, on_publish=self._publish)
+            audit_map = {(r.key, r.sequence): ok for r, ok, _ in audit}
+
+            # Batch 1 AAPL (seq 1) is superseded by Batch 2 (seq 2); Batch 1 NVDA fails timestamp check
+            self.assertFalse(audit_map[(k_aapl, 1)])
+            self.assertFalse(audit_map[(k_nvda, 1)])
+            self.assertTrue(audit_map[(k_aapl, 2)])
+            self.assertTrue(audit_map[(k_msft, 1)])
+            self.assertEqual(
+                [(r.key.target, r.data) for r in self.published],
+                [("QUOTE:AAPL", {"p": "101"}), ("QUOTE:MSFT", {"p": "300"})],
+            )
+        finally:
+            coord.shutdown()
+
+    def test_result_key_shares_ordering_with_batch_child_keys(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=1)
+        applicator = BackgroundResultApplicator(coordinator=coord)
+        try:
+            k_aapl = WorkKey(MD, "QUOTE:AAPL")
+
+            def batch_fn():
+                return BatchObservedResult(items=(
+                    ChildObservedResult(key=k_aapl, data={"src": "batch"}, obs_time=T1),
+                ))
+
+            def fallback_fn():
+                return ObservedResult(data={"src": "fallback"}, obs_time=T2)
+
+            ok1, item1 = coord.enqueue(MD, "BATCH:A", fn=batch_fn, child_keys=(k_aapl,))
+            ok2, item2 = coord.enqueue(MD, "QUOTE_FALLBACK:AAPL", fn=fallback_fn, result_key=k_aapl)
+            self.assertTrue(ok1 and ok2)
+            self.assertTrue(item1.event.wait(timeout=3.0))
+            self.assertTrue(item2.event.wait(timeout=3.0))
+
+            audit = applicator.apply_results(coord.drain_results(), {}, {}, {}, on_publish=self._publish)
+            self.assertEqual(len(audit), 2)
+            self.assertFalse(audit[0][1])  # superseded batch seq 1
+            self.assertTrue(audit[1][1])   # fallback seq 2 applied
+            self.assertEqual(self.published[-1].data, {"src": "fallback"})
+        finally:
+            coord.shutdown()
 
 
 if __name__ == "__main__":
