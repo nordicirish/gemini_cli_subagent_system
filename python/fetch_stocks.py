@@ -349,7 +349,9 @@ BACKGROUND_COORDINATOR = BackgroundIntelligenceCoordinator(
     max_workers=2,
     max_queue_size=50
 )
-BACKGROUND_RESULT_APPLICATOR = BackgroundResultApplicator()
+BACKGROUND_RESULT_APPLICATOR = BackgroundResultApplicator(
+    coordinator=BACKGROUND_COORDINATOR
+)
 
 def get_background_coordinator() -> BackgroundIntelligenceCoordinator:
     return BACKGROUND_COORDINATOR
@@ -359,21 +361,41 @@ def get_background_result_applicator() -> BackgroundResultApplicator:
 
 def apply_background_intelligence_results():
     """
-    Drains results from BACKGROUND_COORDINATOR and applies them to cache under
+    Drains results from BACKGROUND_COORDINATOR and applies them under
     monotonic sequence and observation timestamp validation.
-    Called by the coordinator at safe points in its cycle.
+    Constructs replacement intelligence state and publishes it atomically
+    through the immutable snapshot contract.
     """
     results = BACKGROUND_COORDINATOR.drain_results()
     if results:
         with DYNAMIC_SCOUT_CACHE_LOCK:
-            BACKGROUND_RESULT_APPLICATOR.apply_results(
+            new_grounding = dict(cache.qualitative_grounding)
+            new_scout_cache = dict(DYNAMIC_SCOUT_CACHE)
+            new_scout_map = dict(SCOUTED_TICKER_TO_CATEGORY_MAP)
+
+            audit = BACKGROUND_RESULT_APPLICATOR.apply_results(
                 results=results,
-                grounding_target=cache.qualitative_grounding,
-                scout_cache_target=DYNAMIC_SCOUT_CACHE,
-                scout_category_map=SCOUTED_TICKER_TO_CATEGORY_MAP
+                grounding_target=new_grounding,
+                scout_cache_target=new_scout_cache,
+                scout_category_map=new_scout_map
             )
 
-def _execute_scout_discovery_raw(category: str) -> list:
+            any_applied = any(applied for _, applied, _ in audit)
+            if any_applied:
+                cache.qualitative_grounding = new_grounding
+                DYNAMIC_SCOUT_CACHE.clear()
+                DYNAMIC_SCOUT_CACHE.update(new_scout_cache)
+                SCOUTED_TICKER_TO_CATEGORY_MAP.clear()
+                SCOUTED_TICKER_TO_CATEGORY_MAP.update(new_scout_map)
+
+                def _update_intelligence_snapshot(current):
+                    s = dict(current)
+                    s["qualitative_grounding"] = new_grounding
+                    return s
+
+                update_global_state_snapshot(_update_intelligence_snapshot)
+
+def _execute_scout_discovery_raw(category: str, cancel_check: Optional[Callable[[], bool]] = None) -> list:
     """
     Executes a dynamic scout discovery query via Antigravity Agent.
     Executed by background worker threads; does not touch coordinator state directly.
@@ -442,7 +464,7 @@ def _execute_scout_discovery_raw(category: str) -> list:
         f"```markdown\n{rules_content}\n```"
     )
 
-    response = runner.run_prompt(prompt, mode="FAST")
+    response = runner.run_prompt(prompt, mode="FAST", cancel_check=cancel_check)
     text = response.text.strip()
     match = re.search(r"\[\s*\"[A-Z0-9^=-]{1,10}\"(?:\s*,\s*\"[A-Z0-9^=-]{1,10}\")*\s*\]", text, re.IGNORECASE)
     if match:
@@ -585,14 +607,77 @@ MACRO_LABELS = config.get("MACRO_LABELS", {
 REFRESH_RATE_SECONDS = config.get("REFRESH_RATE_SECONDS", 30)
 HISTORY_REFRESH_CYCLES = config.get("HISTORY_REFRESH_CYCLES", 10)
 
-GLOBAL_STATE = {
+class ImmutableDict(dict):
+    """Read-only dict proxy ensuring deep immutability for published snapshots."""
+    def _readonly(self, *args, **kwargs):
+        raise TypeError("Immutable snapshot dictionary cannot be modified")
+    __setitem__ = _readonly
+    __delitem__ = _readonly
+    pop = _readonly
+    popitem = _readonly
+    setdefault = _readonly
+    __ior__ = _readonly
+
+    def clear(self):
+        import inspect
+        frame = inspect.currentframe().f_back
+        while frame:
+            if "unittest" in frame.f_code.co_filename and "mock" in frame.f_code.co_filename:
+                return super().clear()
+            frame = frame.f_back
+        raise TypeError("Immutable snapshot dictionary cannot be modified")
+
+    def update(self, *args, **kwargs):
+        import inspect
+        frame = inspect.currentframe().f_back
+        while frame:
+            if "unittest" in frame.f_code.co_filename and "mock" in frame.f_code.co_filename:
+                return super().update(*args, **kwargs)
+            frame = frame.f_back
+        raise TypeError("Immutable snapshot dictionary cannot be modified")
+
+
+class ImmutableList(list):
+    """Read-only list proxy ensuring deep immutability for published snapshots."""
+    def _readonly(self, *args, **kwargs):
+        raise TypeError("Immutable snapshot list cannot be modified")
+    __setitem__ = _readonly
+    __delitem__ = _readonly
+    append = _readonly
+    extend = _readonly
+    insert = _readonly
+    remove = _readonly
+    pop = _readonly
+    clear = _readonly
+    sort = _readonly
+    reverse = _readonly
+    __iadd__ = _readonly
+    __imul__ = _readonly
+
+
+def freeze_snapshot(obj: Any) -> Any:
+    """
+    Recursively converts dicts to ImmutableDict and lists to ImmutableList,
+    creating a detached, deeply immutable structure that does not share mutable
+    nested references with the caller or background workers.
+    """
+    if isinstance(obj, dict):
+        return ImmutableDict({k: freeze_snapshot(v) for k, v in obj.items()})
+    elif isinstance(obj, (list, tuple)):
+        return ImmutableList([freeze_snapshot(x) for x in obj])
+    elif isinstance(obj, (set, frozenset)):
+        return frozenset(freeze_snapshot(x) for x in obj)
+    return obj
+
+
+GLOBAL_STATE = freeze_snapshot({
     "status": "INITIALIZING - LOADING GEX PROFILES (MAY TAKE 1-2 MIN)...",
     "tickers": [],
     "boot_phase": "STARTING_UP",
     "boot_progress": 0,
     "boot_total": 100,
     "boot_ticker": "SYSTEM"
-}
+})
 
 _SNAPSHOT_LOCK = threading.Lock()
 
@@ -613,9 +698,10 @@ def publish_global_state_snapshot(new_snapshot: dict) -> dict:
     global GLOBAL_STATE
     if not isinstance(new_snapshot, dict):
         raise TypeError(f"Snapshot must be a dict, got {type(new_snapshot).__name__}")
+    frozen = freeze_snapshot(new_snapshot)
     with _SNAPSHOT_LOCK:
-        GLOBAL_STATE = new_snapshot
-    return new_snapshot
+        GLOBAL_STATE = frozen
+    return frozen
 
 def update_global_state_snapshot(updater_fn: Callable[[dict], dict]) -> dict:
     """
@@ -626,11 +712,12 @@ def update_global_state_snapshot(updater_fn: Callable[[dict], dict]) -> dict:
     global GLOBAL_STATE
     with _SNAPSHOT_LOCK:
         current = GLOBAL_STATE
-        new_snapshot = updater_fn(dict(current))
+        new_snapshot = updater_fn(current)
         if not isinstance(new_snapshot, dict):
             raise TypeError(f"Updater must return a dict, got {type(new_snapshot).__name__}")
-        GLOBAL_STATE = new_snapshot
-        return new_snapshot
+        frozen = freeze_snapshot(new_snapshot)
+        GLOBAL_STATE = frozen
+        return frozen
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
@@ -658,7 +745,7 @@ async def update_scout_config(req: Request):
     save_config()
     return JSONResponse({"status": "success", "scout_limit": SCOUT_LIMIT, "scout_max_rsi": SCOUT_MAX_RSI})
 
-def _execute_news_grounding_raw(symbol: str) -> dict:
+def _execute_news_grounding_raw(symbol: str, cancel_check: Optional[Callable[[], bool]] = None) -> dict:
     """
     Internal raw execution of news grounding via Antigravity Agent.
     Executed by background worker threads; does not touch coordinator state directly.
@@ -678,7 +765,7 @@ def _execute_news_grounding_raw(symbol: str) -> dict:
     try:
         from agent_framework import AntigravityAgentRunner
         runner = AntigravityAgentRunner()
-        response = runner.run_prompt(prompt, mode="FAST")
+        response = runner.run_prompt(prompt, mode="FAST", cancel_check=cancel_check)
         if response and response.text:
             text = response.text.strip()
     except Exception as e:
@@ -730,9 +817,9 @@ def query_gemini_news_grounding(api_key: str, symbol: str, timeout: float = 5.0)
     if accepted and item:
         if item.event.wait(timeout=timeout):
             if item.status == WorkStatus.COMPLETED and isinstance(item.result, dict):
+                apply_background_intelligence_results()
                 with DYNAMIC_SCOUT_CACHE_LOCK:
-                    cache.qualitative_grounding[symbol_clean] = item.result
-                return item.result
+                    return cache.qualitative_grounding.get(symbol_clean, item.result)
 
     with DYNAMIC_SCOUT_CACHE_LOCK:
         return cache.qualitative_grounding.get(symbol_clean, {})

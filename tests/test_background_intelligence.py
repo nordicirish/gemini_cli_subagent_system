@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import queue
+import signal
 import subprocess
 import sys
 import threading
@@ -29,19 +30,27 @@ from background_intelligence import (
     BackgroundIntelligenceCoordinator,
     BackgroundResultApplicator,
     FailureCooldownTracker,
+    WorkItem,
     WorkKey,
     WorkResult,
     WorkStatus,
     WorkType,
     validate_utc_iso8601_timestamp,
+    parse_utc_iso8601_timestamp,
 )
-from agent_framework import AntigravityAgentRunner, _cleanup_subprocess
+from agent_framework import (
+    AntigravityAgentRunner,
+    _cleanup_subprocess,
+    SubprocessCleanupError,
+)
 from fetch_stocks import (
     get_global_state_snapshot,
     publish_global_state_snapshot,
     update_global_state_snapshot,
     _get_dynamic_scout_tickers,
     query_gemini_news_grounding,
+    get_background_coordinator,
+    apply_background_intelligence_results,
 )
 
 
@@ -59,8 +68,10 @@ class TestStrictTimestampValidation(unittest.TestCase):
         ts = "2026-11-14T19:00:00+00:00"
         self.assertEqual(validate_utc_iso8601_timestamp(ts), ts)
 
+    def test_ambiguous_neg_zero_offset_rejected(self):
         ts_neg_zero = "2026-11-14T19:00:00-00:00"
-        self.assertEqual(validate_utc_iso8601_timestamp(ts_neg_zero), ts_neg_zero)
+        with self.assertRaises(ValueError):
+            validate_utc_iso8601_timestamp(ts_neg_zero)
 
     def test_naive_timestamp_rejected_fail_closed(self):
         with self.assertRaises(ValueError):
@@ -306,6 +317,8 @@ class TestSubprocessLifecycleAndHardening(unittest.TestCase):
             hang_event.wait(timeout=2.0)
             return ("", "")
         mock_proc.communicate.side_effect = mock_comm
+        mock_proc.terminate.side_effect = lambda: hang_event.set()
+        mock_proc.kill.side_effect = lambda: hang_event.set()
         mock_popen.return_value = mock_proc
 
         runner = AntigravityAgentRunner(agy_path="agy")
@@ -331,6 +344,8 @@ class TestSubprocessLifecycleAndHardening(unittest.TestCase):
             hang_event.wait(timeout=2.0)
             return ("", "")
         mock_proc.communicate.side_effect = mock_comm
+        mock_proc.terminate.side_effect = lambda: hang_event.set()
+        mock_proc.kill.side_effect = lambda: hang_event.set()
         mock_popen.return_value = mock_proc
 
         is_cancelled = False
@@ -537,6 +552,391 @@ class TestMarketMonitoringIsolation(unittest.TestCase):
 
         self.assertLess(t_elapsed, 0.5)
         self.assertIsInstance(res, dict)
+
+
+class TestStage21RemediationRequirements(unittest.TestCase):
+    """
+    Mandatory deterministic negative and regression tests for Stage 2.1 Targeted Remediation:
+    Items 1 through 24 (Item 25 is market data integrity regression suite).
+    """
+
+    def test_01_posix_child_created_in_dedicated_process_group(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 55555
+        mock_proc.communicate.return_value = ("output", "")
+        mock_proc.returncode = 0
+        with patch("sys.platform", "linux"), patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
+            runner = AntigravityAgentRunner(agy_path="agy")
+            runner.run_prompt("test")
+            mock_popen.assert_called_once()
+            _, kwargs = mock_popen.call_args
+            self.assertTrue(kwargs.get("start_new_session"), "POSIX subprocess must set start_new_session=True")
+            self.assertEqual(getattr(mock_proc, "_dedicated_pgid", None), 55555)
+
+    def test_02_posix_timeout_does_not_terminate_parent_process_group(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 55555
+        mock_proc._dedicated_pgid = 55555
+        mock_proc.poll.return_value = None
+        mock_proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="test", timeout=1.0), 0]
+        parent_pgrp = 1234
+        with patch("sys.platform", "linux"), patch("os.getpgrp", create=True, return_value=parent_pgrp), patch("os.killpg", create=True) as mock_killpg:
+            _cleanup_subprocess(mock_proc, graceful_timeout=0.01)
+            for call in mock_killpg.call_args_list:
+                pgid_signaled = call.args[0]
+                self.assertNotEqual(pgid_signaled, parent_pgrp, "Cleanup must NEVER signal parent process group!")
+                self.assertEqual(pgid_signaled, 55555)
+
+    def test_03_posix_descendant_termination_when_direct_child_exits_first(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 55555
+        mock_proc._dedicated_pgid = 55555
+        mock_proc.poll.return_value = 0  # Direct child exited
+        mock_proc.wait.return_value = 0
+        sigkill = getattr(signal, "SIGKILL", 9)
+        with patch("sys.platform", "linux"), patch("os.getpgrp", create=True, return_value=1234), patch("os.killpg", create=True) as mock_killpg:
+            _cleanup_subprocess(mock_proc, graceful_timeout=0.01)
+            # SIGKILL must still be dispatched to dedicated_pgid to terminate surviving descendants
+            mock_killpg.assert_any_call(55555, sigkill)
+
+    def test_04_windows_process_tree_cleanup(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 44444
+        mock_proc.poll.return_value = None
+        mock_proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="test", timeout=1.0), 0]
+        with patch("sys.platform", "win32"), patch("subprocess.run") as mock_run:
+            _cleanup_subprocess(mock_proc, graceful_timeout=0.01)
+            cmd_runs = [c.args[0] for c in mock_run.call_args_list if c.args]
+            self.assertTrue(any("taskkill" in str(cmd) and "/T" in str(cmd) for cmd in cmd_runs))
+
+    def test_05_explicit_child_reaping_and_stream_closure(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 33333
+        mock_proc.poll.return_value = None
+        mock_proc.wait.return_value = 0
+        _cleanup_subprocess(mock_proc, graceful_timeout=0.01)
+        mock_proc.wait.assert_called()
+        mock_proc.stdin.close.assert_called()
+        mock_proc.stdout.close.assert_called()
+        mock_proc.stderr.close.assert_called()
+
+    def test_06_cleanup_failure_reporting_and_primary_exception_preservation(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 22222
+        mock_proc.poll.return_value = None
+        mock_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=1.0)
+
+        # Standalone call with raise_on_error=True raises SubprocessCleanupError
+        with self.assertRaises(SubprocessCleanupError):
+            _cleanup_subprocess(mock_proc, graceful_timeout=0.01, raise_on_error=True)
+
+        # Standalone call with raise_on_error=False returns False without raising
+        res = _cleanup_subprocess(mock_proc, graceful_timeout=0.01, raise_on_error=False)
+        self.assertFalse(res)
+
+        # When a primary exception is active, cleanup failure must preserve primary exception
+        try:
+            raise TimeoutError("Primary timeout occurred")
+        except TimeoutError as primary_err:
+            success = _cleanup_subprocess(mock_proc, graceful_timeout=0.01, raise_on_error=True)
+            self.assertFalse(success)
+            self.assertEqual(str(primary_err), "Primary timeout occurred")
+
+    def test_07_deep_snapshot_immutability_including_nested_structures(self):
+        snap = publish_global_state_snapshot({
+            "meta": {"version": 1},
+            "tickers": [{"symbol": "AAPL", "tags": ["tech"]}],
+            "values": [1, 2, 3]
+        })
+        with self.assertRaises(TypeError):
+            snap["meta"]["version"] = 2
+        with self.assertRaises(TypeError):
+            snap["tickers"][0]["tags"].append("growth")
+        with self.assertRaises(TypeError):
+            snap["values"].extend([4])
+        with self.assertRaises(TypeError):
+            del snap["meta"]
+
+    def test_08_caller_mutation_after_publication_cannot_alter_published_state(self):
+        caller_dict = {"nested": {"data": [1, 2, 3]}}
+        published = publish_global_state_snapshot(caller_dict)
+
+        # Caller mutates their dictionary
+        caller_dict["nested"]["data"].append(999)
+        caller_dict["nested"]["hacked"] = True
+
+        # Published snapshot must remain completely unaffected
+        self.assertEqual(list(published["nested"]["data"]), [1, 2, 3])
+        self.assertNotIn("hacked", published["nested"])
+
+    def test_09_reader_references_remain_unchanged_after_subsequent_publications(self):
+        publish_global_state_snapshot({"version": 1, "items": [10]})
+        captured = get_global_state_snapshot()
+        publish_global_state_snapshot({"version": 2, "items": [20, 30]})
+
+        self.assertEqual(captured["version"], 1)
+        self.assertEqual(list(captured["items"]), [10])
+        self.assertEqual(get_global_state_snapshot()["version"], 2)
+
+    def test_10_concurrent_snapshot_writers_do_not_lose_updates(self):
+        base = {"counter": 0}
+        publish_global_state_snapshot(base)
+
+        def inc():
+            for _ in range(25):
+                update_global_state_snapshot(lambda s: {**s, "counter": s["counter"] + 1})
+
+        threads = [threading.Thread(target=inc) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=2.0)
+        self.assertEqual(get_global_state_snapshot()["counter"], 100)
+
+    def test_11_background_result_application_does_not_mutate_previously_published_snapshots(self):
+        publish_global_state_snapshot({"qualitative_grounding": {"AAPL": {"sentiment_score": 0.5}}})
+        captured = get_global_state_snapshot()
+
+        def fake_grounding(sym, cancel_check=None):
+            return {"headline": "New Event", "sentiment_score": 0.99}
+
+        coord = get_background_coordinator()
+        accepted, item = coord.enqueue("grounding", "AAPL", "2026-11-14T19:00:00Z", fake_grounding, args=("AAPL",), force=True)
+        self.assertTrue(accepted)
+        self.assertTrue(item.event.wait(timeout=2.0))
+
+        apply_background_intelligence_results()
+
+        # Captured reader reference must NOT be mutated in place
+        self.assertEqual(captured["qualitative_grounding"]["AAPL"]["sentiment_score"], 0.5)
+        # Current published state must reflect the newly applied value
+        self.assertEqual(get_global_state_snapshot()["qualitative_grounding"]["AAPL"]["sentiment_score"], 0.99)
+
+    def test_12_shutdown_during_queued_work(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=10)
+        gate = threading.Event()
+        # Occupy the worker
+        coord.enqueue("grounding", "W1", "2026-11-14T19:00:00Z", lambda: gate.wait(timeout=1.0))
+        accepted, item_q = coord.enqueue("grounding", "Q1", "2026-11-14T19:00:00Z", lambda: 123)
+        self.assertTrue(accepted)
+        self.assertEqual(item_q.status, WorkStatus.QUEUED)
+
+        gate.set()
+        coord.shutdown(timeout=1.0)
+        self.assertEqual(item_q.status, WorkStatus.CANCELLED)
+        self.assertTrue(item_q.event.is_set())
+
+    def test_13_shutdown_during_active_subprocess_execution(self):
+        cancelled_observed = threading.Event()
+
+        def long_task(cancel_check=None):
+            for _ in range(50):
+                if cancel_check and cancel_check():
+                    cancelled_observed.set()
+                    raise RuntimeError("Cancelled by check")
+                time.sleep(0.02)
+            return "finished"
+
+        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=5)
+        accepted, item = coord.enqueue("grounding", "AAPL", "2026-11-14T19:00:00Z", long_task)
+        self.assertTrue(accepted)
+        time.sleep(0.05)
+        coord.shutdown(timeout=1.0)
+        self.assertTrue(cancelled_observed.is_set())
+
+    def test_14_cancellation_propagates_to_child_process(self):
+        cancelled_flag = threading.Event()
+
+        def task_with_cancel(cancel_check=None):
+            while not (cancel_check and cancel_check()):
+                time.sleep(0.01)
+            cancelled_flag.set()
+            raise RuntimeError("Cancelled")
+
+        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=5)
+        key = WorkKey("grounding", "TSLA")
+        accepted, item = coord.enqueue("grounding", "TSLA", "2026-11-14T19:00:00Z", task_with_cancel)
+        self.assertTrue(accepted)
+        time.sleep(0.05)
+        success = coord.cancel_work(key)
+        self.assertTrue(success)
+        self.assertTrue(cancelled_flag.wait(timeout=1.0))
+        coord.shutdown(timeout=1.0)
+
+    def test_15_shutdown_never_reports_success_while_workers_remain_active(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=5)
+        hang_gate = threading.Event()
+
+        def stubborn_worker(cancel_check=None):
+            hang_gate.wait(timeout=1.0)
+            return "done"
+
+        coord.enqueue("grounding", "STUBBORN", "2026-11-14T19:00:00Z", stubborn_worker)
+        time.sleep(0.05)
+        res = coord.shutdown(timeout=0.05)
+        self.assertFalse(res, "Shutdown must report False while workers are active!")
+        hang_gate.set()
+        coord.shutdown(timeout=1.0)
+
+    def test_16_bounded_result_handoff_under_delayed_draining(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=2, max_queue_size=10, max_results_size=2)
+        for i in range(4):
+            coord.enqueue("grounding", f"SYM_{i}", "2026-11-14T19:00:00Z", lambda idx=i: f"val_{idx}")
+        time.sleep(0.15)
+        self.assertLessEqual(coord._results_queue.qsize(), 2)
+        drained = coord.drain_results()
+        self.assertEqual(len(drained), 4)
+        coord.shutdown(timeout=1.0)
+
+    def test_17_result_handoff_capacity_exhaustion_without_silent_data_loss(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=2, max_queue_size=10, max_results_size=1)
+        coord.enqueue("grounding", "A", "2026-11-14T19:00:00Z", lambda: "res_a1")
+        coord.enqueue("grounding", "A", "2026-11-14T19:01:00Z", lambda: "res_a2")
+        coord.enqueue("grounding", "B", "2026-11-14T19:00:00Z", lambda: "res_b1")
+        time.sleep(0.15)
+        drained = coord.drain_results()
+        drained_targets = {r.key.target for r in drained}
+        self.assertIn("A", drained_targets)
+        self.assertIn("B", drained_targets)
+        coord.shutdown(timeout=1.0)
+
+    def test_18_queue_accounting_remains_correct_after_exceptions_and_cancellation(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=5)
+
+        def fail_fn():
+            raise ValueError("Intentional")
+
+        coord.enqueue("grounding", "ERR", "2026-11-14T19:00:00Z", fail_fn)
+        coord.enqueue("grounding", "OK", "2026-11-14T19:00:00Z", lambda: 1)
+        time.sleep(0.15)
+        self.assertEqual(coord.pending_count(), 0)
+        self.assertEqual(coord.in_flight_count(), 0)
+        self.assertEqual(len(coord._in_flight_keys), 0)
+        coord.shutdown(timeout=1.0)
+
+    def test_19_fractional_second_chronological_comparisons(self):
+        applicator = BackgroundResultApplicator()
+        g, sc, sm = {}, {}, {}
+        key = WorkKey("grounding", "AAPL")
+        r1 = WorkResult(key=key, sequence=1, obs_time="2026-11-14T19:00:00.090000Z", data={"v": 1})
+        r2 = WorkResult(key=key, sequence=2, obs_time="2026-11-14T19:00:00.100000Z", data={"v": 2})
+        r3_stale = WorkResult(key=key, sequence=3, obs_time="2026-11-14T19:00:00.095000Z", data={"v": 3})
+
+        audit1 = applicator.apply_results([r1], g, sc, sm)
+        self.assertTrue(audit1[0][1])
+        audit2 = applicator.apply_results([r2], g, sc, sm)
+        self.assertTrue(audit2[0][1])
+        self.assertEqual(g["AAPL"]["v"], 2)
+
+        audit3 = applicator.apply_results([r3_stale], g, sc, sm)
+        self.assertFalse(audit3[0][1])
+        self.assertIn("Stale observation", audit3[0][2])
+        self.assertEqual(g["AAPL"]["v"], 2)
+
+    def test_20_equivalent_utc_timestamps(self):
+        applicator = BackgroundResultApplicator()
+        g, sc, sm = {}, {}, {}
+        key = WorkKey("grounding", "AAPL")
+        r1 = WorkResult(key=key, sequence=1, obs_time="2026-11-14T19:00:00+00:00", data={"v": 1})
+        r2 = WorkResult(key=key, sequence=2, obs_time="2026-11-14T19:00:00Z", data={"v": 2})
+
+        audit1 = applicator.apply_results([r1], g, sc, sm)
+        self.assertTrue(audit1[0][1])
+        audit2 = applicator.apply_results([r2], g, sc, sm)
+        self.assertTrue(audit2[0][1])
+        self.assertEqual(g["AAPL"]["v"], 2)
+
+    def test_21_rejection_of_ambiguous_neg_zero_timestamps(self):
+        with self.assertRaises(ValueError) as ctx:
+            validate_utc_iso8601_timestamp("2026-11-14T19:00:00-00:00")
+        self.assertIn("Ambiguous timestamp offset '-00:00'", str(ctx.exception))
+
+    def test_22_request_time_not_misrepresented_as_source_observation_time(self):
+        item = WorkItem(
+            key=WorkKey("grounding", "AAPL"),
+            sequence=1,
+            obs_time="2026-11-14T19:00:00Z",
+            fn=lambda: None,
+            enqueued_time=12345.67
+        )
+        res = WorkResult(
+            key=item.key,
+            sequence=item.sequence,
+            obs_time=item.obs_time,
+            data="data",
+            completed_time=12345.99,
+            enqueued_time=item.enqueued_time
+        )
+        self.assertEqual(res.obs_time, "2026-11-14T19:00:00Z")
+        self.assertEqual(res.enqueued_time, 12345.67)
+        self.assertEqual(res.completed_time, 12345.99)
+        self.assertNotEqual(res.obs_time, str(res.enqueued_time))
+
+    def test_23_newer_issued_sequence_invalidates_older_outstanding_result(self):
+        applicator = BackgroundResultApplicator()
+        g, sc, sm = {}, {}, {}
+        key = WorkKey("grounding", "NVDA")
+        applicator.record_issued_sequence(key, 1)
+        applicator.record_issued_sequence(key, 2)
+
+        r1 = WorkResult(key=key, sequence=1, obs_time="2026-11-14T19:00:00Z", data={"headline": "Old news"})
+        audit1 = applicator.apply_results([r1], g, sc, sm)
+        self.assertFalse(audit1[0][1], "Older sequence must be rejected when newer work was issued")
+        self.assertIn("older than latest issued", audit1[0][2])
+        self.assertNotIn("NVDA", g)
+
+        r2 = WorkResult(key=key, sequence=2, obs_time="2026-11-14T19:01:00Z", data={"headline": "Fresh news"})
+        audit2 = applicator.apply_results([r2], g, sc, sm)
+        self.assertTrue(audit2[0][1])
+        self.assertEqual(g["NVDA"]["headline"], "Fresh news")
+
+    def test_24_concurrent_result_application_and_snapshot_publication(self):
+        publish_global_state_snapshot({"qualitative_grounding": {}, "tickers": []})
+        applicator = BackgroundResultApplicator()
+        g = {}
+        stop_event = threading.Event()
+        exceptions = []
+
+        def writer_thread():
+            try:
+                seq = 0
+                while not stop_event.is_set():
+                    seq += 1
+                    res = WorkResult(
+                        key=WorkKey("grounding", "AAPL"),
+                        sequence=seq,
+                        obs_time="2026-11-14T19:00:00Z",
+                        data={"score": seq}
+                    )
+                    applicator.apply_results([res], g, {}, {})
+                    update_global_state_snapshot(lambda s: {**s, "qualitative_grounding": dict(g)})
+                    time.sleep(0.001)
+            except Exception as e:
+                exceptions.append(e)
+
+        def reader_thread():
+            try:
+                while not stop_event.is_set():
+                    snap = get_global_state_snapshot()
+                    self.assertIsInstance(snap, dict)
+                    with self.assertRaises(TypeError):
+                        snap["tickers"].append(1)
+                    time.sleep(0.001)
+            except Exception as e:
+                exceptions.append(e)
+
+        threads = [
+            threading.Thread(target=writer_thread),
+            threading.Thread(target=reader_thread),
+            threading.Thread(target=reader_thread)
+        ]
+        for t in threads:
+            t.start()
+        time.sleep(0.2)
+        stop_event.set()
+        for t in threads:
+            t.join(timeout=1.0)
+        self.assertEqual(exceptions, [])
 
 
 if __name__ == "__main__":

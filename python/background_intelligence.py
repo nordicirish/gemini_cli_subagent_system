@@ -25,33 +25,47 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 logger = logging.getLogger("background_intelligence")
 
 ISO8601_UTC_REGEX = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00|-00:00)$"
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$"
 )
 
 
 def validate_utc_iso8601_timestamp(ts: Any) -> str:
     """
-    Validates that ts is a string representing a strict UTC ISO-8601 timestamp with explicit 'Z' or zero offset.
-    Rejects naive, non-string, missing, invalid, or ambiguous timestamps fail-closed.
-    Returns normalized ISO-8601 UTC string.
+    Validates that ts is a string representing a strict UTC ISO-8601 timestamp with explicit 'Z' or zero offset (+00:00).
+    Rejects naive, non-string, missing, invalid, or ambiguous timestamps (-00:00) fail-closed.
+    Returns the exact valid ISO-8601 UTC string without silent normalization.
     """
     if not isinstance(ts, str):
         raise ValueError(f"Timestamp must be a string, got {type(ts).__name__}")
-    ts = ts.strip()
-    if not ISO8601_UTC_REGEX.match(ts):
+    ts_clean = ts.strip()
+    if not ts_clean:
+        raise ValueError("Timestamp cannot be empty")
+    if "-00:00" in ts_clean:
         raise ValueError(
-            f"Timestamp '{ts}' is not a strict UTC ISO-8601 timestamp with explicit Z or zero offset"
+            f"Ambiguous timestamp offset '-00:00' in '{ts}': RFC3339 denotes unknown local offset; strict UTC certainty required"
+        )
+    if not ISO8601_UTC_REGEX.match(ts_clean):
+        raise ValueError(
+            f"Timestamp '{ts}' is not a strict UTC ISO-8601 timestamp with explicit Z or zero offset (+00:00)"
         )
     try:
-        clean_ts = ts[:-1] + "+00:00" if ts.endswith("Z") else ts
-        dt = datetime.fromisoformat(clean_ts)
+        dt = datetime.fromisoformat(ts_clean)
         if dt.tzinfo is None:
             raise ValueError(f"Timestamp '{ts}' is naive (missing tzinfo)")
         if dt.utcoffset() != timezone.utc.utcoffset(None):
             raise ValueError(f"Timestamp '{ts}' has non-zero UTC offset: {dt.utcoffset()}")
     except Exception as e:
         raise ValueError(f"Invalid calendar date/time in timestamp '{ts}': {e}") from e
-    return ts
+    return ts_clean
+
+
+def parse_utc_iso8601_timestamp(ts: Any) -> datetime:
+    """
+    Strictly validates and parses a UTC ISO-8601 timestamp into a timezone-aware UTC datetime.
+    """
+    valid_str = validate_utc_iso8601_timestamp(ts)
+    dt = datetime.fromisoformat(valid_str)
+    return dt.astimezone(timezone.utc)
 
 
 class WorkType(str, enum.Enum):
@@ -92,6 +106,7 @@ class WorkItem:
     status: WorkStatus = WorkStatus.QUEUED
     enqueued_time: float = field(default_factory=time.monotonic)
     event: threading.Event = field(default_factory=threading.Event)
+    cancel_event: threading.Event = field(default_factory=threading.Event)
     result: Any = None
     error: Optional[str] = None
 
@@ -104,6 +119,7 @@ class WorkResult:
     data: Any
     error: Optional[str] = None
     completed_time: float = field(default_factory=time.monotonic)
+    enqueued_time: Optional[float] = None
 
 
 class FailureCooldownTracker:
@@ -170,27 +186,31 @@ class BackgroundIntelligenceCoordinator:
     """
     Fixed-concurrency, bounded-queue background processor for intelligence tasks.
     Enforces per-key queued and in-flight deduplication, failure cooldown,
-    monotonic sequencing, and non-blocking handoff to the market coordinator.
+    monotonic sequencing, bounded result handoff, and non-blocking coordinator operation.
     """
     def __init__(
         self,
         max_workers: int = 2,
         max_queue_size: int = 50,
+        max_results_size: int = 50,
         cooldown_tracker: Optional[FailureCooldownTracker] = None,
         clock_fn: Callable[[], float] = time.monotonic
     ):
         self.max_workers = max(1, int(max_workers))
         self.max_queue_size = max(1, int(max_queue_size))
+        self.max_results_size = max(1, int(max_results_size))
         self.clock_fn = clock_fn
         self.cooldown_tracker = cooldown_tracker or FailureCooldownTracker(clock_fn=clock_fn)
 
         self._queue: queue.Queue = queue.Queue(maxsize=self.max_queue_size)
-        self._results_queue: queue.Queue = queue.Queue()
+        self._results_queue: queue.Queue = queue.Queue(maxsize=self.max_results_size)
+        self._overflow_results: Dict[WorkKey, WorkResult] = {}
 
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._pending_keys: Dict[WorkKey, WorkItem] = {}
         self._in_flight_keys: Dict[WorkKey, WorkItem] = {}
         self._sequences: Dict[WorkKey, int] = {}
+        self._latest_issued_sequence: Dict[WorkKey, int] = {}
 
         self._shutdown_event = threading.Event()
         self._workers: List[threading.Thread] = []
@@ -208,6 +228,40 @@ class BackgroundIntelligenceCoordinator:
                 self._workers.append(t)
                 t.start()
 
+    def get_latest_issued_sequence(self, key: WorkKey) -> int:
+        with self._lock:
+            return self._latest_issued_sequence.get(key, 0)
+
+    def total_work_count(self) -> int:
+        with self._lock:
+            return (
+                len(self._pending_keys)
+                + len(self._in_flight_keys)
+                + self._results_queue.qsize()
+                + len(self._overflow_results)
+            )
+
+    def cancel_work(self, key: WorkKey) -> bool:
+        """
+        Cancels work for key if currently queued or in-flight.
+        Propagates cancellation into running workers.
+        Returns True if work was found and cancellation was requested, False otherwise.
+        """
+        with self._lock:
+            if key in self._pending_keys:
+                item = self._pending_keys.pop(key)
+                item.cancel_event.set()
+                item.status = WorkStatus.CANCELLED
+                item.error = "Work cancelled while queued"
+                item.event.set()
+                return True
+            if key in self._in_flight_keys:
+                item = self._in_flight_keys[key]
+                item.cancel_event.set()
+                # Worker remains registered in _in_flight_keys until thread actually exits
+                return True
+            return False
+
     def enqueue(
         self,
         work_type: str,
@@ -222,6 +276,9 @@ class BackgroundIntelligenceCoordinator:
         Enqueues work if not already queued, in-flight, or in cooldown.
         Returns (accepted, work_item).
         """
+        if self._shutdown_event.is_set():
+            return False, None
+
         key = WorkKey(work_type, target)
         validated_obs_time = validate_utc_iso8601_timestamp(obs_time)
         kwargs = kwargs or {}
@@ -232,15 +289,17 @@ class BackgroundIntelligenceCoordinator:
             logger.info(f"[BackgroundIntelligence] {key} skipped: in cooldown for {remaining:.1f}s")
             return False, None
 
-        if self._shutdown_event.is_set():
-            return False, None
-
         with self._lock:
+            if self._shutdown_event.is_set():
+                return False, None
+
             # 2. Deduplication check (queued)
             if key in self._pending_keys:
                 existing = self._pending_keys[key]
-                # Coalesce: update obs_time if incoming observation is newer
-                if validated_obs_time > existing.obs_time:
+                # Chronological instant comparison (Requirement E)
+                incoming_dt = parse_utc_iso8601_timestamp(validated_obs_time)
+                existing_dt = parse_utc_iso8601_timestamp(existing.obs_time)
+                if incoming_dt > existing_dt:
                     existing.obs_time = validated_obs_time
                 logger.debug(f"[BackgroundIntelligence] {key} coalesced with already QUEUED work")
                 return True, existing
@@ -251,10 +310,11 @@ class BackgroundIntelligenceCoordinator:
                 logger.debug(f"[BackgroundIntelligence] {key} coalesced with IN_FLIGHT work")
                 return True, existing
 
-            # 4. Queue saturation check
-            if self._queue.full():
+            # 4. Total capacity check (Requirement D)
+            total_active = len(self._pending_keys) + len(self._in_flight_keys) + self._results_queue.qsize() + len(self._overflow_results)
+            if total_active >= (self.max_queue_size + self.max_results_size) or self._queue.full():
                 logger.warning(
-                    f"[BackgroundIntelligence] Queue saturated ({self._queue.qsize()}/{self.max_queue_size}). "
+                    f"[BackgroundIntelligence] Queue or capacity saturated ({total_active}/{self.max_queue_size + self.max_results_size}). "
                     f"Rejecting work for {key} without blocking coordinator."
                 )
                 return False, None
@@ -262,6 +322,7 @@ class BackgroundIntelligenceCoordinator:
             # 5. Monotonic sequence assignment
             seq = self._sequences.get(key, 0) + 1
             self._sequences[key] = seq
+            self._latest_issued_sequence[key] = seq
 
             item = WorkItem(
                 key=key,
@@ -294,47 +355,86 @@ class BackgroundIntelligenceCoordinator:
             # Transition from QUEUED to IN_FLIGHT under lock
             with self._lock:
                 self._pending_keys.pop(item.key, None)
-                if self._shutdown_event.is_set():
+                if self._shutdown_event.is_set() or item.cancel_event.is_set():
                     item.status = WorkStatus.CANCELLED
-                    item.error = "Cancelled due to coordinator shutdown"
+                    item.error = "Cancelled due to coordinator shutdown or request"
                     item.event.set()
                     self._queue.task_done()
-                    break
+                    continue
                 self._in_flight_keys[item.key] = item
                 item.status = WorkStatus.IN_FLIGHT
 
             # Execute work outside lock
             data = None
             err_msg = None
+            was_cancelled = False
             try:
-                data = item.fn(*item.args, **item.kwargs)
-                item.status = WorkStatus.COMPLETED
-                item.result = data
-                self.cooldown_tracker.record_success(item.key)
+                if self._shutdown_event.is_set() or item.cancel_event.is_set():
+                    was_cancelled = True
+                    raise RuntimeError("Cancelled before execution")
+
+                # Inject cancel_check if accepted by fn
+                call_kwargs = dict(item.kwargs)
+                try:
+                    import inspect
+                    sig = inspect.signature(item.fn)
+                    if "cancel_check" in sig.parameters and "cancel_check" not in call_kwargs:
+                        call_kwargs["cancel_check"] = lambda: self._shutdown_event.is_set() or item.cancel_event.is_set()
+                except Exception:
+                    pass
+
+                data = item.fn(*item.args, **call_kwargs)
+
+                if self._shutdown_event.is_set() or item.cancel_event.is_set():
+                    was_cancelled = True
+                    item.status = WorkStatus.CANCELLED
+                    item.error = "Work cancelled during execution"
+                else:
+                    item.status = WorkStatus.COMPLETED
+                    item.result = data
+                    self.cooldown_tracker.record_success(item.key)
             except Exception as e:
                 err_msg = str(e)
-                item.status = WorkStatus.FAILED
-                item.error = err_msg
-                self.cooldown_tracker.record_failure(item.key)
-                logger.error(
-                    f"[BackgroundIntelligence] Worker execution failed for {item.key}: {e}",
-                    exc_info=True
-                )
+                if was_cancelled or item.cancel_event.is_set() or self._shutdown_event.is_set() or "cancelled" in err_msg.lower():
+                    item.status = WorkStatus.CANCELLED
+                    item.error = err_msg or "Cancelled"
+                else:
+                    item.status = WorkStatus.FAILED
+                    item.error = err_msg
+                    self.cooldown_tracker.record_failure(item.key)
+                    logger.error(
+                        f"[BackgroundIntelligence] Worker execution failed for {item.key}: {e}",
+                        exc_info=True
+                    )
             finally:
                 with self._lock:
                     self._in_flight_keys.pop(item.key, None)
                     item.event.set()
 
-                # Produce result for coordinator handoff
-                result = WorkResult(
-                    key=item.key,
-                    sequence=item.sequence,
-                    obs_time=item.obs_time,
-                    data=data,
-                    error=err_msg,
-                    completed_time=self.clock_fn()
-                )
-                self._results_queue.put(result)
+                # Produce result for coordinator handoff if not cancelled
+                if item.status != WorkStatus.CANCELLED:
+                    result = WorkResult(
+                        key=item.key,
+                        sequence=item.sequence,
+                        obs_time=item.obs_time,
+                        data=data,
+                        error=err_msg,
+                        completed_time=self.clock_fn(),
+                        enqueued_time=item.enqueued_time
+                    )
+                    try:
+                        self._results_queue.put_nowait(result)
+                    except queue.Full:
+                        # Bounded handoff capacity reached: retain in recoverable overflow store
+                        with self._lock:
+                            existing = self._overflow_results.get(item.key)
+                            if existing is None or result.sequence >= existing.sequence:
+                                self._overflow_results[item.key] = result
+                            logger.warning(
+                                f"[BackgroundIntelligence] Result handoff capacity reached ({self.max_results_size}). "
+                                f"Preserving recoverable result for {item.key} sequence={result.sequence} in overflow store."
+                            )
+
                 self._queue.task_done()
 
     def drain_results(self) -> List[WorkResult]:
@@ -347,6 +447,10 @@ class BackgroundIntelligenceCoordinator:
                 self._results_queue.task_done()
             except queue.Empty:
                 break
+        with self._lock:
+            if self._overflow_results:
+                results.extend(self._overflow_results.values())
+                self._overflow_results.clear()
         return results
 
     def is_queued_or_inflight(self, key: WorkKey) -> bool:
@@ -361,36 +465,63 @@ class BackgroundIntelligenceCoordinator:
         with self._lock:
             return len(self._in_flight_keys)
 
-    def shutdown(self, timeout: float = 2.0) -> None:
-        """Gracefully shuts down workers and releases all resources."""
+    def shutdown(self, timeout: float = 2.0) -> bool:
+        """
+        Gracefully shuts down workers and releases all resources.
+        Returns True if all workers cleanly stopped within timeout, False otherwise.
+        """
         self._shutdown_event.set()
 
-        # Mark all pending and in-flight items cancelled and wake waiters
+        # Mark all pending items cancelled and wake waiters
         with self._lock:
             for item in self._pending_keys.values():
-                item.status = WorkStatus.CANCELLED
-                item.error = "Cancelled due to shutdown"
-                item.event.set()
-            for item in self._in_flight_keys.values():
+                item.cancel_event.set()
                 item.status = WorkStatus.CANCELLED
                 item.error = "Cancelled due to shutdown"
                 item.event.set()
             self._pending_keys.clear()
-            self._in_flight_keys.clear()
+
+            # Signal cancellation to in-flight items; DO NOT clear _in_flight_keys.
+            # Workers will pop their own keys upon termination.
+            for item in self._in_flight_keys.values():
+                item.cancel_event.set()
+                item.status = WorkStatus.CANCELLED
+                item.error = "Cancelled due to shutdown"
+                item.event.set()
 
         # Drain input queue
         while True:
             try:
-                self._queue.get_nowait()
+                item = self._queue.get_nowait()
+                item.cancel_event.set()
+                item.status = WorkStatus.CANCELLED
+                item.error = "Cancelled due to shutdown"
+                item.event.set()
                 self._queue.task_done()
             except queue.Empty:
                 break
 
         # Join workers
-        start = self.clock_fn()
+        start = time.monotonic()
+        all_joined = True
         for t in self._workers:
-            remaining = max(0.05, timeout - (self.clock_fn() - start))
+            remaining = max(0.01, timeout - (time.monotonic() - start))
             t.join(timeout=remaining)
+            if t.is_alive():
+                all_joined = False
+
+        with self._lock:
+            active_in_flight = len(self._in_flight_keys)
+
+        if not all_joined or active_in_flight > 0:
+            alive_workers = [w.name for w in self._workers if w.is_alive()]
+            logger.error(
+                f"[BackgroundIntelligence] Shutdown incomplete after {timeout}s: "
+                f"active workers={alive_workers}, in-flight keys={list(self._in_flight_keys.keys())}"
+            )
+            return False
+
+        return True
 
 
 class BackgroundResultApplicator:
@@ -398,14 +529,38 @@ class BackgroundResultApplicator:
     Coordinates application of background intelligence results to coordinator state.
     Enforces monotonic sequence and observation timestamp constraints:
     - Results superseded by older/equal sequence numbers are rejected.
-    - Results superseded by older observation timestamps are rejected.
+    - Results superseded by newer issued sequences are rejected (Requirement F).
+    - Results superseded by older observation timestamps are rejected (instant comparison).
     - Missing/invalid/ambiguous observation timestamps fail closed.
     - Background workers never mutate state directly.
     """
-    def __init__(self):
+    def __init__(
+        self,
+        coordinator: Optional[Any] = None,
+        latest_issued_provider: Optional[Callable[[WorkKey], int]] = None,
+    ):
         self._last_applied_sequence: Dict[WorkKey, int] = {}
+        self._last_applied_obs_dt: Dict[WorkKey, datetime] = {}
         self._last_applied_obs_time: Dict[WorkKey, str] = {}
-        self._lock = threading.Lock()
+        self._latest_issued_sequence: Dict[WorkKey, int] = {}
+        self._coordinator = coordinator
+        self._latest_issued_provider = latest_issued_provider
+        self._lock = threading.RLock()
+
+    def record_issued_sequence(self, key: WorkKey, seq: int) -> None:
+        with self._lock:
+            if seq > self._latest_issued_sequence.get(key, 0):
+                self._latest_issued_sequence[key] = seq
+
+    def get_latest_issued_sequence(self, key: WorkKey) -> int:
+        with self._lock:
+            if self._coordinator is not None and hasattr(self._coordinator, "get_latest_issued_sequence"):
+                return self._coordinator.get_latest_issued_sequence(key)
+            if callable(self._latest_issued_provider):
+                return self._latest_issued_provider(key)
+            if isinstance(self._latest_issued_provider, dict):
+                return self._latest_issued_provider.get(key, 0)
+            return self._latest_issued_sequence.get(key, 0)
 
     def get_last_applied(self, key: WorkKey) -> Tuple[int, str]:
         with self._lock:
@@ -419,7 +574,8 @@ class BackgroundResultApplicator:
         results: List[WorkResult],
         grounding_target: dict,
         scout_cache_target: dict,
-        scout_category_map: dict
+        scout_category_map: dict,
+        latest_issued_provider: Optional[Callable[[WorkKey], int] | Dict[WorkKey, int]] = None,
     ) -> List[Tuple[WorkResult, bool, str]]:
         """
         Applies results safely to provided targets under lock.
@@ -433,7 +589,7 @@ class BackgroundResultApplicator:
                     audit.append((r, False, f"Worker error: {r.error}"))
                     continue
 
-                # 1. Validate sequence monotonicity
+                # 1. Validate sequence monotonicity against last applied sequence
                 last_seq = self._last_applied_sequence.get(r.key, -1)
                 if r.sequence <= last_seq:
                     msg = f"Stale sequence: received {r.sequence} <= last applied {last_seq}"
@@ -441,23 +597,38 @@ class BackgroundResultApplicator:
                     audit.append((r, False, msg))
                     continue
 
-                # 2. Validate observation timestamp monotonicity
+                # 2. Validate sequence against latest issued sequence (Requirement F)
+                latest_issued = -1
+                if callable(latest_issued_provider):
+                    latest_issued = latest_issued_provider(r.key)
+                elif isinstance(latest_issued_provider, dict):
+                    latest_issued = latest_issued_provider.get(r.key, -1)
+                else:
+                    latest_issued = self.get_latest_issued_sequence(r.key)
+
+                if latest_issued > 0 and r.sequence < latest_issued:
+                    msg = f"Stale sequence: received {r.sequence} is older than latest issued {latest_issued}"
+                    logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
+                    audit.append((r, False, msg))
+                    continue
+
+                # 3. Validate observation timestamp monotonicity (Requirement E)
                 try:
-                    obs_ts = validate_utc_iso8601_timestamp(r.obs_time)
+                    obs_dt = parse_utc_iso8601_timestamp(r.obs_time)
                 except Exception as e:
                     msg = f"Invalid observation timestamp: {e}"
                     logger.warning(f"[BackgroundResultApplicator] {r.key} rejected fail-closed: {msg}")
                     audit.append((r, False, msg))
                     continue
 
-                last_obs = self._last_applied_obs_time.get(r.key, "")
-                if last_obs and obs_ts < last_obs:
-                    msg = f"Stale observation: received {obs_ts} < last applied {last_obs}"
+                last_obs_dt = self._last_applied_obs_dt.get(r.key)
+                if last_obs_dt is not None and obs_dt < last_obs_dt:
+                    msg = f"Stale observation: received {r.obs_time} < last applied {self._last_applied_obs_time[r.key]}"
                     logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
                     audit.append((r, False, msg))
                     continue
 
-                # 3. Apply result based on work type
+                # 4. Apply result based on work type
                 if r.key.work_type == WorkType.GROUNDING.value:
                     grounding_target[r.key.target] = r.data
                 elif r.key.work_type == WorkType.SCOUT.value:
@@ -474,7 +645,8 @@ class BackgroundResultApplicator:
                     continue
 
                 self._last_applied_sequence[r.key] = r.sequence
-                self._last_applied_obs_time[r.key] = obs_ts
+                self._last_applied_obs_dt[r.key] = obs_dt
+                self._last_applied_obs_time[r.key] = r.obs_time
                 audit.append((r, True, "Applied successfully"))
 
         return audit
@@ -482,4 +654,6 @@ class BackgroundResultApplicator:
     def reset(self) -> None:
         with self._lock:
             self._last_applied_sequence.clear()
+            self._last_applied_obs_dt.clear()
             self._last_applied_obs_time.clear()
+            self._latest_issued_sequence.clear()

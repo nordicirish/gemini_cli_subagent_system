@@ -111,6 +111,10 @@ Do not waste time on exhaustive reviews of low-risk changes. An agent report or 
 
 Standing worker constraints, Git write prohibitions, baseline testing gates, protected asset boundaries, negative invariants, and completion report formats are defined in root `INSTRUCTIONS.md` (auto-loaded via `.agents/rules/reference-INSTRUCTIONS.md`).
 
+Select the target model by stage risk tier unless the owner specifies otherwise:
+- **Routine stages** (docs, hygiene, shims, UI, isolated tests): `Gemini 3.8 Flash — Medium`
+- **Integration & Critical stages** (concurrency, queues, state handoff, database/locks, financial boundaries): `Gemini 3.8 Flash — High`
+
 Every stage prompt must begin with `Execute strictly under @INSTRUCTIONS.md` and specify stage-specific deltas:
 - Repository, branch, target model (default: `Gemini 3.8 Flash — High`), and expected baseline HEAD.
 - Objective and authorised file scope.

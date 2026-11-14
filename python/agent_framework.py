@@ -57,19 +57,87 @@ class AntigravityResponse:
         return self.text
 
 
-def _cleanup_subprocess(proc: subprocess.Popen, graceful_timeout: float = 1.0) -> None:
+class SubprocessCleanupError(RuntimeError):
+    """Raised when subprocess tree cleanup or reaping fails."""
+    pass
+
+
+def _get_windows_descendant_pids(parent_pid: int) -> List[int]:
+    """Finds all descendant PIDs for parent_pid on Windows using Toolhelp snapshot."""
+    if sys.platform != "win32" or not parent_pid:
+        return []
+    descendants: List[int] = []
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class PROCESSENTRY32(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", wintypes.DWORD),
+                ("cntUsage", wintypes.DWORD),
+                ("th32ProcessID", wintypes.DWORD),
+                ("th32DefaultHeapID", ctypes.c_size_t),
+                ("th32ModuleID", wintypes.DWORD),
+                ("cntThreads", wintypes.DWORD),
+                ("th32ParentProcessID", wintypes.DWORD),
+                ("pcPriClassBase", wintypes.LONG),
+                ("dwFlags", wintypes.DWORD),
+                ("szExeFile", ctypes.c_char * 260),
+            ]
+
+        kernel32 = ctypes.windll.kernel32
+        h_snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
+        if h_snapshot == -1 or not h_snapshot:
+            return []
+        try:
+            pe = PROCESSENTRY32()
+            pe.dwSize = ctypes.sizeof(PROCESSENTRY32)
+            tree: Dict[int, List[int]] = {}
+            success = kernel32.Process32First(h_snapshot, ctypes.byref(pe))
+            while success:
+                c_pid = int(pe.th32ProcessID)
+                p_pid = int(pe.th32ParentProcessID)
+                tree.setdefault(p_pid, []).append(c_pid)
+                success = kernel32.Process32Next(h_snapshot, ctypes.byref(pe))
+
+            queue = list(tree.get(parent_pid, []))
+            while queue:
+                curr = queue.pop(0)
+                descendants.append(curr)
+                queue.extend(tree.get(curr, []))
+        finally:
+            kernel32.CloseHandle(h_snapshot)
+    except Exception:
+        pass
+    return descendants
+
+
+def _cleanup_subprocess(
+    proc: subprocess.Popen,
+    graceful_timeout: float = 0.5,
+    raise_on_error: bool = False
+) -> bool:
     """
     Guarantees deterministic termination, reaping, and stream cleanup for proc and its descendants.
-    1. Request termination.
+    1. Request termination safely:
+       - Never use os.killpg unless child was created in a dedicated process group and ownership is established.
+       - Never signal the GEM application's own process group.
+       - Terminate descendants even when direct child exits before them.
     2. Wait bounded graceful termination period.
     3. Force-kill if necessary, including process tree descendants.
-    4. Explicitly wait/reap the child.
+    4. Explicitly wait/reap the direct child.
     5. Close or release associated pipes and streams.
+    6. Preserve primary in-flight exception while reporting cleanup failures.
+    Returns True if process was cleanly reaped and streams closed, False otherwise.
     """
-    if proc is None:
-        return
+    if proc is None or getattr(proc, "_cleaned_up", False) is True:
+        return True
 
     pid = getattr(proc, "pid", None)
+    dedicated_pgid = getattr(proc, "_dedicated_pgid", None)
+    reaped = False
+    cleanup_success = True
+
     try:
         poll_fn = getattr(proc, "poll", None)
         is_alive = True
@@ -79,53 +147,107 @@ def _cleanup_subprocess(proc: subprocess.Popen, graceful_timeout: float = 1.0) -
             except Exception:
                 is_alive = True
 
+        # Safety check: Verify we never signal our own process group on POSIX
+        safe_to_killpg = False
+        if dedicated_pgid is not None and hasattr(os, "killpg"):
+            try:
+                current_pgrp = os.getpgrp() if hasattr(os, "getpgrp") else os.getpgid(0)
+                if dedicated_pgid > 1 and dedicated_pgid != current_pgrp:
+                    safe_to_killpg = True
+            except Exception:
+                safe_to_killpg = False
+
+        sig_kill = getattr(signal, "SIGKILL", 9)
+        sig_term = getattr(signal, "SIGTERM", 15)
+
         if is_alive:
-            # 1. Request termination
+            # 1. Graceful termination request
+            if safe_to_killpg:
+                try:
+                    os.killpg(dedicated_pgid, sig_term)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                except Exception:
+                    pass
+
             try:
                 proc.terminate()
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):
                 pass
             except Exception:
                 pass
 
             # 2. Wait bounded graceful period
-            reaped = False
             try:
                 proc.wait(timeout=graceful_timeout)
                 reaped = True
             except (subprocess.TimeoutExpired, Exception):
+                reaped = False
+
+        # If direct child has exited, poll() is not None, but descendants might still survive
+        # 3. Force-kill descendants and process if not reaped or if descendants may survive
+        if not reaped and is_alive:
+            if pid and sys.platform == "win32":
+                try:
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(pid)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=5.0
+                    )
+                except Exception:
+                    pass
+            elif safe_to_killpg:
+                try:
+                    os.killpg(dedicated_pgid, sig_kill)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                except Exception:
+                    pass
+
+            try:
+                proc.kill()
+            except (ProcessLookupError, PermissionError):
+                pass
+            except Exception:
                 pass
 
-            if not reaped:
-                # 3. Force-kill descendants and process
-                if pid and sys.platform == "win32":
-                    try:
-                        subprocess.run(
-                            ["taskkill", "/F", "/T", "/PID", str(pid)],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            timeout=5.0
-                        )
-                    except Exception:
-                        pass
-                elif pid and hasattr(os, "killpg"):
-                    try:
-                        os.killpg(os.getpgid(pid), signal.SIGKILL)
-                    except Exception:
-                        pass
-
+        # 3b. Ensure descendants are terminated even when the direct child exits before them:
+        if safe_to_killpg:
+            try:
+                os.killpg(dedicated_pgid, sig_kill)
+            except (ProcessLookupError, PermissionError):
+                pass
+            except Exception:
+                pass
+        elif pid and sys.platform == "win32":
+            descendants = _get_windows_descendant_pids(pid)
+            for d_pid in descendants:
                 try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
+                    subprocess.run(
+                        ["taskkill", "/F", "/PID", str(d_pid)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=2.0
+                    )
                 except Exception:
                     pass
 
-                # 4. Explicitly wait/reap
-                try:
-                    proc.wait(timeout=2.0)
-                except Exception:
-                    pass
+        # 4. Explicitly wait/reap the direct child
+        if not reaped:
+            try:
+                proc.wait(timeout=0.5)
+                reaped = True
+            except Exception:
+                reaped = (proc.poll() is not None) if callable(getattr(proc, "poll", None)) else False
+
+        if not reaped:
+            cleanup_success = False
+
+    except Exception as ex:
+        cleanup_success = False
+        if sys.exc_info()[1] is None and raise_on_error:
+            raise SubprocessCleanupError(f"Subprocess cleanup failed: {ex}") from ex
     finally:
         # 5. Close/release associated pipes and streams
         for stream in (getattr(proc, "stdin", None), getattr(proc, "stdout", None), getattr(proc, "stderr", None)):
@@ -134,6 +256,21 @@ def _cleanup_subprocess(proc: subprocess.Popen, graceful_timeout: float = 1.0) -
                     stream.close()
                 except Exception:
                     pass
+
+    if cleanup_success:
+        try:
+            proc._cleaned_up = True
+        except Exception:
+            pass
+    elif not cleanup_success:
+        if sys.exc_info()[1] is not None:
+            logging.getLogger("agent_framework").error(
+                f"[SubprocessCleanup] Process PID {pid} could not be cleanly terminated/reaped; primary exception preserved."
+            )
+        elif raise_on_error:
+            raise SubprocessCleanupError(f"Subprocess PID {pid} could not be cleanly terminated or reaped")
+
+    return cleanup_success
 
 
 class AntigravityAgentRunner:
@@ -189,14 +326,22 @@ class AntigravityAgentRunner:
             "--model", model,
         ]
 
+        popen_kwargs = {
+            "stdin": subprocess.PIPE,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+            "encoding": "utf-8",
+        }
+        if sys.platform != "win32":
+            popen_kwargs["start_new_session"] = True
+
         proc = subprocess.Popen(
             cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8"
+            **popen_kwargs
         )
+        if sys.platform != "win32":
+            proc._dedicated_pgid = proc.pid
 
         out = ""
         err = ""
@@ -237,12 +382,12 @@ class AntigravityAgentRunner:
 
             if cancelled:
                 _cleanup_subprocess(proc)
-                comm_thread.join(timeout=0.5)
+                comm_thread.join(timeout=0.1)
                 raise RuntimeError("Operation cancelled by user.")
 
             if timed_out:
                 _cleanup_subprocess(proc)
-                comm_thread.join(timeout=0.5)
+                comm_thread.join(timeout=0.1)
                 raise TimeoutError(f"Antigravity Agent timed out after {timeout}s.")
 
             if exc_holder:
