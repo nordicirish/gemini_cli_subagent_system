@@ -169,6 +169,174 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
 
     @patch("web_server.get_chart_parts", return_value=([], []))
     @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_allows_dispatch_on_valid_populated_ssot(self, mock_dispatch, mock_charts):
+        """Valid populated SSoT permits normal dispatch with active financial context."""
+        mock_dispatch.return_value = {
+            "status": "completed",
+            "response": "Holding AAPL 10 shares at $150.0 WAC.",
+            "turn_count": 1,
+        }
+
+        valid_populated_state = {
+            "financial_state_valid": True,
+            "local_storage_state": {
+                "mutable_state": {
+                    "portfolio_snapshot": [{"ticker": "AAPL", "shares": 10.0, "wac": 150.0, "status": "ACTIVE"}],
+                    "state_context": {"regime": "BULLISH"},
+                }
+            },
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, valid_populated_state, clear=True):
+            req = web_server.ChatRequest(message="What is our AAPL position?")
+            res = web_server.chat_endpoint(req)
+
+            self.assertEqual(res["status"], "success")
+            self.assertEqual(mock_dispatch.call_count, 1)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_halts_when_mutable_state_is_none(self, mock_dispatch, mock_charts):
+        """When authoritative SSoT contains mutable_state=None, chat dispatch halts fail-closed."""
+        initial_model = web_server.ORCHESTRATOR_MODEL
+        initial_session = web_server.global_chat_session
+
+        malformed_state = {
+            "financial_state_valid": True,
+            "local_storage_state": {"mutable_state": None},
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, malformed_state, clear=True):
+            req = web_server.ChatRequest(message="Execute order")
+            res = web_server.chat_endpoint(req)
+
+            self.assertEqual(res["status"], "error")
+            self.assertEqual(res["code"], "financial_state_degraded")
+            self.assertEqual(mock_dispatch.call_count, 0)
+            self.assertEqual(web_server.ORCHESTRATOR_MODEL, initial_model)
+            self.assertIs(web_server.global_chat_session, initial_session)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_halts_when_mutable_state_is_invalid_type(self, mock_dispatch, mock_charts):
+        """When mutable_state is a non-dict type, chat dispatch halts fail-closed."""
+        malformed_state = {
+            "financial_state_valid": True,
+            "local_storage_state": {"mutable_state": "corrupted_non_dict_string"},
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, malformed_state, clear=True):
+            req = web_server.ChatRequest(message="Execute order")
+            res = web_server.chat_endpoint(req)
+
+            self.assertEqual(res["status"], "error")
+            self.assertEqual(res["code"], "financial_state_degraded")
+            self.assertEqual(mock_dispatch.call_count, 0)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_halts_when_portfolio_structure_is_invalid(self, mock_dispatch, mock_charts):
+        """When portfolio_snapshot is not a list, chat dispatch halts fail-closed."""
+        malformed_state = {
+            "financial_state_valid": True,
+            "local_storage_state": {
+                "mutable_state": {
+                    "portfolio_snapshot": "invalid_not_a_list"
+                }
+            },
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, malformed_state, clear=True):
+            req = web_server.ChatRequest(message="Portfolio overview")
+            res = web_server.chat_endpoint(req)
+
+            self.assertEqual(res["status"], "error")
+            self.assertEqual(res["code"], "financial_state_degraded")
+            self.assertEqual(mock_dispatch.call_count, 0)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_halts_when_portfolio_entry_is_invalid(self, mock_dispatch, mock_charts):
+        """When an individual portfolio entry is not a dict, chat dispatch halts fail-closed."""
+        malformed_state = {
+            "financial_state_valid": True,
+            "local_storage_state": {
+                "mutable_state": {
+                    "portfolio_snapshot": [123, "invalid_entry_type"]
+                }
+            },
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, malformed_state, clear=True):
+            req = web_server.ChatRequest(message="Portfolio overview")
+            res = web_server.chat_endpoint(req)
+
+            self.assertEqual(res["status"], "error")
+            self.assertEqual(res["code"], "financial_state_degraded")
+            self.assertEqual(mock_dispatch.call_count, 0)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_halts_on_exception_during_authoritative_ssot_processing(self, mock_dispatch, mock_charts):
+        """An unexpected exception during authoritative SSoT processing aborts dispatch without broad catch suppression."""
+        initial_model = web_server.ORCHESTRATOR_MODEL
+        initial_session = web_server.global_chat_session
+
+        mock_bad_ssot = MagicMock()
+        mock_bad_ssot.get.side_effect = RuntimeError("Memory corruption during authoritative SSoT retrieval")
+
+        malformed_state = {
+            "financial_state_valid": True,
+            "local_storage_state": mock_bad_ssot,
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, malformed_state, clear=True):
+            req = web_server.ChatRequest(message="Status")
+            res = web_server.chat_endpoint(req)
+
+            self.assertEqual(res["status"], "error")
+            self.assertEqual(res["code"], "financial_state_degraded")
+            self.assertEqual(mock_dispatch.call_count, 0)
+            self.assertEqual(web_server.ORCHESTRATOR_MODEL, initial_model)
+            self.assertIs(web_server.global_chat_session, initial_session)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_optional_enrichment_failure_remains_non_blocking(self, mock_dispatch, mock_charts):
+        """When authoritative SSoT is valid, non-authoritative enrichment failure remains non-blocking."""
+        mock_dispatch.return_value = {
+            "status": "completed",
+            "response": "Dispatched despite optional telemetry enrichment failure.",
+            "turn_count": 1,
+        }
+
+        valid_state = {
+            "financial_state_valid": True,
+            "local_storage_state": {
+                "mutable_state": {
+                    "portfolio_snapshot": [{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
+                }
+            },
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, valid_state, clear=True):
+            # Simulate failure during prompt template formatting of optional telemetry
+            with patch("web_server.load_data_packet_injection_prompt", side_effect=RuntimeError("Template load failure")):
+                req = web_server.ChatRequest(message="What is the current position?")
+                res = web_server.chat_endpoint(req)
+
+                self.assertEqual(res["status"], "success")
+                self.assertEqual(mock_dispatch.call_count, 1)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
     def test_chat_endpoint_startup_unreadable_ssot_halts_dispatch(self, mock_dispatch, mock_charts):
         """On startup before daemon runs, unreadable/corrupt SSoT halts chat dispatch."""
         mock_service = MagicMock()

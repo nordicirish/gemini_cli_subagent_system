@@ -18,9 +18,9 @@ import tools
 # cloud_sync removed — GDrive Decoupling Guardrail (ANTIGRAVITY v11.03)
 
 try:
-    from persistence import get_persistence_service
+    from persistence import get_persistence_service, PersistenceValidationError
 except ImportError:
-    from python.persistence import get_persistence_service
+    from python.persistence import get_persistence_service, PersistenceValidationError
 
 # Import the existing FastAPI app from fetch_stocks
 from fetch_stocks import app, run_daemon, GLOBAL_STATE, CHART_SCREENSHOTS_BUFFER
@@ -591,36 +591,68 @@ def chat_endpoint(req: ChatRequest):
         else:
             ssot = local_storage
 
+        # 2. Authoritative SSoT Structure Validation & Extraction
         try:
-            ms = ssot.get("mutable_state", ssot)  # support both nested and flat layouts
-            portfolio = ms.get("portfolio_snapshot", ssot.get("portfolio_snapshot", []))
-            state_ctx = ms.get("state_context", ssot.get("state_context", {}))
+            if not isinstance(ssot, dict):
+                raise PersistenceValidationError(f"Authoritative SSoT root must be a dict, got {type(ssot).__name__}")
 
-            # Slim tickers — only key fields for context efficiency
-            slim_tickers = [
-                {
-                    "ticker": t.get("ticker"),
-                    "price": t.get("price"),
-                    "session_change_pct": t.get("session_change_pct"),
-                    "gap_percent": t.get("gap_percent"),
-                    "rsi": t.get("rsi"),
-                    "macd": t.get("macd", 0.0),
-                    "macd_signal": t.get("macd_signal", 0.0),
-                    "macd_hist": t.get("macd_hist", 0.0),
-                    "macd_slope": t.get("macd_slope", "EXPANDING_POSITIVE"),
-                    "macd_status": t.get("macd_status", "NEUTRAL"),
-                    "atr_percent": t.get("atr_percent"),
-                    "vwap": t.get("vwap"),
-                    "trend": t.get("trend"),
-                    "signal": t.get("signal"),
-                    "score": t.get("score"),
-                    "dealer_posture": t.get("dealer_posture"),
-                    "net_gex_total": round(t.get("net_gex_total", 0.0), 3) if t.get("net_gex_total") is not None else 0.0,
-                    "fib_forecast": t.get("fib_forecast"),
-                    "note": t.get("note"),
-                }
-                for t in (live_state.get("tickers") or [])
-            ]
+            # Validate mutable_state if present
+            if "mutable_state" in ssot:
+                ms = ssot["mutable_state"]
+                if not isinstance(ms, dict):
+                    raise PersistenceValidationError(
+                        f"Authoritative SSoT mutable_state must be a dict, got {type(ms).__name__}"
+                    )
+            else:
+                ms = ssot
+
+            # Validate portfolio structure
+            raw_portfolio = ms.get("portfolio_snapshot")
+            if raw_portfolio is None and "portfolio_snapshot" in ssot:
+                raw_portfolio = ssot.get("portfolio_snapshot")
+
+            if raw_portfolio is None:
+                portfolio = []
+            elif not isinstance(raw_portfolio, list):
+                raise PersistenceValidationError(
+                    f"Authoritative portfolio_snapshot must be a list, got {type(raw_portfolio).__name__}"
+                )
+            else:
+                for idx, p in enumerate(raw_portfolio):
+                    if not isinstance(p, dict):
+                        raise PersistenceValidationError(
+                            f"Authoritative portfolio entry {idx} must be a dict, got {type(p).__name__}"
+                        )
+                portfolio = raw_portfolio
+
+            # Validate state_context
+            raw_state_ctx = ms.get("state_context")
+            if raw_state_ctx is None and "state_context" in ssot:
+                raw_state_ctx = ssot.get("state_context")
+            if raw_state_ctx is not None and not isinstance(raw_state_ctx, dict):
+                raise PersistenceValidationError(
+                    f"Authoritative state_context must be a dict, got {type(raw_state_ctx).__name__}"
+                )
+            state_ctx = raw_state_ctx if isinstance(raw_state_ctx, dict) else {}
+
+            # Validate watched_tickers & scout_categories if present
+            raw_watched = ms.get("watched_tickers")
+            if raw_watched is None and "watched_tickers" in ssot:
+                raw_watched = ssot.get("watched_tickers")
+            if raw_watched is not None and not isinstance(raw_watched, list):
+                raise PersistenceValidationError(
+                    f"Authoritative watched_tickers must be a list, got {type(raw_watched).__name__}"
+                )
+            watched = raw_watched if isinstance(raw_watched, list) else []
+
+            raw_scouts = ms.get("scout_categories")
+            if raw_scouts is None and "scout_categories" in ssot:
+                raw_scouts = ssot.get("scout_categories")
+            if raw_scouts is not None and not isinstance(raw_scouts, list):
+                raise PersistenceValidationError(
+                    f"Authoritative scout_categories must be a list, got {type(raw_scouts).__name__}"
+                )
+            scouts = raw_scouts if isinstance(raw_scouts, list) else []
 
             # Slim portfolio
             slim_portfolio = [
@@ -632,42 +664,81 @@ def chat_endpoint(req: ChatRequest):
                     "action": p.get("action"),
                 }
                 for p in portfolio
-            ] if portfolio else []
+            ]
+        except Exception as ssot_err:
+            framework.log(f"[Security Alert] Authoritative SSoT structure validation failed: {ssot_err}")
+            return {
+                "status": "error",
+                "code": "financial_state_degraded",
+                "message": "Authoritative financial state is currently unavailable or corrupted. Chat dispatch halted to prevent unauthorized or hallucinated mutations.",
+            }
 
-            # Load trade lessons via persistence service
+        # 3. Optional Enrichment & Non-Authoritative Telemetry Assembly
+        try:
+            # Slim tickers — optional market feed telemetry
+            slim_tickers = []
+            raw_tickers = live_state.get("tickers")
+            if isinstance(raw_tickers, list):
+                for t in raw_tickers:
+                    if isinstance(t, dict):
+                        slim_tickers.append({
+                            "ticker": t.get("ticker"),
+                            "price": t.get("price"),
+                            "session_change_pct": t.get("session_change_pct"),
+                            "gap_percent": t.get("gap_percent"),
+                            "rsi": t.get("rsi"),
+                            "macd": t.get("macd", 0.0),
+                            "macd_signal": t.get("macd_signal", 0.0),
+                            "macd_hist": t.get("macd_hist", 0.0),
+                            "macd_slope": t.get("macd_slope", "EXPANDING_POSITIVE"),
+                            "macd_status": t.get("macd_status", "NEUTRAL"),
+                            "atr_percent": t.get("atr_percent"),
+                            "vwap": t.get("vwap"),
+                            "trend": t.get("trend"),
+                            "signal": t.get("signal"),
+                            "score": t.get("score"),
+                            "dealer_posture": t.get("dealer_posture"),
+                            "net_gex_total": round(t.get("net_gex_total", 0.0), 3) if t.get("net_gex_total") is not None else 0.0,
+                            "fib_forecast": t.get("fib_forecast"),
+                            "note": t.get("note"),
+                        })
+
+            # Load trade lessons via persistence service (optional enrichment)
             trade_lessons = live_state.get("trade_lessons", [])
-            if not trade_lessons:
+            if not trade_lessons or not isinstance(trade_lessons, list):
                 try:
                     trade_lessons = get_persistence_service().get_trade_lessons()
-                except Exception:
-                    pass
+                except Exception as tle:
+                    framework.log(f"[System Warning] Optional trade lessons retrieval failed: {tle}")
+                    trade_lessons = []
+            if not isinstance(trade_lessons, list):
+                trade_lessons = []
 
-            # Load watched tickers & scout categories
-            watched = ms.get("watched_tickers", ssot.get("watched_tickers", []))
-            scouts = ms.get("scout_categories", ssot.get("scout_categories", []))
-
-            # Load decision log via persistence service
+            # Load decision log via persistence service (optional enrichment)
             decision_log = []
             try:
                 decision_log = get_persistence_service().get_decision_log()
-            except Exception:
-                pass
+            except Exception as dle:
+                framework.log(f"[System Warning] Optional decision log retrieval failed: {dle}")
+                decision_log = []
+            if not isinstance(decision_log, list):
+                decision_log = []
 
             data_packet = {
-                "_meta": live_state.get("_meta", {}),
+                "_meta": live_state.get("_meta", {}) if isinstance(live_state.get("_meta"), dict) else {},
                 "timestamp": live_state.get("timestamp", current_iso),
                 "market_status": live_state.get("status", "UNKNOWN"),
                 "tickers": slim_tickers,
                 "ssot": ssot,
-                "trade_lessons": trade_lessons[-10:] if isinstance(trade_lessons, list) else [],
-                "decision_log": decision_log[-10:] if isinstance(decision_log, list) else [],
+                "trade_lessons": trade_lessons[-10:],
+                "decision_log": decision_log[-10:],
             }
             data_packet_json = json.dumps(data_packet, indent=2, default=str)
             auto_data_block = load_data_packet_injection_prompt(data_packet_json)
             framework.log(f"[System] DATA_PACKET injected: {len(slim_tickers)} tickers, {len(slim_portfolio)} positions.")
-        except Exception as de:
-            auto_data_block = f"\n[SYSTEM NOTE: Live data unavailable — {de}]\n"
-            framework.log(f"[System] DATA_PACKET injection failed: {de}")
+        except Exception as enrichment_err:
+            auto_data_block = f"\n[SYSTEM NOTE: Live market telemetry partially unavailable — {enrichment_err}]\n"
+            framework.log(f"[System] Non-authoritative DATA_PACKET enrichment failed: {enrichment_err}")
         # --- END AUTO DATA INJECTION ---
         
         # HYDRATION: If server restarted but browser has history, re-prime the LLM

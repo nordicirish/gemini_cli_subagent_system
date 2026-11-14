@@ -551,6 +551,24 @@ class TestValidateFiniteFloatHardening(unittest.TestCase):
         # Negative allowed when non_negative=False
         self.assertEqual(validate_finite_float(-5.0, "test_field", non_negative=False), -5.0)
 
+    def test_rejects_custom_object_implementing_float(self):
+        """Custom objects that define __float__() must be rejected fail-closed under explicit allowlist."""
+        class CustomFloatObj:
+            def __float__(self):
+                return 42.0
+
+        with self.assertRaises(PersistenceValidationError) as ctx:
+            validate_finite_float(CustomFloatObj(), "test_field")
+        self.assertIn("Unsupported type CustomFloatObj", str(ctx.exception))
+
+    def test_rejects_other_unsupported_types(self):
+        """None, list, dict, set, and tuple must be rejected fail-closed under explicit allowlist."""
+        unsupported = [None, [1.0], {"value": 1.0}, {1.0}, (1.0,)]
+        for u in unsupported:
+            with self.assertRaises(PersistenceValidationError) as ctx:
+                validate_finite_float(u, "test_field")
+            self.assertIn("Unsupported type", str(ctx.exception))
+
 
 class TestJsonAndSqliteValidationParity(unittest.TestCase):
     """Verifies that JsonPersistenceAdapter and SqlitePersistenceAdapter exhibit identical validation behavior."""
@@ -621,6 +639,30 @@ class TestJsonAndSqliteValidationParity(unittest.TestCase):
                     adapter.save_portfolio_basket(
                         portfolio=[{"ticker": "SPY", "shares": 0.0, "wac": "corrupt"}],
                         unallocated_cash_eur=1000.0,
+                    )
+
+    def test_parity_on_custom_object_rejection(self):
+        """Both adapters reject custom objects implementing __float__()."""
+        class CustomFloat:
+            def __float__(self):
+                return 150.0
+
+        for adapter in (self.json_adapter, self.sqlite_adapter):
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": CustomFloat(), "wac": 500.0}],
+                        unallocated_cash_eur=1000.0,
+                    )
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": CustomFloat()}],
+                        unallocated_cash_eur=1000.0,
+                    )
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
+                        unallocated_cash_eur=CustomFloat(),
                     )
 
 

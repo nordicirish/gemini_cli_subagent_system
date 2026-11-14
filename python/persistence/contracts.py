@@ -13,6 +13,7 @@ repositories and UnitOfWork) behind a uniform, inspectable interface.
 
 import math
 from abc import ABC, abstractmethod
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Union
 
 
@@ -28,7 +29,9 @@ def validate_finite_float(
 ) -> float:
     """
     Validates that a financial numeric value is a finite float.
-    Rejects booleans, strings, non-numeric types, non-finite values (NaN, +inf, -inf),
+    Explicitly enforces an accepted numeric type allowlist (int, float, Decimal).
+    Rejects booleans, strings, custom objects implementing __float__(),
+    non-numeric types, non-finite values (NaN, +inf, -inf),
     and conversion overflow fail-closed with PersistenceValidationError.
     Preserves legitimate zero values (when allow_zero=True) and finite positive values.
     """
@@ -36,6 +39,10 @@ def validate_finite_float(
         raise PersistenceValidationError(f"Boolean values not allowed for financial field {field_name}")
     if isinstance(val, str):
         raise PersistenceValidationError(f"String values not allowed for financial field {field_name}")
+    if not isinstance(val, (int, float, Decimal)):
+        raise PersistenceValidationError(
+            f"Unsupported type {type(val).__name__} for financial field {field_name}; expected int, float, or Decimal"
+        )
 
     try:
         num = float(val)
