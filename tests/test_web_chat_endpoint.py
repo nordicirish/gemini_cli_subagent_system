@@ -340,6 +340,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
     def test_chat_endpoint_startup_unreadable_ssot_halts_dispatch(self, mock_dispatch, mock_charts):
         """On startup before daemon runs, unreadable/corrupt SSoT halts chat dispatch."""
         mock_service = MagicMock()
+        mock_service.get_portfolio_basket.side_effect = PersistenceIntegrityError("Corrupt SSoT JSON")
         mock_service.get_ssot_data.side_effect = PersistenceIntegrityError("Corrupt SSoT JSON")
 
         uninitialized_state = {
@@ -367,6 +368,12 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
         }
 
         mock_service = MagicMock()
+        mock_service.get_portfolio_basket.return_value = {
+            "portfolio": [],
+            "unallocated_cash_eur": 0.0,
+            "unallocated_cash_usd": 0.0,
+            "eurusd_rate": 1.08,
+        }
         mock_service.get_ssot_data.return_value = {}
 
         uninitialized_state = {
@@ -381,6 +388,109 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
 
                 self.assertEqual(res["status"], "success")
                 self.assertEqual(mock_dispatch.call_count, 1)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_startup_invalid_portfolio_financial_values_halts_dispatch(self, mock_dispatch, mock_charts):
+        """Startup SSoT containing non-finite or invalid portfolio financial values halts dispatch."""
+        mock_service = MagicMock()
+        mock_service.get_portfolio_basket.side_effect = PersistenceValidationError(
+            "Non-finite numeric value not allowed for shares for position AAPL: nan"
+        )
+
+        uninitialized_state = {
+            "status": "INITIALIZING - LOADING GEX PROFILES...",
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, uninitialized_state, clear=True):
+            with patch("web_server.get_persistence_service", return_value=mock_service):
+                req = web_server.ChatRequest(message="Execute buy")
+                res = web_server.chat_endpoint(req)
+
+                self.assertEqual(res["status"], "error")
+                self.assertEqual(res["code"], "financial_state_degraded")
+                self.assertEqual(mock_dispatch.call_count, 0)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_startup_invalid_cash_or_rate_halts_dispatch(self, mock_dispatch, mock_charts):
+        """Startup SSoT containing invalid cash or exchange rate values halts dispatch."""
+        uninitialized_state = {
+            "status": "INITIALIZING - LOADING GEX PROFILES...",
+            "tickers": [],
+        }
+
+        # 1. Invalid Cash EUR
+        mock_service_cash = MagicMock()
+        mock_service_cash.get_portfolio_basket.side_effect = PersistenceValidationError(
+            "Non-finite numeric value not allowed for unallocated_cash_eur: inf"
+        )
+        with patch.dict(fetch_stocks.GLOBAL_STATE, uninitialized_state, clear=True):
+            with patch("web_server.get_persistence_service", return_value=mock_service_cash):
+                res = web_server.chat_endpoint(web_server.ChatRequest(message="Status"))
+                self.assertEqual(res["status"], "error")
+                self.assertEqual(res["code"], "financial_state_degraded")
+                self.assertEqual(mock_dispatch.call_count, 0)
+
+        # 2. Invalid Exchange Rate
+        mock_service_rate = MagicMock()
+        mock_service_rate.get_portfolio_basket.side_effect = PersistenceValidationError(
+            "Zero value not allowed for exchange_rate"
+        )
+        with patch.dict(fetch_stocks.GLOBAL_STATE, uninitialized_state, clear=True):
+            with patch("web_server.get_persistence_service", return_value=mock_service_rate):
+                res = web_server.chat_endpoint(web_server.ChatRequest(message="Status"))
+                self.assertEqual(res["status"], "error")
+                self.assertEqual(res["code"], "financial_state_degraded")
+                self.assertEqual(mock_dispatch.call_count, 0)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_deferred_session_creation_remains_none_on_degraded_state(self, mock_dispatch, mock_charts):
+        """When global_chat_session is initially None, degraded financial state leaves it None."""
+        web_server.global_chat_session = None
+
+        degraded_state = {
+            "financial_state_valid": False,
+            "local_storage_state": None,
+            "persistence_error": "Authoritative SSoT retrieval failure",
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, degraded_state, clear=True):
+            req = web_server.ChatRequest(message="Rebalance")
+            res = web_server.chat_endpoint(req)
+
+            self.assertEqual(res["status"], "error")
+            self.assertEqual(res["code"], "financial_state_degraded")
+            # Session must remain uninstantiated (None)
+            self.assertIsNone(web_server.global_chat_session)
+            self.assertEqual(mock_dispatch.call_count, 0)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_existing_session_preserved_on_degraded_state(self, mock_dispatch, mock_charts):
+        """Existing global_chat_session instance is preserved unchanged on validation failure."""
+        dummy_session = MagicMock(name="PreExistingSession")
+        web_server.global_chat_session = dummy_session
+
+        degraded_state = {
+            "financial_state_valid": False,
+            "local_storage_state": None,
+            "persistence_error": "Authoritative SSoT retrieval failure",
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, degraded_state, clear=True):
+            req = web_server.ChatRequest(message="Rebalance")
+            res = web_server.chat_endpoint(req)
+
+            self.assertEqual(res["status"], "error")
+            self.assertEqual(res["code"], "financial_state_degraded")
+            # Existing session preserved invariant
+            self.assertIs(web_server.global_chat_session, dummy_session)
+            self.assertEqual(mock_dispatch.call_count, 0)
 
 
 class TestDaemonExecutionPathPersistenceIntegrity(unittest.TestCase):

@@ -530,11 +530,6 @@ def set_model(data: dict):
 def chat_endpoint(req: ChatRequest):
     """Primary chat route. Auto-injects live GLOBAL_STATE as DATA_PACKET before each user message."""
     global global_chat_session, cancel_event, _session_hydrated, ORCHESTRATOR_MODEL
-    
-    # Ensure session exists (handle model switches)
-    if global_chat_session is None:
-        global_chat_session = create_new_session()
-    session = global_chat_session
 
     cancel_event.clear()
     framework.reset_turn_usage()
@@ -574,9 +569,11 @@ def chat_endpoint(req: ChatRequest):
             }
 
         if "local_storage_state" not in live_state:
-            # First run / startup check before daemon cycles
+            # First run / startup check before daemon cycles:
+            # Validate authoritative financial basket (shares, WAC, cash, rate) and SSoT structure fail-closed
             try:
                 service = get_persistence_service()
+                service.get_portfolio_basket()
                 ssot_direct = service.get_ssot_data()
                 if not isinstance(ssot_direct, dict):
                     raise PersistenceValidationError("SSoT root must be a dictionary")
@@ -740,7 +737,12 @@ def chat_endpoint(req: ChatRequest):
             auto_data_block = f"\n[SYSTEM NOTE: Live market telemetry partially unavailable — {enrichment_err}]\n"
             framework.log(f"[System] Non-authoritative DATA_PACKET enrichment failed: {enrichment_err}")
         # --- END AUTO DATA INJECTION ---
-        
+
+        # Deferred session initialisation: Only initialize/access session after authoritative financial validation succeeds
+        if global_chat_session is None:
+            global_chat_session = create_new_session()
+        session = global_chat_session
+
         # HYDRATION: If server restarted but browser has history, re-prime the LLM
         prompt_prefix = auto_data_block  # Always prepend live data
         if req.history and not _session_hydrated:
