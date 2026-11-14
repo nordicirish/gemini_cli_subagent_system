@@ -12,6 +12,6 @@
 - Eliminate dead code, lint warnings, and runtime regressions.
 
 ## Restrictions
-- **MUST NOT** modify financial state files (`ssot.json`, `rules.md`, `trade_lessons.json`) without explicit approval.
+- **MUST NOT** modify Protected Financial Assets (`context/ssot.json`, `context/trade_lessons.json`, `context/decision_log.json`, `gem_trading_rules/rules.md`, `engine_instructions/*.md`) or alter investment logic, risk parameters, or operational databases.
 - **MUST NOT** bypass security controls or weaken permission boundaries to achieve functionality.
-- **MUST NOT** commit, push, or deploy code autonomously.
+- **MUST NOT** commit, push, or deploy code autonomously, or proceed past an authorised stage without Human Owner sign-off.

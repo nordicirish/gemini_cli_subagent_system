@@ -35,12 +35,12 @@ The governance hierarchy is structured into three strictly isolated tiers:
                  └───────────────────X───────────────────────────┘
 ```
 
-1. **Human Authority:** The human repository owner holds exclusive authority over financial mandates, capital risk parameters, trading execution, git commits, git pushes, and releases.
-2. **Instruction Precedence:**
-   - Security Policies & Financial Boundary Rules (Non-bypassable, fail-closed).
-   - `.agents/protocols/` and `.agents/AGENTS.md`.
+1. **Human Authority:** The human repository owner holds exclusive authority over task/stage scope authorisation, Protected Financial Assets (`Protocol 06`), financial mandates, capital risk parameters, trading execution, git commits, git pushes, and releases.
+2. **Instruction Precedence (Fail-Closed):**
+   - Security Policies & Financial Boundary Rules (`.agents/protocols/03-security-policy.md`, `.agents/protocols/06-financial-boundaries.md`).
+   - `.agents/AGENTS.md` and remaining engineering protocols (`.agents/protocols/01-agent-orchestration.md`, `02`, `04`, `05`).
    - Domain-specific role definitions (`.agents/agents/` for engineering, `engine_instructions/` for trading).
-   - Session prompt instructions.
+   - [`INSTRUCTIONS.md`](../INSTRUCTIONS.md) (subordinate engineering execution guide; zero trading or financial authority) and approved session task prompts.
 
 ---
 
@@ -82,10 +82,10 @@ Every code change must traverse the fail-closed lifecycle:
  [Automated Verification] ◄─── Full test suite pass; zero regressions; pip check; py_compile
           │
           ▼
- [Independent Code Review] ◄─── Read-only reviewer inspects diff, boundaries, and evidence
+ [Independent Code Review] ◄─── Designated read-only reviewer (never the implementer) audits diff & evidence
           │
           ▼
-   [Human Sign-Off] ◄─── Final inspection; human performs git commit & push
+   [Human Sign-Off] ◄─── Final inspection; human performs git commit & push and authorises next stage
 ```
 
-**Fail-Closed Rule:** If required tests fail, if review evidence is incomplete, or if unapproved files are touched, the task is marked `REJECTED` and execution terminates immediately.
+**Fail-Closed Rule:** If required tests fail, if review evidence is incomplete, if unapproved files or Protected Financial Assets (`Protocol 06`) are touched, or if an agent attempts to self-approve or auto-advance stages, the task is marked `REJECTED` and execution terminates immediately.

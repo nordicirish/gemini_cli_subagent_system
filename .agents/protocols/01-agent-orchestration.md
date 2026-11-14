@@ -16,3 +16,4 @@ This protocol governs how tasks are initiated, scoped, delegated, and coordinate
 3. **No Autonomous Delegation Chains:** Subagents must not autonomously launch secondary subagent swarms without explicit task boundaries.
 4. **Context Budgeting & Minimization:** Agents must pass only necessary, minimal context to subagents. Excessive context bloat and recursive instruction loading are forbidden.
 5. **Deterministic Termination:** Every subagent task must define explicit termination criteria. Infinite wait loops and unbounded turn cycles are forbidden. Maximum turns for tool dispatching is capped at 5 (`MAX_TOOL_TURNS = 5`).
+6. **Stage Isolation & Human Sign-Off:** Completing an authorised task or stage terminates execution. Agents must present observed verification evidence and wait for independent review and explicit Human Repository Owner authorisation before beginning any subsequent stage.
