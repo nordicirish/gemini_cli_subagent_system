@@ -1619,18 +1619,22 @@ class TestStage21FinalCorrectnessRequirements(unittest.TestCase):
                     DYNAMIC_SCOUT_CACHE.pop("JUST_INSIDE_4H", None)
 
         # 12. Timestamp exactly at four-hour boundary -> Cache expires
+        fixed_now = 1_800_000_000.0
         with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
             with DYNAMIC_SCOUT_CACHE_LOCK:
                 DYNAMIC_SCOUT_CACHE["EXACT_4H_BOUNDARY"] = {
                     "tickers": ["OLD"],
-                    "cached_at": time.time() - 14400.0,  # Exactly 14400s
+                    "cached_at": fixed_now - 14400.0,
                     "timestamp": "2026-11-14T19:00:00Z",
                 }
             try:
-                res = _get_dynamic_scout_tickers("EXACT_4H_BOUNDARY")
+                with patch("fetch_stocks.t_time.time", return_value=fixed_now):
+                    res = _get_dynamic_scout_tickers("EXACT_4H_BOUNDARY")
                 self.assertNotEqual(res, ["OLD"])
                 self.assertEqual(dummy.pending_count(), 1)
+                self.assertEqual(len(dummy._workers), 0)
                 mock_scout_raw.assert_not_called()
+                mock_runner.assert_not_called()
                 self.assertEqual(DYNAMIC_SCOUT_CACHE["EXACT_4H_BOUNDARY"]["timestamp"], "2026-11-14T19:00:00Z")
             finally:
                 with DYNAMIC_SCOUT_CACHE_LOCK:
