@@ -257,6 +257,75 @@ class TestJsonPersistenceAdapter(unittest.TestCase):
         with self.assertRaises(PersistenceValidationError):
             self.adapter.get_portfolio_basket()
 
+    def test_json_rejects_non_finite_financial_values(self):
+        """Reject non-finite shares, wac, cash, and exchange-rate values fail-closed with PersistenceValidationError."""
+        non_finite_values = [float("nan"), float("inf"), float("-inf")]
+
+        for nf in non_finite_values:
+            # 1. Non-finite shares in SSoT read
+            with open(self.adapter.ssot_path, "w", encoding="utf-8") as f:
+                json.dump({"portfolio_snapshot": [{"ticker": "SPY", "shares": nf, "wac": 500.0}]}, f)
+            with self.assertRaises(PersistenceValidationError, msg=f"Should reject non-finite shares: {nf}"):
+                self.adapter.get_portfolio_basket()
+
+            # 2. Non-finite wac in SSoT read
+            with open(self.adapter.ssot_path, "w", encoding="utf-8") as f:
+                json.dump({"portfolio_snapshot": [{"ticker": "SPY", "shares": 10.0, "wac": nf}]}, f)
+            with self.assertRaises(PersistenceValidationError, msg=f"Should reject non-finite wac: {nf}"):
+                self.adapter.get_portfolio_basket()
+
+            # 3. Non-finite EUR cash in SSoT read
+            with open(self.adapter.ssot_path, "w", encoding="utf-8") as f:
+                json.dump({"portfolio_snapshot": [], "unallocated_cash_eur": nf}, f)
+            with self.assertRaises(PersistenceValidationError, msg=f"Should reject non-finite EUR cash: {nf}"):
+                self.adapter.get_portfolio_basket()
+
+            # 4. Non-finite USD cash in SSoT read
+            with open(self.adapter.ssot_path, "w", encoding="utf-8") as f:
+                json.dump({"portfolio_snapshot": [], "unallocated_cash_usd": nf}, f)
+            with self.assertRaises(PersistenceValidationError, msg=f"Should reject non-finite USD cash: {nf}"):
+                self.adapter.get_portfolio_basket()
+
+            # 5. Non-finite exchange rate in SSoT read
+            with open(self.adapter.ssot_path, "w", encoding="utf-8") as f:
+                json.dump({"portfolio_snapshot": [], "exchange_rate": nf}, f)
+            with self.assertRaises(PersistenceValidationError, msg=f"Should reject non-finite exchange rate: {nf}"):
+                self.adapter.get_portfolio_basket()
+
+            # 6. Non-finite values in save_portfolio_basket
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PersistenceValidationError, msg=f"save_portfolio_basket should reject non-finite shares: {nf}"):
+                    self.adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": nf, "wac": 500.0}],
+                        unallocated_cash_eur=1000.0,
+                    )
+                with self.assertRaises(PersistenceValidationError, msg=f"save_portfolio_basket should reject non-finite cash: {nf}"):
+                    self.adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
+                        unallocated_cash_eur=nf,
+                    )
+
+    def test_json_accepts_valid_zero_and_positive_values(self):
+        """Valid zero and ordinary positive financial numbers must be accepted without error."""
+        with open(self.adapter.ssot_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "portfolio_snapshot": [
+                    {"ticker": "SPY", "shares": 0.0, "wac": 0.0},
+                    {"ticker": "AAPL", "shares": 10.5, "wac": 225.50},
+                ],
+                "unallocated_cash_eur": 0.0,
+                "unallocated_cash_usd": 1500.75,
+                "exchange_rate": 1.085,
+            }, f)
+
+        basket = self.adapter.get_portfolio_basket()
+        self.assertEqual(len(basket["portfolio"]), 2)
+        self.assertEqual(basket["portfolio"][0]["shares"], 0.0)
+        self.assertEqual(basket["portfolio"][1]["shares"], 10.5)
+        self.assertEqual(basket["unallocated_cash_eur"], 0.0)
+        self.assertEqual(basket["unallocated_cash_usd"], 1500.75)
+        self.assertEqual(basket["eurusd_rate"], 1.085)
+
 
 class TestSqlitePersistenceAdapter(unittest.TestCase):
     def setUp(self):
@@ -368,6 +437,28 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
         self.assertIsInstance(ssot, dict)
         self.assertEqual(ssot["portfolio_snapshot"], [])
         self.assertEqual(ssot["unallocated_cash_eur"], 0.0)
+
+    def test_sqlite_rejects_non_finite_financial_values(self):
+        """Reject non-finite shares, wac, and cash on SQLite adapter with PersistenceValidationError."""
+        non_finite_values = [float("nan"), float("inf"), float("-inf")]
+
+        for nf in non_finite_values:
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PersistenceValidationError, msg=f"SQLite should reject non-finite shares: {nf}"):
+                    self.adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": nf, "wac": 500.0}],
+                        unallocated_cash_eur=1000.0,
+                    )
+                with self.assertRaises(PersistenceValidationError, msg=f"SQLite should reject non-finite wac: {nf}"):
+                    self.adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": nf}],
+                        unallocated_cash_eur=1000.0,
+                    )
+                with self.assertRaises(PersistenceValidationError, msg=f"SQLite should reject non-finite cash: {nf}"):
+                    self.adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
+                        unallocated_cash_eur=nf,
+                    )
 
 
 if __name__ == "__main__":

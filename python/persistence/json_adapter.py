@@ -42,6 +42,7 @@ from .contracts import (
     PersistenceNotFoundError,
     PersistenceValidationError,
     CANONICAL_SSOT_KEYS,
+    validate_finite_float,
 )
 
 
@@ -175,15 +176,8 @@ class JsonPersistenceAdapter(PersistenceAdapter):
             ticker = item.get("ticker")
             if not ticker or not isinstance(ticker, str) or not ticker.strip():
                 raise PersistenceValidationError(f"Portfolio position item {i} missing valid ticker")
-            try:
-                shares = float(item.get("shares", 0.0))
-                if shares < 0:
-                    raise PersistenceValidationError(f"Negative shares for position {ticker}: {shares}")
-                wac = float(item.get("wac", 0.0))
-                if wac < 0:
-                    raise PersistenceValidationError(f"Negative wac for position {ticker}: {wac}")
-            except (ValueError, TypeError) as e:
-                raise PersistenceValidationError(f"Invalid numeric values in position {ticker}: {e}") from e
+            shares = validate_finite_float(item.get("shares", 0.0), f"shares for position {ticker}")
+            wac = validate_finite_float(item.get("wac", 0.0), f"wac for position {ticker}")
 
             portfolio.append({
                 "ticker": str(ticker).strip().upper(),
@@ -191,24 +185,23 @@ class JsonPersistenceAdapter(PersistenceAdapter):
                 "wac": wac,
             })
 
-        try:
-            raw_cash_eur = (
-                ms.get("unallocated_cash_eur") if ms.get("unallocated_cash_eur") is not None else
-                data.get("unallocated_cash_eur") if data.get("unallocated_cash_eur") is not None else
-                ep.get("unallocated_cash_eur") if ep.get("unallocated_cash_eur") is not None else
-                state_ctx.get("unallocated_cash_eur", 0.0)
-            )
-            raw_cash_usd = (
-                ms.get("unallocated_cash_usd") if ms.get("unallocated_cash_usd") is not None else
-                data.get("unallocated_cash_usd") if data.get("unallocated_cash_usd") is not None else
-                ep.get("unallocated_cash_usd") if ep.get("unallocated_cash_usd") is not None else
-                state_ctx.get("unallocated_cash_usd", 0.0)
-            )
-            cash_eur = float(raw_cash_eur if raw_cash_eur is not None else 0.0)
-            cash_usd = float(raw_cash_usd if raw_cash_usd is not None else 0.0)
-            rate = float(data.get("exchange_rate", 1.08)) if data.get("exchange_rate") is not None else 1.08
-        except (ValueError, TypeError) as e:
-            raise PersistenceValidationError(f"Invalid cash or exchange rate values in SSoT: {e}") from e
+        raw_cash_eur = (
+            ms.get("unallocated_cash_eur") if ms.get("unallocated_cash_eur") is not None else
+            data.get("unallocated_cash_eur") if data.get("unallocated_cash_eur") is not None else
+            ep.get("unallocated_cash_eur") if ep.get("unallocated_cash_eur") is not None else
+            state_ctx.get("unallocated_cash_eur", 0.0)
+        )
+        raw_cash_usd = (
+            ms.get("unallocated_cash_usd") if ms.get("unallocated_cash_usd") is not None else
+            data.get("unallocated_cash_usd") if data.get("unallocated_cash_usd") is not None else
+            ep.get("unallocated_cash_usd") if ep.get("unallocated_cash_usd") is not None else
+            state_ctx.get("unallocated_cash_usd", 0.0)
+        )
+        raw_rate = data.get("exchange_rate", 1.08) if data.get("exchange_rate") is not None else 1.08
+
+        cash_eur = validate_finite_float(raw_cash_eur if raw_cash_eur is not None else 0.0, "unallocated_cash_eur")
+        cash_usd = validate_finite_float(raw_cash_usd if raw_cash_usd is not None else 0.0, "unallocated_cash_usd")
+        rate = validate_finite_float(raw_rate, "exchange_rate", allow_zero=False)
 
         return {
             "portfolio": portfolio,
@@ -240,18 +233,29 @@ class JsonPersistenceAdapter(PersistenceAdapter):
             caller_role=caller_role,
         )
 
+        if not isinstance(portfolio, list):
+            raise PersistenceValidationError("Portfolio must be a list of position dictionaries")
+
         new_snapshot = []
         for item in portfolio:
-            shares = float(item.get("shares", 0.0))
+            if not isinstance(item, dict):
+                raise PersistenceValidationError("Portfolio position item must be a dictionary")
+            ticker = item.get("ticker")
+            if not ticker or not isinstance(ticker, str) or not ticker.strip():
+                raise PersistenceValidationError("Portfolio position item missing valid ticker")
+            shares = validate_finite_float(item.get("shares", 0.0), f"shares for position {ticker}")
+            wac = validate_finite_float(item.get("wac", 0.0), f"wac for position {ticker}")
             if shares > 0.0:
                 new_snapshot.append({
-                    "ticker": str(item["ticker"]).strip().upper(),
+                    "ticker": str(ticker).strip().upper(),
                     "shares": shares,
-                    "wac": float(item.get("wac", 0.0)),
+                    "wac": wac,
                 })
 
-        eur_cash = float(unallocated_cash_eur)
-        usd_cash = float(unallocated_cash_usd) if unallocated_cash_usd > 0.0 else round(eur_cash * 1.08, 2)
+        eur_cash = validate_finite_float(unallocated_cash_eur, "unallocated_cash_eur")
+        usd_cash = validate_finite_float(unallocated_cash_usd, "unallocated_cash_usd")
+        if usd_cash <= 0.0:
+            usd_cash = round(eur_cash * 1.08, 2)
 
         def _update_basket_ssot(data: Any) -> Dict[str, Any]:
             if not isinstance(data, dict):

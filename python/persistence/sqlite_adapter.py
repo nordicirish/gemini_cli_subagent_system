@@ -47,6 +47,7 @@ from .contracts import (
     PersistenceValidationError,
     PersistenceIntegrityError,
     PersistenceError,
+    validate_finite_float,
 )
 
 
@@ -112,8 +113,8 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
                     if p.shares > Decimal("0")
                 ]
 
-                eur_amount = float(cash_eur_rec.amount) if cash_eur_rec else 0.0
-                usd_amount = float(cash_usd_rec.amount) if cash_usd_rec else 0.0
+                eur_amount = validate_finite_float(cash_eur_rec.amount if cash_eur_rec else 0.0, "unallocated_cash_eur")
+                usd_amount = validate_finite_float(cash_usd_rec.amount if cash_usd_rec else 0.0, "unallocated_cash_usd")
 
                 return {
                     "portfolio": portfolio,
@@ -154,28 +155,23 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
             t = str(item.get("ticker", "")).strip().upper()
             if not t:
                 raise PersistenceValidationError("Portfolio item missing ticker")
-            try:
-                shares = float(item.get("shares", 0.0))
-            except (ValueError, TypeError) as e:
-                raise PersistenceValidationError(f"Invalid shares for {t}: {e}") from e
-            if shares < 0.0:
-                raise PersistenceValidationError(f"Negative shares not allowed for {t}: {shares}")
+            shares = validate_finite_float(item.get("shares", 0.0), f"shares for {t}")
             if shares > 0.0:
-                try:
-                    wac = float(item.get("wac", 0.0))
-                except (ValueError, TypeError) as e:
-                    raise PersistenceValidationError(f"Invalid wac for {t}: {e}") from e
-                if wac < 0.0:
-                    raise PersistenceValidationError(f"Negative wac not allowed for {t}: {wac}")
+                wac = validate_finite_float(item.get("wac", 0.0), f"wac for {t}")
                 new_map[t] = {
                     "shares": Decimal(str(round(shares, 4))),
                     "wac": Decimal(str(round(wac, 4))),
                 }
 
+        eur_cash = validate_finite_float(unallocated_cash_eur, "unallocated_cash_eur")
+        usd_cash = validate_finite_float(unallocated_cash_usd, "unallocated_cash_usd")
+        eur_dec = Decimal(str(round(eur_cash, 2)))
+        usd_val = usd_cash if usd_cash > 0.0 else round(eur_cash * 1.08, 2)
+        usd_dec = Decimal(str(round(usd_val, 2)))
+
         try:
             with UnitOfWork(self._db_manager, auto_commit=True) as uow:
                 # 1. Update cash balances
-                eur_dec = Decimal(str(round(float(unallocated_cash_eur), 2)))
                 uow.cash.set_cash_balance(
                     account_id="PRIMARY",
                     currency="EUR",
@@ -183,8 +179,6 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
                     caller_role=caller_role,
                 )
 
-                usd_val = float(unallocated_cash_usd) if unallocated_cash_usd > 0.0 else round(float(unallocated_cash_eur) * 1.08, 2)
-                usd_dec = Decimal(str(round(usd_val, 2)))
                 uow.cash.set_cash_balance(
                     account_id="PRIMARY",
                     currency="USD",

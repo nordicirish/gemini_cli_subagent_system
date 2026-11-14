@@ -24,6 +24,7 @@ from .contracts import (
     PersistenceIntegrityError,
     PersistenceNotFoundError,
     CANONICAL_SSOT_KEYS,
+    validate_finite_float,
 )
 from .json_adapter import JsonPersistenceAdapter
 from .sqlite_adapter import SqlitePersistenceAdapter
@@ -42,6 +43,7 @@ __all__ = [
     "PersistenceIntegrityError",
     "PersistenceNotFoundError",
     "CANONICAL_SSOT_KEYS",
+    "validate_finite_float",
     "JsonPersistenceAdapter",
     "SqlitePersistenceAdapter",
     "PersistenceService",

@@ -28,6 +28,7 @@ import json
 import pyperclip
 import re
 import math
+from typing import Any, Dict, List, Optional, Tuple
 from scipy.stats import norm
 from yfinance.data import YfData
 import threading
@@ -2780,6 +2781,123 @@ def compute_merton_allocation(gamma=3.0, r=0.04):
         }
 
 
+def resolve_held_and_watched(service: Optional[Any] = None) -> tuple[set, Optional[str]]:
+    """
+    Retrieves held and watched tickers from the persistence service.
+    Returns (held_and_watched_set, error_str_or_none).
+    Distinguishes legitimate first-run empty state from retrieval failures.
+    """
+    if service is None:
+        service = get_persistence_service()
+    held_and_watched = set()
+    try:
+        basket = service.get_portfolio_basket()
+        for p in basket.get("portfolio", []):
+            ticker = p.get("ticker")
+            if ticker:
+                held_and_watched.add(str(ticker).upper())
+        watchlist = service.get_watchlist()
+        for w in watchlist:
+            if w:
+                held_and_watched.add(str(w).upper())
+        return held_and_watched, None
+    except Exception as e:
+        err = f"Authoritative portfolio/watchlist retrieval failure: {e}"
+        print(f"[Error] {err}")
+        return set(), err
+
+
+def build_daemon_final_output(
+    data: list,
+    status: str,
+    authoritative_state_error: Optional[str] = None,
+    service: Optional[Any] = None,
+) -> dict:
+    """
+    Constructs the final output dictionary for GLOBAL_STATE and the web dashboard.
+    If authoritative financial state (SSoT or portfolio) is degraded or failed,
+    surfaces an explicit DEGRADED status, sets financial_state_valid=False,
+    sets local_storage_state=None, and discards unverified scout data.
+    Optional trade lessons failure logs a warning without invalidating financial state.
+    """
+    if service is None:
+        service = get_persistence_service()
+
+    supplemental_lessons = []
+    try:
+        supplemental_lessons = service.get_trade_lessons()
+    except Exception as e:
+        print(f"[Warning] Failed to load trade lessons via persistence service (optional): {e}")
+
+    supplemental_ssot = None
+    try:
+        supplemental_ssot = service.get_ssot_data()
+    except Exception as e:
+        if not authoritative_state_error:
+            authoritative_state_error = f"Authoritative SSoT retrieval failure: {e}"
+        print(f"[Error] Failed to load SSoT data via persistence service: {e}")
+
+    non_scout_data = []
+    scout_data = []
+    for item in data:
+        if item.get("_isScout"):
+            if item.get("rsi", 50.0) <= SCOUT_MAX_RSI:
+                scout_data.append(item)
+        else:
+            non_scout_data.append(item)
+
+    if authoritative_state_error is not None:
+        filtered_scouts = []
+        final_tickers = non_scout_data
+    else:
+        scout_data.sort(key=lambda x: x.get("score", 0), reverse=True)
+        filtered_scouts = scout_data[:SCOUT_LIMIT]
+        final_tickers = non_scout_data + filtered_scouts
+
+    merton_alloc = compute_merton_allocation() if authoritative_state_error is None else {}
+
+    if authoritative_state_error is not None:
+        return {
+            "_meta": {
+                "description": "LIVE MARKET DATA - FINANCIAL STATE DEGRADED",
+                "is_simulation": False,
+                "source": "Real-time Exchange Feed",
+                "reliability": "DEGRADED",
+                "persistence_error": authoritative_state_error,
+            },
+            "timestamp": datetime.now(ZoneInfo("America/New_York")).strftime('%Y-%m-%d %H:%M:%S'),
+            "status": f"DEGRADED - PERSISTENCE FAILURE: {authoritative_state_error}",
+            "is_heavy_refresh": False,
+            "financial_state_valid": False,
+            "persistence_error": authoritative_state_error,
+            "tickers": final_tickers,
+            "scout_categories_loaded": [],
+            "qualitative_grounding": cache.qualitative_grounding,
+            "local_storage_state": None,
+            "trade_lessons": supplemental_lessons,
+            "merton_optimal_allocation": {},
+        }
+    else:
+        return {
+            "_meta": {
+                "description": "LIVE MARKET DATA - DO NOT TREAT AS SIMULATED",
+                "is_simulation": False,
+                "source": "Real-time Exchange Feed",
+                "reliability": "High",
+            },
+            "timestamp": datetime.now(ZoneInfo("America/New_York")).strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "is_heavy_refresh": False,
+            "financial_state_valid": True,
+            "tickers": final_tickers,
+            "scout_categories_loaded": list(PROCESSED_SCOUT_CATEGORIES),
+            "qualitative_grounding": cache.qualitative_grounding,
+            "local_storage_state": supplemental_ssot if supplemental_ssot is not None else {},
+            "trade_lessons": supplemental_lessons,
+            "merton_optimal_allocation": merton_alloc,
+        }
+
+
 # -----------------------------
 # MAIN LOOP
 # -----------------------------
@@ -2967,20 +3085,7 @@ def run_daemon():
             )
             print(header_str)
             # Calculate held and watched tickers to identify scouts inline
-            held_and_watched = set()
-            try:
-                service = get_persistence_service()
-                basket = service.get_portfolio_basket()
-                for p in basket.get("portfolio", []):
-                    ticker = p.get("ticker")
-                    if ticker:
-                        held_and_watched.add(str(ticker).upper())
-                watchlist = service.get_watchlist()
-                for w in watchlist:
-                    if w:
-                        held_and_watched.add(str(w).upper())
-            except Exception as e:
-                print(f"[Warning] Failed to load portfolio/watchlist for scout indicator via persistence service: {e}")
+            held_and_watched, authoritative_state_error = resolve_held_and_watched()
 
             data = []
 
@@ -3207,7 +3312,11 @@ def run_daemon():
                 else:
                     _dealer_posture = "NEUTRAL"
 
-                is_scout = sym in ACTIVE_SCOUT_TICKERS and sym not in held_and_watched
+                if authoritative_state_error is not None:
+                    # Halt scout classification if authoritative financial state is compromised
+                    is_scout = False
+                else:
+                    is_scout = sym in ACTIVE_SCOUT_TICKERS and sym not in held_and_watched
                 effective_reg_close = float(cache.regular_close.get(sym) or techs.get("Last_Reg_Close", 0.0))
                 effective_pre_price = float(cache.pre_market_price.get(sym, 0.0))
                 item_dict = {
@@ -3321,71 +3430,11 @@ def run_daemon():
             sleep_needed = REFRESH_RATE_SECONDS
             print("")
 
-            # Build final_output for web dashboard
-            supplemental_lessons = []
-            try:
-                service = get_persistence_service()
-                supplemental_lessons = service.get_trade_lessons()
-            except Exception as e:
-                print(f"[Warning] Failed to load trade lessons via persistence service: {e}")
-
-            supplemental_ssot = {}
-            try:
-                service = get_persistence_service()
-                supplemental_ssot = service.get_ssot_data()
-            except Exception as e:
-                print(f"[Warning] Failed to load SSoT data via persistence service: {e}")
-
-            # Filter and sort scout tickers: keep at most 6, sorted by score in descending order, excluding held/watched assets
-            held_and_watched = set()
-            try:
-                service = get_persistence_service()
-                basket = service.get_portfolio_basket()
-                for p in basket.get("portfolio", []):
-                    ticker = p.get("ticker")
-                    if ticker:
-                        held_and_watched.add(str(ticker).upper())
-                watchlist = service.get_watchlist()
-                for w in watchlist:
-                    if w:
-                        held_and_watched.add(str(w).upper())
-            except Exception as e:
-                print(f"[Warning] Failed to load portfolio/watchlist for scout indicator via persistence service: {e}")
-
-            non_scout_data = []
-            scout_data = []
-            for item in data:
-                if item.get("_isScout"):
-                    # Filter out overbought tickers
-                    if item.get("rsi", 50.0) <= SCOUT_MAX_RSI:
-                        scout_data.append(item)
-                else:
-                    non_scout_data.append(item)
-            
-            scout_data.sort(key=lambda x: x.get("score", 0), reverse=True)
-            filtered_scouts = scout_data[:SCOUT_LIMIT]
-            final_tickers = non_scout_data + filtered_scouts
-
-
-            merton_alloc = compute_merton_allocation()
-
-            final_output = {
-                "_meta": {
-                    "description": "LIVE MARKET DATA - DO NOT TREAT AS SIMULATED",
-                    "is_simulation": False,
-                    "source": "Real-time Exchange Feed",
-                    "reliability": "High"
-                },
-                "timestamp": datetime.now(ZoneInfo("America/New_York")).strftime('%Y-%m-%d %H:%M:%S'),
-                "status": status,
-                "is_heavy_refresh": False,
-                "tickers": final_tickers,
-                "scout_categories_loaded": list(PROCESSED_SCOUT_CATEGORIES),
-                "qualitative_grounding": cache.qualitative_grounding,
-                "local_storage_state": supplemental_ssot,
-                "trade_lessons": supplemental_lessons,
-                "merton_optimal_allocation": merton_alloc
-            }
+            final_output = build_daemon_final_output(
+                data=data,
+                status=status,
+                authoritative_state_error=authoritative_state_error,
+            )
             GLOBAL_STATE = final_output
 
             wait_start = t_time.time()

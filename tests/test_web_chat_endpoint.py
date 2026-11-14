@@ -1,13 +1,14 @@
 """
-Automated Test Suite for GEM Web Chat Endpoint and Persistence Integration.
-Governed by Stage 2 Architecture and Agent Governance Framework.
+Automated Test Suite for GEM Web Chat Endpoint and Daemon Persistence Integration.
+Governed by Stage 2 Architecture, Agent Governance Framework, and Follow-up Remediation.
 
 Covers:
-1. Web Chat Endpoint Primary Model Dispatch and Response Shape (Finding 3).
-2. Web Chat Failover Recovery, Model Mutation, and Fallback Reporting (Finding 3).
-3. Web Chat Complete Failure Handling (Zero Unhandled NameError) (Finding 3).
-4. Dynamic Model Parameter Support in create_new_session (Finding 3).
-5. Background Worker Daemon Persistence Service Integration (Finding 1).
+1. Web Chat Primary Model Dispatch, Session Preservation, and Fallback Invariant (Scope A).
+2. Web Chat Error Propagation and Zero Dynamic Model Substitution (Scope A).
+3. Daemon Authoritative State Boundary and Missing SSoT First-Run Behaviour (Scope B).
+4. Daemon Degradation and Output Suppression on Corrupt/Unreadable SSoT (Scope B).
+5. Scout Classification Suppression under Authoritative Persistence Failure (Scope B).
+6. Optional Non-Authoritative Lesson Retrieval Failure Handling (Scope B).
 """
 
 import os
@@ -24,10 +25,11 @@ from persistence import (
     reset_persistence_service,
     PersistenceIntegrityError,
     PersistenceValidationError,
+    PersistenceError,
 )
 
 
-class TestWebChatEndpoint(unittest.TestCase):
+class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
     def setUp(self):
         self._orig_model = web_server.ORCHESTRATOR_MODEL
         self._orig_session = web_server.global_chat_session
@@ -38,22 +40,12 @@ class TestWebChatEndpoint(unittest.TestCase):
         web_server.global_chat_session = self._orig_session
         web_server.cancel_event.clear()
 
-    def test_create_new_session_accepts_optional_model_name(self):
-        """create_new_session accepts explicit model_name or defaults to ORCHESTRATOR_MODEL."""
+    def test_create_new_session_initializes_with_orchestrator_model(self):
+        """create_new_session initializes session using authoritative ORCHESTRATOR_MODEL without dynamic overrides."""
         with patch.object(web_server.framework, "create_chat_session") as mock_create:
             mock_create.return_value = MagicMock()
-            
-            # Explicit model
-            sess1 = web_server.create_new_session(model_name="gemini-3.8-flash-low")
-            mock_create.assert_called_with(
-                web_server.framework._get_sys_instruction(web_server.terminal_instruction),
-                web_server.terminal_tools,
-                "gemini-3.8-flash-low",
-            )
-
-            # Default model
-            sess2 = web_server.create_new_session()
-            mock_create.assert_called_with(
+            sess = web_server.create_new_session()
+            mock_create.assert_called_once_with(
                 web_server.framework._get_sys_instruction(web_server.terminal_instruction),
                 web_server.terminal_tools,
                 web_server.ORCHESTRATOR_MODEL,
@@ -62,7 +54,7 @@ class TestWebChatEndpoint(unittest.TestCase):
     @patch("web_server.get_chart_parts", return_value=([], []))
     @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
     def test_chat_endpoint_primary_success_reports_fallback_false(self, mock_dispatch, mock_charts):
-        """When primary session succeeds, response contains fallback_occurred: False."""
+        """When primary dispatch succeeds, response contains fallback_occurred: False and model is unchanged."""
         web_server.ORCHESTRATOR_MODEL = "gemini-3.8-flash-high"
         mock_dispatch.return_value = {
             "status": "completed",
@@ -82,64 +74,189 @@ class TestWebChatEndpoint(unittest.TestCase):
 
     @patch("web_server.get_chart_parts", return_value=([], []))
     @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
-    def test_chat_endpoint_primary_failure_recovers_via_fallback(self, mock_dispatch, mock_charts):
-        """When primary model fails, chat endpoint falls back, recovers, and sets fallback_occurred: True."""
-        web_server.ORCHESTRATOR_MODEL = "gemini-3.8-flash-high"
-        
-        # Primary fails with transient APIError / 503, fallback succeeds
-        mock_dispatch.side_effect = [
-            RuntimeError("Primary model 503 Service Unavailable"),
-            {
-                "status": "completed",
-                "response": "Fallback recovered: Market regime is NEUTRAL.",
-                "turn_count": 1,
-            },
-        ]
+    def test_chat_endpoint_dispatch_failure_preserves_model_and_session(self, mock_dispatch, mock_charts):
+        """When dispatch fails, error is returned, model is NOT dynamically mutated, and session is NOT replaced."""
+        initial_model = "gemini-3.8-flash-high"
+        web_server.ORCHESTRATOR_MODEL = initial_model
+        initial_session = web_server.global_chat_session
+
+        mock_dispatch.side_effect = RuntimeError("Service connection timeout (503)")
 
         req = web_server.ChatRequest(message="What is the current regime?")
         res = web_server.chat_endpoint(req)
 
-        self.assertEqual(res["status"], "success")
-        self.assertEqual(res["response"], "Fallback recovered: Market regime is NEUTRAL.")
-        self.assertTrue(res["fallback_occurred"])
-        self.assertEqual(res["model"], "gemini-3.8-flash-low")
-        self.assertEqual(res["active_model"], "gemini-3.8-flash-low")
-        self.assertEqual(mock_dispatch.call_count, 2)
+        # 1. Error path executed cleanly
+        self.assertEqual(res["status"], "error")
+        self.assertIn("503", res.get("message", ""))
 
-    @patch("web_server.get_chart_parts", return_value=([], []))
-    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
-    def test_chat_endpoint_both_primary_and_fallback_fail(self, mock_dispatch, mock_charts):
-        """When both primary and fallback fail, endpoint returns clean error dict with no NameError."""
-        mock_dispatch.side_effect = [
-            RuntimeError("Primary model quota exceeded (429)"),
-            RuntimeError("Fallback model also exhausted (429)"),
+        # 2. No second invocation / retry policy attempted
+        self.assertEqual(mock_dispatch.call_count, 1)
+
+        # 3. Model preserved invariant
+        self.assertEqual(web_server.ORCHESTRATOR_MODEL, initial_model)
+
+        # 4. Session preserved invariant
+        self.assertIs(web_server.global_chat_session, initial_session)
+
+
+class TestDaemonExecutionPathPersistenceIntegrity(unittest.TestCase):
+    def test_daemon_missing_ssot_first_run_behaviour(self):
+        """A genuinely missing SSoT returns clean first-run empty state with financial_state_valid=True."""
+        mock_service = MagicMock()
+        mock_service.get_portfolio_basket.return_value = {
+            "portfolio": [],
+            "unallocated_cash_eur": 0.0,
+            "unallocated_cash_usd": 0.0,
+            "eurusd_rate": 1.08,
+        }
+        mock_service.get_watchlist.return_value = []
+        mock_service.get_ssot_data.return_value = {}
+        mock_service.get_trade_lessons.return_value = []
+
+        held_and_watched, err = fetch_stocks.resolve_held_and_watched(service=mock_service)
+        self.assertIsNone(err)
+        self.assertEqual(held_and_watched, set())
+
+        out = fetch_stocks.build_daemon_final_output(
+            data=[{"ticker": "AAPL", "price": 220.0, "_isScout": False}],
+            status="OPEN",
+            authoritative_state_error=err,
+            service=mock_service,
+        )
+
+        self.assertTrue(out["financial_state_valid"])
+        self.assertEqual(out["status"], "OPEN")
+        self.assertEqual(out["_meta"]["reliability"], "High")
+        self.assertEqual(out["local_storage_state"], {})
+        self.assertEqual(len(out["tickers"]), 1)
+
+    def test_daemon_valid_empty_portfolio_handled_correctly(self):
+        """A valid empty portfolio produces normal publication without degraded flags."""
+        mock_service = MagicMock()
+        mock_service.get_portfolio_basket.return_value = {
+            "portfolio": [],
+            "unallocated_cash_eur": 5000.0,
+            "unallocated_cash_usd": 5400.0,
+            "eurusd_rate": 1.08,
+        }
+        mock_service.get_watchlist.return_value = ["MSFT"]
+        mock_service.get_ssot_data.return_value = {
+            "portfolio_snapshot": [],
+            "unallocated_cash_eur": 5000.0,
+            "watched_tickers": ["MSFT"],
+        }
+        mock_service.get_trade_lessons.return_value = []
+
+        held_and_watched, err = fetch_stocks.resolve_held_and_watched(service=mock_service)
+        self.assertIsNone(err)
+        self.assertEqual(held_and_watched, {"MSFT"})
+
+        out = fetch_stocks.build_daemon_final_output(
+            data=[{"ticker": "MSFT", "price": 400.0, "_isScout": False}],
+            status="OPEN",
+            authoritative_state_error=err,
+            service=mock_service,
+        )
+
+        self.assertTrue(out["financial_state_valid"])
+        self.assertEqual(out["local_storage_state"]["unallocated_cash_eur"], 5000.0)
+
+    def test_daemon_malformed_ssot_fails_closed_and_marks_degraded(self):
+        """Malformed or unreadable SSoT prevents normal financial publication and surfaces observable degraded state."""
+        mock_service = MagicMock()
+        mock_service.get_portfolio_basket.side_effect = PersistenceIntegrityError("SSoT file contains malformed JSON")
+        mock_service.get_watchlist.side_effect = PersistenceIntegrityError("SSoT file contains malformed JSON")
+        mock_service.get_ssot_data.side_effect = PersistenceIntegrityError("SSoT file contains malformed JSON")
+        mock_service.get_trade_lessons.return_value = []
+
+        held_and_watched, err = fetch_stocks.resolve_held_and_watched(service=mock_service)
+        self.assertIsNotNone(err)
+        self.assertIn("malformed JSON", err)
+
+        out = fetch_stocks.build_daemon_final_output(
+            data=[{"ticker": "AAPL", "price": 220.0, "_isScout": False}],
+            status="OPEN",
+            authoritative_state_error=err,
+            service=mock_service,
+        )
+
+        # 1. Financial state explicitly marked invalid
+        self.assertFalse(out["financial_state_valid"])
+
+        # 2. Status surfaces explicit degraded failure
+        self.assertIn("DEGRADED - PERSISTENCE FAILURE", out["status"])
+
+        # 3. Reliability marked DEGRADED
+        self.assertEqual(out["_meta"]["reliability"], "DEGRADED")
+
+        # 4. Persistence error preserves underlying exception info
+        self.assertIn("malformed JSON", out["persistence_error"])
+
+        # 5. local_storage_state is None (NOT empty dict {}!)
+        self.assertIsNone(out["local_storage_state"])
+
+    def test_daemon_portfolio_failure_prevents_scout_classification(self):
+        """Authoritative portfolio retrieval failure halts scout classification and discards scout tickers."""
+        # When authoritative error is present:
+        err = "Authoritative portfolio/watchlist retrieval failure: Disk I/O error"
+
+        # Provide a candidate item marked as a scout
+        candidate_data = [
+            {"ticker": "SPY", "price": 500.0, "_isScout": False},
+            {"ticker": "XYZ", "price": 25.0, "_isScout": True, "score": 85.0, "rsi": 40.0},
         ]
 
-        req = web_server.ChatRequest(message="Hello")
-        res = web_server.chat_endpoint(req)
+        mock_service = MagicMock()
+        mock_service.get_ssot_data.side_effect = PersistenceError("Disk I/O error")
+        mock_service.get_trade_lessons.return_value = []
 
-        self.assertEqual(res["status"], "error")
-        self.assertIn("quota", res.get("code", "") + res.get("message", "").lower())
+        out = fetch_stocks.build_daemon_final_output(
+            data=candidate_data,
+            status="OPEN",
+            authoritative_state_error=err,
+            service=mock_service,
+        )
 
+        # Scout tickers must be completely excluded from final publication
+        self.assertEqual(len(out["tickers"]), 1)
+        self.assertEqual(out["tickers"][0]["ticker"], "SPY")
+        self.assertEqual(out["scout_categories_loaded"], [])
+        self.assertFalse(out["financial_state_valid"])
 
-class TestFetchStocksPersistenceBoundary(unittest.TestCase):
-    def test_fetch_stocks_uses_persistence_service_for_state(self):
-        """fetch_stocks reads state via PersistenceService rather than raw JSON file reads."""
-        service = get_persistence_service()
-        
-        # Verify get_portfolio_basket returns dict with standard keys
-        basket = service.get_portfolio_basket()
-        self.assertIn("portfolio", basket)
-        self.assertIn("unallocated_cash_eur", basket)
-        self.assertIn("unallocated_cash_usd", basket)
+    def test_daemon_optional_trade_lessons_failure_does_not_mask_authoritative_state(self):
+        """Failure of optional trade lessons logs a warning without marking authoritative financial state degraded."""
+        mock_service = MagicMock()
+        mock_service.get_portfolio_basket.return_value = {
+            "portfolio": [{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
+            "unallocated_cash_eur": 2000.0,
+            "unallocated_cash_usd": 2160.0,
+            "eurusd_rate": 1.08,
+        }
+        mock_service.get_watchlist.return_value = ["AAPL"]
+        mock_service.get_ssot_data.return_value = {
+            "portfolio_snapshot": [{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
+            "unallocated_cash_eur": 2000.0,
+        }
+        # Optional data source fails
+        mock_service.get_trade_lessons.side_effect = PersistenceError("trade_lessons.json read error")
 
-        # Verify get_trade_lessons returns a list
-        lessons = service.get_trade_lessons()
-        self.assertIsInstance(lessons, list)
+        held_and_watched, err = fetch_stocks.resolve_held_and_watched(service=mock_service)
+        self.assertIsNone(err)
 
-        # Verify get_ssot_data returns a dict
-        ssot = service.get_ssot_data()
-        self.assertIsInstance(ssot, dict)
+        out = fetch_stocks.build_daemon_final_output(
+            data=[{"ticker": "SPY", "price": 505.0, "_isScout": False}],
+            status="OPEN",
+            authoritative_state_error=err,
+            service=mock_service,
+        )
+
+        # Financial state remains valid
+        self.assertTrue(out["financial_state_valid"])
+        self.assertEqual(out["status"], "OPEN")
+        self.assertEqual(out["_meta"]["reliability"], "High")
+        # Lessons fallback to empty list
+        self.assertEqual(out["trade_lessons"], [])
+        self.assertIsNotNone(out["local_storage_state"])
 
 
 if __name__ == "__main__":

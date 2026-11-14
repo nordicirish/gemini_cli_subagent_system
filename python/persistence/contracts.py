@@ -11,8 +11,42 @@ Confines backend-specific implementation details (JSON file I/O vs. SQLite
 repositories and UnitOfWork) behind a uniform, inspectable interface.
 """
 
+import math
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union
+
+
+# ---------------------------------------------------------------------------
+# Numeric Validation Utilities
+# ---------------------------------------------------------------------------
+
+def validate_finite_float(
+    val: Any,
+    field_name: str,
+    allow_zero: bool = True,
+    non_negative: bool = True,
+) -> float:
+    """
+    Validates that a financial numeric value is a finite float.
+    Rejects NaN, +Infinity, -Infinity, negative values (when non_negative=True),
+    and non-numeric types fail-closed with PersistenceValidationError.
+    Preserves legitimate zero values (when allow_zero=True) and finite positive values.
+    """
+    try:
+        num = float(val)
+    except (ValueError, TypeError) as e:
+        raise PersistenceValidationError(f"Invalid numeric value for {field_name}: {val}") from e
+
+    if not math.isfinite(num):
+        raise PersistenceValidationError(f"Non-finite numeric value not allowed for {field_name}: {num}")
+
+    if non_negative and num < 0.0:
+        raise PersistenceValidationError(f"Negative value not allowed for {field_name}: {num}")
+
+    if not allow_zero and num == 0.0:
+        raise PersistenceValidationError(f"Zero value not allowed for {field_name}")
+
+    return num
 
 
 # ---------------------------------------------------------------------------
