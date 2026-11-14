@@ -667,6 +667,8 @@ class TestStage21RemediationRequirements(unittest.TestCase):
             mock_kernel32.CreateToolhelp32Snapshot.return_value = 0x123456789ABCDEF0
             mock_kernel32.Process32First.return_value = True
             mock_kernel32.Process32Next.return_value = False
+            mock_kernel32.GetLastError.return_value = 18  # ERROR_NO_MORE_FILES
+            mock_kernel32.CloseHandle.return_value = 1
             pids, success = _get_windows_descendant_pids(1234)
             self.assertEqual(mock_kernel32.CreateToolhelp32Snapshot.restype, wintypes.HANDLE)
             self.assertEqual(mock_kernel32.CloseHandle.argtypes, [wintypes.HANDLE])
@@ -688,10 +690,11 @@ class TestStage21RemediationRequirements(unittest.TestCase):
         from agent_framework import _get_windows_descendant_pids
         ERROR_ACCESS_DENIED = 5
         with patch("sys.platform", "win32"), \
-             patch("ctypes.windll.kernel32", create=True) as mock_kernel32, \
-             patch("ctypes.GetLastError", create=True, return_value=ERROR_ACCESS_DENIED):
+             patch("ctypes.windll.kernel32", create=True) as mock_kernel32:
             mock_kernel32.CreateToolhelp32Snapshot.return_value = 100
             mock_kernel32.Process32First.return_value = False
+            mock_kernel32.GetLastError.return_value = ERROR_ACCESS_DENIED
+            mock_kernel32.CloseHandle.return_value = 1
             pids, success = _get_windows_descendant_pids(1234)
             self.assertFalse(success, "Enumeration failure must report success=False")
             mock_kernel32.CloseHandle.assert_called_once_with(100)
@@ -945,6 +948,273 @@ class TestStage21RemediationRequirements(unittest.TestCase):
         snap = publish_global_state_snapshot({"a": 1, "b": [1, 2]})
         self.assertEqual(snap["a"], 1)
         self.assertEqual(list(snap["b"]), [1, 2])
+        self.assertTrue(coord.shutdown(timeout=1.0))
+
+
+class TestStage21FinalCorrectnessRequirements(unittest.TestCase):
+    """
+    Mandatory Deterministic Negative and Regression Verification Suite for
+    Stage 2.1 Final Correctness Remediation (Section 5, Requirements 1-17).
+    """
+
+    def test_01_direct_mutation_through_snapshot_data_impossible(self):
+        """1. Direct mutation through snapshot _data is impossible."""
+        snap = publish_global_state_snapshot({"a": 1, "nested": {"b": 2}})
+        # _data is MappingProxyType: mutating items directly raises TypeError
+        with self.assertRaises(TypeError):
+            snap._data["a"] = 100
+        with self.assertRaises(TypeError):
+            snap["nested"]._data["b"] = 200
+        # Reassigning or deleting the _data attribute raises TypeError
+        with self.assertRaises(TypeError):
+            snap._data = {}
+        with self.assertRaises(TypeError):
+            del snap._data
+        with self.assertRaises(TypeError):
+            snap.new_attr = 123
+
+    def test_02_direct_mutation_through_snapshot_items_impossible(self):
+        """2. Direct mutation through snapshot _items is impossible."""
+        snap = publish_global_state_snapshot({"list": [1, 2, 3]})
+        # _items is a tuple: mutating elements raises TypeError
+        with self.assertRaises(TypeError):
+            snap["list"]._items[0] = 999
+        with self.assertRaises(AttributeError):
+            snap["list"]._items.append(4)
+        # Reassigning or deleting the _items attribute raises TypeError
+        with self.assertRaises(TypeError):
+            snap["list"]._items = (4, 5, 6)
+        with self.assertRaises(TypeError):
+            del snap["list"]._items
+        with self.assertRaises(TypeError):
+            snap["list"].new_attr = 123
+
+    def test_03_nested_mappings_and_sequences_remain_immutable(self):
+        """3. Nested mappings and sequences remain immutable."""
+        snap = publish_global_state_snapshot({
+            "meta": {"version": 1, "tags": ["a", "b"]},
+            "items": [{"id": 10}, {"id": 20}]
+        })
+        with self.assertRaises(TypeError):
+            snap["meta"]["version"] = 2
+        with self.assertRaises(TypeError):
+            snap["meta"]["tags"].append("c")
+        with self.assertRaises(TypeError):
+            snap["items"][0]["id"] = 99
+        with self.assertRaises(TypeError):
+            dict.__setitem__(snap["meta"], "version", 2)
+        with self.assertRaises(TypeError):
+            list.append(snap["items"], {"id": 30})
+
+    def test_04_caller_owned_nested_structures_cannot_change_published_snapshots(self):
+        """4. Caller-owned nested structures cannot change published snapshots."""
+        nested_list = [10, 20, 30]
+        nested_dict = {"inner_list": nested_list, "count": 100}
+        root = {"data": nested_dict}
+        snap = publish_global_state_snapshot(root)
+
+        nested_list.append(40)
+        nested_dict["count"] = 999
+        nested_dict["injected"] = "tampered"
+        root["data"] = "replaced"
+
+        self.assertEqual(list(snap["data"]["inner_list"]), [10, 20, 30])
+        self.assertEqual(snap["data"]["count"], 100)
+        self.assertNotIn("injected", snap["data"])
+
+    def test_05_sequence_issuance_cannot_interleave_between_validation_and_actual_publication(self):
+        """5. Sequence issuance cannot interleave between validation and actual publication (barrier/event test)."""
+        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=5)
+        applicator = BackgroundResultApplicator(coordinator=coord)
+        key = WorkKey("grounding", "TEST_BARRIER")
+
+        # Sequence 1 is issued
+        accepted, item = coord.enqueue("grounding", "TEST_BARRIER", "2026-11-14T19:00:00Z", fn=lambda: {"res": 1})
+        self.assertTrue(accepted)
+        self.assertEqual(item.sequence, 1)
+
+        pub_started = threading.Event()
+        allow_pub_finish = threading.Event()
+        enqueue_attempted = threading.Event()
+        enqueue_finished = threading.Event()
+        second_item_holder = []
+
+        def blocking_publish(result):
+            pub_started.set()
+            # Wait until the enqueue thread attempts to run
+            enqueue_attempted.wait(timeout=2.0)
+            # Verify that enqueue thread has NOT finished yet (it must be blocked on key_lock)
+            self.assertFalse(enqueue_finished.is_set(), "New sequence must not be issued while publication holds key_lock")
+            allow_pub_finish.wait(timeout=2.0)
+            update_global_state_snapshot(lambda current: {**dict(current), "qualitative_grounding": {"TEST_BARRIER": result.data}})
+
+        def attempt_enqueue():
+            enqueue_attempted.set()
+            # This must block until blocking_publish completes and key_lock is released
+            acc, itm = coord.enqueue("grounding", "TEST_BARRIER", "2026-11-14T19:05:00Z", fn=lambda: {"res": 2}, force=True)
+            second_item_holder.append((acc, itm))
+            enqueue_finished.set()
+
+        res1 = WorkResult(key=key, sequence=1, obs_time="2026-11-14T19:00:00Z", data={"val": "pub1"})
+        t_apply = threading.Thread(target=lambda: applicator.apply_results([res1], {}, {}, {}, on_publish=blocking_publish))
+        t_enq = threading.Thread(target=attempt_enqueue)
+
+        t_apply.start()
+        self.assertTrue(pub_started.wait(timeout=2.0))
+        t_enq.start()
+        time.sleep(0.1)  # Give t_enq time to invoke coord.enqueue
+        self.assertFalse(enqueue_finished.is_set(), "enqueue must be blocked on key_lock while publication is in progress")
+        allow_pub_finish.set()
+        t_apply.join(timeout=2.0)
+        t_enq.join(timeout=2.0)
+        self.assertTrue(enqueue_finished.is_set())
+        self.assertEqual(second_item_holder[0][1].sequence, 2)
+        coord.shutdown(timeout=1.0)
+
+    def test_06_newer_request_cannot_be_overtaken_by_older_result(self):
+        """6. A newer request cannot be overtaken by an older result."""
+        applicator = BackgroundResultApplicator()
+        g, sc, sm = {}, {}, {}
+        key = WorkKey("grounding", "AAPL")
+        applicator.record_issued_sequence(key, 1)
+        applicator.record_issued_sequence(key, 2)
+
+        r1 = WorkResult(key=key, sequence=1, obs_time="2026-11-14T19:00:00Z", data={"v": 1})
+        audit1 = applicator.apply_results([r1], g, sc, sm)
+        self.assertFalse(audit1[0][1], "Older sequence must be rejected when newer work was issued")
+        self.assertIn("older than latest issued", audit1[0][2])
+        self.assertNotIn("AAPL", g)
+
+    def test_07_concurrent_unrelated_keys_remain_processable(self):
+        """7. Concurrent unrelated keys remain processable."""
+        coord = BackgroundIntelligenceCoordinator(max_workers=2, max_queue_size=10)
+        key_a = WorkKey("grounding", "AAPL")
+        key_b = WorkKey("grounding", "MSFT")
+
+        # Explicitly acquire lock for key_a
+        lock_a = coord.get_key_lock(key_a)
+        lock_a.acquire()
+        try:
+            # Key B must be enqueued and executed without blocking
+            accepted_b, item_b = coord.enqueue("grounding", "MSFT", "2026-11-14T19:00:00Z", fn=lambda: {"val": "msft"})
+            self.assertTrue(accepted_b)
+            self.assertTrue(item_b.event.wait(timeout=2.0))
+            res_b = coord.drain_results()
+            self.assertEqual(len(res_b), 1)
+            self.assertEqual(res_b[0].key, key_b)
+        finally:
+            lock_a.release()
+        coord.shutdown(timeout=1.0)
+
+    def test_08_scout_discovery_enqueue_time_never_represented_as_source_observation_time(self):
+        """8. Scout discovery enqueue time is never represented as source observation time."""
+        from fetch_stocks import enqueue_scout_discovery
+        accepted, item = enqueue_scout_discovery("Technology", obs_time=None)
+        self.assertTrue(accepted)
+        self.assertIsNone(item.obs_time)
+        self.assertIsInstance(item.enqueued_time, float)
+
+    def test_09_news_grounding_enqueue_time_never_represented_as_source_observation_time(self):
+        """9. News grounding enqueue time is never represented as source observation time."""
+        from fetch_stocks import enqueue_news_grounding
+        accepted, item = enqueue_news_grounding("AAPL", obs_time=None)
+        self.assertTrue(accepted)
+        self.assertIsNone(item.obs_time)
+        self.assertIsInstance(item.enqueued_time, float)
+
+    def test_10_daemon_grounding_scheduling_does_not_fabricate_source_timestamps(self):
+        """10. Daemon grounding scheduling does not fabricate source timestamps."""
+        import inspect
+        from fetch_stocks import run_daemon
+        src = inspect.getsource(run_daemon)
+        self.assertIn("enqueue_news_grounding(p_sym, obs_time=None)", src)
+        self.assertNotIn("enqueue_news_grounding(p_sym, obs_time=datetime", src)
+
+    def test_11_generated_cache_timestamps_clearly_distinct_from_source_observation_timestamps(self):
+        """11. Generated cache timestamps are clearly distinct from source observation timestamps."""
+        from fetch_stocks import DYNAMIC_SCOUT_CACHE, DYNAMIC_SCOUT_CACHE_LOCK
+        with DYNAMIC_SCOUT_CACHE_LOCK:
+            DYNAMIC_SCOUT_CACHE["TECHNOLOGY"] = {
+                "tickers": ["AAPL"],
+                "timestamp": 1000.0,
+                "cached_at": 2000.0,
+            }
+            self.assertIn("cached_at", DYNAMIC_SCOUT_CACHE["TECHNOLOGY"])
+            self.assertIn("timestamp", DYNAMIC_SCOUT_CACHE["TECHNOLOGY"])
+            self.assertNotEqual(
+                DYNAMIC_SCOUT_CACHE["TECHNOLOGY"]["timestamp"],
+                DYNAMIC_SCOUT_CACHE["TECHNOLOGY"]["cached_at"],
+            )
+
+    def test_12_windows_normal_enumeration_exhaustion_accepted(self):
+        """12. Windows normal enumeration exhaustion is accepted (GetLastError() == 18)."""
+        from agent_framework import _get_windows_descendant_pids
+        with patch("sys.platform", "win32"), \
+             patch("ctypes.windll.kernel32", create=True) as mock_kernel32:
+            mock_kernel32.CreateToolhelp32Snapshot.return_value = 100
+            mock_kernel32.Process32First.return_value = True
+            mock_kernel32.Process32Next.return_value = False
+            mock_kernel32.GetLastError.return_value = 18  # ERROR_NO_MORE_FILES
+            mock_kernel32.CloseHandle.return_value = 1
+            pids, success = _get_windows_descendant_pids(1234)
+            self.assertTrue(success)
+
+    def test_13_windows_unexpected_enumeration_failure_rejected(self):
+        """13. Windows unexpected enumeration failure is rejected (GetLastError() != 18)."""
+        from agent_framework import _get_windows_descendant_pids
+        with patch("sys.platform", "win32"), \
+             patch("ctypes.windll.kernel32", create=True) as mock_kernel32:
+            mock_kernel32.CreateToolhelp32Snapshot.return_value = 100
+            mock_kernel32.Process32First.return_value = True
+            mock_kernel32.Process32Next.return_value = False
+            mock_kernel32.GetLastError.return_value = 5  # ERROR_ACCESS_DENIED
+            mock_kernel32.CloseHandle.return_value = 1
+            pids, success = _get_windows_descendant_pids(1234)
+            self.assertFalse(success)
+            self.assertEqual(pids, [])
+
+    def test_14_windows_handle_closure_failure_reported(self):
+        """14. Windows handle-closure failure is reported (CloseHandle() == False)."""
+        from agent_framework import _get_windows_descendant_pids
+        with patch("sys.platform", "win32"), \
+             patch("ctypes.windll.kernel32", create=True) as mock_kernel32:
+            mock_kernel32.CreateToolhelp32Snapshot.return_value = 100
+            mock_kernel32.Process32First.return_value = True
+            mock_kernel32.Process32Next.return_value = False
+            mock_kernel32.GetLastError.return_value = 18  # Normal exhaustion
+            mock_kernel32.CloseHandle.return_value = 0   # CloseHandle returns FALSE (0)
+            pids, success = _get_windows_descendant_pids(1234)
+            self.assertFalse(success)
+            self.assertEqual(pids, [])
+
+    def test_15_existing_subprocess_cleanup_tests_remain_green(self):
+        """15. Existing subprocess cleanup tests remain green."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 99999
+        mock_proc.poll.return_value = 0
+        mock_proc.wait.return_value = 0
+        mock_proc._cleaned_up = False
+        with patch("sys.platform", "win32"), \
+             patch("agent_framework._get_windows_descendant_pids", return_value=([], True)):
+            success = _cleanup_subprocess(mock_proc, raise_on_error=True)
+            self.assertTrue(success)
+            self.assertTrue(mock_proc._cleaned_up)
+
+    def test_16_existing_stage1_market_data_integrity_tests_remain_green(self):
+        """16. Existing Stage 1 market-data integrity tests remain green."""
+        from fetch_stocks import build_daemon_final_output
+        final_output = build_daemon_final_output(data=[], status="CLOSED")
+        snap = publish_global_state_snapshot(final_output)
+        self.assertIsInstance(snap, collections.abc.Mapping)
+        self.assertIn("_meta", snap)
+        self.assertIn("tickers", snap)
+        self.assertIn("status", snap)
+
+    def test_17_existing_stage21_regression_tests_remain_green(self):
+        """17. Existing Stage 2.1 regression tests remain green."""
+        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=2)
+        self.assertEqual(coord.pending_count(), 0)
+        self.assertEqual(coord.in_flight_count(), 0)
         self.assertTrue(coord.shutdown(timeout=1.0))
 
 

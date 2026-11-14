@@ -45,6 +45,7 @@ from scipy.stats import norm
 from yfinance.data import YfData
 import threading
 import collections.abc
+from types import MappingProxyType
 from atomic_io import atomic_write_json, atomic_read_json, atomic_update_json
 from tool_registry import authorize_financial_mutation
 from background_intelligence import (
@@ -366,36 +367,38 @@ def apply_background_intelligence_results():
     Drains results from BACKGROUND_COORDINATOR and applies them under
     monotonic sequence and observation timestamp validation.
     Constructs replacement intelligence state and publishes it atomically
-    through the immutable snapshot contract.
+    through the immutable snapshot contract while holding the relevant per-key lock.
     """
     results = BACKGROUND_COORDINATOR.drain_results()
     if results:
         with DYNAMIC_SCOUT_CACHE_LOCK:
-            new_grounding = dict(cache.qualitative_grounding)
-            new_scout_cache = dict(DYNAMIC_SCOUT_CACHE)
-            new_scout_map = dict(SCOUTED_TICKER_TO_CATEGORY_MAP)
+            def _publish_result(res: WorkResult):
+                if res.key.work_type == WorkType.GROUNDING.value:
+                    cache.qualitative_grounding = dict(cache.qualitative_grounding)
+                    cache.qualitative_grounding[res.key.target] = res.data
+                    update_global_state_snapshot(
+                        lambda s: {**s, "qualitative_grounding": dict(cache.qualitative_grounding)}
+                    )
+                elif res.key.work_type == WorkType.SCOUT.value:
+                    DYNAMIC_SCOUT_CACHE.clear()
+                    DYNAMIC_SCOUT_CACHE.update(temp_scout_cache)
+                    SCOUTED_TICKER_TO_CATEGORY_MAP.clear()
+                    SCOUTED_TICKER_TO_CATEGORY_MAP.update(temp_scout_map)
+                    update_global_state_snapshot(
+                        lambda s: {**s, "scout_categories_loaded": list(PROCESSED_SCOUT_CATEGORIES)}
+                    )
 
-            audit = BACKGROUND_RESULT_APPLICATOR.apply_results(
+            temp_grounding = dict(cache.qualitative_grounding)
+            temp_scout_cache = dict(DYNAMIC_SCOUT_CACHE)
+            temp_scout_map = dict(SCOUTED_TICKER_TO_CATEGORY_MAP)
+
+            BACKGROUND_RESULT_APPLICATOR.apply_results(
                 results=results,
-                grounding_target=new_grounding,
-                scout_cache_target=new_scout_cache,
-                scout_category_map=new_scout_map
+                grounding_target=temp_grounding,
+                scout_cache_target=temp_scout_cache,
+                scout_category_map=temp_scout_map,
+                on_publish=_publish_result
             )
-
-            any_applied = any(applied for _, applied, _ in audit)
-            if any_applied:
-                cache.qualitative_grounding = new_grounding
-                DYNAMIC_SCOUT_CACHE.clear()
-                DYNAMIC_SCOUT_CACHE.update(new_scout_cache)
-                SCOUTED_TICKER_TO_CATEGORY_MAP.clear()
-                SCOUTED_TICKER_TO_CATEGORY_MAP.update(new_scout_map)
-
-                def _update_intelligence_snapshot(current):
-                    s = dict(current)
-                    s["qualitative_grounding"] = new_grounding
-                    return s
-
-                update_global_state_snapshot(_update_intelligence_snapshot)
 
 def _execute_scout_discovery_raw(category: str, cancel_check: Optional[Callable[[], bool]] = None) -> list:
     """
@@ -509,12 +512,12 @@ def _get_dynamic_scout_tickers(category: str) -> list:
     with DYNAMIC_SCOUT_CACHE_LOCK:
         if category_clean in DYNAMIC_SCOUT_CACHE:
             cached = DYNAMIC_SCOUT_CACHE[category_clean]
-            if now - cached["timestamp"] < 14400: # 4-hour cache TTL
+            cached_time = cached.get("cached_at", cached.get("timestamp", 0))
+            if now - cached_time < 14400: # 4-hour cache TTL
                 return cached["tickers"]
 
-    # Enqueue background discovery without blocking
-    obs_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    enqueue_scout_discovery(category_clean, obs_time=obs_time)
+    # Enqueue background discovery without blocking; no fabricated source observation timestamp
+    enqueue_scout_discovery(category_clean, obs_time=None)
 
     fallback = SCOUT_TICKER_MAP.get(category, [])
     if not fallback:
@@ -609,16 +612,15 @@ HISTORY_REFRESH_CYCLES = config.get("HISTORY_REFRESH_CYCLES", 10)
 
 class ImmutableDict(collections.abc.Mapping):
     """
-    Read-only dict proxy ensuring deep immutability for published snapshots.
-    Inherits from collections.abc.Mapping so that:
-    1. Standard mapping reads (.get(), in, keys(), values(), items(), len, iter) work seamlessly.
-    2. Overridden mutators (__setitem__, __delitem__, clear, update, pop, popitem, setdefault, __ior__)
-       unconditionally raise TypeError with zero production test seams or call-stack inspection.
-    3. Base-class dict operations (dict.__setitem__, dict.clear, dict.update) fail-closed because
-       this is not a PyDictObject subtype.
+    Read-only mapping proxy ensuring deep immutability for published snapshots.
+    Wraps an immutable MappingProxyType over a detached copy of the input mapping.
+    Prevents direct mutation through ordinary methods or direct backing-container access.
     """
+    __slots__ = ("_data",)
+
     def __init__(self, data=None, **kwargs):
-        self._data = dict(data or {}, **kwargs)
+        detached = dict(data or {}, **kwargs)
+        super().__setattr__("_data", MappingProxyType(detached))
 
     def __getitem__(self, key):
         return self._data[key]
@@ -630,11 +632,11 @@ class ImmutableDict(collections.abc.Mapping):
         return len(self._data)
 
     def __repr__(self):
-        return f"ImmutableDict({self._data!r})"
+        return f"ImmutableDict({dict(self._data)!r})"
 
     def __eq__(self, other):
         if isinstance(other, collections.abc.Mapping):
-            return self._data == dict(other)
+            return dict(self._data) == dict(other)
         return False
 
     def copy(self):
@@ -654,6 +656,12 @@ class ImmutableDict(collections.abc.Mapping):
             return res
         return NotImplemented
 
+    def __setattr__(self, key, value):
+        raise TypeError("Immutable snapshot dictionary cannot be modified")
+
+    def __delattr__(self, key):
+        raise TypeError("Immutable snapshot dictionary cannot be modified")
+
     def _readonly(self, *args, **kwargs):
         raise TypeError("Immutable snapshot dictionary cannot be modified")
 
@@ -670,15 +678,13 @@ class ImmutableDict(collections.abc.Mapping):
 class ImmutableList(collections.abc.Sequence):
     """
     Read-only sequence proxy ensuring deep immutability for published snapshots.
-    Inherits from collections.abc.Sequence so that:
-    1. Standard sequence reads (__getitem__, len, iter, in, index, count) work seamlessly.
-    2. Mutators (__setitem__, __delitem__, append, extend, insert, remove, pop, clear, sort, reverse)
-       unconditionally raise TypeError.
-    3. Base-class list operations (list.append, list.__setitem__, list.extend) fail-closed because
-       this is not a PyListObject subtype.
+    Wraps an immutable tuple over a detached copy of the input sequence.
+    Prevents direct mutation through ordinary methods or direct backing-container access.
     """
+    __slots__ = ("_items",)
+
     def __init__(self, items=()):
-        self._items = list(items)
+        super().__setattr__("_items", tuple(items))
 
     def __getitem__(self, idx):
         return self._items[idx]
@@ -687,7 +693,7 @@ class ImmutableList(collections.abc.Sequence):
         return len(self._items)
 
     def __repr__(self):
-        return f"ImmutableList({self._items!r})"
+        return f"ImmutableList({list(self._items)!r})"
 
     def __eq__(self, other):
         if isinstance(other, collections.abc.Sequence):
@@ -706,6 +712,12 @@ class ImmutableList(collections.abc.Sequence):
         if isinstance(other, (list, tuple, collections.abc.Sequence)):
             return list(other) + list(self._items)
         return NotImplemented
+
+    def __setattr__(self, key, value):
+        raise TypeError("Immutable snapshot list cannot be modified")
+
+    def __delattr__(self, key):
+        raise TypeError("Immutable snapshot list cannot be modified")
 
     def _readonly(self, *args, **kwargs):
         raise TypeError("Immutable snapshot list cannot be modified")
@@ -733,7 +745,7 @@ def freeze_snapshot(obj: Any) -> Any:
     if isinstance(obj, collections.abc.Mapping):
         return ImmutableDict({k: freeze_snapshot(v) for k, v in obj.items()})
     elif isinstance(obj, (list, tuple, collections.abc.Sequence)) and not isinstance(obj, (str, bytes)):
-        return ImmutableList([freeze_snapshot(x) for x in obj])
+        return ImmutableList(tuple(freeze_snapshot(x) for x in obj))
     elif isinstance(obj, (set, frozenset)):
         return frozenset(freeze_snapshot(x) for x in obj)
     return obj
@@ -847,7 +859,10 @@ def _execute_news_grounding_raw(symbol: str, cancel_check: Optional[Callable[[],
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         parsed = json.loads(match.group(0))
-        parsed["timestamp"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Distinguish processed/cached timestamp from external source observation timestamp
+        processed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        parsed["processed_at"] = processed_at
+        parsed["timestamp"] = processed_at  # Preserved for API/dashboard backwards compatibility
         parsed["symbol"] = symbol_clean
         return parsed
     raise ValueError(f"Could not parse valid JSON from grounding response for {symbol_clean}")
@@ -879,8 +894,7 @@ def query_gemini_news_grounding(api_key: str, symbol: str, timeout: float = 5.0)
         if symbol_clean in cache.qualitative_grounding:
             return cache.qualitative_grounding[symbol_clean]
 
-    obs_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    accepted, item = enqueue_news_grounding(symbol_clean, obs_time=obs_time)
+    accepted, item = enqueue_news_grounding(symbol_clean, obs_time=None)
     if accepted and item:
         if item.event.wait(timeout=timeout):
             if item.status == WorkStatus.COMPLETED and isinstance(item.result, dict):
@@ -3783,11 +3797,10 @@ def run_daemon():
             # Immediately notify frontend that heavy fetching has begun
             if is_heavy and get_global_state_snapshot().get("tickers"):
                 update_global_state_snapshot(lambda s: {**s, "is_heavy_refresh": True})
-                current_obs_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 try:
                     for p_sym in WATCHLIST:
                         if p_sym not in cache.qualitative_grounding:
-                            enqueue_news_grounding(p_sym, obs_time=current_obs_time)
+                            enqueue_news_grounding(p_sym, obs_time=None)
                 except Exception as g_err:
                     print(f"[Daemon Grounding Warning]: {g_err}")
 

@@ -604,17 +604,22 @@ class BackgroundResultApplicator:
         scout_category_map: dict,
         latest_issued_provider: Optional[Callable[[WorkKey], int] | Dict[WorkKey, int]] = None,
         require_source_time: bool = False,
+        on_publish: Optional[Callable[[WorkResult], None]] = None,
     ) -> List[Tuple[WorkResult, bool, str]]:
         """
         Applies results safely to provided targets under per-key lock.
         Sequence validation and target publication are atomic: a newer sequence
         cannot be issued between sequence validation and result publication.
+        When on_publish is provided, it is executed under key_lock before the sequence
+        is marked as applied and key_lock is released.
         Returns list of (result, applied, reason).
         """
         audit = []
         for r in results:
             key_lock = self.get_key_lock(r.key)
             with key_lock:
+                applied = False
+                obs_dt = None
                 with self._lock:
                     # If worker errored, do not apply data
                     if r.error is not None or r.data is None:
@@ -645,7 +650,6 @@ class BackgroundResultApplicator:
                         continue
 
                     # 3. Validate observation timestamp monotonicity
-                    obs_dt = None
                     if r.obs_time is not None and str(r.obs_time).strip() != "":
                         try:
                             obs_dt = parse_utc_iso8601_timestamp(r.obs_time)
@@ -670,24 +674,40 @@ class BackgroundResultApplicator:
                     # 4. Apply result based on work type
                     if r.key.work_type == WorkType.GROUNDING.value:
                         grounding_target[r.key.target] = r.data
+                        applied = True
                     elif r.key.work_type == WorkType.SCOUT.value:
                         scout_cache_target[r.key.target] = {
                             "tickers": r.data,
-                            "timestamp": time.time()
+                            "cached_at": time.time(),
+                            "timestamp": r.obs_time or time.time()
                         }
                         if isinstance(r.data, list):
                             for t in r.data:
                                 if isinstance(t, str):
                                     scout_category_map[t.upper()] = r.key.target
+                        applied = True
                     else:
                         audit.append((r, False, f"Unknown work type: {r.key.work_type}"))
                         continue
 
-                    self._last_applied_sequence[r.key] = r.sequence
-                    if obs_dt is not None:
-                        self._last_applied_obs_dt[r.key] = obs_dt
-                        self._last_applied_obs_time[r.key] = r.obs_time
-                    audit.append((r, True, "Applied successfully"))
+                # 5. Execute publication callback while STILL holding key_lock!
+                # This guarantees that sequence validation and actual snapshot publication are atomic:
+                # a newer sequence cannot be issued between sequence validation and replacement snapshot publication.
+                if applied and on_publish is not None:
+                    try:
+                        on_publish(r)
+                    except Exception as pub_err:
+                        logger.error(f"[BackgroundResultApplicator] on_publish failed for {r.key}: {pub_err}")
+                        audit.append((r, False, f"Publication failed: {pub_err}"))
+                        continue
+
+                with self._lock:
+                    if applied:
+                        self._last_applied_sequence[r.key] = r.sequence
+                        if obs_dt is not None:
+                            self._last_applied_obs_dt[r.key] = obs_dt
+                            self._last_applied_obs_time[r.key] = r.obs_time
+                        audit.append((r, True, "Applied successfully"))
 
         return audit
 

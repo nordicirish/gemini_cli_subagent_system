@@ -105,6 +105,9 @@ def _get_windows_descendant_pids(parent_pid: int) -> Tuple[List[int], bool]:
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
         kernel32.CloseHandle.restype = wintypes.BOOL
 
+        kernel32.GetLastError.argtypes = []
+        kernel32.GetLastError.restype = wintypes.DWORD
+
         # INVALID_HANDLE_VALUE is pointer-sized ((HANDLE)(LONG_PTR)-1)
         invalid_handle_val = wintypes.HANDLE(-1).value
 
@@ -112,29 +115,41 @@ def _get_windows_descendant_pids(parent_pid: int) -> Tuple[List[int], bool]:
         h_snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
         h_val = getattr(h_snapshot, "value", h_snapshot)
         if h_val is None or h_val == 0 or h_val == invalid_handle_val or h_snapshot == -1:
+            err = kernel32.GetLastError()
             logging.getLogger("agent_framework").error(
-                f"[WindowsToolhelp] Failed to create Toolhelp snapshot for PID {parent_pid}"
+                f"[WindowsToolhelp] Failed to create Toolhelp snapshot for PID {parent_pid} (error {err})"
             )
             return [], False
 
+        enumeration_ok = False
         try:
             pe = PROCESSENTRY32()
             pe.dwSize = ctypes.sizeof(PROCESSENTRY32)
             tree: Dict[int, List[int]] = {}
 
             if not kernel32.Process32First(h_snapshot, ctypes.byref(pe)):
-                logging.getLogger("agent_framework").error(
-                    f"[WindowsToolhelp] Process32First failed during descendant enumeration for PID {parent_pid}"
-                )
-                return [], False
-
-            while True:
-                c_pid = int(pe.th32ProcessID)
-                p_pid = int(pe.th32ParentProcessID)
-                if c_pid != 0:
-                    tree.setdefault(p_pid, []).append(c_pid)
-                if not kernel32.Process32Next(h_snapshot, ctypes.byref(pe)):
-                    break
+                err = kernel32.GetLastError()
+                # ERROR_NO_MORE_FILES = 18 indicates empty snapshot
+                if err != 18:
+                    logging.getLogger("agent_framework").error(
+                        f"[WindowsToolhelp] Process32First failed during descendant enumeration for PID {parent_pid} (error {err})"
+                    )
+                    return [], False
+            else:
+                while True:
+                    c_pid = int(pe.th32ProcessID)
+                    p_pid = int(pe.th32ParentProcessID)
+                    if c_pid != 0:
+                        tree.setdefault(p_pid, []).append(c_pid)
+                    if not kernel32.Process32Next(h_snapshot, ctypes.byref(pe)):
+                        err = kernel32.GetLastError()
+                        # ERROR_NO_MORE_FILES = 18 indicates normal enumeration exhaustion
+                        if err != 18:
+                            logging.getLogger("agent_framework").error(
+                                f"[WindowsToolhelp] Process32Next aborted unexpectedly with error code {err} for PID {parent_pid}"
+                            )
+                            return [], False
+                        break
 
             # Safe parent-to-child breadth-first traversal
             queue = list(tree.get(parent_pid, []))
@@ -146,9 +161,17 @@ def _get_windows_descendant_pids(parent_pid: int) -> Tuple[List[int], bool]:
                     descendants.append(curr)
                     queue.extend(tree.get(curr, []))
 
-            return descendants, True
+            enumeration_ok = True
         finally:
-            kernel32.CloseHandle(h_snapshot)
+            close_ok = kernel32.CloseHandle(h_snapshot)
+            if not close_ok:
+                close_err = kernel32.GetLastError()
+                logging.getLogger("agent_framework").error(
+                    f"[WindowsToolhelp] CloseHandle failed for snapshot handle on PID {parent_pid} (error {close_err})"
+                )
+                enumeration_ok = False
+
+        return (descendants, True) if enumeration_ok else ([], False)
     except Exception as ex:
         logging.getLogger("agent_framework").error(
             f"[WindowsToolhelp] Exception during descendant enumeration for PID {parent_pid}: {ex}"
