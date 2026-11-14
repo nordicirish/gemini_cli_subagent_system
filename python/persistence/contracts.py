@@ -28,13 +28,18 @@ def validate_finite_float(
 ) -> float:
     """
     Validates that a financial numeric value is a finite float.
-    Rejects NaN, +Infinity, -Infinity, negative values (when non_negative=True),
-    and non-numeric types fail-closed with PersistenceValidationError.
+    Rejects booleans, strings, non-numeric types, non-finite values (NaN, +inf, -inf),
+    and conversion overflow fail-closed with PersistenceValidationError.
     Preserves legitimate zero values (when allow_zero=True) and finite positive values.
     """
+    if isinstance(val, bool):
+        raise PersistenceValidationError(f"Boolean values not allowed for financial field {field_name}")
+    if isinstance(val, str):
+        raise PersistenceValidationError(f"String values not allowed for financial field {field_name}")
+
     try:
         num = float(val)
-    except (ValueError, TypeError) as e:
+    except (ValueError, TypeError, OverflowError) as e:
         raise PersistenceValidationError(f"Invalid numeric value for {field_name}: {val}") from e
 
     if not math.isfinite(num):

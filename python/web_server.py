@@ -553,7 +553,45 @@ def chat_endpoint(req: ChatRequest):
         framework.log("[System] Auto-injecting live DATA_PACKET into context...")
         try:
             from fetch_stocks import GLOBAL_STATE as live_state
-            ssot = live_state.get("local_storage_state") or {}
+        except ImportError:
+            live_state = {}
+
+        # 1. Authoritative financial state boundary enforcement
+        financial_valid = live_state.get("financial_state_valid")
+        local_storage = live_state.get("local_storage_state")
+
+        if (
+            financial_valid is False
+            or (local_storage is None and "local_storage_state" in live_state)
+            or ("local_storage_state" in live_state and not isinstance(local_storage, dict))
+        ):
+            err_msg = live_state.get("persistence_error") or live_state.get("status") or "Authoritative financial state unavailable"
+            framework.log(f"[Security Alert] Chat dispatch halted: financial state degraded ({err_msg}).")
+            return {
+                "status": "error",
+                "code": "financial_state_degraded",
+                "message": "Authoritative financial state is currently unavailable or corrupted. Chat dispatch halted to prevent unauthorized or hallucinated mutations.",
+            }
+
+        if "local_storage_state" not in live_state:
+            # First run / startup check before daemon cycles
+            try:
+                service = get_persistence_service()
+                ssot_direct = service.get_ssot_data()
+                if not isinstance(ssot_direct, dict):
+                    raise PersistenceValidationError("SSoT root must be a dictionary")
+                ssot = ssot_direct
+            except Exception as pe:
+                framework.log(f"[Security Alert] Chat dispatch halted: persistence check failed on startup ({pe}).")
+                return {
+                    "status": "error",
+                    "code": "financial_state_degraded",
+                    "message": "Authoritative financial state is currently unavailable or corrupted. Chat dispatch halted to prevent unauthorized or hallucinated mutations.",
+                }
+        else:
+            ssot = local_storage
+
+        try:
             ms = ssot.get("mutable_state", ssot)  # support both nested and flat layouts
             portfolio = ms.get("portfolio_snapshot", ssot.get("portfolio_snapshot", []))
             state_ctx = ms.get("state_context", ssot.get("state_context", {}))

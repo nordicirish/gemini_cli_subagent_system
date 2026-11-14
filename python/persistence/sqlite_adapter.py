@@ -103,15 +103,16 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
                 cash_usd_rec = uow.cash.get_cash("PRIMARY", "USD")
                 positions_recs = uow.positions.list_positions("PRIMARY")
 
-                portfolio = [
-                    {
-                        "ticker": p.ticker,
-                        "shares": float(p.shares),
-                        "wac": float(p.wac_eur),
-                    }
-                    for p in positions_recs
-                    if p.shares > Decimal("0")
-                ]
+                portfolio = []
+                for p in positions_recs:
+                    shares_val = validate_finite_float(p.shares, f"shares for {p.ticker}")
+                    wac_val = validate_finite_float(p.wac_eur, f"wac for {p.ticker}")
+                    if shares_val > 0.0:
+                        portfolio.append({
+                            "ticker": p.ticker,
+                            "shares": shares_val,
+                            "wac": wac_val,
+                        })
 
                 eur_amount = validate_finite_float(cash_eur_rec.amount if cash_eur_rec else 0.0, "unallocated_cash_eur")
                 usd_amount = validate_finite_float(cash_usd_rec.amount if cash_usd_rec else 0.0, "unallocated_cash_usd")
@@ -122,6 +123,8 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
                     "unallocated_cash_usd": usd_amount,
                     "eurusd_rate": 1.08,
                 }
+        except (PersistenceValidationError, PersistenceIntegrityError):
+            raise
         except TransactionIntegrityError as tie:
             raise PersistenceIntegrityError(f"Transaction integrity failure: {tie}") from tie
         except Exception as e:
@@ -156,8 +159,8 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
             if not t:
                 raise PersistenceValidationError("Portfolio item missing ticker")
             shares = validate_finite_float(item.get("shares", 0.0), f"shares for {t}")
+            wac = validate_finite_float(item.get("wac", 0.0), f"wac for {t}")
             if shares > 0.0:
-                wac = validate_finite_float(item.get("wac", 0.0), f"wac for {t}")
                 new_map[t] = {
                     "shares": Decimal(str(round(shares, 4))),
                     "wac": Decimal(str(round(wac, 4))),

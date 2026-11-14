@@ -38,6 +38,7 @@ from persistence import (
     PersistenceError,
     PersistenceIntegrityError,
     PersistenceValidationError,
+    validate_finite_float,
 )
 try:
     from python.tool_registry import execution_role_context, authorize_financial_mutation
@@ -458,6 +459,168 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
                     self.adapter.save_portfolio_basket(
                         portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
                         unallocated_cash_eur=nf,
+                    )
+
+    def test_sqlite_validates_wac_on_zero_shares_parity(self):
+        """SQLite save_portfolio_basket validates wac even when shares=0.0 before omitting."""
+        invalid_wac_values = [float("nan"), float("inf"), float("-inf"), "invalid_str", True, False, 10**500]
+        for bad_wac in invalid_wac_values:
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PersistenceValidationError, msg=f"Should reject zero-share position with bad wac {bad_wac}"):
+                    self.adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": 0.0, "wac": bad_wac}],
+                        unallocated_cash_eur=1000.0,
+                    )
+
+    def test_sqlite_get_portfolio_validates_corrupt_non_finite_records(self):
+        """SQLite get_portfolio_basket rejects corrupted non-finite database records fail-closed."""
+        with patch("persistence.sqlite_adapter.UnitOfWork") as mock_uow_cls:
+            mock_uow = mock_uow_cls.return_value.__enter__.return_value
+            mock_pos = type("PosRec", (), {"ticker": "CORRUPT", "shares": Decimal("10"), "wac_eur": float("nan")})()
+            mock_uow.positions.list_positions.return_value = [mock_pos]
+            mock_uow.cash.get_cash.return_value = None
+
+            with self.assertRaises(PersistenceValidationError):
+                self.adapter.get_portfolio_basket()
+
+
+class TestValidateFiniteFloatHardening(unittest.TestCase):
+    """Direct unit tests for validate_finite_float hardening (Scope C)."""
+
+    def test_rejects_boolean_types(self):
+        """Booleans must be explicitly rejected and not cast to 1.0 or 0.0."""
+        with self.assertRaises(PersistenceValidationError) as ctx_true:
+            validate_finite_float(True, "test_field")
+        self.assertIn("Boolean values not allowed", str(ctx_true.exception))
+
+        with self.assertRaises(PersistenceValidationError) as ctx_false:
+            validate_finite_float(False, "test_field")
+        self.assertIn("Boolean values not allowed", str(ctx_false.exception))
+
+    def test_rejects_string_types(self):
+        """String values must be rejected fail-closed to prevent accidental conversions."""
+        bad_strings = ["100.5", "0.0", "0", "NaN", "Infinity", "invalid", ""]
+        for s in bad_strings:
+            with self.assertRaises(PersistenceValidationError) as ctx:
+                validate_finite_float(s, "test_field")
+            self.assertIn("String values not allowed", str(ctx.exception))
+
+    def test_handles_conversion_overflow_safely(self):
+        """Massive integers or exponents causing OverflowError must be caught fail-closed."""
+        huge_int = 10**500
+        with self.assertRaises(PersistenceValidationError) as ctx:
+            validate_finite_float(huge_int, "test_field")
+        self.assertIn("Invalid numeric value", str(ctx.exception))
+
+    def test_rejects_non_finite_floats_and_decimals(self):
+        """NaN, +inf, -inf in float and Decimal types must be rejected."""
+        non_finite = [
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            Decimal("NaN"),
+            Decimal("Infinity"),
+            Decimal("-Infinity"),
+        ]
+        for nf in non_finite:
+            with self.assertRaises(PersistenceValidationError):
+                validate_finite_float(nf, "test_field")
+
+    def test_accepts_valid_numerics_and_preserves_legitimate_zeros(self):
+        """Valid int, float, and Decimal positive and zero values must be accepted."""
+        # Int
+        self.assertEqual(validate_finite_float(100, "test_field"), 100.0)
+        self.assertEqual(validate_finite_float(0, "test_field"), 0.0)
+
+        # Float
+        self.assertEqual(validate_finite_float(123.456, "test_field"), 123.456)
+        self.assertEqual(validate_finite_float(0.0, "test_field"), 0.0)
+
+        # Decimal
+        self.assertEqual(validate_finite_float(Decimal("789.12"), "test_field"), 789.12)
+        self.assertEqual(validate_finite_float(Decimal("0.0"), "test_field"), 0.0)
+
+    def test_enforces_allow_zero_and_non_negative_constraints(self):
+        """Zero values are rejected when allow_zero=False; negative values rejected when non_negative=True."""
+        with self.assertRaises(PersistenceValidationError):
+            validate_finite_float(0.0, "test_field", allow_zero=False)
+
+        with self.assertRaises(PersistenceValidationError):
+            validate_finite_float(-5.0, "test_field", non_negative=True)
+
+        # Negative allowed when non_negative=False
+        self.assertEqual(validate_finite_float(-5.0, "test_field", non_negative=False), -5.0)
+
+
+class TestJsonAndSqliteValidationParity(unittest.TestCase):
+    """Verifies that JsonPersistenceAdapter and SqlitePersistenceAdapter exhibit identical validation behavior."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.context_dir = os.path.join(self.temp_dir.name, "context")
+        os.makedirs(self.context_dir, exist_ok=True)
+        self.ssot_path = os.path.join(self.context_dir, "ssot.json")
+
+        self.json_adapter = JsonPersistenceAdapter(base_dir=self.temp_dir.name)
+
+        db_path = os.path.join(self.temp_dir.name, "parity_test.db")
+        self.db_manager = DatabaseManager(db_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with self.db_manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+        self.sqlite_adapter = SqlitePersistenceAdapter(self.db_manager)
+
+    def tearDown(self):
+        self.sqlite_adapter.close()
+        self.temp_dir.cleanup()
+
+    def test_parity_on_boolean_rejection(self):
+        """Both adapters reject boolean shares and wac."""
+        for adapter in (self.json_adapter, self.sqlite_adapter):
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": True, "wac": 500.0}],
+                        unallocated_cash_eur=1000.0,
+                    )
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": False}],
+                        unallocated_cash_eur=1000.0,
+                    )
+
+    def test_parity_on_string_rejection(self):
+        """Both adapters reject string shares, wac, and cash."""
+        for adapter in (self.json_adapter, self.sqlite_adapter):
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": "10", "wac": 500.0}],
+                        unallocated_cash_eur=1000.0,
+                    )
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": "500.0"}],
+                        unallocated_cash_eur=1000.0,
+                    )
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
+                        unallocated_cash_eur="1000.0",
+                    )
+
+    def test_parity_on_zero_share_wac_validation(self):
+        """Both adapters validate wac on zero-share positions before omitting."""
+        for adapter in (self.json_adapter, self.sqlite_adapter):
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": 0.0, "wac": float("nan")}],
+                        unallocated_cash_eur=1000.0,
+                    )
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": 0.0, "wac": "corrupt"}],
+                        unallocated_cash_eur=1000.0,
                     )
 
 

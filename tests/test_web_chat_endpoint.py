@@ -98,6 +98,122 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
         # 4. Session preserved invariant
         self.assertIs(web_server.global_chat_session, initial_session)
 
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_halts_dispatch_when_financial_state_is_degraded(self, mock_dispatch, mock_charts):
+        """When daemon financial state is degraded, chat endpoint aborts dispatch with controlled error."""
+        initial_model = "gemini-3.8-flash-high"
+        web_server.ORCHESTRATOR_MODEL = initial_model
+        initial_session = web_server.global_chat_session
+
+        degraded_state = {
+            "financial_state_valid": False,
+            "local_storage_state": None,
+            "persistence_error": "Authoritative SSoT retrieval failure: Malformed JSON",
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, degraded_state, clear=True):
+            req = web_server.ChatRequest(message="Execute rebalance")
+            res = web_server.chat_endpoint(req)
+
+            # 1. Controlled error response returned without leaking raw internal exception
+            self.assertEqual(res["status"], "error")
+            self.assertEqual(res["code"], "financial_state_degraded")
+            self.assertIn("Authoritative financial state is currently unavailable or corrupted", res["message"])
+            self.assertNotIn("Traceback", res["message"])
+
+            # 2. Dispatch is halted — zero tool or model execution
+            self.assertEqual(mock_dispatch.call_count, 0)
+
+            # 3. Model invariant preserved
+            self.assertEqual(web_server.ORCHESTRATOR_MODEL, initial_model)
+
+            # 4. Session invariant preserved
+            self.assertIs(web_server.global_chat_session, initial_session)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_halts_dispatch_when_local_storage_state_is_none(self, mock_dispatch, mock_charts):
+        """When local_storage_state is explicitly None, chat endpoint halts dispatch."""
+        with patch.dict(fetch_stocks.GLOBAL_STATE, {"local_storage_state": None}, clear=True):
+            req = web_server.ChatRequest(message="What is the current regime?")
+            res = web_server.chat_endpoint(req)
+
+            self.assertEqual(res["status"], "error")
+            self.assertEqual(res["code"], "financial_state_degraded")
+            self.assertEqual(mock_dispatch.call_count, 0)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_allows_dispatch_on_valid_empty_state(self, mock_dispatch, mock_charts):
+        """When financial state is valid and empty, chat endpoint proceeds normally to dispatch."""
+        mock_dispatch.return_value = {
+            "status": "completed",
+            "response": "Portfolio is currently empty. Ready for cash allocation.",
+            "turn_count": 1,
+        }
+
+        valid_empty_state = {
+            "financial_state_valid": True,
+            "local_storage_state": {},
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, valid_empty_state, clear=True):
+            req = web_server.ChatRequest(message="What is the portfolio status?")
+            res = web_server.chat_endpoint(req)
+
+            self.assertEqual(res["status"], "success")
+            self.assertEqual(mock_dispatch.call_count, 1)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_startup_unreadable_ssot_halts_dispatch(self, mock_dispatch, mock_charts):
+        """On startup before daemon runs, unreadable/corrupt SSoT halts chat dispatch."""
+        mock_service = MagicMock()
+        mock_service.get_ssot_data.side_effect = PersistenceIntegrityError("Corrupt SSoT JSON")
+
+        uninitialized_state = {
+            "status": "INITIALIZING - LOADING GEX PROFILES...",
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, uninitialized_state, clear=True):
+            with patch("web_server.get_persistence_service", return_value=mock_service):
+                req = web_server.ChatRequest(message="Hello")
+                res = web_server.chat_endpoint(req)
+
+                self.assertEqual(res["status"], "error")
+                self.assertEqual(res["code"], "financial_state_degraded")
+                self.assertEqual(mock_dispatch.call_count, 0)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_startup_clean_empty_ssot_allows_dispatch(self, mock_dispatch, mock_charts):
+        """On startup before daemon runs, clean first-run empty SSoT allows dispatch."""
+        mock_dispatch.return_value = {
+            "status": "completed",
+            "response": "First run initialized cleanly.",
+            "turn_count": 1,
+        }
+
+        mock_service = MagicMock()
+        mock_service.get_ssot_data.return_value = {}
+
+        uninitialized_state = {
+            "status": "INITIALIZING - LOADING GEX PROFILES...",
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, uninitialized_state, clear=True):
+            with patch("web_server.get_persistence_service", return_value=mock_service):
+                req = web_server.ChatRequest(message="Hello")
+                res = web_server.chat_endpoint(req)
+
+                self.assertEqual(res["status"], "success")
+                self.assertEqual(mock_dispatch.call_count, 1)
+
 
 class TestDaemonExecutionPathPersistenceIntegrity(unittest.TestCase):
     def test_daemon_missing_ssot_first_run_behaviour(self):
