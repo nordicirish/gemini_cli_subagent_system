@@ -531,8 +531,6 @@ def chat_endpoint(req: ChatRequest):
     """Primary chat route. Auto-injects live GLOBAL_STATE as DATA_PACKET before each user message."""
     global global_chat_session, cancel_event, _session_hydrated, ORCHESTRATOR_MODEL
 
-    cancel_event.clear()
-    framework.reset_turn_usage()
     try:
         # 1. Map names to actual tool functions for manual execution
         tool_map = {f.__name__: f for f in terminal_tools}
@@ -738,7 +736,10 @@ def chat_endpoint(req: ChatRequest):
             framework.log(f"[System] Non-authoritative DATA_PACKET enrichment failed: {enrichment_err}")
         # --- END AUTO DATA INJECTION ---
 
-        # Deferred session initialisation: Only initialize/access session after authoritative financial validation succeeds
+        # Deferred runtime reset and session initialisation: Only execute after authoritative financial validation succeeds
+        cancel_event.clear()
+        framework.reset_turn_usage()
+
         if global_chat_session is None:
             global_chat_session = create_new_session()
         session = global_chat_session

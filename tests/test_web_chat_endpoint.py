@@ -492,6 +492,80 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             self.assertIs(web_server.global_chat_session, dummy_session)
             self.assertEqual(mock_dispatch.call_count, 0)
 
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_cancel_event_preserved_when_financial_state_degraded(self, mock_dispatch, mock_charts):
+        """When cancel_event is already set and financial state is degraded, event remains set after return."""
+        web_server.cancel_event.set()
+
+        degraded_state = {
+            "financial_state_valid": False,
+            "local_storage_state": None,
+            "persistence_error": "Authoritative SSoT retrieval failure",
+            "tickers": [],
+        }
+
+        with patch.dict(fetch_stocks.GLOBAL_STATE, degraded_state, clear=True):
+            req = web_server.ChatRequest(message="Halt check")
+            res = web_server.chat_endpoint(req)
+
+            self.assertEqual(res["status"], "error")
+            self.assertEqual(res["code"], "financial_state_degraded")
+            # Runtime cancel_event must not be cleared on rejected request
+            self.assertTrue(web_server.cancel_event.is_set())
+            self.assertEqual(mock_dispatch.call_count, 0)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_reset_turn_usage_not_called_when_financial_state_degraded(self, mock_dispatch, mock_charts):
+        """When authoritative financial state is degraded, framework.reset_turn_usage() is not called."""
+        with patch.object(web_server.framework, "reset_turn_usage") as mock_reset:
+            degraded_state = {
+                "financial_state_valid": False,
+                "local_storage_state": None,
+                "persistence_error": "Authoritative SSoT retrieval failure",
+                "tickers": [],
+            }
+
+            with patch.dict(fetch_stocks.GLOBAL_STATE, degraded_state, clear=True):
+                req = web_server.ChatRequest(message="Usage check")
+                res = web_server.chat_endpoint(req)
+
+                self.assertEqual(res["status"], "error")
+                self.assertEqual(res["code"], "financial_state_degraded")
+                mock_reset.assert_not_called()
+                self.assertEqual(mock_dispatch.call_count, 0)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_runtime_resets_execute_once_on_valid_state(self, mock_dispatch, mock_charts):
+        """When authoritative financial state is valid, runtime reset operations execute exactly once before dispatch."""
+        web_server.cancel_event.set()
+
+        mock_dispatch.return_value = {
+            "status": "completed",
+            "response": "Dispatch completed successfully.",
+            "turn_count": 1,
+        }
+
+        valid_state = {
+            "financial_state_valid": True,
+            "local_storage_state": {},
+            "tickers": [],
+        }
+
+        with patch.object(web_server.framework, "reset_turn_usage") as mock_reset:
+            with patch.dict(fetch_stocks.GLOBAL_STATE, valid_state, clear=True):
+                req = web_server.ChatRequest(message="Valid dispatch check")
+                res = web_server.chat_endpoint(req)
+
+                self.assertEqual(res["status"], "success")
+                # cancel_event was cleared before dispatch
+                self.assertFalse(web_server.cancel_event.is_set())
+                # reset_turn_usage executed exactly once
+                mock_reset.assert_called_once()
+                self.assertEqual(mock_dispatch.call_count, 1)
+
 
 class TestDaemonExecutionPathPersistenceIntegrity(unittest.TestCase):
     def test_daemon_missing_ssot_first_run_behaviour(self):
