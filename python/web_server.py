@@ -583,9 +583,13 @@ def chat_endpoint(req: ChatRequest):
         # This replaces all manual clipboard copy/paste operations.
         framework.log("[System] Auto-injecting live DATA_PACKET into context...")
         try:
-            from fetch_stocks import GLOBAL_STATE as live_state
-        except ImportError:
-            live_state = {}
+            from fetch_stocks import get_global_state_snapshot
+            live_state = get_global_state_snapshot()
+        except (ImportError, AttributeError):
+            try:
+                from fetch_stocks import GLOBAL_STATE as live_state
+            except ImportError:
+                live_state = {}
 
         # 1. Authoritative financial state boundary enforcement
         financial_valid = live_state.get("financial_state_valid")
@@ -1177,16 +1181,26 @@ def save_basket(req: BasketSaveRequest):
             fetch_stocks.FORCE_REFRESH = True
 
             # Immediately update in-memory GLOBAL_STATE so the next GET /api/data instantly reflects changes
-            if isinstance(getattr(fetch_stocks, "GLOBAL_STATE", None), dict):
+            if hasattr(fetch_stocks, "update_global_state_snapshot"):
+                def _update_basket_state(current):
+                    new_state = dict(current)
+                    new_state["local_storage_state"] = service.get_ssot_data()
+                    held_set = {item["ticker"].upper() for item in new_snapshot}
+                    watched_set = set(service.get_watchlist())
+                    if "tickers" in new_state and isinstance(new_state["tickers"], list):
+                        valid_active = held_set.union(watched_set)
+                        new_state["tickers"] = [
+                            t for t in new_state["tickers"]
+                            if isinstance(t, dict) and (
+                                t.get("_isScout")
+                                or t.get("ticker", "").upper() in valid_active
+                                or t.get("ticker", "").upper() in fetch_stocks.MACRO_TICKERS
+                            )
+                        ]
+                    return new_state
+                fetch_stocks.update_global_state_snapshot(_update_basket_state)
+            elif isinstance(getattr(fetch_stocks, "GLOBAL_STATE", None), dict):
                 fetch_stocks.GLOBAL_STATE["local_storage_state"] = service.get_ssot_data()
-                held_set = {item["ticker"].upper() for item in new_snapshot}
-                watched_set = set(service.get_watchlist())
-                if "tickers" in fetch_stocks.GLOBAL_STATE and isinstance(fetch_stocks.GLOBAL_STATE["tickers"], list):
-                    valid_active = held_set.union(watched_set)
-                    fetch_stocks.GLOBAL_STATE["tickers"] = [
-                        t for t in fetch_stocks.GLOBAL_STATE["tickers"]
-                        if t.get("_isScout") or t.get("ticker", "").upper() in valid_active or t.get("ticker", "").upper() in fetch_stocks.MACRO_TICKERS
-                    ]
         except Exception as se:
             framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
             
@@ -1250,7 +1264,13 @@ async def save_watch_list(req: Request):
             fetch_stocks.TICKERS = fetch_stocks._load_ssot_tickers()
             fetch_stocks.ALL_TICKERS = fetch_stocks.TICKERS + fetch_stocks.MACRO_TICKERS
             fetch_stocks.FORCE_REFRESH = True
-            if isinstance(getattr(fetch_stocks, "GLOBAL_STATE", None), dict):
+            if hasattr(fetch_stocks, "update_global_state_snapshot"):
+                def _update_watchlist_state(current):
+                    new_state = dict(current)
+                    new_state["local_storage_state"] = service.get_ssot_data()
+                    return new_state
+                fetch_stocks.update_global_state_snapshot(_update_watchlist_state)
+            elif isinstance(getattr(fetch_stocks, "GLOBAL_STATE", None), dict):
                 fetch_stocks.GLOBAL_STATE["local_storage_state"] = service.get_ssot_data()
         except Exception as se:
             framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")

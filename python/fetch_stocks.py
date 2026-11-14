@@ -29,7 +29,7 @@ from pandas.tseries.holiday import (
 )
 import numpy as np
 import requests
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 import base64
 import os
@@ -39,12 +39,19 @@ import json
 import pyperclip
 import re
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from scipy.stats import norm
 from yfinance.data import YfData
 import threading
 from atomic_io import atomic_write_json, atomic_read_json, atomic_update_json
 from tool_registry import authorize_financial_mutation
+from background_intelligence import (
+    BackgroundIntelligenceCoordinator,
+    BackgroundResultApplicator,
+    WorkType,
+    WorkStatus,
+    validate_utc_iso8601_timestamp,
+)
 
 try:
     from persistence import get_persistence_service
@@ -303,6 +310,14 @@ SCOUT_MAX_RSI = max(30, min(100, int(config.get("SCOUT_MAX_RSI", 75))))
 USER_CONFIG_FILE = 'context/user_config.json'
 
 SCOUT_TICKER_MAP = config.get("SCOUT_TICKER_MAP", {})
+if not SCOUT_TICKER_MAP and os.path.exists('config.json'):
+    try:
+        with open('config.json', 'r', encoding='utf-8') as _cf:
+            _root_cfg = json.load(_cf)
+            if isinstance(_root_cfg, dict) and "SCOUT_TICKER_MAP" in _root_cfg:
+                SCOUT_TICKER_MAP = _root_cfg.get("SCOUT_TICKER_MAP", {})
+    except Exception:
+        pass
 
 
 # Dynamic Sector Tickers Cache Deck (ENH_CACHE_02)
@@ -330,112 +345,161 @@ def is_valid_ticker(symbol: str) -> bool:
         return False
     return True
 
+BACKGROUND_COORDINATOR = BackgroundIntelligenceCoordinator(
+    max_workers=2,
+    max_queue_size=50
+)
+BACKGROUND_RESULT_APPLICATOR = BackgroundResultApplicator()
+
+def get_background_coordinator() -> BackgroundIntelligenceCoordinator:
+    return BACKGROUND_COORDINATOR
+
+def get_background_result_applicator() -> BackgroundResultApplicator:
+    return BACKGROUND_RESULT_APPLICATOR
+
+def apply_background_intelligence_results():
+    """
+    Drains results from BACKGROUND_COORDINATOR and applies them to cache under
+    monotonic sequence and observation timestamp validation.
+    Called by the coordinator at safe points in its cycle.
+    """
+    results = BACKGROUND_COORDINATOR.drain_results()
+    if results:
+        with DYNAMIC_SCOUT_CACHE_LOCK:
+            BACKGROUND_RESULT_APPLICATOR.apply_results(
+                results=results,
+                grounding_target=cache.qualitative_grounding,
+                scout_cache_target=DYNAMIC_SCOUT_CACHE,
+                scout_category_map=SCOUTED_TICKER_TO_CATEGORY_MAP
+            )
+
+def _execute_scout_discovery_raw(category: str) -> list:
+    """
+    Executes a dynamic scout discovery query via Antigravity Agent.
+    Executed by background worker threads; does not touch coordinator state directly.
+    """
+    category_clean = category.strip().upper()
+    from agent_framework import AntigravityAgentRunner
+    runner = AntigravityAgentRunner()
+
+    scout_prompt = load_scout_prompt()
+    prompt = scout_prompt.replace("{category}", category_clean)
+
+    ssot_content = "{}"
+    try:
+        service = get_persistence_service()
+        ssot_data = service.get_ssot_data()
+        if ssot_data:
+            ssot_content = json.dumps(ssot_data, indent=2)
+    except Exception as e:
+        print(f"[Warning] Failed to load SSoT for scout prompt via persistence service: {e}")
+
+    rules_content = ""
+    try:
+        rules_path = "gem_trading_rules/rules.md"
+        if os.path.exists(rules_path):
+            with open(rules_path, "r", encoding="utf-8") as rf:
+                rules_text = rf.read()
+                subset = []
+                m11_start = rules_text.find("MANDATE_11_RESEARCH_SYNC")
+                if m11_start == -1:
+                    m11_start = rules_text.find("MANDATE_11")
+                if m11_start != -1:
+                    line_start = rules_text.rfind("\n", 0, m11_start)
+                    if line_start == -1: line_start = 0
+                    next_header = len(rules_text)
+                    for pattern in ["<a name=", "\n- **[MANDATE_", "\n## ", "\n### "]:
+                        pos = rules_text.find(pattern, m11_start)
+                        if pos != -1 and pos < next_header:
+                            next_header = pos
+                    subset.append(rules_text[line_start:next_header].strip())
+
+                anti_start = rules_text.lower().find("anti hallucination core")
+                if anti_start == -1:
+                    anti_start = rules_text.lower().find("anti-hallucination core")
+                if anti_start != -1:
+                    line_start = rules_text.rfind("\n", 0, anti_start)
+                    if line_start == -1: line_start = 0
+                    next_header = len(rules_text)
+                    for pattern in ["<a name=", "\n- **[MANDATE_", "\n## ", "\n### "]:
+                        pos = rules_text.lower().find(pattern, anti_start)
+                        if pos != -1 and pos < next_header:
+                            next_header = pos
+                    subset.append(rules_text[line_start:next_header].strip())
+
+                if subset:
+                    rules_content = "\n\n".join(subset)
+                else:
+                    rules_content = "\n".join(rules_text.splitlines()[:200])
+    except Exception as e:
+        print(f"[Warning] Failed to load rules.md for scout prompt: {e}")
+
+    prompt = (
+        f"{prompt}\n\n"
+        f"### ATTACHED SSOT JSON BLOCK:\n"
+        f"```json\n{ssot_content}\n```\n\n"
+        f"### RELEVANT SYSTEM RULES & MANDATES (rules.md):\n"
+        f"```markdown\n{rules_content}\n```"
+    )
+
+    response = runner.run_prompt(prompt, mode="FAST")
+    text = response.text.strip()
+    match = re.search(r"\[\s*\"[A-Z0-9^=-]{1,10}\"(?:\s*,\s*\"[A-Z0-9^=-]{1,10}\")*\s*\]", text, re.IGNORECASE)
+    if match:
+        tickers = json.loads(match.group(0))
+    else:
+        words = re.findall(r"\"([A-Z0-9^=-]{1,10})\"", text)
+        if not words:
+            words = re.findall(r"\b([A-Z0-9^=-]{1,10})\b", text)
+        filter_words = {"AND", "THE", "FOR", "JSON", "USA", "ETF", "SEC", "CEO", "IPO", "NYSE", "NASDAQ", "US"}
+        tickers = [w.upper() for w in words if w.upper() not in filter_words]
+
+    valid_tickers = [t.strip().upper() for t in tickers if is_valid_ticker(t)][:5]
+    if not valid_tickers:
+        raise ValueError(f"No valid tickers discovered for category {category_clean}")
+    return valid_tickers
+
+def enqueue_scout_discovery(category: str, obs_time: Optional[str] = None) -> Tuple[bool, Optional[Any]]:
+    if not category:
+        return False, None
+    category_clean = category.strip().upper()
+    if not obs_time:
+        obs_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return BACKGROUND_COORDINATOR.enqueue(
+        work_type=WorkType.SCOUT.value,
+        target=category_clean,
+        obs_time=obs_time,
+        fn=_execute_scout_discovery_raw,
+        args=(category_clean,)
+    )
+
 def _get_dynamic_scout_tickers(category: str) -> list:
     """
-    Dynamically performs a live Google Search via Gemini Flash to retrieve the top 5
-    trending, high-performing tickers for a given sector, falling back to configuration mappings.
-    Caches results in memory for 4 hours to respect API quotas.
+    Non-blocking dynamic scout ticker retrieval.
+    Returns cached tickers if valid (< 4 hours).
+    If cache miss or expired, enqueues background discovery and immediately
+    returns fallback configuration tickers so market monitoring is never blocked.
     """
     global DYNAMIC_SCOUT_CACHE
+    category_clean = category.strip().upper()
     now = t_time.time()
-    
+
     with DYNAMIC_SCOUT_CACHE_LOCK:
-        if category in DYNAMIC_SCOUT_CACHE:
-            cached = DYNAMIC_SCOUT_CACHE[category]
+        if category_clean in DYNAMIC_SCOUT_CACHE:
+            cached = DYNAMIC_SCOUT_CACHE[category_clean]
             if now - cached["timestamp"] < 14400: # 4-hour cache TTL
                 return cached["tickers"]
-                
+
+    # Enqueue background discovery without blocking
+    obs_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    enqueue_scout_discovery(category_clean, obs_time=obs_time)
+
     fallback = SCOUT_TICKER_MAP.get(category, [])
-    
-    try:
-        from agent_framework import AntigravityAgentRunner
-        runner = AntigravityAgentRunner()
-        
-        scout_prompt = load_scout_prompt()
-        prompt = scout_prompt.replace("{category}", category)
-        
-        # Load SSOT and rules dynamically to satisfy MANDATE_11 and Anti-Hallucination Core
-        ssot_content = "{}"
-        try:
-            service = get_persistence_service()
-            ssot_data = service.get_ssot_data()
-            if ssot_data:
-                ssot_content = json.dumps(ssot_data, indent=2)
-        except Exception as e:
-            print(f"[Warning] Failed to load SSoT for scout prompt via persistence service: {e}")
-            
-        rules_content = ""
-        try:
-            rules_path = "gem_trading_rules/rules.md"
-            if os.path.exists(rules_path):
-                with open(rules_path, "r", encoding="utf-8") as rf:
-                    rules_text = rf.read()
-                    subset = []
-                    # Extract MANDATE_11
-                    m11_start = rules_text.find("MANDATE_11_RESEARCH_SYNC")
-                    if m11_start == -1:
-                        m11_start = rules_text.find("MANDATE_11")
-                    if m11_start != -1:
-                        line_start = rules_text.rfind("\n", 0, m11_start)
-                        if line_start == -1: line_start = 0
-                        next_header = len(rules_text)
-                        for pattern in ["<a name=", "\n- **[MANDATE_", "\n## ", "\n### "]:
-                            pos = rules_text.find(pattern, m11_start)
-                            if pos != -1 and pos < next_header:
-                                next_header = pos
-                        subset.append(rules_text[line_start:next_header].strip())
-                    
-                    # Extract Anti-Hallucination Core
-                    anti_start = rules_text.lower().find("anti hallucination core")
-                    if anti_start == -1:
-                        anti_start = rules_text.lower().find("anti-hallucination core")
-                    if anti_start != -1:
-                        line_start = rules_text.rfind("\n", 0, anti_start)
-                        if line_start == -1: line_start = 0
-                        next_header = len(rules_text)
-                        for pattern in ["<a name=", "\n- **[MANDATE_", "\n## ", "\n### "]:
-                            pos = rules_text.lower().find(pattern, anti_start)
-                            if pos != -1 and pos < next_header:
-                                next_header = pos
-                        subset.append(rules_text[line_start:next_header].strip())
-                    
-                    if subset:
-                        rules_content = "\n\n".join(subset)
-                    else:
-                        rules_content = "\n".join(rules_text.splitlines()[:200])
-        except Exception as e:
-            print(f"[Warning] Failed to load rules.md for scout prompt: {e}")
-            
-        prompt = (
-            f"{prompt}\n\n"
-            f"### ATTACHED SSOT JSON BLOCK:\n"
-            f"```json\n{ssot_content}\n```\n\n"
-            f"### RELEVANT SYSTEM RULES & MANDATES (rules.md):\n"
-            f"```markdown\n{rules_content}\n```"
-        )
-        
-        response = runner.run_prompt(prompt, mode="FAST")
-        text = response.text.strip()
-        match = re.search(r"\[\s*\"[A-Z0-9^=-]{1,10}\"(?:\s*,\s*\"[A-Z0-9^=-]{1,10}\")*\s*\]", text, re.IGNORECASE)
-        if match:
-            tickers = json.loads(match.group(0))
-        else:
-            words = re.findall(r"\"([A-Z0-9^=-]{1,10})\"", text)
-            if not words:
-                words = re.findall(r"\b([A-Z0-9^=-]{1,10})\b", text)
-            filter_words = {"AND", "THE", "FOR", "JSON", "USA", "ETF", "SEC", "CEO", "IPO", "NYSE", "NASDAQ", "US"}
-            tickers = [w.upper() for w in words if w.upper() not in filter_words]
-            
-        tickers = [t.strip().upper() for t in tickers if is_valid_ticker(t)][:5]
-        if tickers:
-            with DYNAMIC_SCOUT_CACHE_LOCK:
-                DYNAMIC_SCOUT_CACHE[category] = {"tickers": tickers, "timestamp": now}
-            print(f"[Scout Scanner] Successfully discovered dynamic tickers for {category}: {tickers}")
-            return tickers
-            
-    except Exception as e:
-        print(f"[Scout Scanner] Dynamic search failed for {category}: {e}. Using fallback tickers.")
-        
+    if not fallback:
+        for k, v in SCOUT_TICKER_MAP.items():
+            if k.upper() == category_clean:
+                fallback = v
+                break
     return [t.strip().upper() for t in fallback if is_valid_ticker(t)]
 
 ACTIVE_SCOUT_TICKERS = set()
@@ -529,6 +593,44 @@ GLOBAL_STATE = {
     "boot_total": 100,
     "boot_ticker": "SYSTEM"
 }
+
+_SNAPSHOT_LOCK = threading.Lock()
+
+def get_global_state_snapshot() -> dict:
+    """
+    Returns the current immutable/read-only snapshot reference of GLOBAL_STATE.
+    Readers capture this reference once and use it consistently throughout their operation.
+    """
+    global GLOBAL_STATE
+    return GLOBAL_STATE
+
+def publish_global_state_snapshot(new_snapshot: dict) -> dict:
+    """
+    Publishes a replacement GLOBAL_STATE snapshot via an atomic reference swap.
+    The caller must construct replacement snapshots separately.
+    Published snapshots must not subsequently be mutated in place.
+    """
+    global GLOBAL_STATE
+    if not isinstance(new_snapshot, dict):
+        raise TypeError(f"Snapshot must be a dict, got {type(new_snapshot).__name__}")
+    with _SNAPSHOT_LOCK:
+        GLOBAL_STATE = new_snapshot
+    return new_snapshot
+
+def update_global_state_snapshot(updater_fn: Callable[[dict], dict]) -> dict:
+    """
+    Atomically updates the snapshot by applying updater_fn(current_snapshot) -> new_snapshot
+    and publishing through atomic reference swap.
+    Preserves immutability of previously published snapshots.
+    """
+    global GLOBAL_STATE
+    with _SNAPSHOT_LOCK:
+        current = GLOBAL_STATE
+        new_snapshot = updater_fn(dict(current))
+        if not isinstance(new_snapshot, dict):
+            raise TypeError(f"Updater must return a dict, got {type(new_snapshot).__name__}")
+        GLOBAL_STATE = new_snapshot
+        return new_snapshot
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
@@ -556,14 +658,11 @@ async def update_scout_config(req: Request):
     save_config()
     return JSONResponse({"status": "success", "scout_limit": SCOUT_LIMIT, "scout_max_rsi": SCOUT_MAX_RSI})
 
-def query_gemini_news_grounding(api_key: str, symbol: str) -> dict:
+def _execute_news_grounding_raw(symbol: str) -> dict:
     """
-    Executes a real-time news grounding query via Antigravity App Agents
-    to retrieve qualitative news, catalyst explanations, and sentiment ground truth for a ticker.
+    Internal raw execution of news grounding via Antigravity Agent.
+    Executed by background worker threads; does not touch coordinator state directly.
     """
-    if not symbol:
-        return {}
-        
     symbol_clean = symbol.strip().upper()
     template = load_news_scan_prompt()
     if "{symbol}" in template:
@@ -574,7 +673,7 @@ def query_gemini_news_grounding(api_key: str, symbol: str) -> dict:
             f"TARGET SYMBOL FOR SEARCH: {symbol_clean}\n"
             f"Return ONLY a clean JSON object with keys: \"headline\", \"summary\", \"catalyst_type\", \"sentiment_score\"."
         )
-    
+
     text = ""
     try:
         from agent_framework import AntigravityAgentRunner
@@ -584,23 +683,59 @@ def query_gemini_news_grounding(api_key: str, symbol: str) -> dict:
             text = response.text.strip()
     except Exception as e:
         print(f"[Grounding Error] {symbol_clean}: {e}")
-        return {}
+        raise
 
     if not text:
-        return {}
+        raise ValueError(f"Empty text response from news grounding for {symbol_clean}")
 
-    try:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            parsed = json.loads(match.group(0))
-            parsed["timestamp"] = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-            parsed["symbol"] = symbol_clean
-            cache.qualitative_grounding[symbol_clean] = parsed
-            return parsed
-    except Exception as parse_err:
-        print(f"[Grounding Parse Error] {symbol_clean}: {parse_err}")
-        
-    return {}
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        parsed = json.loads(match.group(0))
+        parsed["timestamp"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        parsed["symbol"] = symbol_clean
+        return parsed
+    raise ValueError(f"Could not parse valid JSON from grounding response for {symbol_clean}")
+
+def enqueue_news_grounding(symbol: str, obs_time: Optional[str] = None) -> Tuple[bool, Optional[Any]]:
+    """Enqueues news grounding for symbol to background worker pool without blocking."""
+    if not symbol:
+        return False, None
+    symbol_clean = symbol.strip().upper()
+    if not obs_time:
+        obs_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return BACKGROUND_COORDINATOR.enqueue(
+        work_type=WorkType.GROUNDING.value,
+        target=symbol_clean,
+        obs_time=obs_time,
+        fn=_execute_news_grounding_raw,
+        args=(symbol_clean,)
+    )
+
+def query_gemini_news_grounding(api_key: str, symbol: str, timeout: float = 5.0) -> dict:
+    """
+    Public / caller-facing news grounding query.
+    Returns cached qualitative grounding if present. Otherwise enqueues to bounded
+    background worker pool with a bounded wait timeout without blocking the main coordinator.
+    """
+    if not symbol:
+        return {}
+    symbol_clean = symbol.strip().upper()
+
+    with DYNAMIC_SCOUT_CACHE_LOCK:
+        if symbol_clean in cache.qualitative_grounding:
+            return cache.qualitative_grounding[symbol_clean]
+
+    obs_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    accepted, item = enqueue_news_grounding(symbol_clean, obs_time=obs_time)
+    if accepted and item:
+        if item.event.wait(timeout=timeout):
+            if item.status == WorkStatus.COMPLETED and isinstance(item.result, dict):
+                with DYNAMIC_SCOUT_CACHE_LOCK:
+                    cache.qualitative_grounding[symbol_clean] = item.result
+                return item.result
+
+    with DYNAMIC_SCOUT_CACHE_LOCK:
+        return cache.qualitative_grounding.get(symbol_clean, {})
 
 @app.get("/api/grounding")
 async def get_grounding(symbol: str = "UMAC"):
@@ -710,7 +845,7 @@ def sanitize_json_payload(obj):
 
 @app.get("/api/data")
 def get_data():
-    return JSONResponse(sanitize_json_payload(GLOBAL_STATE))
+    return JSONResponse(sanitize_json_payload(get_global_state_snapshot()))
 
 @app.get("/api/tickers")
 def get_tickers():
@@ -3078,7 +3213,7 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None, open
 def fetch_stocks(state=None):
     """Returns compact ticker dictionaries with fib_forecast for API and Council consumption."""
     if state is None:
-        state = GLOBAL_STATE
+        state = get_global_state_snapshot()
     compact_tickers = []
     for t in state.get("tickers", []):
         compact_tickers.append({
@@ -3103,7 +3238,7 @@ def fetch_stocks(state=None):
 
 def get_ssot_json_payload():
     """Returns the sanitized SSoT JSON payload with live tickers and fib_forecast."""
-    return sanitize_json_payload(GLOBAL_STATE)
+    return sanitize_json_payload(get_global_state_snapshot())
 
 
 def compute_merton_allocation(gamma=3.0, r=0.04):
@@ -3363,13 +3498,37 @@ def run_daemon():
     tickers_obj = {sym: yf.Ticker(sym) for sym in ALL_TICKERS}
 
     print(f"{YELLOW}Performing initial heavy fetch...{RESET}")
+    def _set_boot(phase, progress, total, sym, status_msg=None):
+        def _updater(current):
+            s = dict(current)
+            s["boot_phase"] = phase
+            s["boot_progress"] = progress
+            s["boot_total"] = total
+            s["boot_ticker"] = sym
+            if status_msg:
+                s["status"] = status_msg
+            return s
+        update_global_state_snapshot(_updater)
+
+    def _clear_boot():
+        def _updater(current):
+            s = dict(current)
+            s.pop("boot_phase", None)
+            s.pop("boot_progress", None)
+            s.pop("boot_total", None)
+            s.pop("boot_ticker", None)
+            return s
+        update_global_state_snapshot(_updater)
+
     total_tickers = len(tickers_obj)
     for idx, (sym, obj) in enumerate(tickers_obj.items()):
-        GLOBAL_STATE["status"] = "INITIALIZING - LOADING TECHNICALS (MAY TAKE 1 MIN)..."
-        GLOBAL_STATE["boot_phase"] = "TECHNICAL_ANALYSIS"
-        GLOBAL_STATE["boot_progress"] = idx + 1
-        GLOBAL_STATE["boot_total"] = total_tickers
-        GLOBAL_STATE["boot_ticker"] = sym
+        _set_boot(
+            "TECHNICAL_ANALYSIS",
+            idx + 1,
+            total_tickers,
+            sym,
+            "INITIALIZING - LOADING TECHNICALS (MAY TAKE 1 MIN)..."
+        )
 
         print(f"Loading {sym}...", end="\r")
         update_history_and_technicals(sym, obj)
@@ -3383,11 +3542,13 @@ def run_daemon():
     boot_quotes = get_batch_quotes(ALL_TICKERS)
     total_gex = len(ALL_TICKERS)
     for idx, sym in enumerate(ALL_TICKERS):
-        GLOBAL_STATE["status"] = "INITIALIZING - LOADING GEX PROFILES (MAY TAKE 1 MIN)..."
-        GLOBAL_STATE["boot_phase"] = "GEX_PROFILES"
-        GLOBAL_STATE["boot_progress"] = idx + 1
-        GLOBAL_STATE["boot_total"] = total_gex
-        GLOBAL_STATE["boot_ticker"] = sym
+        _set_boot(
+            "GEX_PROFILES",
+            idx + 1,
+            total_gex,
+            sym,
+            "INITIALIZING - LOADING GEX PROFILES (MAY TAKE 1 MIN)..."
+        )
 
         obj = tickers_obj[sym]
         # Get an initial price from batch quotes
@@ -3428,20 +3589,19 @@ def run_daemon():
     # Hold boot panel at 100% for a minimum window so the browser poll loop
     # (every 3s) can observe the completed state before we clear it.
     # This prevents the race condition on fast restarts with cached GEX data.
-    GLOBAL_STATE["boot_phase"] = "GEX_PROFILES"
-    GLOBAL_STATE["boot_progress"] = GLOBAL_STATE.get("boot_total", len(ALL_TICKERS))
-    GLOBAL_STATE["boot_ticker"] = "COMPLETE"
+    current_boot_total = get_global_state_snapshot().get("boot_total", len(ALL_TICKERS))
+    _set_boot("GEX_PROFILES", current_boot_total, current_boot_total, "COMPLETE")
     print(f"{YELLOW}Holding boot panel visible for browser poll window...{RESET}")
     t_time.sleep(5)
 
     # Clear boot progress keys to signal completion to the frontend
-    GLOBAL_STATE.pop("boot_phase", None)
-    GLOBAL_STATE.pop("boot_progress", None)
-    GLOBAL_STATE.pop("boot_total", None)
-    GLOBAL_STATE.pop("boot_ticker", None)
+    _clear_boot()
 
     try:
         while True:
+            # 1. Apply any completed background intelligence results under monotonic ordering
+            apply_background_intelligence_results()
+
             # Dynamically reload TICKERS and MACRO_TICKERS from SSOT on every cycle
             try:
                 TICKERS = _load_ssot_tickers()
@@ -3467,12 +3627,13 @@ def run_daemon():
             is_heavy = (cache.cycles % HISTORY_REFRESH_CYCLES == 0)
 
             # Immediately notify frontend that heavy fetching has begun
-            if is_heavy and GLOBAL_STATE.get("tickers"):
-                GLOBAL_STATE["is_heavy_refresh"] = True
+            if is_heavy and get_global_state_snapshot().get("tickers"):
+                update_global_state_snapshot(lambda s: {**s, "is_heavy_refresh": True})
+                current_obs_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 try:
                     for p_sym in WATCHLIST:
                         if p_sym not in cache.qualitative_grounding:
-                            query_gemini_news_grounding("", p_sym)
+                            enqueue_news_grounding(p_sym, obs_time=current_obs_time)
                 except Exception as g_err:
                     print(f"[Daemon Grounding Warning]: {g_err}")
 
@@ -3942,7 +4103,7 @@ def run_daemon():
                 status=status,
                 authoritative_state_error=authoritative_state_error,
             )
-            GLOBAL_STATE = final_output
+            publish_global_state_snapshot(final_output)
 
             wait_start = t_time.time()
             while True:

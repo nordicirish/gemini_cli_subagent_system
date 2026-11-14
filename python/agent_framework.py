@@ -5,7 +5,11 @@ import time
 import hashlib
 import requests
 import subprocess
+import signal
+import sys
+import threading
 from types import SimpleNamespace
+from typing import Optional, Callable, List
 import concurrent.futures
 import logging
 from logging.handlers import TimedRotatingFileHandler
@@ -53,6 +57,85 @@ class AntigravityResponse:
         return self.text
 
 
+def _cleanup_subprocess(proc: subprocess.Popen, graceful_timeout: float = 1.0) -> None:
+    """
+    Guarantees deterministic termination, reaping, and stream cleanup for proc and its descendants.
+    1. Request termination.
+    2. Wait bounded graceful termination period.
+    3. Force-kill if necessary, including process tree descendants.
+    4. Explicitly wait/reap the child.
+    5. Close or release associated pipes and streams.
+    """
+    if proc is None:
+        return
+
+    pid = getattr(proc, "pid", None)
+    try:
+        poll_fn = getattr(proc, "poll", None)
+        is_alive = True
+        if callable(poll_fn):
+            try:
+                is_alive = (proc.poll() is None)
+            except Exception:
+                is_alive = True
+
+        if is_alive:
+            # 1. Request termination
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass
+            except Exception:
+                pass
+
+            # 2. Wait bounded graceful period
+            reaped = False
+            try:
+                proc.wait(timeout=graceful_timeout)
+                reaped = True
+            except (subprocess.TimeoutExpired, Exception):
+                pass
+
+            if not reaped:
+                # 3. Force-kill descendants and process
+                if pid and sys.platform == "win32":
+                    try:
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(pid)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=5.0
+                        )
+                    except Exception:
+                        pass
+                elif pid and hasattr(os, "killpg"):
+                    try:
+                        os.killpg(os.getpgid(pid), signal.SIGKILL)
+                    except Exception:
+                        pass
+
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                except Exception:
+                    pass
+
+                # 4. Explicitly wait/reap
+                try:
+                    proc.wait(timeout=2.0)
+                except Exception:
+                    pass
+    finally:
+        # 5. Close/release associated pipes and streams
+        for stream in (getattr(proc, "stdin", None), getattr(proc, "stdout", None), getattr(proc, "stderr", None)):
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+
+
 class AntigravityAgentRunner:
     def __init__(self, agy_path=None, cancel_check=None):
         if agy_path and os.path.exists(agy_path):
@@ -66,8 +149,17 @@ class AntigravityAgentRunner:
         self.cancel_check = cancel_check
         self.is_available = os.path.exists(self.agy_path) or bool(os.environ.get("AGY_PATH"))
 
-    def run_prompt(self, prompt: str, system_instruction: str = "", mode: str = "FAST", tools=None, timeout: int = 120) -> AntigravityResponse:
-        if self.cancel_check and self.cancel_check():
+    def run_prompt(
+        self,
+        prompt: str,
+        system_instruction: str = "",
+        mode: str = "FAST",
+        tools=None,
+        timeout: int = 120,
+        cancel_check: Optional[Callable[[], bool]] = None
+    ) -> AntigravityResponse:
+        effective_cancel_check = cancel_check if cancel_check is not None else self.cancel_check
+        if effective_cancel_check and effective_cancel_check():
             raise RuntimeError("Operation cancelled by user.")
 
         # Map execution mode to Antigravity model tiers
@@ -106,11 +198,61 @@ class AntigravityAgentRunner:
             encoding="utf-8"
         )
 
+        out = ""
+        err = ""
+        timed_out = False
+        cancelled = False
+
         try:
-            out, err = proc.communicate(input=full_prompt, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            raise TimeoutError(f"Antigravity Agent timed out after {timeout}s.")
+            out_holder: List[str] = []
+            err_holder: List[str] = []
+            exc_holder: List[Exception] = []
+
+            def comm_worker():
+                try:
+                    o, e = proc.communicate(input=full_prompt)
+                    out_holder.append(o)
+                    err_holder.append(e)
+                except Exception as ex:
+                    exc_holder.append(ex)
+
+            comm_thread = threading.Thread(target=comm_worker, daemon=True)
+            comm_thread.start()
+
+            start_time = time.monotonic()
+            poll_interval = 0.05
+
+            while comm_thread.is_alive():
+                # Check cancellation while running
+                if effective_cancel_check and effective_cancel_check():
+                    cancelled = True
+                    break
+
+                elapsed = time.monotonic() - start_time
+                if timeout is not None and elapsed > timeout:
+                    timed_out = True
+                    break
+
+                comm_thread.join(timeout=poll_interval)
+
+            if cancelled:
+                _cleanup_subprocess(proc)
+                comm_thread.join(timeout=0.5)
+                raise RuntimeError("Operation cancelled by user.")
+
+            if timed_out:
+                _cleanup_subprocess(proc)
+                comm_thread.join(timeout=0.5)
+                raise TimeoutError(f"Antigravity Agent timed out after {timeout}s.")
+
+            if exc_holder:
+                raise exc_holder[0]
+
+            out = out_holder[0] if out_holder else ""
+            err = err_holder[0] if err_holder else ""
+
+        finally:
+            _cleanup_subprocess(proc)
 
         if proc.returncode != 0:
             raise RuntimeError(f"Antigravity Agent failed (code {proc.returncode}): {err or out}")

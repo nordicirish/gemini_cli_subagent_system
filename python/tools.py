@@ -340,7 +340,7 @@ def get_market_data() -> str:
         time.sleep(1)
         retries += 1
 
-    state = fetch_stocks.GLOBAL_STATE
+    state = getattr(fetch_stocks, "get_global_state_snapshot", lambda: fetch_stocks.GLOBAL_STATE)()
     if not state:
         return json.dumps(
             {"error": "Market data daemon is still initializing or failed."}
