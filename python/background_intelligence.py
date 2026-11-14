@@ -20,14 +20,16 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("background_intelligence")
 
 ISO8601_UTC_REGEX = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$"
 )
+SESSION_DATE_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def validate_utc_iso8601_timestamp(ts: Any) -> str:
@@ -67,6 +69,148 @@ def parse_utc_iso8601_timestamp(ts: Any) -> datetime:
     valid_str = validate_utc_iso8601_timestamp(ts)
     dt = datetime.fromisoformat(valid_str)
     return dt.astimezone(timezone.utc)
+
+
+def current_market_session_date() -> date:
+    """Returns the current calendar date in the US market timezone (America/New_York)."""
+    return datetime.now(ZoneInfo("America/New_York")).date()
+
+
+def validate_session_date(
+    session_date: Any,
+    reference_date: Optional[date] = None,
+) -> str:
+    """
+    Strictly validates an effective trading-session date:
+    - Exact YYYY-MM-DD syntax
+    - Valid calendar date
+    - Not in the future relative to reference_date (or current US market NY date)
+    """
+    if not isinstance(session_date, str):
+        raise ValueError(f"Session date must be a string, got {type(session_date).__name__}")
+    if not SESSION_DATE_REGEX.match(session_date):
+        raise ValueError(f"Session date '{session_date}' must match exact YYYY-MM-DD format")
+    try:
+        parsed = date.fromisoformat(session_date)
+    except ValueError as e:
+        raise ValueError(f"Invalid calendar session date '{session_date}': {e}") from e
+    max_date = reference_date if reference_date is not None else current_market_session_date()
+    if parsed > max_date:
+        raise ValueError(
+            f"Future session date '{session_date}' exceeds market session date '{max_date.isoformat()}'"
+        )
+    return session_date
+
+
+class ObservationKind(str, enum.Enum):
+    """Explicit classification of market-data provenance semantics."""
+    INSTANT = "instant"
+    SESSION_REFERENCE = "session_reference"
+
+
+@dataclass(frozen=True)
+class MarketDataProvenance:
+    """Immutable, cross-field validated provenance contract for market-data observations."""
+    kind: ObservationKind
+    source: str
+    effective_session_date: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.kind, ObservationKind):
+            raise ValueError(
+                f"Provenance kind must be an ObservationKind Enum, got {self.kind!r}"
+            )
+        if not isinstance(self.source, str) or not self.source.strip():
+            raise ValueError("Provenance source must be a non-empty string")
+        object.__setattr__(self, "source", self.source.strip())
+        if self.kind == ObservationKind.INSTANT:
+            if self.effective_session_date is not None:
+                raise ValueError(
+                    "Contradictory provenance: INSTANT must not define effective_session_date"
+                )
+        elif self.kind == ObservationKind.SESSION_REFERENCE:
+            if self.effective_session_date is None:
+                raise ValueError(
+                    "SESSION_REFERENCE provenance requires effective_session_date"
+                )
+            valid_date = validate_session_date(self.effective_session_date)
+            object.__setattr__(self, "effective_session_date", valid_date)
+
+
+@dataclass(frozen=True)
+class TimestampedValue:
+    """Immutable value paired directly with its provider UTC observation timestamp and source."""
+    value: Any
+    obs_time: str
+    source: str
+
+    def __post_init__(self) -> None:
+        valid_ts = validate_utc_iso8601_timestamp(self.obs_time)
+        if not isinstance(self.source, str) or not self.source.strip():
+            raise ValueError("TimestampedValue source must be a non-empty string")
+        object.__setattr__(self, "obs_time", valid_ts)
+        object.__setattr__(self, "source", self.source.strip())
+
+
+@dataclass(frozen=True)
+class SessionReferenceValue:
+    """Immutable completed-session value paired with its provider effective trading-session date and source."""
+    value: Any
+    effective_session_date: str
+    source: str
+
+    def __post_init__(self) -> None:
+        valid_date = validate_session_date(self.effective_session_date)
+        if not isinstance(self.source, str) or not self.source.strip():
+            raise ValueError("SessionReferenceValue source must be a non-empty string")
+        object.__setattr__(self, "effective_session_date", valid_date)
+        object.__setattr__(self, "source", self.source.strip())
+
+
+def validate_market_data_observation(
+    obs_time: Any,
+    provenance: Any,
+    reference_date: Optional[date] = None,
+) -> Tuple[Optional[datetime], MarketDataProvenance]:
+    """
+    Validates market-data observation metadata fail-closed:
+    - INSTANT requires strict UTC obs_time and effective_session_date=None.
+    - SESSION_REFERENCE requires obs_time=None and valid non-future YYYY-MM-DD effective_session_date.
+    """
+    if not isinstance(provenance, MarketDataProvenance):
+        raise ValueError(
+            f"Missing required market-data provenance: expected MarketDataProvenance, got {type(provenance).__name__}"
+        )
+    if not isinstance(provenance.kind, ObservationKind):
+        raise ValueError(f"Invalid provenance kind: {provenance.kind!r}")
+    if not isinstance(provenance.source, str) or not provenance.source.strip():
+        raise ValueError("Provenance source must be a non-empty string")
+
+    if provenance.kind == ObservationKind.INSTANT:
+        if provenance.effective_session_date is not None:
+            raise ValueError(
+                "Contradictory provenance: INSTANT observation must not define effective_session_date"
+            )
+        if obs_time is None or (isinstance(obs_time, str) and not obs_time.strip()):
+            raise ValueError("Missing required source observation timestamp")
+        try:
+            obs_dt = parse_utc_iso8601_timestamp(obs_time)
+        except Exception as e:
+            raise ValueError(f"Invalid observation timestamp: {e}") from e
+        return obs_dt, provenance
+
+    if provenance.kind == ObservationKind.SESSION_REFERENCE:
+        if obs_time is not None:
+            raise ValueError(
+                "Contradictory provenance: SESSION_REFERENCE must not carry obs_time"
+            )
+        validate_session_date(
+            provenance.effective_session_date,
+            reference_date=reference_date,
+        )
+        return None, provenance
+
+    raise ValueError(f"Unsupported provenance kind: {provenance.kind!r}")
 
 
 class WorkType(str, enum.Enum):
@@ -113,17 +257,18 @@ class WorkItem:
     error: Optional[str] = None
     child_sequences: Dict[WorkKey, int] = field(default_factory=dict)
     result_key: Optional[WorkKey] = None
+    provenance: Optional[MarketDataProvenance] = None
 
 
 @dataclass(frozen=True)
 class ObservedResult:
     """
-    Carries a worker-discovered payload and its actual source observation timestamp
-    (strict UTC ISO-8601 string) without substituting enqueue, start, completion,
-    retrieval, or local wall-clock time.
+    Carries a worker-discovered payload and its provenance / source observation timestamp
+    without substituting enqueue, start, completion, retrieval, or local wall-clock time.
     """
     data: Any
     obs_time: Optional[str] = None
+    provenance: Optional[MarketDataProvenance] = None
 
 
 @dataclass(frozen=True)
@@ -133,6 +278,7 @@ class ChildObservedResult:
     data: Any = None
     obs_time: Optional[str] = None
     error: Optional[str] = None
+    provenance: Optional[MarketDataProvenance] = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +296,7 @@ class WorkResult:
     error: Optional[str] = None
     completed_time: float = field(default_factory=time.monotonic)
     enqueued_time: Optional[float] = None
+    provenance: Optional[MarketDataProvenance] = None
 
 
 class FailureCooldownTracker:
@@ -312,6 +459,7 @@ class BackgroundIntelligenceCoordinator:
         force: bool = False,
         child_keys: Optional[Sequence[WorkKey]] = None,
         result_key: Optional[WorkKey] = None,
+        provenance: Optional[MarketDataProvenance] = None,
     ) -> Tuple[bool, Optional[WorkItem]]:
         """
         Enqueues work if not already queued, in-flight, or in cooldown.
@@ -326,6 +474,8 @@ class BackgroundIntelligenceCoordinator:
         validated_obs_time = None
         if obs_time is not None:
             validated_obs_time = validate_utc_iso8601_timestamp(obs_time)
+        if provenance is not None and not isinstance(provenance, MarketDataProvenance):
+            raise ValueError("provenance must be a MarketDataProvenance instance")
         kwargs = kwargs or {}
 
         extra_keys: List[WorkKey] = []
@@ -408,6 +558,7 @@ class BackgroundIntelligenceCoordinator:
                     enqueued_time=self.clock_fn(),
                     child_sequences=child_sequences,
                     result_key=result_key,
+                    provenance=provenance,
                 )
                 self._pending_keys[key] = item
 
@@ -535,6 +686,7 @@ class BackgroundIntelligenceCoordinator:
                                         error=child.error,
                                         completed_time=completed_ts,
                                         enqueued_time=item.enqueued_time,
+                                        provenance=child.provenance,
                                     )
                                 )
                     elif err_msg is None and isinstance(data, ObservedResult):
@@ -553,6 +705,7 @@ class BackgroundIntelligenceCoordinator:
                                 error=None,
                                 completed_time=completed_ts,
                                 enqueued_time=item.enqueued_time,
+                                provenance=data.provenance,
                             )
                         )
                     else:
@@ -571,6 +724,7 @@ class BackgroundIntelligenceCoordinator:
                                 error=err_msg,
                                 completed_time=completed_ts,
                                 enqueued_time=item.enqueued_time,
+                                provenance=item.provenance,
                             )
                         )
 
@@ -681,6 +835,8 @@ class BackgroundResultApplicator:
         self._last_applied_sequence: Dict[WorkKey, int] = {}
         self._last_applied_obs_dt: Dict[WorkKey, datetime] = {}
         self._last_applied_obs_time: Dict[WorkKey, str] = {}
+        self._last_applied_session_date: Dict[WorkKey, str] = {}
+        self._last_applied_provenance: Dict[WorkKey, MarketDataProvenance] = {}
         self._latest_issued_sequence: Dict[WorkKey, int] = {}
         self._key_locks: Dict[WorkKey, threading.RLock] = {}
         self._coordinator = coordinator
@@ -717,6 +873,14 @@ class BackgroundResultApplicator:
                 self._last_applied_obs_time.get(key, "")
             )
 
+    def get_last_applied_session_date(self, key: WorkKey) -> str:
+        with self._lock:
+            return self._last_applied_session_date.get(key, "")
+
+    def get_last_applied_provenance(self, key: WorkKey) -> Optional[MarketDataProvenance]:
+        with self._lock:
+            return self._last_applied_provenance.get(key)
+
     def apply_results(
         self,
         results: List[WorkResult],
@@ -733,9 +897,10 @@ class BackgroundResultApplicator:
         cannot be issued between sequence validation and result publication.
         When on_publish is provided, it is executed under key_lock before the sequence
         is marked as applied and key_lock is released.
-        MARKET_DATA results require a valid source observation timestamp and an explicit
-        on_publish callback; they never mutate grounding/scout targets, and the applied
-        sequence/timestamp advance only after on_publish succeeds.
+        MARKET_DATA results require a validated MarketDataProvenance (INSTANT with strict UTC
+        source timestamp, or SESSION_REFERENCE with valid YYYY-MM-DD effective_session_date
+        and obs_time=None) plus an explicit on_publish callback. Applied sequence and provenance
+        ordering advance only after on_publish succeeds.
         Returns list of (result, applied, reason).
         """
         audit = []
@@ -744,6 +909,7 @@ class BackgroundResultApplicator:
             with key_lock:
                 applied = False
                 obs_dt = None
+                validated_provenance: Optional[MarketDataProvenance] = None
                 with self._lock:
                     # If worker errored, do not apply data
                     if r.error is not None or r.data is None:
@@ -773,27 +939,60 @@ class BackgroundResultApplicator:
                         audit.append((r, False, msg))
                         continue
 
-                    # 3. Validate observation timestamp monotonicity
-                    if r.obs_time is not None and str(r.obs_time).strip() != "":
+                    # 3. Validate provenance / observation timestamp / session date monotonicity
+                    if r.key.work_type == WorkType.MARKET_DATA.value:
                         try:
-                            obs_dt = parse_utc_iso8601_timestamp(r.obs_time)
+                            obs_dt, validated_provenance = validate_market_data_observation(
+                                r.obs_time,
+                                r.provenance,
+                            )
                         except Exception as e:
-                            msg = f"Invalid observation timestamp: {e}"
+                            msg = str(e)
                             logger.warning(f"[BackgroundResultApplicator] {r.key} rejected fail-closed: {msg}")
                             audit.append((r, False, msg))
                             continue
 
-                        last_obs_dt = self._last_applied_obs_dt.get(r.key)
-                        if last_obs_dt is not None and obs_dt < last_obs_dt:
-                            msg = f"Stale observation: received {r.obs_time} < last applied {self._last_applied_obs_time.get(r.key)}"
-                            logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
+                        if validated_provenance.kind == ObservationKind.INSTANT:
+                            last_obs_dt = self._last_applied_obs_dt.get(r.key)
+                            if last_obs_dt is not None and obs_dt < last_obs_dt:
+                                msg = f"Stale observation: received {r.obs_time} < last applied {self._last_applied_obs_time.get(r.key)}"
+                                logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
+                                audit.append((r, False, msg))
+                                continue
+                        elif validated_provenance.kind == ObservationKind.SESSION_REFERENCE:
+                            last_sess_date = self._last_applied_session_date.get(r.key)
+                            if (
+                                last_sess_date is not None
+                                and validated_provenance.effective_session_date < last_sess_date
+                            ):
+                                msg = (
+                                    f"Stale session reference: received {validated_provenance.effective_session_date} "
+                                    f"< last applied {last_sess_date}"
+                                )
+                                logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
+                                audit.append((r, False, msg))
+                                continue
+                    else:
+                        if r.obs_time is not None and str(r.obs_time).strip() != "":
+                            try:
+                                obs_dt = parse_utc_iso8601_timestamp(r.obs_time)
+                            except Exception as e:
+                                msg = f"Invalid observation timestamp: {e}"
+                                logger.warning(f"[BackgroundResultApplicator] {r.key} rejected fail-closed: {msg}")
+                                audit.append((r, False, msg))
+                                continue
+
+                            last_obs_dt = self._last_applied_obs_dt.get(r.key)
+                            if last_obs_dt is not None and obs_dt < last_obs_dt:
+                                msg = f"Stale observation: received {r.obs_time} < last applied {self._last_applied_obs_time.get(r.key)}"
+                                logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
+                                audit.append((r, False, msg))
+                                continue
+                        elif require_source_time:
+                            msg = "Missing required source observation timestamp"
+                            logger.warning(f"[BackgroundResultApplicator] {r.key} rejected fail-closed: {msg}")
                             audit.append((r, False, msg))
                             continue
-                    elif require_source_time or r.key.work_type == WorkType.MARKET_DATA.value:
-                        msg = "Missing required source observation timestamp"
-                        logger.warning(f"[BackgroundResultApplicator] {r.key} rejected fail-closed: {msg}")
-                        audit.append((r, False, msg))
-                        continue
 
                     # 4. Apply result based on work type
                     if r.key.work_type == WorkType.GROUNDING.value:
@@ -841,6 +1040,15 @@ class BackgroundResultApplicator:
                         if obs_dt is not None:
                             self._last_applied_obs_dt[r.key] = obs_dt
                             self._last_applied_obs_time[r.key] = r.obs_time
+                        if validated_provenance is not None:
+                            self._last_applied_provenance[r.key] = validated_provenance
+                            if (
+                                validated_provenance.kind == ObservationKind.SESSION_REFERENCE
+                                and validated_provenance.effective_session_date
+                            ):
+                                self._last_applied_session_date[r.key] = (
+                                    validated_provenance.effective_session_date
+                                )
                         audit.append((r, True, "Applied successfully"))
 
         return audit
@@ -850,4 +1058,6 @@ class BackgroundResultApplicator:
             self._last_applied_sequence.clear()
             self._last_applied_obs_dt.clear()
             self._last_applied_obs_time.clear()
+            self._last_applied_session_date.clear()
+            self._last_applied_provenance.clear()
             self._latest_issued_sequence.clear()

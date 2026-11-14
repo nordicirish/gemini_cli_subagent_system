@@ -32,6 +32,7 @@ import requests
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 import base64
+from dataclasses import dataclass
 import os
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 import time as t_time
@@ -53,12 +54,18 @@ from background_intelligence import (
     BackgroundResultApplicator,
     BatchObservedResult,
     ChildObservedResult,
+    MarketDataProvenance,
+    ObservationKind,
     ObservedResult,
+    SessionReferenceValue,
+    TimestampedValue,
     WorkKey,
     WorkResult,
     WorkType,
     WorkStatus,
     parse_utc_iso8601_timestamp,
+    validate_market_data_observation,
+    validate_session_date,
     validate_utc_iso8601_timestamp,
 )
 
@@ -1409,13 +1416,19 @@ class MarketDataCache:
         self.day_open: dict[str, float] = {}
         self.day_high: dict[str, float] = {}
         self.day_low: dict[str, float] = {}
-        # Market Data Provenance & Freshness metadata (GEM Stage 1)
+        # Market Data Provenance & Freshness metadata (GEM Stage 1 & Stage 2.2.2)
         self.observation_times: dict[str, str | None] = {}
         self.retrieval_times: dict[str, str | None] = {}
         self.price_sources: dict[str, str | None] = {}
         self.price_validity: dict[str, str] = {}
         self.freshness: dict[str, str] = {}
         self.chart_obs_time: dict[str, datetime | None] = {}
+        self.previous_session_volume: dict[str, int] = {}
+        self.previous_session_volume_dates: dict[str, str] = {}
+        self.previous_session_volume_sources: dict[str, str] = {}
+        self.regular_close_dates: dict[str, str] = {}
+        self.regular_close_sources: dict[str, str] = {}
+        self.metric_provenance: dict[str, dict[str, dict[str, Any]]] = {}
 
     def clear(self):
         self.__init__()
@@ -1882,22 +1895,42 @@ def calculate_delta(S, K, T, r, sigma, option_type):
     except:
         return 0.0
 
-def get_premarket_volume_chart(symbol):
+@dataclass(frozen=True)
+class PremarketVolumeObservation:
+    """
+    Immutable pre-market volume aggregate carrying both the latest contributing valid
+    bar's UTC observation timestamp and the verified NY session date.
+    """
+    value: int
+    obs_time: str
+    effective_session_date: str
+    source: str = "PREMARKET_VOLUME_CHART"
+
+    def __post_init__(self) -> None:
+        if isinstance(self.value, bool) or not isinstance(self.value, int) or self.value < 0:
+            raise ValueError(f"PremarketVolumeObservation value must be a non-negative int, got {self.value!r}")
+        valid_ts = validate_utc_iso8601_timestamp(self.obs_time)
+        valid_date = validate_session_date(self.effective_session_date)
+        if not isinstance(self.source, str) or not self.source.strip():
+            raise ValueError("PremarketVolumeObservation source must be a non-empty string")
+        object.__setattr__(self, "obs_time", valid_ts)
+        object.__setattr__(self, "effective_session_date", valid_date)
+        object.__setattr__(self, "source", self.source.strip())
+
+
+def _acquire_premarket_volume_raw(symbol: str) -> Optional[PremarketVolumeObservation]:
     """
     Dedicated fetch for pre-market volume (04:00-09:30 ET today) via Yahoo chart API.
-    This is more reliable than the batch quote endpoint which often omits preMarketVolume
-    during regular hours.
+    Returns PremarketVolumeObservation carrying the timestamp of the latest contributing
+    valid bar and the NY session date, or None when unavailable/empty/unprovenanced.
     """
     try:
         ny_tz = ZoneInfo("America/New_York")
         now = datetime.now(ny_tz)
-        # Build period for today's premarket window: 04:00 to 09:30 ET
         pre_start = now.replace(hour=4, minute=0, second=0, microsecond=0)
         pre_end = now.replace(hour=9, minute=30, second=0, microsecond=0)
-        # Only fetch if we're past the premarket window
         if now < pre_start:
-            return 0
-        # Cap end at market open or current time, whichever is earlier
+            return None
         if now < pre_end:
             pre_end = now
         ts1 = int(pre_start.timestamp())
@@ -1905,104 +1938,219 @@ def get_premarket_volume_chart(symbol):
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={ts1}&period2={ts2}&interval=1m&includePrePost=true"
         r = safe_yf_get(url, timeout=3)
         data = r.json()
-        result = data['chart']['result'][0]
-        volumes = result['indicators']['quote'][0].get('volume', [])
-        total = sum(v for v in volumes if v is not None and v > 0)
-        return total
-    except:
-        return 0
+        result = data["chart"]["result"][0]
+        timestamps = result.get("timestamp", [])
+        volumes = result["indicators"]["quote"][0].get("volume", [])
+        if not timestamps or not volumes:
+            return None
+
+        total = 0
+        has_valid_bar = False
+        last_valid_ts = None
+        last_positive_ts = None
+        today_ny = now.date()
+
+        for ts, v in zip(timestamps, volumes):
+            obs_iso = _epoch_to_utc_iso8601(ts)
+            if obs_iso is None:
+                continue
+            dt_ny = datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(ny_tz)
+            if dt_ny.date() != today_ny:
+                continue
+            if dt_ny.time() < time(4, 0) or dt_ny.time() >= time(9, 30):
+                continue
+            v_num = to_float(v)
+            if v_num is None or not math.isfinite(v_num) or v_num < 0:
+                continue
+            has_valid_bar = True
+            last_valid_ts = ts
+            v_int = int(v_num)
+            total += v_int
+            if v_int > 0:
+                last_positive_ts = ts
+
+        if not has_valid_bar:
+            return None
+        chosen_ts = last_positive_ts if last_positive_ts is not None else last_valid_ts
+        chosen_iso = _epoch_to_utc_iso8601(chosen_ts)
+        if chosen_iso is None:
+            return None
+        sess_date = (
+            datetime.fromtimestamp(float(chosen_ts), tz=timezone.utc)
+            .astimezone(ny_tz)
+            .date()
+            .isoformat()
+        )
+        return PremarketVolumeObservation(
+            value=int(total),
+            obs_time=chosen_iso,
+            effective_session_date=sess_date,
+            source="PREMARKET_VOLUME_CHART",
+        )
+    except Exception:
+        return None
+
+
+def get_premarket_volume_chart(symbol) -> Optional[PremarketVolumeObservation]:
+    """
+    Dedicated fetch for pre-market volume (04:00-09:30 ET today) via Yahoo chart API.
+    Returns PremarketVolumeObservation (with latest contributing bar timestamp and session date)
+    or None if no provenanced bars were observed.
+    """
+    return _acquire_premarket_volume_raw(symbol)
 
 # -----------------------------
 # FETCHERS
 # -----------------------------
-def _acquire_live_chart_data_raw(symbol, status):
+def _acquire_live_chart_observations_raw(symbol: str, status: str) -> dict:
     """
     Worker-safe fetch of 5-day 1m chart data without mutating shared cache state.
-    Returns (live_price, total_session_vol, pre_vol, post_vol, chart_obs_utc_iso).
+    Preserves separate bar-level timestamps for price and each volume aggregate,
+    distinguishing an observed zero from empty/invalid responses.
     """
+    empty_result = {
+        "price": None,
+        "session_volume": None,
+        "premarket_volume": None,
+        "after_hours_volume": None,
+        "chart_obs_utc_iso": None,
+        "legacy_tuple": (None, 0, 0, 0, None),
+    }
     try:
         ny_tz = ZoneInfo("America/New_York")
         now = datetime.now(ny_tz)
 
-        # Use range=5d to bridge weekends/holidays and ensure we get today's data
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1m&includePrePost=true"
-        # Use safe_yf_get to fallback if curl_cffi fails
         r = safe_yf_get(url, timeout=3)
         data = r.json()
         result = data['chart']['result'][0]
-        timestamps = result['timestamp']
+        timestamps = result.get('timestamp', [])
         quote = result['indicators']['quote'][0]
         closes = quote.get('close', [])
         volumes = quote.get('volume', [])
 
-        live_price = None
+        price_obs: Optional[TimestampedValue] = None
         chart_obs_utc_iso = None
-        if closes:
-            valid_closes = [(i, c) for i, c in enumerate(closes) if c is not None and to_float(c) is not None]
+        if closes and timestamps:
+            valid_closes = [
+                (i, c_val)
+                for i, c in enumerate(closes)
+                if (c_val := to_float(c)) is not None and math.isfinite(c_val)
+            ]
             if valid_closes:
                 last_idx, last_c = valid_closes[-1]
-                live_price = float(last_c)
-                if timestamps and last_idx < len(timestamps):
+                if last_idx < len(timestamps):
                     ts = timestamps[last_idx]
                     chart_obs_utc_iso = _epoch_to_utc_iso8601(ts)
+                    if chart_obs_utc_iso is not None and float(last_c) > 0:
+                        price_obs = TimestampedValue(
+                            value=float(last_c),
+                            obs_time=chart_obs_utc_iso,
+                            source="INTRADAY_CHART",
+                        )
 
         pre_vol = 0
-        reg_vol = 0
         post_vol = 0
-        total_session_vol = 0 # Volume matching current status
+        total_session_vol = 0
+        has_pre_bar = False
+        has_post_bar = False
+        has_session_bar = False
+        pre_last_valid_ts = None
+        pre_last_pos_ts = None
+        post_last_valid_ts = None
+        post_last_pos_ts = None
+        sess_last_valid_ts = None
+        sess_last_pos_ts = None
 
         if volumes and timestamps:
-            # First pass: find the most recent date available in the dataset
             latest_date = None
             for ts in reversed(timestamps):
-                dt_ny = datetime.fromtimestamp(ts, ZoneInfo("UTC")).astimezone(ny_tz)
+                if _epoch_to_utc_iso8601(ts) is None:
+                    continue
+                dt_ny = datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(ny_tz)
                 latest_date = dt_ny.date()
-                break # the last timestamp is the most recent date
+                break
 
-            cutoff_ts = 0
-            # Only use cutoff if today is the latest date (meaning the market is actively open)
-            if latest_date == now.date():
-                if status == "OPEN":
-                    cutoff_dt = now.replace(hour=9, minute=30, second=0, microsecond=0)
-                    cutoff_ts = cutoff_dt.timestamp()
-                elif status == "AFTER-HOURS":
-                    cutoff_dt = now.replace(hour=16, minute=0, second=0, microsecond=0)
-                    cutoff_ts = cutoff_dt.timestamp()
+            if latest_date is not None:
+                cutoff_ts = 0
+                if latest_date == now.date():
+                    if status == "OPEN":
+                        cutoff_dt = now.replace(hour=9, minute=30, second=0, microsecond=0)
+                        cutoff_ts = cutoff_dt.timestamp()
+                    elif status == "AFTER-HOURS":
+                        cutoff_dt = now.replace(hour=16, minute=0, second=0, microsecond=0)
+                        cutoff_ts = cutoff_dt.timestamp()
 
-            for ts, v in zip(timestamps, volumes):
-                if v is None:
-                    continue
-
-                dt_utc = datetime.fromtimestamp(ts, ZoneInfo("UTC"))
-                dt_ny = dt_utc.astimezone(ny_tz)
-
-                # Filter for the most recent active trading day
-                if dt_ny.date() != latest_date:
-                    continue
-
-                t_idx = dt_ny.time()
                 t_0400 = time(4, 0)
                 t_0930 = time(9, 30)
                 t_1600 = time(16, 0)
                 t_2000 = time(20, 0)
 
-                # Pre-Market
-                if t_0400 <= t_idx < t_0930:
-                    pre_vol += v
-                # Regular
-                elif t_0930 <= t_idx < t_1600:
-                    reg_vol += v
-                # Post-Market
-                elif t_1600 <= t_idx < t_2000:
-                    post_vol += v
+                for ts, v in zip(timestamps, volumes):
+                    if _epoch_to_utc_iso8601(ts) is None:
+                        continue
+                    v_num = to_float(v)
+                    if v_num is None or not math.isfinite(v_num) or v_num < 0:
+                        continue
+                    v_int = int(v_num)
 
-                # Session-specific calculation (for fallback logic compatibility)
-                if ts >= cutoff_ts:
-                    total_session_vol += v
+                    dt_ny = datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(ny_tz)
+                    if dt_ny.date() != latest_date:
+                        continue
 
-        return live_price, total_session_vol, pre_vol, post_vol, chart_obs_utc_iso
+                    t_idx = dt_ny.time()
+                    if t_0400 <= t_idx < t_0930:
+                        has_pre_bar = True
+                        pre_last_valid_ts = ts
+                        pre_vol += v_int
+                        if v_int > 0:
+                            pre_last_pos_ts = ts
+                    elif t_1600 <= t_idx < t_2000:
+                        has_post_bar = True
+                        post_last_valid_ts = ts
+                        post_vol += v_int
+                        if v_int > 0:
+                            post_last_pos_ts = ts
+
+                    if float(ts) >= cutoff_ts:
+                        has_session_bar = True
+                        sess_last_valid_ts = ts
+                        total_session_vol += v_int
+                        if v_int > 0:
+                            sess_last_pos_ts = ts
+
+        def _make_vol_obs(has_bar: bool, total_val: int, pos_ts: Any, valid_ts: Any) -> Optional[TimestampedValue]:
+            if not has_bar:
+                return None
+            chosen_ts = pos_ts if pos_ts is not None else valid_ts
+            chosen_iso = _epoch_to_utc_iso8601(chosen_ts)
+            if chosen_iso is None:
+                return None
+            return TimestampedValue(value=int(total_val), obs_time=chosen_iso, source="INTRADAY_CHART")
+
+        sess_vol_obs = _make_vol_obs(has_session_bar, total_session_vol, sess_last_pos_ts, sess_last_valid_ts)
+        pre_vol_obs = _make_vol_obs(has_pre_bar, pre_vol, pre_last_pos_ts, pre_last_valid_ts)
+        post_vol_obs = _make_vol_obs(has_post_bar, post_vol, post_last_pos_ts, post_last_valid_ts)
+        live_price = price_obs.value if price_obs is not None else None
+
+        return {
+            "price": price_obs,
+            "session_volume": sess_vol_obs,
+            "premarket_volume": pre_vol_obs,
+            "after_hours_volume": post_vol_obs,
+            "chart_obs_utc_iso": chart_obs_utc_iso,
+            "legacy_tuple": (live_price, total_session_vol, pre_vol, post_vol, chart_obs_utc_iso),
+        }
     except Exception:
-        return None, 0, 0, 0, None
+        return empty_result
+
+
+def _acquire_live_chart_data_raw(symbol, status):
+    """
+    Worker-safe fetch of 5-day 1m chart data without mutating shared cache state.
+    Returns legacy 5-tuple (live_price, total_session_vol, pre_vol, post_vol, chart_obs_utc_iso).
+    """
+    return _acquire_live_chart_observations_raw(symbol, status)["legacy_tuple"]
 
 
 def get_live_chart_data(symbol, status):
@@ -2062,8 +2210,10 @@ def _acquire_true_intraday_vwap_bars(symbol, status):
     last_ts = None
     if timestamps:
         for ts, h, l, c, v in zip(timestamps, highs, lows, closes, volumes):
+            if _epoch_to_utc_iso8601(ts) is None:
+                continue
             if c is not None and h is not None and l is not None and v is not None and v > 0:
-                dt = datetime.fromtimestamp(ts, tz=ny_tz)
+                dt = datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(ny_tz)
                 if dt.date() == now.date():
                     valid.append((h, l, c, v))
                     last_ts = ts
@@ -2218,6 +2368,162 @@ def get_polygon_history_df(symbol):
         pass
     return pd.DataFrame()
 
+def _acquire_finnhub_quote_raw(symbol: str) -> Optional[TimestampedValue]:
+    """
+    Worker-safe Finnhub quote adapter returning current price (c) paired strictly with
+    provider timestamp (t). Never assigns quote timestamp t to previous close (pc),
+    and never treats pc as an instant price.
+    """
+    c, _pc, t = get_finnhub_quote(symbol)
+    c_val = to_float(c)
+    if c_val is None or not math.isfinite(c_val) or c_val <= 0:
+        return None
+    obs_iso = _epoch_to_utc_iso8601(t)
+    if obs_iso is None:
+        return None
+    try:
+        return TimestampedValue(value=float(c_val), obs_time=obs_iso, source="FINNHUB")
+    except ValueError:
+        return None
+
+
+def _acquire_polygon_previous_agg_raw(symbol: str) -> Optional[SessionReferenceValue]:
+    """
+    Fetches Polygon /v2/aggs/ticker/{symbol}/prev and derives the effective NY
+    trading-session date from the aggregate's Unix millisecond timestamp (`t`).
+    Returns SessionReferenceValue or None fail-closed. Never writes into cache.volumes.
+    """
+    if not USE_POLYGON or not POLYGON_API_KEY:
+        return None
+    try:
+        url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev?adjusted=true&apiKey={POLYGON_API_KEY}"
+        r = session.get(url, timeout=2)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if not isinstance(data, dict):
+            return None
+        if "resultsCount" in data and (data.get("resultsCount") or 0) <= 0:
+            return None
+        results = data.get("results") or []
+        if not results or not isinstance(results[0], dict):
+            return None
+        rec = results[0]
+        raw_v = rec.get("v")
+        raw_t = rec.get("t")
+        v_num = to_float(raw_v)
+        if v_num is None or not math.isfinite(v_num) or v_num < 0:
+            return None
+        if raw_t is None or isinstance(raw_t, bool) or not isinstance(raw_t, (int, float)):
+            return None
+        t_ms = float(raw_t)
+        if not math.isfinite(t_ms) or t_ms < 100_000_000_000:
+            return None
+        ny_tz = ZoneInfo("America/New_York")
+        today_ny = datetime.now(ny_tz).date()
+        dt_ny = datetime.fromtimestamp(t_ms / 1000.0, tz=timezone.utc).astimezone(ny_tz)
+        if dt_ny.date() >= today_ny:
+            return None
+        sess_date = validate_session_date(dt_ny.date().isoformat(), reference_date=today_ny)
+        return SessionReferenceValue(
+            value=int(v_num),
+            effective_session_date=sess_date,
+            source="POLYGON_PREV_AGG",
+        )
+    except Exception:
+        return None
+
+
+def _acquire_previous_close_raw(symbol: str, now_ny: Optional[datetime] = None) -> Optional[SessionReferenceValue]:
+    """
+    Fetches completed previous daily close paired with its own provider daily-bar timestamp
+    from Yahoo 5d/1d chart, deriving and validating the NY effective session date.
+    Never falls back to untimestamped metadata and never borrows regularMarketTime.
+    """
+    try:
+        ny_tz = ZoneInfo("America/New_York")
+        cur_ny = now_ny if now_ny is not None else datetime.now(ny_tz)
+        today_ny = cur_ny.date()
+
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1d"
+        r = safe_yf_get(url, timeout=2)
+        data = r.json()
+        result = data["chart"]["result"][0]
+        timestamps = result.get("timestamp", [])
+        q = result.get("indicators", {}).get("quote", [{}])[0]
+        closes = q.get("close", [])
+        if not timestamps or not closes:
+            return None
+
+        prior_bars: List[Tuple[str, float]] = []
+        for ts, c in zip(timestamps, closes):
+            if _epoch_to_utc_iso8601(ts) is None:
+                continue
+            c_val = to_float(c)
+            if c_val is None or not math.isfinite(c_val) or c_val <= 0:
+                continue
+            bar_date = datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(ny_tz).date()
+            if bar_date > today_ny:
+                continue
+            if bar_date < today_ny:
+                prior_bars.append((bar_date.isoformat(), float(c_val)))
+
+        if not prior_bars:
+            return None
+        eff_date_str, prev_close_val = prior_bars[-1]
+        valid_date = validate_session_date(eff_date_str, reference_date=today_ny)
+        return SessionReferenceValue(
+            value=float(prev_close_val),
+            effective_session_date=valid_date,
+            source="YAHOO_DAILY_CLOSE",
+        )
+    except Exception:
+        return None
+
+
+def _acquire_chart_open_raw(symbol: str, now_ny: Optional[datetime] = None) -> Optional[TimestampedValue]:
+    """
+    Fetches today's regular-session opening price from 1m chart data paired strictly with
+    the actual opening bar's own UTC observation timestamp.
+    """
+    try:
+        ny_tz = ZoneInfo("America/New_York")
+        now = now_ny if now_ny is not None else datetime.now(ny_tz)
+        open_dt = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        if now < open_dt:
+            return None
+        end_dt = now.replace(hour=9, minute=35, second=0, microsecond=0)
+        if now < end_dt:
+            end_dt = now
+        ts1 = int(open_dt.timestamp())
+        ts2 = int(end_dt.timestamp())
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={ts1}&period2={ts2}&interval=1m&includePrePost=false"
+        r = safe_yf_get(url, timeout=3)
+        data = r.json()
+        result = data["chart"]["result"][0]
+        timestamps = result.get("timestamp", [])
+        opens = result["indicators"]["quote"][0].get("open", [])
+        if not timestamps or not opens:
+            return None
+        for ts, o in zip(timestamps, opens):
+            obs_iso = _epoch_to_utc_iso8601(ts)
+            if obs_iso is None:
+                continue
+            dt_ny = datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(ny_tz)
+            if dt_ny.date() != now.date():
+                continue
+            o_val = to_float(o)
+            if o_val is not None and math.isfinite(o_val) and o_val > 0:
+                return TimestampedValue(
+                    value=float(o_val),
+                    obs_time=obs_iso,
+                    source="INTRADAY_CHART_OPEN",
+                )
+    except Exception:
+        pass
+    return None
+
+
 def polygon_volume(symbol):
     if not USE_POLYGON:
         return None
@@ -2255,27 +2561,8 @@ def get_previous_close(symbol):
 def _get_chart_open(symbol):
     """Fetch today's true regular-session opening price from 1-minute chart data.
     More reliable than batch quote's regularMarketOpen for small-cap stocks."""
-    try:
-        ny_tz = ZoneInfo("America/New_York")
-        now = datetime.now(ny_tz)
-        open_dt = now.replace(hour=9, minute=30, second=0, microsecond=0)
-        # Fetch a small window around market open
-        end_dt = now.replace(hour=9, minute=35, second=0, microsecond=0)
-        if now < end_dt:
-            end_dt = now
-        ts1 = int(open_dt.timestamp())
-        ts2 = int(end_dt.timestamp())
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={ts1}&period2={ts2}&interval=1m&includePrePost=false"
-        r = safe_yf_get(url, timeout=3)
-        data = r.json()
-        result = data['chart']['result'][0]
-        opens = result['indicators']['quote'][0].get('open', [])
-        valid_opens = [o for o in opens if o is not None and o > 0]
-        if valid_opens:
-            return float(valid_opens[0])
-    except:
-        pass
-    return None
+    obs = _acquire_chart_open_raw(symbol)
+    return obs.value if obs is not None else None
 
 def get_batch_quotes(symbols):
     try:
@@ -2789,15 +3076,71 @@ def select_quote_observation(
     return None, None, None
 
 
+MARKET_METRIC_QUOTE = "QUOTE"
+MARKET_METRIC_SESSION_VOLUME = "SESSION_VOLUME"
+MARKET_METRIC_PREMARKET_VOLUME = "PREMARKET_VOLUME"
+MARKET_METRIC_AFTER_HOURS_VOLUME = "AFTER_HOURS_VOLUME"
+MARKET_METRIC_DAY_OPEN = "DAY_OPEN"
+MARKET_METRIC_DAY_HIGH = "DAY_HIGH"
+MARKET_METRIC_DAY_LOW = "DAY_LOW"
+MARKET_METRIC_REGULAR_CLOSE = "REGULAR_CLOSE"
+MARKET_METRIC_PREVIOUS_SESSION_VOLUME = "PREVIOUS_SESSION_VOLUME"
+MARKET_METRIC_VWAP = "VWAP"
+
+ALL_MARKET_METRICS = (
+    MARKET_METRIC_AFTER_HOURS_VOLUME,
+    MARKET_METRIC_DAY_HIGH,
+    MARKET_METRIC_DAY_LOW,
+    MARKET_METRIC_DAY_OPEN,
+    MARKET_METRIC_PREMARKET_VOLUME,
+    MARKET_METRIC_PREVIOUS_SESSION_VOLUME,
+    MARKET_METRIC_QUOTE,
+    MARKET_METRIC_REGULAR_CLOSE,
+    MARKET_METRIC_SESSION_VOLUME,
+    MARKET_METRIC_VWAP,
+)
+
+
+def _metric_work_key(metric: str, symbol: str) -> WorkKey:
+    return WorkKey(WorkType.MARKET_DATA.value, f"{str(metric).strip().upper()}:{str(symbol).strip().upper()}")
+
+
+def _default_batch_metrics_for_status(status: str) -> Tuple[str, ...]:
+    clean_status = str(status or "OPEN").strip().upper()
+    metrics = [
+        MARKET_METRIC_DAY_HIGH,
+        MARKET_METRIC_DAY_LOW,
+        MARKET_METRIC_DAY_OPEN,
+        MARKET_METRIC_QUOTE,
+        MARKET_METRIC_SESSION_VOLUME,
+    ]
+    if clean_status == "PRE-MARKET":
+        metrics.append(MARKET_METRIC_PREMARKET_VOLUME)
+    elif clean_status in ("AFTER-HOURS", "CLOSED"):
+        metrics.append(MARKET_METRIC_AFTER_HOURS_VOLUME)
+    return tuple(sorted(metrics))
+
+
+def _normalize_requested_metrics(
+    metrics: Optional[Sequence[str]],
+    default: Tuple[str, ...],
+) -> Tuple[str, ...]:
+    if metrics is None:
+        return default
+    cleaned = tuple(sorted({str(m).strip().upper() for m in metrics if m and str(m).strip()}))
+    return cleaned if cleaned else default
+
+
 def _acquire_batch_quotes_raw(
     symbols: Tuple[str, ...],
     status: str,
+    metrics: Optional[Tuple[str, ...]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
 ) -> BatchObservedResult:
     """
     Worker-thread batch quote acquisition. Executes one batched provider request
-    and emits per-symbol ChildObservedResult items with independent source observation timestamps
-    matched strictly to the selected price field. Does not mutate shared cache or GLOBAL_STATE.
+    and emits independent per-symbol, per-metric ChildObservedResult items with explicit
+    MarketDataProvenance and metric-matched source timestamps. Does not mutate shared cache.
     """
     if cancel_check and cancel_check():
         raise RuntimeError("Operation cancelled before batch quote acquisition")
@@ -2807,50 +3150,188 @@ def _acquire_batch_quotes_raw(
     if cancel_check and cancel_check():
         raise RuntimeError("Operation cancelled during batch quote acquisition")
 
+    metric_set = _normalize_requested_metrics(metrics, default=_default_batch_metrics_for_status(status))
+    clean_status = str(status or "OPEN").strip().upper()
     child_items: List[ChildObservedResult] = []
+
     for sym in symbols:
-        ck = WorkKey(WorkType.MARKET_DATA.value, f"QUOTE:{sym}")
         q = batch_quotes.get(sym) if isinstance(batch_quotes, dict) else None
         if not isinstance(q, dict) or not q:
-            child_items.append(
-                ChildObservedResult(
-                    key=ck,
-                    data=None,
-                    obs_time=None,
-                    error=f"Missing batch quote for {sym}",
+            for metric_name in metric_set:
+                child_items.append(
+                    ChildObservedResult(
+                        key=_metric_work_key(metric_name, sym),
+                        data=None,
+                        obs_time=None,
+                        error=f"Missing batch quote for {sym}",
+                        provenance=None,
+                    )
                 )
-            )
             continue
 
-        selected_price, selected_source, raw_ts = select_quote_observation(q, status)
-        if selected_price is None or selected_price <= 0:
-            child_items.append(
-                ChildObservedResult(
-                    key=ck,
-                    data=None,
-                    obs_time=None,
-                    error=f"No valid positive batch quote price for {sym}",
-                )
-            )
-            continue
+        reg_obs_iso = _epoch_to_utc_iso8601(q.get("regularMarketTime"))
+        pre_obs_iso = _epoch_to_utc_iso8601(q.get("preMarketTime"))
+        post_obs_iso = _epoch_to_utc_iso8601(q.get("postMarketTime"))
 
-        obs_iso = _epoch_to_utc_iso8601(raw_ts)
-        payload = {
-            "kind": "batch_quote",
-            "symbol": sym,
-            "status": status,
-            "quote_data": dict(q),
-            "selected_price": selected_price,
-            "selected_source": selected_source,
-        }
-        child_items.append(
-            ChildObservedResult(
-                key=ck,
-                data=payload,
-                obs_time=obs_iso,
-                error=None,
-            )
-        )
+        if MARKET_METRIC_QUOTE in metric_set:
+            q_key = _metric_work_key(MARKET_METRIC_QUOTE, sym)
+            selected_price, selected_source, raw_ts = select_quote_observation(q, clean_status)
+            if selected_price is None or not math.isfinite(float(selected_price)) or selected_price <= 0:
+                child_items.append(
+                    ChildObservedResult(
+                        key=q_key,
+                        data=None,
+                        obs_time=None,
+                        error=f"No valid positive batch quote price for {sym}",
+                        provenance=None,
+                    )
+                )
+            else:
+                obs_iso = _epoch_to_utc_iso8601(raw_ts)
+                payload: Dict[str, Any] = {
+                    "kind": "metric",
+                    "metric": MARKET_METRIC_QUOTE,
+                    "symbol": sym,
+                    "status": clean_status,
+                    "value": float(selected_price),
+                    "from_batch": True,
+                }
+                if clean_status == "PRE-MARKET":
+                    pre_p = to_float(q.get("preMarketPrice"))
+                    if pre_p is not None and pre_p > 0 and pre_obs_iso is not None:
+                        payload["pre_market_price"] = float(pre_p)
+                        pre_chg_feed = to_float(q.get("preMarketChangePercent"))
+                        if pre_chg_feed is not None and abs(pre_chg_feed) < 500:
+                            payload["pre_market_change_pct_feed"] = float(pre_chg_feed)
+                elif clean_status in ("AFTER-HOURS", "CLOSED"):
+                    post_p = to_float(q.get("postMarketPrice"))
+                    if post_p is not None and post_p > 0 and post_obs_iso is not None:
+                        payload["after_hours_price"] = float(post_p)
+
+                prov_q = MarketDataProvenance(
+                    kind=ObservationKind.INSTANT,
+                    source=selected_source or "BATCH_QUOTE",
+                )
+                child_items.append(
+                    ChildObservedResult(
+                        key=q_key,
+                        data=payload,
+                        obs_time=obs_iso,
+                        error=None,
+                        provenance=prov_q,
+                    )
+                )
+
+        if MARKET_METRIC_SESSION_VOLUME in metric_set:
+            sv_key = _metric_work_key(MARKET_METRIC_SESSION_VOLUME, sym)
+            raw_sv = q.get("regularMarketVolume")
+            sv_num = None if isinstance(raw_sv, bool) else to_float(raw_sv)
+            if sv_num is not None and math.isfinite(sv_num) and sv_num >= 0 and reg_obs_iso is not None:
+                child_items.append(
+                    ChildObservedResult(
+                        key=sv_key,
+                        data={"kind": "metric", "metric": MARKET_METRIC_SESSION_VOLUME, "symbol": sym, "value": int(sv_num)},
+                        obs_time=reg_obs_iso,
+                        error=None,
+                        provenance=MarketDataProvenance(ObservationKind.INSTANT, "BATCH_QUOTE"),
+                    )
+                )
+            else:
+                child_items.append(
+                    ChildObservedResult(
+                        key=sv_key,
+                        data=None,
+                        obs_time=None,
+                        error=f"Missing or unprovenanced regularMarketVolume for {sym}",
+                        provenance=None,
+                    )
+                )
+
+        if MARKET_METRIC_PREMARKET_VOLUME in metric_set:
+            pv_key = _metric_work_key(MARKET_METRIC_PREMARKET_VOLUME, sym)
+            raw_pv = q.get("preMarketVolume")
+            pv_num = None if isinstance(raw_pv, bool) else to_float(raw_pv)
+            if pv_num is not None and math.isfinite(pv_num) and pv_num > 0 and pre_obs_iso is not None:
+                child_items.append(
+                    ChildObservedResult(
+                        key=pv_key,
+                        data={"kind": "metric", "metric": MARKET_METRIC_PREMARKET_VOLUME, "symbol": sym, "value": int(pv_num)},
+                        obs_time=pre_obs_iso,
+                        error=None,
+                        provenance=MarketDataProvenance(ObservationKind.INSTANT, "BATCH_QUOTE_PREMARKET"),
+                    )
+                )
+            else:
+                child_items.append(
+                    ChildObservedResult(
+                        key=pv_key,
+                        data=None,
+                        obs_time=None,
+                        error=f"Missing or unprovenanced preMarketVolume for {sym}",
+                        provenance=None,
+                    )
+                )
+
+        if MARKET_METRIC_AFTER_HOURS_VOLUME in metric_set:
+            av_key = _metric_work_key(MARKET_METRIC_AFTER_HOURS_VOLUME, sym)
+            raw_av = q.get("postMarketVolume")
+            av_num = None if isinstance(raw_av, bool) else to_float(raw_av)
+            if av_num is not None and math.isfinite(av_num) and av_num > 0 and post_obs_iso is not None:
+                child_items.append(
+                    ChildObservedResult(
+                        key=av_key,
+                        data={"kind": "metric", "metric": MARKET_METRIC_AFTER_HOURS_VOLUME, "symbol": sym, "value": int(av_num)},
+                        obs_time=post_obs_iso,
+                        error=None,
+                        provenance=MarketDataProvenance(ObservationKind.INSTANT, "BATCH_QUOTE_POSTMARKET"),
+                    )
+                )
+            else:
+                child_items.append(
+                    ChildObservedResult(
+                        key=av_key,
+                        data=None,
+                        obs_time=None,
+                        error=f"Missing or unprovenanced postMarketVolume for {sym}",
+                        provenance=None,
+                    )
+                )
+
+        for metric_name, field_name in (
+            (MARKET_METRIC_DAY_OPEN, "regularMarketOpen"),
+            (MARKET_METRIC_DAY_HIGH, "regularMarketDayHigh"),
+            (MARKET_METRIC_DAY_LOW, "regularMarketDayLow"),
+        ):
+            if metric_name not in metric_set:
+                continue
+            m_key = _metric_work_key(metric_name, sym)
+            val_num = to_float(q.get(field_name))
+            if val_num is not None and math.isfinite(val_num) and val_num > 0 and reg_obs_iso is not None:
+                child_items.append(
+                    ChildObservedResult(
+                        key=m_key,
+                        data={
+                            "kind": "metric",
+                            "metric": metric_name,
+                            "symbol": sym,
+                            "status": clean_status,
+                            "value": float(val_num),
+                        },
+                        obs_time=reg_obs_iso,
+                        error=None,
+                        provenance=MarketDataProvenance(ObservationKind.INSTANT, "BATCH_QUOTE"),
+                    )
+                )
+            else:
+                child_items.append(
+                    ChildObservedResult(
+                        key=m_key,
+                        data=None,
+                        obs_time=None,
+                        error=f"Missing or unprovenanced {field_name} for {sym}",
+                        provenance=None,
+                    )
+                )
 
     return BatchObservedResult(items=tuple(child_items))
 
@@ -2862,107 +3343,344 @@ def _acquire_symbol_fallback_raw(
     fetch_chart: bool = True,
     fetch_premarket_vol: bool = True,
     include_finnhub: bool = True,
-    include_fast_info: bool = True,
+    include_fast_info: bool = False,
     include_polygon_vol: bool = False,
     include_prev_close: bool = False,
     include_chart_open: bool = False,
+    requested_metrics: Optional[Tuple[str, ...]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
-) -> ObservedResult:
+) -> BatchObservedResult:
     """
     Worker-thread per-symbol fallback/supplemental market-data acquisition.
-    Preserves fallback precedence (intraday chart -> Finnhub -> fast_info -> polygon/prev_close/chart_open)
-    without reading or mutating shared cache. Preserves actual per-source observation timestamps
-    where available and never substitutes prior batch or wall-clock timestamps.
+    Emits independent provenance-verified ChildObservedResult items per requested metric
+    (INSTANT with strict UTC obs_time, SESSION_REFERENCE with effective_session_date).
+    Strict fail-closed policy: fast_info lacks verifiable provenance and is never published;
+    timestamps are never borrowed across providers or responses.
     """
     if cancel_check and cancel_check():
         raise RuntimeError("Operation cancelled before fallback acquisition")
 
-    chart_tuple = None
-    chart_obs_utc_iso = None
-    api_price = None
-    if fetch_chart:
-        api_price, api_vol, api_pre_vol, api_post_vol, chart_obs_utc_iso = _acquire_live_chart_data_raw(symbol, status)
-        chart_tuple = (api_price, api_vol, api_pre_vol, api_post_vol, chart_obs_utc_iso)
+    sym_clean = str(symbol).strip().upper()
+    clean_status = str(status or "OPEN").strip().upper()
 
-    if cancel_check and cancel_check():
-        raise RuntimeError("Operation cancelled during fallback acquisition")
+    if requested_metrics is not None:
+        target_metrics = _normalize_requested_metrics(requested_metrics, default=())
+    else:
+        inferred = []
+        if need_price:
+            inferred.append(MARKET_METRIC_QUOTE)
+        if fetch_chart:
+            inferred.append(MARKET_METRIC_SESSION_VOLUME)
+            if clean_status in ("AFTER-HOURS", "CLOSED"):
+                inferred.append(MARKET_METRIC_AFTER_HOURS_VOLUME)
+        if fetch_premarket_vol:
+            inferred.append(MARKET_METRIC_PREMARKET_VOLUME)
+        if include_polygon_vol:
+            inferred.append(MARKET_METRIC_PREVIOUS_SESSION_VOLUME)
+        if include_prev_close:
+            inferred.append(MARKET_METRIC_REGULAR_CLOSE)
+        if include_chart_open:
+            inferred.append(MARKET_METRIC_DAY_OPEN)
+        target_metrics = tuple(sorted(set(inferred)))
 
-    premarket_vol_data = None
-    if fetch_premarket_vol:
-        premarket_vol_data = get_premarket_volume_chart(symbol)
-
-    if cancel_check and cancel_check():
-        raise RuntimeError("Operation cancelled during fallback acquisition")
-
-    finnhub_data = None
-    fh_obs_iso = None
-    has_chart_price = api_price is not None and api_price > 0
-    if include_finnhub and need_price and not has_chart_price and USE_FINNHUB:
-        fh_c, fh_pc, fh_t = get_finnhub_quote(symbol)
-        if fh_c and fh_c > 0:
-            finnhub_data = (fh_c, fh_pc, fh_t)
-            fh_obs_iso = _epoch_to_utc_iso8601(fh_t)
-
-    if cancel_check and cancel_check():
-        raise RuntimeError("Operation cancelled during fallback acquisition")
-
-    fast_info_data = None
-    if include_fast_info:
-        try:
-            local_ticker = yf.Ticker(symbol)
-            fast_info_data = _extract_fast_info_snapshot(local_ticker)
-        except Exception:
-            fast_info_data = {}
-
-    polygon_vol_data = None
-    if include_polygon_vol and USE_POLYGON:
-        polygon_vol_data = polygon_volume(symbol)
-
-    alt_prev_close = None
-    if include_prev_close:
-        alt_prev_close = get_previous_close(symbol)
-
-    alt_chart_open = None
-    if include_chart_open:
-        alt_chart_open = _get_chart_open(symbol)
-
-    # Determine source observation timestamp strictly from acquired source data.
-    # Never substitute a prior batch quote timestamp or wall-clock time for untimestamped sources.
-    has_untimestamped_supplement = bool(
-        fetch_premarket_vol
-        or include_fast_info
-        or include_polygon_vol
-        or include_prev_close
-        or include_chart_open
-    )
-    obs_iso = None
-    if has_chart_price and chart_obs_utc_iso is not None:
-        obs_iso = chart_obs_utc_iso
-    elif finnhub_data is not None and fh_obs_iso is not None:
-        obs_iso = fh_obs_iso
-    elif not need_price and fetch_chart and chart_obs_utc_iso is not None and not has_untimestamped_supplement:
-        obs_iso = chart_obs_utc_iso
-
-    payload = {
-        "kind": "symbol_fallback",
-        "symbol": symbol,
-        "status": status,
-        "supplement_only": not need_price,
-        "chart_data": chart_tuple,
-        "chart_fetched": bool(fetch_chart),
-        "premarket_vol_data": premarket_vol_data,
-        "premarket_vol_fetched": bool(fetch_premarket_vol),
-        "finnhub_data": finnhub_data,
-        "fast_info_data": fast_info_data,
-        "polygon_vol_data": polygon_vol_data,
-        "alt_prev_close": alt_prev_close,
-        "alt_chart_open": alt_chart_open,
-        "source_timestamps": {
-            "chart": chart_obs_utc_iso,
-            "finnhub": fh_obs_iso,
-        },
+    chart_obs: Dict[str, Any] = {
+        "price": None,
+        "session_volume": None,
+        "premarket_volume": None,
+        "after_hours_volume": None,
+        "chart_obs_utc_iso": None,
+        "legacy_tuple": (None, 0, 0, 0, None),
     }
-    return ObservedResult(data=payload, obs_time=obs_iso)
+    if fetch_chart:
+        chart_obs = _acquire_live_chart_observations_raw(sym_clean, clean_status)
+
+    if cancel_check and cancel_check():
+        raise RuntimeError("Operation cancelled during fallback acquisition")
+
+    premarket_vol_obs: Optional[PremarketVolumeObservation] = None
+    if fetch_premarket_vol or MARKET_METRIC_PREMARKET_VOLUME in target_metrics:
+        if fetch_premarket_vol:
+            pm_res = get_premarket_volume_chart(sym_clean)
+            if isinstance(pm_res, PremarketVolumeObservation):
+                premarket_vol_obs = pm_res
+
+    if cancel_check and cancel_check():
+        raise RuntimeError("Operation cancelled during fallback acquisition")
+
+    fh_price_obs: Optional[TimestampedValue] = None
+    chart_price_obs: Optional[TimestampedValue] = chart_obs.get("price")
+    if include_finnhub and need_price and chart_price_obs is None and USE_FINNHUB:
+        fh_price_obs = _acquire_finnhub_quote_raw(sym_clean)
+
+    if cancel_check and cancel_check():
+        raise RuntimeError("Operation cancelled during fallback acquisition")
+
+    # Owner-approved strict fail-closed fast_info policy: never acquire or publish any
+    # fast_info field because fast_info provides no independently verifiable provenance.
+
+    polygon_prev_obs: Optional[SessionReferenceValue] = None
+    if include_polygon_vol and USE_POLYGON:
+        polygon_prev_obs = _acquire_polygon_previous_agg_raw(sym_clean)
+
+    prev_close_obs: Optional[SessionReferenceValue] = None
+    if include_prev_close:
+        prev_close_obs = _acquire_previous_close_raw(sym_clean)
+
+    chart_open_obs: Optional[TimestampedValue] = None
+    if include_chart_open:
+        chart_open_obs = _acquire_chart_open_raw(sym_clean)
+
+    child_items: List[ChildObservedResult] = []
+    chart_cache_meta = None
+    if fetch_chart and any(
+        chart_obs.get(k) is not None
+        for k in ("price", "session_volume", "premarket_volume", "after_hours_volume")
+    ):
+        chart_cache_meta = {
+            "legacy_tuple": chart_obs.get("legacy_tuple"),
+            "chart_obs_utc_iso": chart_obs.get("chart_obs_utc_iso"),
+        }
+
+    if MARKET_METRIC_QUOTE in target_metrics:
+        q_key = _metric_work_key(MARKET_METRIC_QUOTE, sym_clean)
+        chosen_price_obs = chart_price_obs if chart_price_obs is not None else fh_price_obs
+        if chosen_price_obs is not None and chosen_price_obs.value > 0:
+            q_payload: Dict[str, Any] = {
+                "kind": "metric",
+                "metric": MARKET_METRIC_QUOTE,
+                "symbol": sym_clean,
+                "status": clean_status,
+                "value": float(chosen_price_obs.value),
+                "from_batch": False,
+            }
+            if clean_status == "PRE-MARKET":
+                q_payload["pre_market_price"] = float(chosen_price_obs.value)
+            elif clean_status in ("AFTER-HOURS", "CLOSED"):
+                q_payload["after_hours_price"] = float(chosen_price_obs.value)
+            if chart_cache_meta is not None:
+                q_payload["chart_cache_meta"] = chart_cache_meta
+            child_items.append(
+                ChildObservedResult(
+                    key=q_key,
+                    data=q_payload,
+                    obs_time=chosen_price_obs.obs_time,
+                    error=None,
+                    provenance=MarketDataProvenance(ObservationKind.INSTANT, chosen_price_obs.source),
+                )
+            )
+        else:
+            child_items.append(
+                ChildObservedResult(
+                    key=q_key,
+                    data=None,
+                    obs_time=None,
+                    error=f"No valid provenance-backed fallback price for {sym_clean}",
+                    provenance=None,
+                )
+            )
+
+    if MARKET_METRIC_SESSION_VOLUME in target_metrics:
+        sv_key = _metric_work_key(MARKET_METRIC_SESSION_VOLUME, sym_clean)
+        sv_obs: Optional[TimestampedValue] = chart_obs.get("session_volume")
+        if sv_obs is not None:
+            child_items.append(
+                ChildObservedResult(
+                    key=sv_key,
+                    data={
+                        "kind": "metric",
+                        "metric": MARKET_METRIC_SESSION_VOLUME,
+                        "symbol": sym_clean,
+                        "value": int(sv_obs.value),
+                    },
+                    obs_time=sv_obs.obs_time,
+                    error=None,
+                    provenance=MarketDataProvenance(ObservationKind.INSTANT, sv_obs.source),
+                )
+            )
+        else:
+            child_items.append(
+                ChildObservedResult(
+                    key=sv_key,
+                    data=None,
+                    obs_time=None,
+                    error=f"No valid provenance-backed session volume for {sym_clean}",
+                    provenance=None,
+                )
+            )
+
+    if MARKET_METRIC_PREMARKET_VOLUME in target_metrics:
+        pv_key = _metric_work_key(MARKET_METRIC_PREMARKET_VOLUME, sym_clean)
+        if premarket_vol_obs is not None:
+            child_items.append(
+                ChildObservedResult(
+                    key=pv_key,
+                    data={
+                        "kind": "metric",
+                        "metric": MARKET_METRIC_PREMARKET_VOLUME,
+                        "symbol": sym_clean,
+                        "value": int(premarket_vol_obs.value),
+                        "effective_session_date": premarket_vol_obs.effective_session_date,
+                    },
+                    obs_time=premarket_vol_obs.obs_time,
+                    error=None,
+                    provenance=MarketDataProvenance(ObservationKind.INSTANT, premarket_vol_obs.source),
+                )
+            )
+        else:
+            chart_pre_obs: Optional[TimestampedValue] = chart_obs.get("premarket_volume")
+            if chart_pre_obs is not None:
+                child_items.append(
+                    ChildObservedResult(
+                        key=pv_key,
+                        data={
+                            "kind": "metric",
+                            "metric": MARKET_METRIC_PREMARKET_VOLUME,
+                            "symbol": sym_clean,
+                            "value": int(chart_pre_obs.value),
+                        },
+                        obs_time=chart_pre_obs.obs_time,
+                        error=None,
+                        provenance=MarketDataProvenance(ObservationKind.INSTANT, chart_pre_obs.source),
+                    )
+                )
+            else:
+                child_items.append(
+                    ChildObservedResult(
+                        key=pv_key,
+                        data=None,
+                        obs_time=None,
+                        error=f"No valid provenance-backed premarket volume for {sym_clean}",
+                        provenance=None,
+                    )
+                )
+
+    if MARKET_METRIC_AFTER_HOURS_VOLUME in target_metrics:
+        av_key = _metric_work_key(MARKET_METRIC_AFTER_HOURS_VOLUME, sym_clean)
+        post_obs: Optional[TimestampedValue] = chart_obs.get("after_hours_volume")
+        if post_obs is not None:
+            av_payload: Dict[str, Any] = {
+                "kind": "metric",
+                "metric": MARKET_METRIC_AFTER_HOURS_VOLUME,
+                "symbol": sym_clean,
+                "value": int(post_obs.value),
+            }
+            if chart_cache_meta is not None:
+                av_payload["chart_cache_meta"] = chart_cache_meta
+            child_items.append(
+                ChildObservedResult(
+                    key=av_key,
+                    data=av_payload,
+                    obs_time=post_obs.obs_time,
+                    error=None,
+                    provenance=MarketDataProvenance(ObservationKind.INSTANT, post_obs.source),
+                )
+            )
+        else:
+            child_items.append(
+                ChildObservedResult(
+                    key=av_key,
+                    data=None,
+                    obs_time=None,
+                    error=f"No valid provenance-backed after-hours volume for {sym_clean}",
+                    provenance=None,
+                )
+            )
+
+    if MARKET_METRIC_DAY_OPEN in target_metrics:
+        do_key = _metric_work_key(MARKET_METRIC_DAY_OPEN, sym_clean)
+        if chart_open_obs is not None:
+            child_items.append(
+                ChildObservedResult(
+                    key=do_key,
+                    data={
+                        "kind": "metric",
+                        "metric": MARKET_METRIC_DAY_OPEN,
+                        "symbol": sym_clean,
+                        "status": clean_status,
+                        "value": float(chart_open_obs.value),
+                    },
+                    obs_time=chart_open_obs.obs_time,
+                    error=None,
+                    provenance=MarketDataProvenance(ObservationKind.INSTANT, chart_open_obs.source),
+                )
+            )
+        else:
+            child_items.append(
+                ChildObservedResult(
+                    key=do_key,
+                    data=None,
+                    obs_time=None,
+                    error=f"No valid provenance-backed opening price for {sym_clean}",
+                    provenance=None,
+                )
+            )
+
+    if MARKET_METRIC_REGULAR_CLOSE in target_metrics:
+        rc_key = _metric_work_key(MARKET_METRIC_REGULAR_CLOSE, sym_clean)
+        if prev_close_obs is not None:
+            child_items.append(
+                ChildObservedResult(
+                    key=rc_key,
+                    data={
+                        "kind": "metric",
+                        "metric": MARKET_METRIC_REGULAR_CLOSE,
+                        "symbol": sym_clean,
+                        "status": clean_status,
+                        "value": float(prev_close_obs.value),
+                    },
+                    obs_time=None,
+                    error=None,
+                    provenance=MarketDataProvenance(
+                        kind=ObservationKind.SESSION_REFERENCE,
+                        source=prev_close_obs.source,
+                        effective_session_date=prev_close_obs.effective_session_date,
+                    ),
+                )
+            )
+        else:
+            child_items.append(
+                ChildObservedResult(
+                    key=rc_key,
+                    data=None,
+                    obs_time=None,
+                    error=f"No valid daily-bar previous close for {sym_clean}",
+                    provenance=None,
+                )
+            )
+
+    if MARKET_METRIC_PREVIOUS_SESSION_VOLUME in target_metrics:
+        pv_agg_key = _metric_work_key(MARKET_METRIC_PREVIOUS_SESSION_VOLUME, sym_clean)
+        if polygon_prev_obs is not None:
+            child_items.append(
+                ChildObservedResult(
+                    key=pv_agg_key,
+                    data={
+                        "kind": "metric",
+                        "metric": MARKET_METRIC_PREVIOUS_SESSION_VOLUME,
+                        "symbol": sym_clean,
+                        "value": int(polygon_prev_obs.value),
+                    },
+                    obs_time=None,
+                    error=None,
+                    provenance=MarketDataProvenance(
+                        kind=ObservationKind.SESSION_REFERENCE,
+                        source=polygon_prev_obs.source,
+                        effective_session_date=polygon_prev_obs.effective_session_date,
+                    ),
+                )
+            )
+        else:
+            child_items.append(
+                ChildObservedResult(
+                    key=pv_agg_key,
+                    data=None,
+                    obs_time=None,
+                    error=f"No valid Polygon previous-session aggregate for {sym_clean}",
+                    provenance=None,
+                )
+            )
+
+    return BatchObservedResult(items=tuple(child_items))
 
 
 def _acquire_vwap_raw(
@@ -2973,18 +3691,21 @@ def _acquire_vwap_raw(
     """
     Worker-thread intraday VWAP data acquisition.
     Preserves get_true_intraday_vwap -> fallback_vwap precedence without mutating shared cache.
+    Carries explicit MarketDataProvenance with the timestamp of the latest included valid bar.
     """
     if cancel_check and cancel_check():
         raise RuntimeError("Operation cancelled before VWAP acquisition")
 
     try:
         valid, obs_utc_iso, before_anchor = _acquire_true_intraday_vwap_bars(symbol, status)
-        if not before_anchor and valid:
+        if not before_anchor and valid and obs_utc_iso is not None:
             total_v = sum(v for _, _, _, v in valid)
             if total_v > 0:
+                valid_ts = validate_utc_iso8601_timestamp(obs_utc_iso)
                 return ObservedResult(
                     data={"kind": "vwap", "symbol": symbol, "bars": valid, "source": "INTRADAY_VWAP"},
-                    obs_time=obs_utc_iso,
+                    obs_time=valid_ts,
+                    provenance=MarketDataProvenance(ObservationKind.INSTANT, "INTRADAY_VWAP"),
                 )
     except Exception:
         pass
@@ -2994,9 +3715,18 @@ def _acquire_vwap_raw(
 
     fb_payload, fb_obs_iso = _acquire_fallback_vwap_payload(symbol)
     if fb_payload is not None and fb_obs_iso is not None:
-        return ObservedResult(data=fb_payload, obs_time=fb_obs_iso)
+        try:
+            valid_fb_ts = validate_utc_iso8601_timestamp(fb_obs_iso)
+            fb_source = str(fb_payload.get("source") or "FALLBACK_VWAP").strip() or "FALLBACK_VWAP"
+            return ObservedResult(
+                data=fb_payload,
+                obs_time=valid_fb_ts,
+                provenance=MarketDataProvenance(ObservationKind.INSTANT, fb_source),
+            )
+        except Exception:
+            pass
 
-    return ObservedResult(data=None, obs_time=None)
+    return ObservedResult(data=None, obs_time=None, provenance=None)
 
 
 def _build_quote_cache_candidate(
@@ -3056,10 +3786,15 @@ def _build_quote_cache_candidate(
                 updates["after_hours_volume"] = int(api_post_vol)
 
         if premarket_vol_fetched and premarket_vol_data is not None:
+            pm_val = (
+                premarket_vol_data.value
+                if isinstance(premarket_vol_data, PremarketVolumeObservation)
+                else premarket_vol_data
+            )
             updates["last_premarket_vol_fetch"] = now_ts
-            updates["premarket_vol_cache"] = premarket_vol_data
-            if premarket_vol_data > 0:
-                updates["pre_market_volume"] = int(premarket_vol_data)
+            updates["premarket_vol_cache"] = int(pm_val or 0)
+            if pm_val and pm_val > 0:
+                updates["pre_market_volume"] = int(pm_val)
 
         if fast_info_data:
             fi_open = fast_info_data.get("open") or fast_info_data.get("regular_market_open")
@@ -3225,10 +3960,14 @@ def _build_quote_cache_candidate(
     if needs_pre_vol:
         chart_pre_vol = 0
         if premarket_vol_data is not None:
-            chart_pre_vol = premarket_vol_data
+            chart_pre_vol = (
+                premarket_vol_data.value
+                if isinstance(premarket_vol_data, PremarketVolumeObservation)
+                else premarket_vol_data
+            )
             if premarket_vol_fetched:
                 updates["last_premarket_vol_fetch"] = now_ts
-                updates["premarket_vol_cache"] = chart_pre_vol
+                updates["premarket_vol_cache"] = int(chart_pre_vol or 0)
         elif symbol in cache.last_premarket_vol_fetch and (now_ts - cache.last_premarket_vol_fetch[symbol]) < 90:
             chart_pre_vol = cache.premarket_vol_cache.get(symbol, 0)
         if chart_pre_vol > 0:
@@ -3538,7 +4277,13 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         if symbol in cache.last_premarket_vol_fetch and (now_ts - cache.last_premarket_vol_fetch[symbol]) < 90:
             premarket_vol_data = cache.premarket_vol_cache.get(symbol, 0)
         else:
-            premarket_vol_data = get_premarket_volume_chart(symbol)
+            raw_pm = get_premarket_volume_chart(symbol)
+            if isinstance(raw_pm, PremarketVolumeObservation):
+                premarket_vol_data = raw_pm.value
+            elif isinstance(raw_pm, (int, float)) and not isinstance(raw_pm, bool):
+                premarket_vol_data = int(raw_pm)
+            else:
+                premarket_vol_data = 0
             premarket_vol_fetched = True
 
     finnhub_data = None
@@ -3589,6 +4334,286 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
     )
 
 
+def _build_metric_cache_candidate(
+    res: WorkResult,
+    now_ny: Optional[datetime] = None,
+) -> Tuple[str, str, Dict[str, Any], Dict[str, Any]]:
+    """
+    Validates a single provenance-bearing market-data WorkResult and stages its
+    independent per-symbol cache updates without mutating shared MarketDataCache.
+    Enforces strict fail-closed rejection of fast_info and unprovenanced payloads.
+    Returns (symbol, metric_name, cache_updates_dict, provenance_entry_dict).
+    """
+    if not isinstance(res.data, dict):
+        raise ValueError(f"Malformed market-data payload for {res.key}")
+
+    if not isinstance(res.provenance, MarketDataProvenance):
+        raise ValueError(f"Missing MarketDataProvenance for {res.key}")
+
+    prov_source_upper = res.provenance.source.strip().upper()
+    if not prov_source_upper or "FAST_INFO" in prov_source_upper:
+        raise ValueError(f"Unverifiable market-data source {res.provenance.source!r} for {res.key}")
+
+    ny_tz = ZoneInfo("America/New_York")
+    if now_ny is None:
+        now_ny = datetime.now(ny_tz)
+
+    obs_dt, prov = validate_market_data_observation(
+        res.obs_time,
+        res.provenance,
+        reference_date=now_ny.date(),
+    )
+
+    prov_entry: Dict[str, Any] = {
+        "kind": prov.kind.value,
+        "source": prov.source,
+        "effective_session_date": prov.effective_session_date,
+        "obs_time": res.obs_time,
+    }
+
+    kind = res.data.get("kind")
+    updates: Dict[str, Any] = {}
+
+    if kind == "vwap":
+        sym = str(res.data.get("symbol") or res.key.target.removeprefix("VWAP:")).strip().upper()
+        if not sym or res.key.target != f"{MARKET_METRIC_VWAP}:{sym}":
+            raise ValueError(f"VWAP key/payload mismatch for {res.key}")
+        if prov.kind != ObservationKind.INSTANT or obs_dt is None:
+            raise ValueError(f"VWAP requires INSTANT provenance with UTC obs_time for {sym}")
+        v_true = _compute_vwap_from_payload(res.data)
+        v_status, v_num = classify_market_numeric(v_true)
+        if v_status != "VALID" or v_num is None or v_num <= 0:
+            raise ValueError(f"Invalid or non-positive VWAP observation for {sym}")
+        updates["vwaps"] = float(v_num)
+        return sym, MARKET_METRIC_VWAP, updates, prov_entry
+
+    if kind != "metric":
+        raise ValueError(f"Unknown market-data payload kind: {kind!r}")
+
+    metric = str(res.data.get("metric") or "").strip().upper()
+    sym = str(res.data.get("symbol") or "").strip().upper()
+    if not metric or not sym or res.key.target != f"{metric}:{sym}":
+        raise ValueError(f"Metric key/payload mismatch for {res.key}: {res.data!r}")
+
+    def _validate_nonneg_int(raw_val: Any) -> int:
+        if isinstance(raw_val, bool):
+            raise ValueError(f"Boolean not allowed for {metric} on {sym}")
+        num = to_float(raw_val)
+        if num is None or not math.isfinite(num) or num < 0:
+            raise ValueError(f"Invalid non-negative numeric value for {metric} on {sym}: {raw_val!r}")
+        return int(num)
+
+    def _validate_pos_float(raw_val: Any) -> float:
+        status_cls, num = classify_market_numeric(raw_val)
+        if status_cls != "VALID" or num is None or num <= 0:
+            raise ValueError(f"Invalid positive numeric value for {metric} on {sym}: {raw_val!r}")
+        return float(num)
+
+    def _stage_chart_meta() -> None:
+        meta = res.data.get("chart_cache_meta")
+        if isinstance(meta, dict) and isinstance(meta.get("tuple"), tuple):
+            ts_val = to_float(meta.get("ts"))
+            if ts_val is not None and math.isfinite(ts_val) and ts_val > 0:
+                updates["last_chart_fetch"] = float(ts_val)
+                updates["chart_cache"] = meta["tuple"]
+
+    def _stage_premarket_meta() -> None:
+        meta = res.data.get("premarket_vol_cache_meta")
+        if isinstance(meta, dict) and meta.get("value") is not None:
+            ts_val = to_float(meta.get("ts"))
+            val_num = to_float(meta.get("value"))
+            if (
+                ts_val is not None
+                and math.isfinite(ts_val)
+                and ts_val > 0
+                and val_num is not None
+                and math.isfinite(val_num)
+                and val_num >= 0
+            ):
+                updates["last_premarket_vol_fetch"] = float(ts_val)
+                updates["premarket_vol_cache"] = int(val_num)
+
+    if metric == MARKET_METRIC_QUOTE:
+        if prov.kind != ObservationKind.INSTANT or obs_dt is None:
+            raise ValueError(f"QUOTE requires INSTANT provenance for {sym}")
+        price = _validate_pos_float(res.data.get("value"))
+        status = str(res.data.get("status") or cache.session.get(sym) or "OPEN").strip().upper()
+        obs_ny = obs_dt.astimezone(ny_tz)
+        validity, freshness = determine_market_freshness(
+            price=price,
+            obs_time=obs_ny,
+            current_ny=now_ny,
+            session_status=status,
+            source=prov.source,
+        )
+        updates["prices"] = price
+        updates["observation_times"] = obs_ny.isoformat()
+        updates["retrieval_times"] = now_ny.isoformat()
+        updates["price_validity"] = validity
+        updates["freshness"] = freshness
+        updates["price_sources"] = prov.source
+        updates["session"] = status
+        updates["session_liquidity"] = (
+            "LOW" if status in ("AFTER-HOURS", "PRE-MARKET") else "HIGH"
+        )
+
+        pre_p = to_float(res.data.get("pre_market_price"))
+        post_p = to_float(res.data.get("after_hours_price"))
+        reg_close = cache.regular_close.get(sym)
+        eff_day_open = cache.day_open.get(sym)
+        eff_day_low = cache.day_low.get(sym)
+
+        if status == "PRE-MARKET":
+            eff_pre = float(pre_p) if (pre_p is not None and pre_p > 0) else price
+            updates["pre_market_price"] = eff_pre
+            if reg_close and reg_close > 0:
+                feed_chg = to_float(res.data.get("pre_market_change_pct_feed"))
+                if feed_chg is not None and abs(feed_chg) < 500:
+                    pre_chg = float(feed_chg)
+                else:
+                    pre_chg = ((eff_pre - reg_close) / reg_close) * 100
+                updates["session_change"] = pre_chg
+                updates["gaps"] = pre_chg
+                updates["pre_market_change"] = pre_chg
+        else:
+            if status in ("AFTER-HOURS", "CLOSED"):
+                eff_post = float(post_p) if (post_p is not None and post_p > 0) else price
+                updates["after_hours_price"] = eff_post
+                if reg_close and reg_close > 0:
+                    updates["after_hours_change"] = ((eff_post - reg_close) / reg_close) * 100
+            if reg_close and reg_close > 0:
+                updates["session_change"] = ((price - reg_close) / reg_close) * 100
+                gap_price = (
+                    float(eff_day_open)
+                    if (status in ("OPEN", "CLOSED") and eff_day_open and eff_day_open > 0)
+                    else price
+                )
+                updates["gaps"] = ((gap_price - reg_close) / reg_close) * 100
+
+        if eff_day_low and reg_close and reg_close > 0:
+            drop_from_close = ((float(eff_day_low) - reg_close) / reg_close) * 100
+            if drop_from_close <= -10.0:
+                updates["ssr_active"] = True
+            else:
+                updates["ssr_active"] = bool(cache.ssr_active.get(sym, False))
+
+        eff_pre_ovr = updates.get("pre_market_price", cache.pre_market_price.get(sym))
+        eff_post_ovr = updates.get("after_hours_price", cache.after_hours_price.get(sym))
+        if eff_pre_ovr and eff_post_ovr and eff_post_ovr > 0:
+            updates["overnight_return"] = ((eff_pre_ovr - eff_post_ovr) / eff_post_ovr) * 100
+
+        _stage_chart_meta()
+        return sym, metric, updates, prov_entry
+
+    if metric == MARKET_METRIC_SESSION_VOLUME:
+        if prov.kind != ObservationKind.INSTANT or obs_dt is None:
+            raise ValueError(f"SESSION_VOLUME requires INSTANT provenance for {sym}")
+        updates["volumes"] = _validate_nonneg_int(res.data.get("value"))
+        _stage_chart_meta()
+        return sym, metric, updates, prov_entry
+
+    if metric == MARKET_METRIC_PREMARKET_VOLUME:
+        if prov.kind != ObservationKind.INSTANT or obs_dt is None:
+            raise ValueError(f"PREMARKET_VOLUME requires INSTANT provenance for {sym}")
+        updates["pre_market_volume"] = _validate_nonneg_int(res.data.get("value"))
+        _stage_premarket_meta()
+        _stage_chart_meta()
+        return sym, metric, updates, prov_entry
+
+    if metric == MARKET_METRIC_AFTER_HOURS_VOLUME:
+        if prov.kind != ObservationKind.INSTANT or obs_dt is None:
+            raise ValueError(f"AFTER_HOURS_VOLUME requires INSTANT provenance for {sym}")
+        updates["after_hours_volume"] = _validate_nonneg_int(res.data.get("value"))
+        _stage_chart_meta()
+        return sym, metric, updates, prov_entry
+
+    if metric == MARKET_METRIC_DAY_OPEN:
+        if prov.kind != ObservationKind.INSTANT or obs_dt is None:
+            raise ValueError(f"DAY_OPEN requires INSTANT provenance for {sym}")
+        day_open = _validate_pos_float(res.data.get("value"))
+        updates["day_open"] = day_open
+        status = str(res.data.get("status") or cache.session.get(sym) or "OPEN").strip().upper()
+        reg_close = cache.regular_close.get(sym)
+        if status in ("OPEN", "CLOSED") and reg_close and reg_close > 0:
+            updates["gaps"] = ((day_open - reg_close) / reg_close) * 100
+        return sym, metric, updates, prov_entry
+
+    if metric == MARKET_METRIC_DAY_HIGH:
+        if prov.kind != ObservationKind.INSTANT or obs_dt is None:
+            raise ValueError(f"DAY_HIGH requires INSTANT provenance for {sym}")
+        updates["day_high"] = _validate_pos_float(res.data.get("value"))
+        return sym, metric, updates, prov_entry
+
+    if metric == MARKET_METRIC_DAY_LOW:
+        if prov.kind != ObservationKind.INSTANT or obs_dt is None:
+            raise ValueError(f"DAY_LOW requires INSTANT provenance for {sym}")
+        day_low = _validate_pos_float(res.data.get("value"))
+        updates["day_low"] = day_low
+        reg_close = cache.regular_close.get(sym)
+        if reg_close and reg_close > 0 and ((day_low - reg_close) / reg_close) * 100 <= -10.0:
+            updates["ssr_active"] = True
+        return sym, metric, updates, prov_entry
+
+    if metric == MARKET_METRIC_REGULAR_CLOSE:
+        if prov.kind != ObservationKind.SESSION_REFERENCE or not prov.effective_session_date:
+            raise ValueError(f"REGULAR_CLOSE requires SESSION_REFERENCE provenance for {sym}")
+        reg_close = _validate_pos_float(res.data.get("value"))
+        updates["regular_close"] = reg_close
+        updates["regular_close_dates"] = prov.effective_session_date
+        updates["regular_close_sources"] = prov.source
+
+        status = str(res.data.get("status") or cache.session.get(sym) or "OPEN").strip().upper()
+        cur_price = cache.prices.get(sym)
+        if cur_price and cur_price > 0:
+            if status == "PRE-MARKET":
+                eff_pre = cache.pre_market_price.get(sym) or cur_price
+                pre_chg = ((eff_pre - reg_close) / reg_close) * 100
+                updates["session_change"] = pre_chg
+                updates["gaps"] = pre_chg
+                updates["pre_market_change"] = pre_chg
+            else:
+                updates["session_change"] = ((cur_price - reg_close) / reg_close) * 100
+                eff_day_open = cache.day_open.get(sym)
+                gap_price = (
+                    float(eff_day_open)
+                    if (status in ("OPEN", "CLOSED") and eff_day_open and eff_day_open > 0)
+                    else float(cur_price)
+                )
+                updates["gaps"] = ((gap_price - reg_close) / reg_close) * 100
+                if status in ("AFTER-HOURS", "CLOSED") and cache.after_hours_price.get(sym):
+                    updates["after_hours_change"] = (
+                        (float(cache.after_hours_price[sym]) - reg_close) / reg_close
+                    ) * 100
+        eff_day_low = cache.day_low.get(sym)
+        if eff_day_low and ((float(eff_day_low) - reg_close) / reg_close) * 100 <= -10.0:
+            updates["ssr_active"] = True
+        return sym, metric, updates, prov_entry
+
+    if metric == MARKET_METRIC_PREVIOUS_SESSION_VOLUME:
+        if prov.kind != ObservationKind.SESSION_REFERENCE or not prov.effective_session_date:
+            raise ValueError(f"PREVIOUS_SESSION_VOLUME requires SESSION_REFERENCE provenance for {sym}")
+        updates["previous_session_volume"] = _validate_nonneg_int(res.data.get("value"))
+        updates["previous_session_volume_dates"] = prov.effective_session_date
+        updates["previous_session_volume_sources"] = prov.source
+        return sym, metric, updates, prov_entry
+
+    raise ValueError(f"Unsupported market metric: {metric!r}")
+
+
+def _publish_metric_cache_candidate(
+    symbol: str,
+    metric_name: str,
+    candidate: Dict[str, Any],
+    prov_entry: Dict[str, Any],
+) -> None:
+    """
+    Commits a validated single-metric candidate and its provenance record to MarketDataCache
+    on the coordinating thread without altering unrelated metric fields.
+    """
+    _publish_quote_cache_candidate(symbol, candidate)
+    cache.metric_provenance.setdefault(symbol, {})[metric_name] = prov_entry
+
+
 def refresh_cached_symbol_state(symbol: str, status: str, now_ny: Optional[datetime] = None) -> None:
     """
     Re-evaluates cached market observation freshness and session tags on the coordinating thread
@@ -3621,23 +4646,34 @@ def refresh_cached_symbol_state(symbol: str, status: str, now_ny: Optional[datet
     cache.freshness[symbol] = freshness
 
 
-def enqueue_market_batch_quotes(symbols: Sequence[str], status: str) -> Tuple[bool, Optional[Any]]:
+def enqueue_market_batch_quotes(
+    symbols: Sequence[str],
+    status: str,
+    metrics: Optional[Sequence[str]] = None,
+) -> Tuple[bool, Optional[Any]]:
     """
     Enqueues non-blocking batched quote acquisition on MARKET_DATA_COORDINATOR.
-    Uses a session-specific request key paired with stable per-symbol QUOTE:{sym} child keys.
+    Uses a session- and metric-set-specific request key paired with independent
+    per-symbol, per-metric {METRIC}:{sym} child keys.
     """
     clean_syms = tuple(dict.fromkeys(str(s).strip().upper() for s in symbols if s and str(s).strip()))
     if not clean_syms:
         return False, None
     clean_status = str(status or "OPEN").strip().upper()
-    batch_target = f"BATCH_QUOTE:{clean_status}:" + ",".join(sorted(clean_syms))
-    child_keys = tuple(WorkKey(WorkType.MARKET_DATA.value, f"QUOTE:{s}") for s in clean_syms)
+    metric_set = _normalize_requested_metrics(metrics, default=_default_batch_metrics_for_status(clean_status))
+    metric_sig = ",".join(metric_set)
+    batch_target = f"BATCH_QUOTE:{clean_status}:{metric_sig}:" + ",".join(sorted(clean_syms))
+    child_keys = tuple(
+        _metric_work_key(m, s)
+        for s in clean_syms
+        for m in metric_set
+    )
     return MARKET_DATA_COORDINATOR.enqueue(
         work_type=WorkType.MARKET_DATA.value,
         target=batch_target,
         obs_time=None,
         fn=_acquire_batch_quotes_raw,
-        args=(clean_syms, clean_status),
+        args=(clean_syms, clean_status, metric_set),
         child_keys=child_keys,
     )
 
@@ -3648,15 +4684,17 @@ def enqueue_market_symbol_fallback(
     need_price: bool = True,
     needs_pre_vol: bool = False,
     needs_post_vol: bool = False,
-    need_fast_info: bool = True,
+    need_fast_info: bool = False,
     need_prev_close: bool = False,
     need_chart_open: bool = False,
+    need_polygon_vol: bool = False,
+    metrics: Optional[Sequence[str]] = None,
 ) -> Tuple[bool, Optional[Any]]:
     """
-    Enqueues non-blocking per-symbol fallback/supplemental market-data acquisition on MARKET_DATA_COORDINATOR.
-    Uses a session-specific request key paired with the stable logical result key (QUOTE:{symbol}
-    for price fallbacks, QUOTE_SUPPLEMENT:{symbol} for non-price enrichment) while respecting
-    existing 60s intraday-chart and 90s premarket-volume TTLs on the coordinating thread.
+    Enqueues non-blocking per-symbol fallback/supplemental market-data acquisition on
+    MARKET_DATA_COORDINATOR. Encodes session status and sorted requested metric set
+    in the request key (preventing cross-session or cross-metric coalescing) while fanning out
+    independent per-metric {METRIC}:{symbol} child keys and respecting 60s/90s TTLs.
     """
     if not symbol or not str(symbol).strip():
         return False, None
@@ -3668,22 +4706,52 @@ def enqueue_market_symbol_fallback(
         sym_clean in cache.last_chart_fetch
         and (now_ts - cache.last_chart_fetch[sym_clean]) < 60
     )
-    fetch_chart = (need_price or needs_post_vol) and not chart_fresh
-
     pre_vol_fresh = (
         sym_clean in cache.last_premarket_vol_fetch
         and (now_ts - cache.last_premarket_vol_fetch[sym_clean]) < 90
     )
-    fetch_premarket_vol = needs_pre_vol and not pre_vol_fresh
 
-    include_polygon_vol = bool(USE_POLYGON and cache.volumes.get(sym_clean, 0) == 0)
-
-    if need_price:
-        request_target = f"QUOTE_FALLBACK:{clean_status}:{sym_clean}"
-        logical_target = f"QUOTE:{sym_clean}"
+    if metrics is not None:
+        requested_metrics = _normalize_requested_metrics(metrics, default=())
     else:
-        request_target = f"QUOTE_SUPPLEMENT_REQ:{clean_status}:{sym_clean}"
-        logical_target = f"QUOTE_SUPPLEMENT:{sym_clean}"
+        req_list: List[str] = []
+        if need_price:
+            req_list.append(MARKET_METRIC_QUOTE)
+        if (need_price or needs_post_vol) and not chart_fresh:
+            req_list.append(MARKET_METRIC_SESSION_VOLUME)
+            if clean_status in ("AFTER-HOURS", "CLOSED"):
+                req_list.append(MARKET_METRIC_AFTER_HOURS_VOLUME)
+        if needs_pre_vol and not pre_vol_fresh:
+            req_list.append(MARKET_METRIC_PREMARKET_VOLUME)
+        if need_polygon_vol or (need_price and USE_POLYGON and sym_clean not in cache.previous_session_volume):
+            req_list.append(MARKET_METRIC_PREVIOUS_SESSION_VOLUME)
+        if need_prev_close:
+            req_list.append(MARKET_METRIC_REGULAR_CLOSE)
+        if need_chart_open:
+            req_list.append(MARKET_METRIC_DAY_OPEN)
+        requested_metrics = tuple(sorted(set(req_list)))
+
+    if not requested_metrics:
+        return False, None
+
+    req_set = set(requested_metrics)
+    need_price_eff = bool(need_price or (MARKET_METRIC_QUOTE in req_set))
+    fetch_chart_eff = bool(
+        (
+            MARKET_METRIC_QUOTE in req_set
+            or MARKET_METRIC_SESSION_VOLUME in req_set
+            or MARKET_METRIC_AFTER_HOURS_VOLUME in req_set
+        )
+        and not chart_fresh
+    )
+    fetch_pre_vol_eff = bool((MARKET_METRIC_PREMARKET_VOLUME in req_set) and not pre_vol_fresh)
+    include_polygon_vol_eff = bool(MARKET_METRIC_PREVIOUS_SESSION_VOLUME in req_set)
+    include_prev_close_eff = bool(MARKET_METRIC_REGULAR_CLOSE in req_set)
+    include_chart_open_eff = bool(MARKET_METRIC_DAY_OPEN in req_set)
+
+    metric_sig = ",".join(requested_metrics)
+    request_target = f"FALLBACK_REQ:{clean_status}:{metric_sig}:{sym_clean}"
+    child_keys = tuple(_metric_work_key(m, sym_clean) for m in requested_metrics)
 
     return MARKET_DATA_COORDINATOR.enqueue(
         work_type=WorkType.MARKET_DATA.value,
@@ -3692,16 +4760,17 @@ def enqueue_market_symbol_fallback(
         fn=_acquire_symbol_fallback_raw,
         args=(sym_clean, clean_status),
         kwargs={
-            "need_price": need_price,
-            "fetch_chart": fetch_chart,
-            "fetch_premarket_vol": fetch_premarket_vol,
-            "include_finnhub": need_price and USE_FINNHUB,
-            "include_fast_info": need_fast_info,
-            "include_polygon_vol": include_polygon_vol,
-            "include_prev_close": need_prev_close,
-            "include_chart_open": need_chart_open,
+            "need_price": need_price_eff,
+            "fetch_chart": fetch_chart_eff,
+            "fetch_premarket_vol": fetch_pre_vol_eff,
+            "include_finnhub": bool(need_price_eff and USE_FINNHUB),
+            "include_fast_info": False,
+            "include_polygon_vol": include_polygon_vol_eff,
+            "include_prev_close": include_prev_close_eff,
+            "include_chart_open": include_chart_open_eff,
+            "requested_metrics": requested_metrics,
         },
-        result_key=WorkKey(WorkType.MARKET_DATA.value, logical_target),
+        child_keys=child_keys,
     )
 
 
@@ -3734,64 +4803,19 @@ def apply_background_market_data_results() -> List[Tuple[WorkResult, bool, str]]
         return []
 
     pending_fallbacks: Dict[str, dict] = {}
+    batch_quote_applied: Dict[str, str] = {}
     ny_tz = ZoneInfo("America/New_York")
     now_ny = datetime.now(ny_tz)
 
     def _publish_market_data_result(res: WorkResult) -> None:
-        if not isinstance(res.data, dict):
-            raise ValueError(f"Malformed market-data payload for {res.key}")
-
-        kind = res.data.get("kind")
-        if kind == "batch_quote":
-            sym = res.data.get("symbol") or res.key.target.removeprefix("QUOTE:")
-            obs_ny = parse_utc_iso8601_timestamp(res.obs_time).astimezone(ny_tz)
-            meta = _apply_quote_and_fallback_to_cache(
-                symbol=sym,
-                status=res.data.get("status", "OPEN"),
-                quote_data=res.data.get("quote_data"),
-                obs_time_override=obs_ny,
-                allow_cache_previous=False,
-                now_ny=now_ny,
-            )
-            if meta.get("needs_supplement"):
-                pending_fallbacks[sym] = {
-                    "need_price": False,
-                    "needs_pre_vol": meta.get("needs_pre_vol", False),
-                    "needs_post_vol": meta.get("needs_post_vol", False),
-                    "need_fast_info": meta.get("need_fast_info", False),
-                    "need_prev_close": meta.get("need_prev_close", False),
-                    "need_chart_open": meta.get("need_chart_open", False),
-                }
-        elif kind == "symbol_fallback":
-            sym = res.data.get("symbol") or res.key.target.removeprefix("QUOTE:").removeprefix("QUOTE_SUPPLEMENT:")
-            obs_ny = parse_utc_iso8601_timestamp(res.obs_time).astimezone(ny_tz)
-            supplement_only = bool(res.data.get("supplement_only", False))
-            _apply_quote_and_fallback_to_cache(
-                symbol=sym,
-                status=res.data.get("status", "OPEN"),
-                fast_info_data=res.data.get("fast_info_data"),
-                chart_data=res.data.get("chart_data"),
-                chart_fetched=bool(res.data.get("chart_fetched", False)),
-                premarket_vol_data=res.data.get("premarket_vol_data"),
-                premarket_vol_fetched=bool(res.data.get("premarket_vol_fetched", False)),
-                finnhub_data=res.data.get("finnhub_data"),
-                polygon_vol_data=res.data.get("polygon_vol_data"),
-                alt_prev_close=res.data.get("alt_prev_close"),
-                alt_chart_open=res.data.get("alt_chart_open"),
-                obs_time_override=obs_ny,
-                allow_cache_previous=False,
-                supplement_only=supplement_only,
-                now_ny=now_ny,
-            )
-        elif kind == "vwap":
-            sym = res.data.get("symbol") or res.key.target.removeprefix("VWAP:")
-            v_true = _compute_vwap_from_payload(res.data)
-            v_status, v_num = classify_market_numeric(v_true)
-            if v_status != "VALID" or v_num is None or v_num <= 0:
-                raise ValueError(f"Invalid or non-positive VWAP observation for {sym}")
-            cache.vwaps[sym] = float(v_num)
-        else:
-            raise ValueError(f"Unknown market-data payload kind: {kind}")
+        sym, metric_name, updates, prov_entry = _build_metric_cache_candidate(res, now_ny=now_ny)
+        _publish_metric_cache_candidate(sym, metric_name, updates, prov_entry)
+        if (
+            isinstance(res.data, dict)
+            and metric_name == MARKET_METRIC_QUOTE
+            and res.data.get("from_batch")
+        ):
+            batch_quote_applied[sym] = str(res.data.get("status") or "OPEN").strip().upper()
 
     audit = MARKET_DATA_RESULT_APPLICATOR.apply_results(
         results=results,
@@ -3801,26 +4825,58 @@ def apply_background_market_data_results() -> List[Tuple[WorkResult, bool, str]]
         on_publish=_publish_market_data_result,
     )
 
+    for sym, clean_status in batch_quote_applied.items():
+        needs_pre_vol = cache.pre_market_volume.get(sym, 0) == 0
+        needs_post_vol = (clean_status in ("AFTER-HOURS", "CLOSED") and cache.after_hours_volume.get(sym, 0) == 0)
+        need_prev_close = (clean_status != "PRE-MARKET" and sym not in cache.regular_close)
+        need_polygon_vol = bool(USE_POLYGON and sym not in cache.previous_session_volume)
+        need_chart_open = False
+        if clean_status == "OPEN":
+            reg_open = cache.day_open.get(sym)
+            eff_reg_close = cache.regular_close.get(sym)
+            eff_price = cache.prices.get(sym)
+            if reg_open and eff_price and eff_reg_close and eff_reg_close > 0:
+                raw_gap = ((float(reg_open) - eff_reg_close) / eff_reg_close) * 100
+                session_chg = ((eff_price - eff_reg_close) / eff_reg_close) * 100
+                if abs(raw_gap) > 3.0 and ((raw_gap < -3.0 and session_chg > 0) or (raw_gap > 3.0 and session_chg < 0)):
+                    need_chart_open = True
+        if needs_pre_vol or needs_post_vol or need_prev_close or need_polygon_vol or need_chart_open:
+            pending_fallbacks[sym] = {
+                "need_price": False,
+                "needs_pre_vol": needs_pre_vol,
+                "needs_post_vol": needs_post_vol,
+                "need_fast_info": False,
+                "need_prev_close": need_prev_close,
+                "need_chart_open": need_chart_open,
+                "need_polygon_vol": need_polygon_vol,
+            }
+
     for res, applied, reason in audit:
         if applied or str(reason).startswith("Stale "):
             continue
         target = res.key.target
         if target.startswith("QUOTE:"):
             sym = target.removeprefix("QUOTE:")
+            if res.error and str(res.error).startswith("No valid provenance-backed price for "):
+                continue
+            cur_status = str(cache.session.get(sym) or "OPEN").strip().upper()
             pending_fallbacks.setdefault(
                 sym,
                 {
                     "need_price": True,
                     "needs_pre_vol": cache.pre_market_volume.get(sym, 0) == 0,
                     "needs_post_vol": cache.after_hours_volume.get(sym, 0) == 0,
-                    "need_fast_info": True,
+                    "need_fast_info": False,
                     "need_prev_close": sym not in cache.regular_close,
                     "need_chart_open": False,
+                    "need_polygon_vol": bool(USE_POLYGON and sym not in cache.previous_session_volume),
                 },
             )
+            if cur_status == "PRE-MARKET":
+                pending_fallbacks[sym]["needs_post_vol"] = False
         elif target.startswith("BATCH_QUOTE:"):
             remainder = target.removeprefix("BATCH_QUOTE:")
-            sym_list_part = remainder.split(":", 1)[1] if ":" in remainder else remainder
+            sym_list_part = remainder.rsplit(":", 1)[1] if ":" in remainder else remainder
             for sym in sym_list_part.split(","):
                 sym = sym.strip()
                 if sym:
@@ -3830,9 +4886,10 @@ def apply_background_market_data_results() -> List[Tuple[WorkResult, bool, str]]
                             "need_price": True,
                             "needs_pre_vol": cache.pre_market_volume.get(sym, 0) == 0,
                             "needs_post_vol": cache.after_hours_volume.get(sym, 0) == 0,
-                            "need_fast_info": True,
+                            "need_fast_info": False,
                             "need_prev_close": sym not in cache.regular_close,
                             "need_chart_open": False,
+                            "need_polygon_vol": bool(USE_POLYGON and sym not in cache.previous_session_volume),
                         },
                     )
 

@@ -23,8 +23,9 @@ import sys
 import threading
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 
@@ -34,12 +35,18 @@ from background_intelligence import (
     BatchObservedResult,
     ChildObservedResult,
     FailureCooldownTracker,
+    MarketDataProvenance,
+    ObservationKind,
     ObservedResult,
+    SessionReferenceValue,
+    TimestampedValue,
     WorkItem,
     WorkKey,
     WorkResult,
     WorkStatus,
     WorkType,
+    current_market_session_date,
+    validate_session_date,
     validate_utc_iso8601_timestamp,
     parse_utc_iso8601_timestamp,
 )
@@ -1891,10 +1898,16 @@ class TestMarketDataResultApplication(unittest.TestCase):
         self.assertEqual((g, s, m), ({}, {}, {}), "market data must never mutate grounding/scout targets")
         return audit
 
-    def _res(self, seq=1, obs=T1, data=None, error=None, key=None):
+    def _res(self, seq=1, obs=T1, data=None, error=None, key=None, provenance="default"):
+        prov = (
+            MarketDataProvenance(ObservationKind.INSTANT, "TEST_PROVIDER")
+            if provenance == "default"
+            else provenance
+        )
         return WorkResult(
             key=key or self.key, sequence=seq, obs_time=obs,
             data={"price": "1"} if data is None and error is None else data, error=error,
+            provenance=prov,
         )
 
     def test_05_callback_is_required(self):
@@ -1944,7 +1957,11 @@ class TestMarketDataResultApplication(unittest.TestCase):
 
         def acquire():
             worker_ident["id"] = threading.get_ident()
-            return {"price": "9"}
+            return ObservedResult(
+                data={"price": "9"},
+                obs_time=T1,
+                provenance=MarketDataProvenance(ObservationKind.INSTANT, "TEST_PROVIDER"),
+            )
 
         _, item = coord.enqueue(MD, "AAPL", T1, acquire)
         self.assertTrue(item.event.wait(5.0))
@@ -2018,9 +2035,27 @@ class TestMarketDataResultApplication(unittest.TestCase):
     def test_11b_end_to_end_superseded_by_real_coordinator_sequence(self):
         coord = BackgroundIntelligenceCoordinator(max_workers=1)
         self.addCleanup(coord.shutdown, 2.0)
-        _, first = coord.enqueue(MD, "AAPL", T1, lambda: {"p": "1"})
+        _, first = coord.enqueue(
+            MD,
+            "AAPL",
+            T1,
+            lambda: ObservedResult(
+                data={"p": "1"},
+                obs_time=T1,
+                provenance=MarketDataProvenance(ObservationKind.INSTANT, "TEST_PROVIDER"),
+            ),
+        )
         self.assertTrue(first.event.wait(5.0))
-        _, second = coord.enqueue(MD, "AAPL", T2, lambda: {"p": "2"})
+        _, second = coord.enqueue(
+            MD,
+            "AAPL",
+            T2,
+            lambda: ObservedResult(
+                data={"p": "2"},
+                obs_time=T2,
+                provenance=MarketDataProvenance(ObservationKind.INSTANT, "TEST_PROVIDER"),
+            ),
+        )
         self.assertEqual(second.sequence, 2)
         self.assertTrue(second.event.wait(5.0))
         results = sorted(_collect_results(coord, 2), key=lambda r: r.sequence)
@@ -2155,7 +2190,13 @@ class TestMarketDataResultApplication(unittest.TestCase):
         grounding, scout_cache, scout_map = {}, {}, {}
         results = [
             WorkResult(key=WorkKey("grounding", "AAPL"), sequence=1, obs_time=T1, data={"h": 1}),
-            WorkResult(key=WorkKey(MD, "AAPL"), sequence=1, obs_time=T1, data={"p": "1"}),
+            WorkResult(
+                key=WorkKey(MD, "AAPL"),
+                sequence=1,
+                obs_time=T1,
+                data={"p": "1"},
+                provenance=MarketDataProvenance(ObservationKind.INSTANT, "TEST_PROVIDER"),
+            ),
         ]
         audit = applicator.apply_results(results, grounding, scout_cache, scout_map, on_publish=self._publish)
         self.assertTrue(all(a[1] for a in audit))
@@ -2165,9 +2206,10 @@ class TestMarketDataResultApplication(unittest.TestCase):
     def test_observed_result_carries_worker_discovered_timestamp(self):
         coord = BackgroundIntelligenceCoordinator(max_workers=1)
         applicator = BackgroundResultApplicator(coordinator=coord)
+        prov = MarketDataProvenance(ObservationKind.INSTANT, "TEST_PROVIDER")
         try:
             def worker():
-                return ObservedResult(data={"price": "188.50"}, obs_time=T2)
+                return ObservedResult(data={"price": "188.50"}, obs_time=T2, provenance=prov)
 
             ok, item = coord.enqueue(MD, "AAPL", obs_time=None, fn=worker)
             self.assertTrue(ok)
@@ -2176,16 +2218,19 @@ class TestMarketDataResultApplication(unittest.TestCase):
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0].obs_time, T2)
             self.assertEqual(results[0].data, {"price": "188.50"})
+            self.assertEqual(results[0].provenance, prov)
             audit = applicator.apply_results(results, {}, {}, {}, on_publish=self._publish)
             self.assertEqual(len(audit), 1)
             self.assertTrue(audit[0][1])
             self.assertEqual(applicator.get_last_applied(WorkKey(MD, "AAPL")), (1, T2))
+            self.assertEqual(applicator.get_last_applied_provenance(WorkKey(MD, "AAPL")), prov)
         finally:
             coord.shutdown()
 
     def test_batch_observed_result_independent_per_child_sequences_and_timestamps(self):
         coord = BackgroundIntelligenceCoordinator(max_workers=1)
         applicator = BackgroundResultApplicator(coordinator=coord)
+        prov_batch = MarketDataProvenance(ObservationKind.INSTANT, "BATCH_QUOTE")
         try:
             k_aapl = WorkKey(MD, "QUOTE:AAPL")
             k_nvda = WorkKey(MD, "QUOTE:NVDA")
@@ -2193,14 +2238,19 @@ class TestMarketDataResultApplication(unittest.TestCase):
 
             def batch_one():
                 return BatchObservedResult(items=(
-                    ChildObservedResult(key=k_aapl, data={"p": "100"}, obs_time=T1),
-                    ChildObservedResult(key=k_nvda, data={"p": "200"}, obs_time="2026-11-14T19:00:00"),  # naive -> fail closed
+                    ChildObservedResult(key=k_aapl, data={"p": "100"}, obs_time=T1, provenance=prov_batch),
+                    ChildObservedResult(
+                        key=k_nvda,
+                        data={"p": "200"},
+                        obs_time="2026-11-14T19:00:00",
+                        provenance=prov_batch,
+                    ),  # naive -> fail closed
                 ))
 
             def batch_two():
                 return BatchObservedResult(items=(
-                    ChildObservedResult(key=k_aapl, data={"p": "101"}, obs_time=T2),
-                    ChildObservedResult(key=k_msft, data={"p": "300"}, obs_time=T2),
+                    ChildObservedResult(key=k_aapl, data={"p": "101"}, obs_time=T2, provenance=prov_batch),
+                    ChildObservedResult(key=k_msft, data={"p": "300"}, obs_time=T2, provenance=prov_batch),
                 ))
 
             ok1, item1 = coord.enqueue(MD, "BATCH:1", fn=batch_one, child_keys=(k_aapl, k_nvda))
@@ -2222,8 +2272,8 @@ class TestMarketDataResultApplication(unittest.TestCase):
             self.assertTrue(audit_map[(k_aapl, 2)])
             self.assertTrue(audit_map[(k_msft, 1)])
             self.assertEqual(
-                [(r.key.target, r.data) for r in self.published],
-                [("QUOTE:AAPL", {"p": "101"}), ("QUOTE:MSFT", {"p": "300"})],
+                [(r.key.target, r.data, r.provenance) for r in self.published],
+                [("QUOTE:AAPL", {"p": "101"}, prov_batch), ("QUOTE:MSFT", {"p": "300"}, prov_batch)],
             )
         finally:
             coord.shutdown()
@@ -2231,16 +2281,18 @@ class TestMarketDataResultApplication(unittest.TestCase):
     def test_result_key_shares_ordering_with_batch_child_keys(self):
         coord = BackgroundIntelligenceCoordinator(max_workers=1)
         applicator = BackgroundResultApplicator(coordinator=coord)
+        prov_batch = MarketDataProvenance(ObservationKind.INSTANT, "BATCH_QUOTE")
+        prov_fb = MarketDataProvenance(ObservationKind.INSTANT, "INTRADAY_CHART")
         try:
             k_aapl = WorkKey(MD, "QUOTE:AAPL")
 
             def batch_fn():
                 return BatchObservedResult(items=(
-                    ChildObservedResult(key=k_aapl, data={"src": "batch"}, obs_time=T1),
+                    ChildObservedResult(key=k_aapl, data={"src": "batch"}, obs_time=T1, provenance=prov_batch),
                 ))
 
             def fallback_fn():
-                return ObservedResult(data={"src": "fallback"}, obs_time=T2)
+                return ObservedResult(data={"src": "fallback"}, obs_time=T2, provenance=prov_fb)
 
             ok1, item1 = coord.enqueue(MD, "BATCH:A", fn=batch_fn, child_keys=(k_aapl,))
             ok2, item2 = coord.enqueue(MD, "QUOTE_FALLBACK:AAPL", fn=fallback_fn, result_key=k_aapl)
@@ -2253,6 +2305,172 @@ class TestMarketDataResultApplication(unittest.TestCase):
             self.assertFalse(audit[0][1])  # superseded batch seq 1
             self.assertTrue(audit[1][1])   # fallback seq 2 applied
             self.assertEqual(self.published[-1].data, {"src": "fallback"})
+            self.assertEqual(self.published[-1].provenance, prov_fb)
+        finally:
+            coord.shutdown()
+
+    def test_17_provenance_contract_cross_field_and_date_validation(self):
+        today_ny = current_market_session_date()
+        valid_past = (today_ny - timedelta(days=2)).isoformat()
+        future_date = (today_ny + timedelta(days=1)).isoformat()
+
+        # Valid instant & session reference contracts
+        p_inst = MarketDataProvenance(ObservationKind.INSTANT, "BATCH_QUOTE")
+        self.assertEqual(p_inst.kind, ObservationKind.INSTANT)
+        self.assertEqual(p_inst.source, "BATCH_QUOTE")
+        self.assertIsNone(p_inst.effective_session_date)
+
+        p_ref = MarketDataProvenance(
+            ObservationKind.SESSION_REFERENCE,
+            "POLYGON_PREV_AGG",
+            effective_session_date=valid_past,
+        )
+        self.assertEqual(p_ref.kind, ObservationKind.SESSION_REFERENCE)
+        self.assertEqual(p_ref.effective_session_date, valid_past)
+
+        # Invalid kind, empty source, contradictory date/timestamp, bad calendar or future dates
+        bad_constructions = [
+            ("instant", "BATCH_QUOTE", None),
+            (ObservationKind.INSTANT, "", None),
+            (ObservationKind.INSTANT, "   ", None),
+            (ObservationKind.INSTANT, None, None),
+            (ObservationKind.INSTANT, "BATCH_QUOTE", valid_past),
+            (ObservationKind.SESSION_REFERENCE, "POLYGON_PREV_AGG", None),
+            (ObservationKind.SESSION_REFERENCE, "POLYGON_PREV_AGG", ""),
+            (ObservationKind.SESSION_REFERENCE, "POLYGON_PREV_AGG", "20261113"),
+            (ObservationKind.SESSION_REFERENCE, "POLYGON_PREV_AGG", "2026/11/13"),
+            (ObservationKind.SESSION_REFERENCE, "POLYGON_PREV_AGG", "2026-02-30"),
+            (ObservationKind.SESSION_REFERENCE, "POLYGON_PREV_AGG", future_date),
+            (ObservationKind.SESSION_REFERENCE, "   ", valid_past),
+        ]
+        for kind, source, eff_date in bad_constructions:
+            with self.subTest(kind=kind, source=source, eff_date=eff_date):
+                with self.assertRaises(ValueError):
+                    MarketDataProvenance(kind=kind, source=source, effective_session_date=eff_date)
+
+        # Immutability check
+        with self.assertRaises(Exception):
+            p_ref.source = "MUTATED"
+
+        # TimestampedValue and SessionReferenceValue contracts
+        tv = TimestampedValue(value=150.5, obs_time=T1, source="FINNHUB")
+        self.assertEqual(tv.obs_time, T1)
+        with self.assertRaises(ValueError):
+            TimestampedValue(value=150.5, obs_time="2026-11-14T19:00:00", source="FINNHUB")
+        with self.assertRaises(ValueError):
+            TimestampedValue(value=150.5, obs_time=T1, source="")
+
+        srv = SessionReferenceValue(value=148.0, effective_session_date=valid_past, source="YAHOO_DAILY_CLOSE")
+        self.assertEqual(srv.effective_session_date, valid_past)
+        with self.assertRaises(ValueError):
+            SessionReferenceValue(value=148.0, effective_session_date=future_date, source="YAHOO_DAILY_CLOSE")
+
+    def test_18_applicator_provenance_fail_closed_and_independent_ordering(self):
+        today_ny = current_market_session_date()
+        d_old = (today_ny - timedelta(days=3)).isoformat()
+        d_mid = (today_ny - timedelta(days=2)).isoformat()
+        d_new = (today_ny - timedelta(days=1)).isoformat()
+
+        # 1. Missing or non-MarketDataProvenance rejected fail-closed for MARKET_DATA
+        for bad_prov in (None, "BATCH_QUOTE", {"kind": "instant", "source": "X"}):
+            audit = self._apply([self._res(seq=1, obs=T1, provenance=bad_prov)])
+            self.assertFalse(audit[0][1])
+            self.assertEqual(self.published, [])
+            self.assertEqual(self.applicator.get_last_applied(self.key), (-1, ""))
+
+        # 2. Contradictory provenance: SESSION_REFERENCE with obs_time present rejected fail-closed
+        prov_ref_mid = MarketDataProvenance(ObservationKind.SESSION_REFERENCE, "POLYGON_PREV_AGG", d_mid)
+        bad_ref = WorkResult(
+            key=WorkKey(MD, "PREVIOUS_SESSION_VOLUME:AAPL"),
+            sequence=1,
+            obs_time=T1,
+            data={"value": 500000},
+            provenance=prov_ref_mid,
+        )
+        audit = self._apply([bad_ref])
+        self.assertFalse(audit[0][1])
+        self.assertIn("SESSION_REFERENCE", audit[0][2])
+        self.assertEqual(self.published, [])
+
+        # 3. Valid SESSION_REFERENCE accepted with obs_time=None and never advances instant obs_time
+        k_prev_vol = WorkKey(MD, "PREVIOUS_SESSION_VOLUME:AAPL")
+        r_ref_1 = WorkResult(
+            key=k_prev_vol,
+            sequence=1,
+            obs_time=None,
+            data={"value": 500000},
+            provenance=prov_ref_mid,
+        )
+        audit1 = self._apply([r_ref_1])
+        self.assertTrue(audit1[0][1], audit1[0][2])
+        self.assertEqual(self.applicator.get_last_applied(k_prev_vol), (1, ""))
+        self.assertEqual(self.applicator.get_last_applied_session_date(k_prev_vol), d_mid)
+        self.assertEqual(self.applicator.get_last_applied_provenance(k_prev_vol), prov_ref_mid)
+
+        # 4. Older session reference rejected even with higher sequence
+        prov_ref_old = MarketDataProvenance(ObservationKind.SESSION_REFERENCE, "POLYGON_PREV_AGG", d_old)
+        r_ref_old = WorkResult(
+            key=k_prev_vol,
+            sequence=2,
+            obs_time=None,
+            data={"value": 400000},
+            provenance=prov_ref_old,
+        )
+        audit_old = self._apply([r_ref_old])
+        self.assertFalse(audit_old[0][1])
+        self.assertIn("Stale session reference", audit_old[0][2])
+        self.assertEqual(self.applicator.get_last_applied_session_date(k_prev_vol), d_mid)
+        self.assertEqual(self.applicator.get_last_applied(k_prev_vol), (1, ""))
+
+        # 5. Failed on_publish for newer SESSION_REFERENCE leaves session_date & provenance unchanged
+        prov_ref_new = MarketDataProvenance(ObservationKind.SESSION_REFERENCE, "POLYGON_PREV_AGG", d_new)
+        r_ref_new = WorkResult(
+            key=k_prev_vol,
+            sequence=3,
+            obs_time=None,
+            data={"value": 650000},
+            provenance=prov_ref_new,
+        )
+        audit_fail = self._apply([r_ref_new], on_publish=lambda _r: (_ for _ in ()).throw(RuntimeError("boom")))
+        self.assertFalse(audit_fail[0][1])
+        self.assertEqual(self.applicator.get_last_applied_session_date(k_prev_vol), d_mid)
+        self.assertEqual(self.applicator.get_last_applied_provenance(k_prev_vol), prov_ref_mid)
+
+        # Retrying sequence 3 succeeds and advances cleanly
+        audit_ok = self._apply([r_ref_new])
+        self.assertTrue(audit_ok[0][1])
+        self.assertEqual(self.applicator.get_last_applied_session_date(k_prev_vol), d_new)
+        self.assertEqual(self.applicator.get_last_applied_provenance(k_prev_vol), prov_ref_new)
+        self.assertEqual(self.applicator.get_last_applied(k_prev_vol), (3, ""))
+
+    def test_19_batch_fanout_preserves_mixed_provenance_without_crosstalk(self):
+        today_ny = current_market_session_date()
+        d_prev = (today_ny - timedelta(days=1)).isoformat()
+        coord = BackgroundIntelligenceCoordinator(max_workers=1)
+        applicator = BackgroundResultApplicator(coordinator=coord)
+        prov_q = MarketDataProvenance(ObservationKind.INSTANT, "INTRADAY_CHART")
+        prov_ref = MarketDataProvenance(ObservationKind.SESSION_REFERENCE, "YAHOO_DAILY_CLOSE", d_prev)
+        try:
+            k_q = WorkKey(MD, "QUOTE:AAPL")
+            k_rc = WorkKey(MD, "REGULAR_CLOSE:AAPL")
+
+            def worker():
+                return BatchObservedResult(items=(
+                    ChildObservedResult(key=k_q, data={"value": 212.0}, obs_time=T2, provenance=prov_q),
+                    ChildObservedResult(key=k_rc, data={"value": 208.5}, obs_time=None, provenance=prov_ref),
+                ))
+
+            ok, item = coord.enqueue(MD, "MIXED:AAPL", fn=worker, child_keys=(k_q, k_rc))
+            self.assertTrue(ok)
+            self.assertTrue(item.event.wait(timeout=3.0))
+            audit = applicator.apply_results(coord.drain_results(), {}, {}, {}, on_publish=self._publish)
+            self.assertEqual(len(audit), 2)
+            self.assertTrue(all(ok for _, ok, _ in audit))
+            self.assertEqual(applicator.get_last_applied(k_q), (1, T2))
+            self.assertEqual(applicator.get_last_applied_provenance(k_q), prov_q)
+            self.assertEqual(applicator.get_last_applied(k_rc), (1, ""))
+            self.assertEqual(applicator.get_last_applied_session_date(k_rc), d_prev)
+            self.assertEqual(applicator.get_last_applied_provenance(k_rc), prov_ref)
         finally:
             coord.shutdown()
 
