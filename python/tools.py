@@ -17,6 +17,11 @@ from tool_registry import (
     authorize_financial_mutation,
 )
 
+try:
+    from persistence import get_persistence_service
+except ImportError:
+    from python.persistence import get_persistence_service
+
 # We import from the existing fetch_stocks to leverage its battle-tested logic
 from fetch_stocks import handle_paste, run_daemon
 import fetch_stocks
@@ -67,11 +72,9 @@ class MockRequest:
 
 def read_ssot() -> str:
     """Reads the current Single Source of Truth (SSoT) state."""
-    path = "context/ssot.json"
-    if not os.path.exists(path):
-        return "{}"
     try:
-        data = atomic_read_json(path, default={})
+        service = get_persistence_service()
+        data = service.get_ssot_data()
         return json.dumps(data, indent=2)
     except Exception as e:
         return f"Error reading SSoT: {str(e)}"
@@ -104,17 +107,13 @@ def update_ssot(payload_json: str) -> str:
         except Exception as ie:
             print(f"[System Warning] Decision interception inside update_ssot failed: {ie}")
 
-        req = MockRequest({"payload": json.dumps(payload_data)})
+        service = get_persistence_service()
+        res = service.update_ssot_payload(payload_data)
 
-        # Run the async handler synchronously
-        res = asyncio.run(handle_paste(req))
-
-        res_body = json.loads(res.body.decode("utf-8"))
-
-        if res_body.get("status") == "success":
+        if res.get("status") == "success":
             return "SSoT updated successfully."
         else:
-            return f"Error updating SSoT: {res_body.get('message')}"
+            return f"Error updating SSoT: {res.get('message', 'Update failed')}"
 
     except PermissionError:
         raise
@@ -124,11 +123,9 @@ def update_ssot(payload_json: str) -> str:
 
 def read_trade_lessons() -> str:
     """Reads the historical trade lessons."""
-    path = "context/trade_lessons.json"
-    if not os.path.exists(path):
-        return "[]"
     try:
-        data = atomic_read_json(path, default=[])
+        service = get_persistence_service()
+        data = service.get_trade_lessons()
         return json.dumps(data, indent=2)
     except Exception as e:
         return f"Error reading trade lessons: {str(e)}"
@@ -145,32 +142,9 @@ def update_trade_lessons(lessons_json: str) -> str:
         payload=lessons_json,
     )
 
-    path = "context/trade_lessons.json"
     try:
-        if isinstance(lessons_json, str):
-            new_data = json.loads(lessons_json)
-        else:
-            new_data = lessons_json
-
-        def _apply_lessons_update(file_content):
-            current_data = []
-            is_dict_format = False
-            if isinstance(file_content, dict) and "trade_lessons" in file_content:
-                current_data = list(file_content["trade_lessons"])
-                is_dict_format = True
-            elif isinstance(file_content, list):
-                current_data = list(file_content)
-
-            if isinstance(new_data, list):
-                current_data.extend(new_data)
-            elif isinstance(new_data, dict) and "trade_lessons" in new_data:
-                current_data.extend(new_data["trade_lessons"])
-            else:
-                current_data.append(new_data)
-
-            return {"trade_lessons": current_data} if is_dict_format else current_data
-
-        atomic_update_json(path, _apply_lessons_update, default_factory=list)
+        service = get_persistence_service()
+        service.save_trade_lessons(lessons_json)
         return "Trade lessons updated successfully."
     except PermissionError:
         raise
@@ -180,11 +154,9 @@ def update_trade_lessons(lessons_json: str) -> str:
 
 def read_decision_log() -> str:
     """Reads the continuous time-series ledger of all Council decisions (decision_log.json)."""
-    path = "context/decision_log.json"
-    if not os.path.exists(path):
-        return "[]"
     try:
-        data = atomic_read_json(path, default=[])
+        service = get_persistence_service()
+        data = service.get_decision_log()
         return json.dumps(data, indent=2)
     except Exception as e:
         return f"Error reading decision log: {str(e)}"
@@ -329,44 +301,11 @@ def intercept_and_log_decision(data_input) -> None:
                             )
 
                 if turn_log["decisions"]:
-                    decision_log_file = "context/decision_log.json"
-                    appended_flag = {"appended": False}
-
-                    def _update_decision_ledger(existing_content):
-                        is_dict = False
-                        if isinstance(existing_content, dict) and "decision_log" in existing_content:
-                            log_data = list(existing_content["decision_log"])
-                            is_dict = True
-                        elif isinstance(existing_content, list):
-                            log_data = list(existing_content)
-                        else:
-                            log_data = []
-
-                        duplicate = False
-                        if log_data:
-                            last_entry = log_data[-1]
-                            if (
-                                isinstance(last_entry, dict)
-                                and last_entry.get("timestamp") == ts
-                                and last_entry.get("decisions") == turn_log["decisions"]
-                            ):
-                                duplicate = True
-
-                        if not duplicate:
-                            log_data.append(turn_log)
-                            if len(log_data) > 300:
-                                log_data = log_data[-300:]
-                            appended_flag["appended"] = True
-
-                        return {"decision_log": log_data} if is_dict else log_data
-
-                    atomic_update_json(
-                        decision_log_file, _update_decision_ledger, default_factory=list
+                    service = get_persistence_service()
+                    service.append_decision_log(turn_log)
+                    print(
+                        f"[System] Decision Log Appended: {len(turn_log['decisions'])} decisions."
                     )
-                    if appended_flag["appended"]:
-                        print(
-                            f"[System] Decision Log Appended: {len(turn_log['decisions'])} decisions."
-                        )
                     break
     except PermissionError:
         raise

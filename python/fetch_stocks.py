@@ -33,6 +33,11 @@ from yfinance.data import YfData
 import threading
 from atomic_io import atomic_write_json, atomic_read_json, atomic_update_json
 from tool_registry import authorize_financial_mutation
+
+try:
+    from persistence import get_persistence_service
+except ImportError:
+    from python.persistence import get_persistence_service
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
@@ -429,64 +434,31 @@ FORCE_REFRESH = False
 def _load_ssot_tickers():
     global ACTIVE_SCOUT_TICKERS, PROCESSED_SCOUT_CATEGORIES, SCOUTED_TICKER_TO_CATEGORY_MAP
     try:
-        if os.path.exists('context/ssot.json'):
-            with open('context/ssot.json', 'r', encoding='utf-8') as f:
-                ssot = json.load(f)
-            
-            ms = ssot.get('mutable_state', {})
-            ep = ssot.get('EXECUTION_PAYLOAD', {})
-            
-            raw_portfolio = (
-                ms.get('portfolio_snapshot') or
-                ssot.get('portfolio_snapshot') or
-                ep.get('portfolio_snapshot') or
-                []
-            )
-            portfolio = [
-                t['ticker'].strip().upper() for t in raw_portfolio 
-                if isinstance(t, dict) and t.get('ticker') and is_valid_ticker(t.get('ticker'))
-            ]
-            
-            watched = [
-                w.strip().upper() for w in (
-                    ms.get('watched_tickers') or
-                    ssot.get('watched_tickers') or
-                    ep.get('watched_tickers') or
-                    []
-                ) if isinstance(w, str) and is_valid_ticker(w)
-            ]
-            
-            # Also check config.json for user watchlist
-            if os.path.exists('context/config.json'):
-                try:
-                    with open('context/config.json', 'r', encoding='utf-8') as cf:
-                        cfg_w = json.load(cf).get('WATCHLIST', [])
-                        for w in cfg_w:
-                            if isinstance(w, str) and is_valid_ticker(w):
-                                w_clean = w.strip().upper()
-                                if w_clean not in watched:
-                                    watched.append(w_clean)
-                except: pass
-                
-            scouts = ms.get('scout_categories', ssot.get('scout_categories', []))
-            
-            scout_tickers = []
-            SCOUTED_TICKER_TO_CATEGORY_MAP.clear()
-            for cat in scouts:
-                cat_tickers = _get_dynamic_scout_tickers(cat)[:5]
-                for t in cat_tickers:
-                    SCOUTED_TICKER_TO_CATEGORY_MAP[t.upper()] = cat
-                scout_tickers.extend(cat_tickers)
-            
-            ACTIVE_SCOUT_TICKERS = {t.upper() for t in scout_tickers if is_valid_ticker(t)}
-            PROCESSED_SCOUT_CATEGORIES = list(scouts)
-                    
-            combined = []
-            for t in portfolio + watched + list(ACTIVE_SCOUT_TICKERS):
-                t_upper = t.upper()
-                if t_upper not in combined and is_valid_ticker(t_upper):
-                    combined.append(t_upper)
-            return combined
+        service = get_persistence_service()
+        combined_base = service.get_ssot_tickers()
+        portfolio_and_watched = [t.upper() for t in combined_base if is_valid_ticker(t)]
+
+        # Scout categories dynamic tickers
+        scout_dict = service.get_scout_categories()
+        scouts = list(scout_dict.keys()) if isinstance(scout_dict, dict) else list(scout_dict)
+
+        scout_tickers = []
+        SCOUTED_TICKER_TO_CATEGORY_MAP.clear()
+        for cat in scouts:
+            cat_tickers = _get_dynamic_scout_tickers(cat)[:5]
+            for t in cat_tickers:
+                SCOUTED_TICKER_TO_CATEGORY_MAP[t.upper()] = cat
+            scout_tickers.extend(cat_tickers)
+
+        ACTIVE_SCOUT_TICKERS = {t.upper() for t in scout_tickers if is_valid_ticker(t)}
+        PROCESSED_SCOUT_CATEGORIES = list(scouts)
+
+        combined = []
+        for t in portfolio_and_watched + list(ACTIVE_SCOUT_TICKERS):
+            t_upper = t.upper()
+            if t_upper not in combined and is_valid_ticker(t_upper):
+                combined.append(t_upper)
+        return combined
     except Exception as e:
         print(f"[SSOT] Load failed: {e}")
     return config.get("DEFAULT_TICKERS", ["AAPL", "MSFT", "GOOGL", "NVDA"])
@@ -507,22 +479,10 @@ def _load_macro_tickers():
 # Clear active scout categories on startup to defer yahoo finance queries
 try:
     if os.path.exists('context/ssot.json'):
-        with open('context/ssot.json', 'r', encoding='utf-8') as f:
-            ssot_data = json.load(f)
-        
-        has_changed = False
-        if "mutable_state" in ssot_data:
-            if ssot_data["mutable_state"].get("scout_categories"):
-                ssot_data["mutable_state"]["scout_categories"] = []
-                has_changed = True
-        else:
-            if ssot_data.get("scout_categories"):
-                ssot_data["scout_categories"] = []
-                has_changed = True
-                
-        if has_changed:
-            with open('context/ssot.json', 'w', encoding='utf-8') as f:
-                json.dump(ssot_data, f, indent=2)
+        service = get_persistence_service()
+        scouts = service.get_scout_categories()
+        if scouts:
+            service.save_scout_categories([])
             print("[SSOT] Active scout categories cleared on startup to defer loading.")
 except Exception as e:
     print(f"[SSOT] Clear scout categories failed: {e}")
@@ -638,15 +598,12 @@ async def get_grounding(symbol: str = "UMAC"):
     return JSONResponse({"status": "success", "symbol": symbol.upper(), "grounding": result})
 
 @app.get("/api/get_basket")
-
 def get_basket():
     try:
-        if os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r") as f:
-                data = json.load(f)
-                ms = data.get("mutable_state", data)
-                raw_basket = ms.get("portfolio_snapshot", [])
-                return JSONResponse([{"ticker": i["ticker"], "shares": i.get("shares", 0), "wac": i.get("wac", 0)} for i in raw_basket])
+        service = get_persistence_service()
+        basket = service.get_portfolio_basket()
+        raw_basket = basket.get("portfolio", [])
+        return JSONResponse([{"ticker": i["ticker"], "shares": i.get("shares", 0), "wac": i.get("wac", 0)} for i in raw_basket])
     except Exception as e:
         print(f"SSoT Read Warning: {e}")
     return JSONResponse([])
@@ -657,31 +614,25 @@ async def save_basket(req: Request):
     try:
         basket = await req.json()
         authorize_financial_mutation("update_ssot", "context/ssot.json", payload=basket)
-        if os.path.exists("context/ssot.json"):
-            new_snapshot = []
-            for item in basket:
-                if item.get("shares", 0) > 0:
-                    new_snapshot.append({
-                        "ticker": item["ticker"],
-                        "shares": item["shares"],
-                        "wac": item["wac"]
-                    })
+        new_snapshot = []
+        for item in basket:
+            if item.get("shares", 0) > 0:
+                new_snapshot.append({
+                    "ticker": item["ticker"],
+                    "shares": item["shares"],
+                    "wac": item["wac"]
+                })
 
-            def _update_basket(data):
-                if not isinstance(data, dict):
-                    data = {}
-                if "mutable_state" in data:
-                    data["mutable_state"]["portfolio_snapshot"] = new_snapshot
-                else:
-                    data["portfolio_snapshot"] = new_snapshot
-                return data
+        service = get_persistence_service()
+        existing_basket = service.get_portfolio_basket()
+        cash_eur = existing_basket.get("unallocated_cash_eur", 0.0)
+        cash_usd = existing_basket.get("unallocated_cash_usd", 0.0)
+        service.save_portfolio_basket(new_snapshot, unallocated_cash_eur=cash_eur, unallocated_cash_usd=cash_usd)
 
-            atomic_update_json("context/ssot.json", _update_basket, default_factory=dict)
-
-            # Reload TICKERS
-            TICKERS = _load_ssot_tickers()
-            ALL_TICKERS = TICKERS + MACRO_TICKERS
-            return JSONResponse({"status": "success"})
+        # Reload TICKERS
+        TICKERS = _load_ssot_tickers()
+        ALL_TICKERS = TICKERS + MACRO_TICKERS
+        return JSONResponse({"status": "success"})
     except PermissionError:
         raise
     except Exception as e:
@@ -691,19 +642,8 @@ async def save_basket(req: Request):
 @app.get("/api/get_watch_list")
 def get_watch_list():
     try:
-        watchlist = []
-        if os.path.exists("context/config.json"):
-            with open("context/config.json", "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-                watchlist = cfg.get("WATCHLIST", [])
-
-        if not watchlist and os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r", encoding="utf-8") as f:
-                data = json.load(f)
-                ms = data.get("mutable_state", data)
-                watchlist = ms.get("watched_tickers", data.get("watched_tickers", []))
-
-        watchlist = [w.strip().upper() for w in watchlist if isinstance(w, str) and w.strip()]
+        service = get_persistence_service()
+        watchlist = service.get_watchlist()
         return JSONResponse(watchlist)
     except Exception:
         pass
@@ -726,31 +666,13 @@ async def save_watch_list(req: Request):
 
         new_list = [w.strip().upper() for w in new_list if isinstance(w, str) and w.strip()]
 
-        # 1. Update config.json (ENH_83)
-        if os.path.exists("context/config.json"):
-            def _update_cfg_wl(cfg):
-                if not isinstance(cfg, dict):
-                    cfg = {}
-                cfg["WATCHLIST"] = new_list
-                return cfg
-            atomic_update_json("context/config.json", _update_cfg_wl, default_factory=dict)
+        service = get_persistence_service()
+        service.save_watchlist(new_list)
 
-        # 2. Update ssot.json
-        if os.path.exists("context/ssot.json"):
-            def _update_ssot_wl(data):
-                if not isinstance(data, dict):
-                    data = {}
-                if "mutable_state" in data:
-                    data["mutable_state"]["watched_tickers"] = new_list
-                else:
-                    data["watched_tickers"] = new_list
-                return data
-            atomic_update_json("context/ssot.json", _update_ssot_wl, default_factory=dict)
-
-            # Reload TICKERS
-            TICKERS = _load_ssot_tickers()
-            ALL_TICKERS = TICKERS + MACRO_TICKERS
-            return JSONResponse({"status": "success"})
+        # Reload TICKERS
+        TICKERS = _load_ssot_tickers()
+        ALL_TICKERS = TICKERS + MACRO_TICKERS
+        return JSONResponse({"status": "success"})
     except PermissionError:
         raise
     except Exception as e:
@@ -988,402 +910,62 @@ async def handle_paste(req: Request):
             body = await req.json()
             clip_data = body.get("payload", "")
         
-        # Process the clipboard data string
-        if "```" in clip_data:
-            match = re.search(r"```(?:json)?\s*(.*?)\s*```", clip_data, re.IGNORECASE | re.DOTALL)
-            if match: clip_data = match.group(1)
-            
-        clip_data = re.sub(r'\[cite_start\]', '', clip_data)
-        clip_data = re.sub(r'\[cite:\s*\d+(?:,\s*\d+)*\]', '', clip_data)
-        clip_data = clip_data.strip()
-        
-        clip_data = clip_data.strip()
-        
-        if not (clip_data.startswith('{') or clip_data.startswith('[')) or not (clip_data.endswith('}') or clip_data.endswith(']')):
-            start_brace = clip_data.find('{')
-            start_bracket = clip_data.find('[')
-            start_idx = -1
-            if start_brace != -1 and start_bracket != -1: start_idx = min(start_brace, start_bracket)
-            elif start_brace != -1: start_idx = start_brace
-            else: start_idx = start_bracket
-            
-            if start_idx != -1:
-                end_brace = clip_data.rfind('}')
-                end_bracket = clip_data.rfind(']')
-                end_idx = max(end_brace, end_bracket)
-                if end_idx != -1 and end_idx > start_idx:
-                    clip_data = clip_data[start_idx:end_idx+1]
-        
-        payload = json.loads(clip_data.strip())
-        
-        # Map common payload aliases to canonical keys
-        def map_aliases(data):
-            if not isinstance(data, dict): return
-            if "portfolio" in data and "portfolio_snapshot" not in data:
-                data["portfolio_snapshot"] = data.pop("portfolio")
-            if "terminal_state" in data and "state_context" not in data:
-                data["state_context"] = data.pop("terminal_state")
-            if "forensic_alerts" in data and "forensic_intelligence" not in data:
-                data["forensic_intelligence"] = data.pop("forensic_alerts")
-        
-        map_aliases(payload)
-        if isinstance(payload.get("mutable_state"), dict):
-            map_aliases(payload["mutable_state"])
-        if isinstance(payload.get("EXECUTION_PAYLOAD"), dict):
-            map_aliases(payload["EXECUTION_PAYLOAD"])
-            
-        # Helper to extract and remove lessons from payload regardless of nesting
-        def extract_and_remove(data, key):
-            val = None
-            if key in data:
-                val = data.pop(key, None)
-            elif "mutable_state" in data and isinstance(data["mutable_state"], dict) and key in data["mutable_state"]:
-                val = data["mutable_state"].pop(key, None)
-            elif "EXECUTION_PAYLOAD" in data and isinstance(data["EXECUTION_PAYLOAD"], dict) and key in data["EXECUTION_PAYLOAD"]:
-                val = data["EXECUTION_PAYLOAD"].pop(key, None)
-            return val
+        service = get_persistence_service()
+        res = service.update_ssot_payload(clip_data)
 
-        # Extract lesson data *before* merging
-        extracted_compressed = extract_and_remove(payload, "compressed_trade_lessons")
-        extracted_new = extract_and_remove(payload, "new_trade_lessons")
-        extracted_trade_lessons = extract_and_remove(payload, "trade_lessons") or []
-        if isinstance(extracted_trade_lessons, dict) and "trade_lessons" in extracted_trade_lessons:
-            extracted_trade_lessons = extracted_trade_lessons["trade_lessons"]
-        if not isinstance(extracted_trade_lessons, list):
-            extracted_trade_lessons = []
-            
-        extracted_rev_trade_lessons = extract_and_remove(payload, "trade_lessons_revision") or []
-        if isinstance(extracted_rev_trade_lessons, dict) and "trade_lessons" in extracted_rev_trade_lessons:
-            extracted_rev_trade_lessons = extracted_rev_trade_lessons["trade_lessons"]
-        elif isinstance(extracted_rev_trade_lessons, dict) and "trade_lessons_revision" in extracted_rev_trade_lessons:
-            extracted_rev_trade_lessons = extracted_rev_trade_lessons["trade_lessons_revision"]
-        if not isinstance(extracted_rev_trade_lessons, list):
-            extracted_rev_trade_lessons = []
-            
-        extracted_trade_lessons.extend(extracted_rev_trade_lessons)
-        if not extracted_trade_lessons:
-            extracted_trade_lessons = None
-            
-        extracted_mutations = extract_and_remove(payload, "rule_mutations")
+        # Check for rule mutations requiring owner approval
+        try:
+            parsed = {}
+            if isinstance(clip_data, str):
+                clean_clip = clip_data.strip()
+                if "```" in clean_clip:
+                    m = re.search(r"```(?:json)?\s*(.*?)\s*```", clean_clip, re.IGNORECASE | re.DOTALL)
+                    if m:
+                        clean_clip = m.group(1).strip()
+                if clean_clip.startswith("{") or clean_clip.startswith("["):
+                    parsed = json.loads(clean_clip)
+            elif isinstance(clip_data, dict):
+                parsed = clip_data
 
-        # ENH_31: Promote key fields from EXECUTION_PAYLOAD to state root for immediate SSoT synchronization
-        # This ensures that 'allocations' (portfolio_snapshot) and other directives are applied to the active state.
-        incoming_ep = payload.get("EXECUTION_PAYLOAD")
-        if not incoming_ep and isinstance(payload.get("mutable_state"), dict):
-            incoming_ep = payload["mutable_state"].get("EXECUTION_PAYLOAD")
-            
-        # Determine source of truth for promotion (dict or root payload if flag is True)
-        ep_source = None
-        if isinstance(incoming_ep, dict):
-            ep_source = incoming_ep
-        elif incoming_ep is True:
-            ep_source = payload
-
-        if ep_source:
-            promotion_keys = ["portfolio_snapshot", "risk_metrics", "directive", "timestamp", 
-                              "remaining_cash_eur", "remaining_cash_usd", 
-                              "unallocated_cash_eur", "unallocated_cash_usd",
-                              "base_currency", "exchange_rate", 
-                              "portfolio_total_value_usd", "portfolio_total_value_eur",
-                              "state_context", "forensic_intelligence"]
-            
-            # Source data can be at the root of ep_source or inside its mutable_state
-            source_data = ep_source
-            if "mutable_state" in ep_source and isinstance(ep_source["mutable_state"], dict):
-                source_data = _deep_merge(ep_source, ep_source["mutable_state"])
-
-            # Determine target container for promotion
-            target_container = payload
-            if isinstance(payload.get("mutable_state"), dict):
-                target_container = payload["mutable_state"]
-                
-            for k in promotion_keys:
-                if k in source_data:
-                    # Directives Supremacy (ENH_31-P): Promote portfolio_snapshot as both active portfolio_snapshot and proposed_portfolio_snapshot
-                    if k == "portfolio_snapshot":
-                        target_container["portfolio_snapshot"] = source_data[k]
-                    # For all other promotion keys, promote/overwrite them to target_container
-                    else:
-                        target_container[k] = source_data[k]
-
-        # Merge local ssot under a single read-modify-write lock (Stage 1.1 R6)
-        raw_payload = payload
-
-        def _merge_ssot_state(existing_ssot):
-            if not isinstance(existing_ssot, dict):
-                existing_ssot = {}
-            local_payload = _deep_merge({}, raw_payload)
-
-            # Check if existing SSoT uses the v4.9x Layer Model
-            has_layer_model = "mutable_state" in existing_ssot
-
-            # If payload provides naked keys but existing uses Layer Model, wrap the payload in mutable_state
-            if has_layer_model and "mutable_state" not in local_payload and "immutable_background" not in local_payload:
-                local_payload = {"mutable_state": local_payload}
-
-            if existing_ssot:
-                existing_portfolio = existing_ssot.get("mutable_state", {}).get("portfolio_snapshot", []) if has_layer_model else existing_ssot.get("portfolio_snapshot", [])
-
-                has_payload_portfolio = False
-                payload_portfolio = None
-                if has_layer_model:
-                    if "mutable_state" in local_payload and isinstance(local_payload["mutable_state"], dict) and "portfolio_snapshot" in local_payload["mutable_state"]:
-                        payload_portfolio = local_payload["mutable_state"]["portfolio_snapshot"]
-                        has_payload_portfolio = True
-                else:
-                    if "portfolio_snapshot" in local_payload:
-                        payload_portfolio = local_payload["portfolio_snapshot"]
-                        has_payload_portfolio = True
-
-                if has_payload_portfolio:
-                    if not payload_portfolio and existing_portfolio:
-                        merged_portfolio = existing_portfolio
-                    else:
-                        if ep_source is not None:
-                            existing_by_ticker = {}
-                            for item in existing_portfolio:
-                                if isinstance(item, dict) and item.get("ticker"):
-                                    existing_by_ticker[item["ticker"].upper()] = item
-
-                            for item in payload_portfolio:
-                                if isinstance(item, dict) and item.get("ticker"):
-                                    ticker_upper = item["ticker"].upper()
-                                    if ticker_upper in existing_by_ticker:
-                                        existing_item = existing_by_ticker[ticker_upper]
-                                        if ("wac" not in item or item.get("wac") in (0, 0.0, None)) and "wac" in existing_item:
-                                            item["wac"] = existing_item["wac"]
-                                        if ("historical_context" not in item or not item.get("historical_context")) and "historical_context" in existing_item:
-                                            item["historical_context"] = existing_item["historical_context"]
-                            merged_portfolio = payload_portfolio
-                        else:
-                            merged_portfolio = _merge_portfolio(existing_portfolio, payload_portfolio)
-
-                    payload_without_portfolio = _deep_merge({}, local_payload)
-                    if has_layer_model:
-                        if "portfolio_snapshot" in payload_without_portfolio.get("mutable_state", {}):
-                            payload_without_portfolio["mutable_state"].pop("portfolio_snapshot")
-                    else:
-                        payload_without_portfolio.pop("portfolio_snapshot", None)
-
-                    merged_ssot = _deep_merge(existing_ssot, payload_without_portfolio)
-
-                    if has_layer_model:
-                        if "mutable_state" not in merged_ssot:
-                            merged_ssot["mutable_state"] = {}
-                        merged_ssot["mutable_state"]["portfolio_snapshot"] = merged_portfolio
-                    else:
-                        merged_ssot["portfolio_snapshot"] = merged_portfolio
-                else:
-                    merged_ssot = _deep_merge(existing_ssot, local_payload)
-            else:
-                merged_ssot = local_payload
-
-            # Strip trade_lessons keys from ROOT, MUTABLE_STATE, and EXECUTION_PAYLOAD — they are routed to trade_lessons.json
-            for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons", "rule_mutations", "trade_lessons_revision"):
-                merged_ssot.pop(tl_key, None)
-                if "mutable_state" in merged_ssot:
-                    merged_ssot["mutable_state"].pop(tl_key, None)
-                if "EXECUTION_PAYLOAD" in merged_ssot:
-                    merged_ssot["EXECUTION_PAYLOAD"].pop(tl_key, None)
-
-            # SSoT schema validation — prune non-canonical top-level keys to prevent drift
-            CANONICAL_SSOT_KEYS = {
-                "state_context", "portfolio_snapshot", "proposed_portfolio_snapshot", "forensic_intelligence",
-                "runtime_flags", "macro_calendar_shield", "active_orders",
-                "fin_account_gate", "registry_pointers", "overnight_posture",
-                "strategy_timing", "lesson_integration", "immutable_background", "mutable_state",
-                "unallocated_cash_eur", "unallocated_cash_usd",
-                "portfolio_total_value_usd", "portfolio_total_value_eur", "base_currency", "exchange_rate",
-                "scouted_assets_tracked", "risk_metrics", "directive", "EXECUTION_PAYLOAD", "_meta"
-            }
-
-            non_canonical = [k for k in merged_ssot if k not in CANONICAL_SSOT_KEYS]
-            for k in non_canonical:
-                merged_ssot.pop(k)
-
-            if has_layer_model and "mutable_state" in merged_ssot and isinstance(merged_ssot["mutable_state"], dict):
-                non_canonical_mutable = [k for k in merged_ssot["mutable_state"] if k not in CANONICAL_SSOT_KEYS]
-                for k in non_canonical_mutable:
-                    merged_ssot["mutable_state"].pop(k)
-
-            # Process Explicit Deletions
-            del_list = local_payload.get("DELETE_FIELD", [])
-            if not del_list and "mutable_state" in local_payload:
-                del_list = local_payload["mutable_state"].get("DELETE_FIELD", [])
-            if "DELETE_FIELD (optional)" in local_payload:
-                del_list.extend(local_payload["DELETE_FIELD (optional)"])
-            if isinstance(del_list, list) and len(del_list) > 0:
-                target_state = merged_ssot.get("mutable_state", merged_ssot) if has_layer_model else merged_ssot
-                _process_deletions(target_state, del_list)
-                if has_layer_model and "mutable_state" in merged_ssot:
-                    merged_ssot["mutable_state"].pop("DELETE_FIELD", None)
-                    merged_ssot["mutable_state"].pop("DELETE_FIELD (optional)", None)
-                merged_ssot.pop("DELETE_FIELD", None)
-                merged_ssot.pop("DELETE_FIELD (optional)", None)
-
-            return merged_ssot
-
-        atomic_update_json('context/ssot.json', _merge_ssot_state, default_factory=dict)
-
-        def _normalize_lessons(lessons_list):
-            normalized = []
-            for i, item in enumerate(lessons_list):
-                if isinstance(item, str):
-                    normalized.append({"id": i + 1, "rule": item})
-                elif isinstance(item, dict):
-                    new_item = item.copy()
-                    new_item["id"] = i + 1
-                    if "rule" not in new_item and "lesson" in new_item:
-                        new_item["rule"] = new_item.pop("lesson")
-                    normalized.append(new_item)
-                else:
-                    normalized.append({"id": i + 1, "rule": str(item)})
-            return normalized
-
-        # Trade lessons
-        lessons_file = 'context/trade_lessons.json'
-        incoming_lessons = []
-        if extracted_compressed and isinstance(extracted_compressed, list):
-            incoming_lessons.extend(extracted_compressed)
-        if extracted_new and isinstance(extracted_new, list):
-            incoming_lessons.extend(extracted_new)
-        if extracted_trade_lessons and isinstance(extracted_trade_lessons, list):
-            incoming_lessons.extend(extracted_trade_lessons)
-
-        if incoming_lessons:
-            authorize_financial_mutation(
-                operation_name="update_trade_lessons",
-                target_resource=lessons_file,
-                payload=incoming_lessons,
-            )
-
-            def _merge_lessons_state(existing_data):
-                existing_lessons = []
-                if isinstance(existing_data, dict):
-                    existing_lessons = list(existing_data.get("trade_lessons", []))
-                elif isinstance(existing_data, list):
-                    existing_lessons = list(existing_data)
-
-                existing_by_id = {}
-                existing_by_text = {}
-                for lesson in existing_lessons:
-                    if isinstance(lesson, dict):
-                        if "id" in lesson:
-                            existing_by_id[lesson["id"]] = lesson
-                        rule_text = lesson.get("rule", lesson.get("lesson", "")).strip().lower()
-                        if rule_text:
-                            existing_by_text[rule_text] = lesson
-                    elif isinstance(lesson, str):
-                        rule_text = lesson.strip().lower()
-                        if rule_text:
-                            existing_by_text[rule_text] = lesson
-
-                kept_ids = set()
-                new_compiled_lessons = []
-
-                for item in incoming_lessons:
-                    if isinstance(item, str):
-                        match = re.match(r'^(\d+)-(\d+).*PERMANENT', item, re.IGNORECASE)
-                        if match:
-                            start_id = int(match.group(1))
-                            end_id = int(match.group(2))
-                            kept_ids.update(range(start_id, end_id + 1))
-                        else:
-                            rule_text = item.strip().lower()
-                            if rule_text and rule_text in existing_by_text:
-                                continue
-                            new_compiled_lessons.append(item)
-                            if rule_text:
-                                existing_by_text[rule_text] = item
-                    elif isinstance(item, dict):
-                        item_id = item.get("id")
-                        rule_text = item.get("rule", item.get("lesson", "")).strip().lower()
-
-                        if item_id is not None:
-                            kept_ids.add(item_id)
-                            if item_id in existing_by_id:
-                                existing_by_id[item_id].update(item)
-                                new_compiled_lessons.append(existing_by_id[item_id])
-                                if rule_text:
-                                    existing_by_text[rule_text] = existing_by_id[item_id]
-                                continue
-
-                        if rule_text and rule_text in existing_by_text:
-                            existing = existing_by_text[rule_text]
-                            if isinstance(existing, dict):
-                                orig_id = existing.get("id")
-                                existing.update(item)
-                                if orig_id is not None:
-                                    existing["id"] = orig_id
-                            continue
-
-                        new_compiled_lessons.append(item)
-                        if rule_text:
-                            existing_by_text[rule_text] = item
-                    else:
-                        new_compiled_lessons.append(item)
-
-                preserved_lessons = []
-                for lesson in existing_lessons:
-                    if isinstance(lesson, dict):
-                        lid = lesson.get("id")
-                        updated = False
-                        if lid is not None:
-                            for new_lesson in new_compiled_lessons:
-                                if isinstance(new_lesson, dict) and new_lesson.get("id") == lid:
-                                    updated = True
-                                    break
-                        if not updated:
-                            preserved_lessons.append(lesson)
-                    elif isinstance(lesson, str):
-                        preserved_lessons.append(lesson)
-
-                combined_lessons = preserved_lessons + new_compiled_lessons
-                final_normalized = _normalize_lessons(combined_lessons)
-
-                if isinstance(existing_data, dict):
-                    out = dict(existing_data)
-                    out["trade_lessons"] = final_normalized
-                    return out
-                return {"trade_lessons": final_normalized}
-
-            atomic_update_json(lessons_file, _merge_lessons_state, default_factory=dict)
-
-        # Rule mutations require explicit owner approval (Stage 1.1 R2 & R3)
-        if extracted_mutations and isinstance(extracted_mutations, list):
-            rules_file = os.path.join('gem_trading_rules', 'rules.json')
-            authorize_financial_mutation(
-                operation_name="update_rules",
-                target_resource=rules_file,
-                payload=extracted_mutations,
-                requires_owner_approval=True,
-            )
-            if os.path.exists(rules_file):
-                def _apply_rule_mutations(current_rules):
-                    if not isinstance(current_rules, dict):
+            extracted_mutations = parsed.get("rule_mutations") if isinstance(parsed, dict) else None
+            if extracted_mutations and isinstance(extracted_mutations, list):
+                rules_file = os.path.join('gem_trading_rules', 'rules.json')
+                authorize_financial_mutation(
+                    operation_name="update_rules",
+                    target_resource=rules_file,
+                    payload=extracted_mutations,
+                    requires_owner_approval=True,
+                )
+                if os.path.exists(rules_file):
+                    def _apply_rule_mutations(current_rules):
+                        if not isinstance(current_rules, dict):
+                            return current_rules
+                        applied_patches = 0
+                        for mutation in extracted_mutations:
+                            if isinstance(mutation, dict) and "path" in mutation and "value" in mutation:
+                                path = mutation["path"]
+                                val = mutation["value"]
+                                if isinstance(path, list) and len(path) > 0:
+                                    target = current_rules
+                                    valid_path = True
+                                    for p in path[:-1]:
+                                        if p in target and isinstance(target[p], dict):
+                                            target = target[p]
+                                        else:
+                                            valid_path = False
+                                            break
+                                    if valid_path:
+                                        target[path[-1]] = val
+                                        applied_patches += 1
+                        if applied_patches > 0:
+                            print(f"⚠️ RULES MUTATED LOCALLY ({applied_patches} patches applied).")
                         return current_rules
-                    applied_patches = 0
-                    for mutation in extracted_mutations:
-                        if isinstance(mutation, dict) and "path" in mutation and "value" in mutation:
-                            path = mutation["path"]
-                            val = mutation["value"]
-                            if isinstance(path, list) and len(path) > 0:
-                                target = current_rules
-                                valid_path = True
-                                for p in path[:-1]:
-                                    if p in target and isinstance(target[p], dict):
-                                        target = target[p]
-                                    else:
-                                        valid_path = False
-                                        break
-                                if valid_path:
-                                    target[path[-1]] = val
-                                    applied_patches += 1
-                    if applied_patches > 0:
-                        print(f"⚠️ RULES MUTATED LOCALLY ({applied_patches} patches applied).")
-                    return current_rules
 
-                atomic_update_json(rules_file, _apply_rule_mutations, default_factory=dict, indent=4)
+                    atomic_update_json(rules_file, _apply_rule_mutations, default_factory=dict, indent=4)
+        except PermissionError:
+            raise
+        except Exception:
+            pass
 
         return JSONResponse({"status": "success", "message": "Payload ingested successfully"})
     except PermissionError:
@@ -1485,9 +1067,8 @@ class MarketDataCache:
                 "technicals": self.technicals,
                 "last_history_fetch_date": self.last_history_fetch_date
             }
-            os.makedirs("context", exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2)
+            os.makedirs("cache", exist_ok=True)
+            atomic_write_json(path, payload, indent=2)
             print(f"[Cache] Successfully saved daily history cache for {len(serialized_history)} tickers to disk.")
         except Exception as e:
             print(f"[Cache Warning] Failed to save daily history cache: {e}")
@@ -1497,8 +1078,7 @@ class MarketDataCache:
             path = "cache/daily_history_cache.json"
             if not os.path.exists(path):
                 return
-            with open(path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
+            payload = atomic_read_json(path, default={})
             serialized_history = payload.get("history", {})
             for sym, serialized in serialized_history.items():
                 try:

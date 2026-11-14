@@ -17,6 +17,11 @@ import agent_framework
 import tools
 # cloud_sync removed — GDrive Decoupling Guardrail (ANTIGRAVITY v11.03)
 
+try:
+    from persistence import get_persistence_service
+except ImportError:
+    from python.persistence import get_persistence_service
+
 # Import the existing FastAPI app from fetch_stocks
 from fetch_stocks import app, run_daemon, GLOBAL_STATE, CHART_SCREENSHOTS_BUFFER
 
@@ -591,27 +596,24 @@ def chat_endpoint(req: ChatRequest):
                 for p in portfolio
             ] if portfolio else []
 
-            # Load trade lessons
+            # Load trade lessons via persistence service
             trade_lessons = live_state.get("trade_lessons", [])
-            if not trade_lessons and os.path.exists("context/trade_lessons.json"):
+            if not trade_lessons:
                 try:
-                    with open("context/trade_lessons.json", "r", encoding="utf-8") as f:
-                        td = json.load(f)
-                        trade_lessons = td.get("trade_lessons", td) if isinstance(td, dict) else td
-                except: pass
+                    trade_lessons = get_persistence_service().get_trade_lessons()
+                except Exception:
+                    pass
 
             # Load watched tickers & scout categories
             watched = ms.get("watched_tickers", ssot.get("watched_tickers", []))
             scouts = ms.get("scout_categories", ssot.get("scout_categories", []))
 
-            # Load decision log
+            # Load decision log via persistence service
             decision_log = []
-            if os.path.exists("context/decision_log.json"):
-                try:
-                    with open("context/decision_log.json", "r", encoding="utf-8") as f:
-                        dd = json.load(f)
-                        decision_log = dd.get("decision_log", dd) if isinstance(dd, dict) else dd
-                except: pass
+            try:
+                decision_log = get_persistence_service().get_decision_log()
+            except Exception:
+                pass
 
             data_packet = {
                 "_meta": live_state.get("_meta", {}),
@@ -855,7 +857,6 @@ class DecisionLogRequest(BaseModel):
 def save_decision_log(req: DecisionLogRequest):
     """Auto-write a new lesson entry to decision_log.json from the AI Council."""
     from tool_registry import authorize_financial_mutation
-    from atomic_io import atomic_update_json
     authorize_financial_mutation(
         operation_name="update_decision_log",
         target_resource="context/decision_log.json",
@@ -870,14 +871,8 @@ def save_decision_log(req: DecisionLogRequest):
             "outcome": req.outcome,
             "source": "AI_COUNCIL_AUTO"
         }
-        lessons_file = "context/decision_log.json"
-
-        def _prepend_entry(td):
-            existing = list(td.get("decision_log", td)) if isinstance(td, dict) else (list(td) if isinstance(td, list) else [])
-            existing.insert(0, entry)
-            return {"decision_log": existing}
-
-        atomic_update_json(lessons_file, _prepend_entry, default_factory=dict)
+        service = get_persistence_service()
+        service.append_decision_log(entry, prepend=True)
         framework.log(f"[System] Decision log saved: {req.ticker} — {req.lesson[:60]}...")
         return {"status": "success", "entry": entry}
     except PermissionError:
@@ -890,14 +885,14 @@ def save_decision_log(req: DecisionLogRequest):
 def clear_decision_log():
     """Wipe decision_log.json — all entries removed."""
     from tool_registry import authorize_financial_mutation
-    from atomic_io import atomic_write_json
     authorize_financial_mutation(
         operation_name="update_decision_log",
         target_resource="context/decision_log.json",
         payload={"decision_log": []},
     )
     try:
-        atomic_write_json("context/decision_log.json", {"decision_log": []})
+        service = get_persistence_service()
+        service.clear_decision_log()
         framework.log("[System] Decision log cleared.")
         return {"status": "success"}
     except PermissionError:
@@ -1010,43 +1005,8 @@ def save_macro(req: MacroRequest):
 @app.get("/api/basket")
 def get_basket():
     try:
-        if os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r", encoding="utf-8") as f:
-                data = json.load(f)
-                ms = data.get("mutable_state", {})
-                ep = data.get("EXECUTION_PAYLOAD", {})
-                state_ctx = ms.get("state_context", ep.get("state_context", data.get("state_context", {})))
-                
-                raw_basket = (
-                    ms.get("portfolio_snapshot") or
-                    data.get("portfolio_snapshot") or
-                    ep.get("portfolio_snapshot") or
-                    []
-                )
-                portfolio = [
-                    {"ticker": i["ticker"], "shares": float(i.get("shares", 0)), "wac": float(i.get("wac", 0))} 
-                    for i in raw_basket if isinstance(i, dict) and i.get("ticker")
-                ]
-                cash = (
-                    ms.get("unallocated_cash_eur") if ms.get("unallocated_cash_eur") is not None else
-                    data.get("unallocated_cash_eur") if data.get("unallocated_cash_eur") is not None else
-                    ep.get("unallocated_cash_eur") if ep.get("unallocated_cash_eur") is not None else
-                    state_ctx.get("unallocated_cash_eur", 0.0)
-                )
-                cash_usd = (
-                    ms.get("unallocated_cash_usd") if ms.get("unallocated_cash_usd") is not None else
-                    data.get("unallocated_cash_usd") if data.get("unallocated_cash_usd") is not None else
-                    ep.get("unallocated_cash_usd") if ep.get("unallocated_cash_usd") is not None else
-                    state_ctx.get("unallocated_cash_usd", 0.0)
-                )
-                import fetch_stocks
-                rate = fetch_stocks.cache.prices.get("EURUSD=X", 1.08)
-                return {
-                    "portfolio": portfolio,
-                    "unallocated_cash_eur": cash,
-                    "unallocated_cash_usd": cash_usd,
-                    "eurusd_rate": rate
-                }
+        service = get_persistence_service()
+        return service.get_portfolio_basket()
     except Exception as e:
         framework.log(f"[Error] get_basket failed: {e}")
     return {"portfolio": [], "unallocated_cash_eur": 0.0, "unallocated_cash_usd": 0.0, "eurusd_rate": 1.08}
@@ -1054,7 +1014,6 @@ def get_basket():
 @app.post("/api/basket")
 def save_basket(req: BasketSaveRequest):
     from tool_registry import authorize_financial_mutation
-    from atomic_io import atomic_update_json
     authorize_financial_mutation(
         operation_name="update_ssot",
         target_resource="context/ssot.json",
@@ -1070,60 +1029,42 @@ def save_basket(req: BasketSaveRequest):
                 detail=f"Invalid ticker symbol(s): {', '.join(invalid)}"
             )
 
-        if os.path.exists("context/ssot.json"):
-            new_snapshot = []
-            for item in req.portfolio:
-                if item.shares > 0:
-                    new_snapshot.append({"ticker": item.ticker, "shares": item.shares, "wac": item.wac})
-            
+        new_snapshot = [
+            {"ticker": item.ticker, "shares": item.shares, "wac": item.wac}
+            for item in req.portfolio if item.shares > 0
+        ]
+
+        service = get_persistence_service()
+        service.save_portfolio_basket(
+            portfolio=new_snapshot,
+            unallocated_cash_eur=req.unallocated_cash_eur,
+            unallocated_cash_usd=req.unallocated_cash_usd,
+        )
+        framework.log(f"[System] SSoT Basket & Cash updated: {len(new_snapshot)} holding(s). Cash: {req.unallocated_cash_eur} EUR | {req.unallocated_cash_usd} USD")
+        
+        # Hot-reload TICKERS in fetch_stocks so the scanning daemon immediately registers changes
+        try:
             import fetch_stocks
-            rate = fetch_stocks.cache.prices.get("EURUSD=X", 1.08)
-            usd_val = req.unallocated_cash_usd if req.unallocated_cash_usd > 0.0 else round(req.unallocated_cash_eur * rate, 2)
+            fetch_stocks.TICKERS = fetch_stocks._load_ssot_tickers()
+            fetch_stocks.MACRO_TICKERS = fetch_stocks._load_macro_tickers()
+            fetch_stocks.ALL_TICKERS = list(dict.fromkeys(fetch_stocks.TICKERS + fetch_stocks.MACRO_TICKERS))
+            fetch_stocks.FORCE_REFRESH = True
 
-            def _update_basket_ssot(data):
-                if not isinstance(data, dict):
-                    data = {}
-                data["portfolio_snapshot"] = new_snapshot
-                data["unallocated_cash_eur"] = req.unallocated_cash_eur
-                data["unallocated_cash_usd"] = usd_val
-
-                if "mutable_state" in data and isinstance(data["mutable_state"], dict):
-                    data["mutable_state"]["portfolio_snapshot"] = new_snapshot
-                    data["mutable_state"]["unallocated_cash_eur"] = req.unallocated_cash_eur
-                    data["mutable_state"]["unallocated_cash_usd"] = usd_val
-
-                if "EXECUTION_PAYLOAD" in data and isinstance(data["EXECUTION_PAYLOAD"], dict):
-                    data["EXECUTION_PAYLOAD"]["portfolio_snapshot"] = new_snapshot
-                    data["EXECUTION_PAYLOAD"]["unallocated_cash_eur"] = req.unallocated_cash_eur
-                    data["EXECUTION_PAYLOAD"]["unallocated_cash_usd"] = usd_val
-                return data
-
-            data = atomic_update_json("context/ssot.json", _update_basket_ssot, default_factory=dict)
-            framework.log(f"[System] SSoT Basket & Cash updated: {len(new_snapshot)} holding(s). Cash: {req.unallocated_cash_eur} EUR | {req.unallocated_cash_usd} USD")
+            # Immediately update in-memory GLOBAL_STATE so the next GET /api/data instantly reflects changes
+            if isinstance(getattr(fetch_stocks, "GLOBAL_STATE", None), dict):
+                fetch_stocks.GLOBAL_STATE["local_storage_state"] = service.get_ssot_data()
+                held_set = {item["ticker"].upper() for item in new_snapshot}
+                watched_set = set(service.get_watchlist())
+                if "tickers" in fetch_stocks.GLOBAL_STATE and isinstance(fetch_stocks.GLOBAL_STATE["tickers"], list):
+                    valid_active = held_set.union(watched_set)
+                    fetch_stocks.GLOBAL_STATE["tickers"] = [
+                        t for t in fetch_stocks.GLOBAL_STATE["tickers"]
+                        if t.get("_isScout") or t.get("ticker", "").upper() in valid_active or t.get("ticker", "").upper() in fetch_stocks.MACRO_TICKERS
+                    ]
+        except Exception as se:
+            framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
             
-            # Hot-reload TICKERS in fetch_stocks so the scanning daemon immediately registers changes
-            try:
-                import fetch_stocks
-                fetch_stocks.TICKERS = fetch_stocks._load_ssot_tickers()
-                fetch_stocks.MACRO_TICKERS = fetch_stocks._load_macro_tickers()
-                fetch_stocks.ALL_TICKERS = list(dict.fromkeys(fetch_stocks.TICKERS + fetch_stocks.MACRO_TICKERS))
-                fetch_stocks.FORCE_REFRESH = True
-
-                # Immediately update in-memory GLOBAL_STATE so the next GET /api/data instantly reflects changes
-                if isinstance(getattr(fetch_stocks, "GLOBAL_STATE", None), dict):
-                    fetch_stocks.GLOBAL_STATE["local_storage_state"] = data
-                    held_set = {item["ticker"].upper() for item in new_snapshot}
-                    watched_set = set(fetch_stocks._load_watchlist())
-                    if "tickers" in fetch_stocks.GLOBAL_STATE and isinstance(fetch_stocks.GLOBAL_STATE["tickers"], list):
-                        valid_active = held_set.union(watched_set)
-                        fetch_stocks.GLOBAL_STATE["tickers"] = [
-                            t for t in fetch_stocks.GLOBAL_STATE["tickers"]
-                            if t.get("_isScout") or t.get("ticker", "").upper() in valid_active or t.get("ticker", "").upper() in fetch_stocks.MACRO_TICKERS
-                        ]
-            except Exception as se:
-                framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
-                
-            return {"status": "success", "portfolio": new_snapshot}
+        return {"status": "success", "portfolio": new_snapshot}
     except PermissionError:
         raise
     except HTTPException as he:
@@ -1135,21 +1076,8 @@ def save_basket(req: BasketSaveRequest):
 @app.get("/api/watchlist")
 def get_watch_list():
     try:
-        from atomic_io import atomic_read_json
-        watchlist = []
-        # Load from config.json if it exists (ENH_83)
-        if os.path.exists("context/config.json"):
-            cfg = atomic_read_json("context/config.json", default={})
-            watchlist = cfg.get("WATCHLIST", [])
-        
-        # Fall back to ssot.json if config.json does not provide a watchlist
-        if not watchlist and os.path.exists("context/ssot.json"):
-            data = atomic_read_json("context/ssot.json", default={})
-            ms = data.get("mutable_state", data)
-            watchlist = ms.get("watched_tickers", data.get("watched_tickers", []))
-                    
-        watchlist = [w.strip().upper() for w in watchlist if isinstance(w, str) and w.strip()]
-        return watchlist
+        service = get_persistence_service()
+        return service.get_watchlist()
     except Exception as e:
         framework.log(f"[Error] Failed to get watchlist: {e}")
     return []
@@ -1159,7 +1087,6 @@ from fastapi import Request
 @app.post("/api/watchlist")
 async def save_watch_list(req: Request):
     from tool_registry import authorize_financial_mutation
-    from atomic_io import atomic_update_json
     try:
         payload = await req.json()
         authorize_financial_mutation(
@@ -1187,28 +1114,9 @@ async def save_watch_list(req: Request):
                 detail=f"Invalid ticker symbol(s): {', '.join(invalid)}"
             )
 
-        # 1. Update config.json (ENH_83 SSoT active asset tracking)
-        if os.path.exists("context/config.json"):
-            def _update_cfg_wl(cfg):
-                if not isinstance(cfg, dict):
-                    cfg = {}
-                cfg["WATCHLIST"] = watch_list
-                return cfg
-            atomic_update_json("context/config.json", _update_cfg_wl, default_factory=dict)
-                
-        # 2. Update ssot.json
-        data = {}
-        if os.path.exists("context/ssot.json"):
-            def _update_ssot_wl(d):
-                if not isinstance(d, dict):
-                    d = {}
-                if "mutable_state" in d and isinstance(d["mutable_state"], dict):
-                    d["mutable_state"]["watched_tickers"] = watch_list
-                else:
-                    d["watched_tickers"] = watch_list
-                return d
-            data = atomic_update_json("context/ssot.json", _update_ssot_wl, default_factory=dict)
-            framework.log("[System] Watch list updated in ssot.json and config.json.")
+        service = get_persistence_service()
+        service.save_watchlist(watch_list)
+        framework.log("[System] Watch list updated in ssot.json and config.json.")
             
         # FORCE HOT-RELOAD OF DAEMON TICKERS
         try:
@@ -1217,7 +1125,7 @@ async def save_watch_list(req: Request):
             fetch_stocks.ALL_TICKERS = fetch_stocks.TICKERS + fetch_stocks.MACRO_TICKERS
             fetch_stocks.FORCE_REFRESH = True
             if isinstance(getattr(fetch_stocks, "GLOBAL_STATE", None), dict):
-                fetch_stocks.GLOBAL_STATE["local_storage_state"] = data
+                fetch_stocks.GLOBAL_STATE["local_storage_state"] = service.get_ssot_data()
         except Exception as se:
             framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
             
@@ -1228,6 +1136,7 @@ async def save_watch_list(req: Request):
         raise he
     except Exception as e:
         framework.log(f"[Error] Watch List Save Failed: {e}")
+        return {"status": "error", "message": str(e)}
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/ai_scout")
@@ -1254,10 +1163,7 @@ async def run_ai_scout(request: Request, background_tasks: BackgroundTasks):
         if mode == "watchlist":
             watchlist = []
             try:
-                with open("context/ssot.json", "r") as f:
-                    ssot = json.load(f)
-                ms = ssot.get("mutable_state", ssot)
-                watchlist = ms.get("watched_tickers", ssot.get("watched_tickers", []))
+                watchlist = get_persistence_service().get_watchlist()
             except Exception:
                 pass
 
@@ -1277,10 +1183,8 @@ async def run_ai_scout(request: Request, background_tasks: BackgroundTasks):
         else:
             categories = []
             try:
-                with open("context/ssot.json", "r") as f:
-                    ssot = json.load(f)
-                ms = ssot.get("mutable_state", ssot)
-                categories = ms.get("scout_categories", ssot.get("scout_categories", []))
+                scout_data = get_persistence_service().get_scout_categories()
+                categories = list(scout_data.keys()) if isinstance(scout_data, dict) else list(scout_data)
             except Exception:
                 pass
 
@@ -1304,11 +1208,8 @@ async def run_ai_scout(request: Request, background_tasks: BackgroundTasks):
 @app.get("/api/scout_categories")
 def get_scout_categories():
     try:
-        if os.path.exists("context/ssot.json"):
-            with open("context/ssot.json", "r") as f:
-                data = json.load(f)
-                ms = data.get("mutable_state", data)
-                return ms.get("scout_categories", [])
+        scouts = get_persistence_service().get_scout_categories()
+        return list(scouts.keys()) if isinstance(scouts, dict) else list(scouts)
     except: pass
     return []
 
@@ -1339,22 +1240,12 @@ def reload_scout_tickers_task():
 def save_scout_categories(categories: List[str], background_tasks: BackgroundTasks):
     try:
         from tool_registry import authorize_financial_mutation
-        from atomic_io import atomic_update_json
         authorize_financial_mutation("update_ssot", "context/ssot.json", payload=categories)
-        if os.path.exists("context/ssot.json"):
-            def _update_scouts(data):
-                if not isinstance(data, dict):
-                    data = {}
-                if "mutable_state" in data:
-                    data["mutable_state"]["scout_categories"] = categories
-                else:
-                    data["scout_categories"] = categories
-                return data
-            atomic_update_json("context/ssot.json", _update_scouts, default_factory=dict)
-            framework.log("[System] Scout categories updated.")
-            
-            # Queue the heavy Dynamic Search yfinance reload logic in the background
-            background_tasks.add_task(reload_scout_tickers_task)
+        get_persistence_service().save_scout_categories(categories)
+        framework.log("[System] Scout categories updated.")
+        
+        # Queue the heavy Dynamic Search yfinance reload logic in the background
+        background_tasks.add_task(reload_scout_tickers_task)
                 
     except PermissionError:
         raise
