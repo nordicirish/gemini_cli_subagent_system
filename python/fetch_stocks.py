@@ -2760,6 +2760,35 @@ def _extract_fast_info_snapshot(t_obj) -> dict:
     return snapshot
 
 
+def select_quote_observation(
+    quote_data: Optional[dict],
+    status: str,
+) -> Tuple[Optional[float], Optional[str], Any]:
+    """
+    Atomically selects the session-appropriate price, provenance, and corresponding
+    source timestamp field from a quote payload so price and observation time always
+    come from the exact same provider observation field.
+    """
+    if not isinstance(quote_data, dict) or not quote_data:
+        return None, None, None
+
+    if status == "PRE-MARKET":
+        pre_price = to_float(quote_data.get("preMarketPrice"))
+        if pre_price is not None and pre_price > 0:
+            return pre_price, "BATCH_QUOTE", quote_data.get("preMarketTime")
+
+    elif status in ("AFTER-HOURS", "CLOSED"):
+        post_price = to_float(quote_data.get("postMarketPrice"))
+        if post_price is not None and post_price > 0:
+            return post_price, "BATCH_QUOTE", quote_data.get("postMarketTime")
+
+    reg_price = to_float(quote_data.get("regularMarketPrice"))
+    if reg_price is not None and reg_price > 0:
+        return reg_price, "BATCH_QUOTE", quote_data.get("regularMarketTime")
+
+    return None, None, None
+
+
 def _acquire_batch_quotes_raw(
     symbols: Tuple[str, ...],
     status: str,
@@ -2767,8 +2796,8 @@ def _acquire_batch_quotes_raw(
 ) -> BatchObservedResult:
     """
     Worker-thread batch quote acquisition. Executes one batched provider request
-    and emits per-symbol ChildObservedResult items with independent source observation timestamps.
-    Does not mutate shared cache or GLOBAL_STATE.
+    and emits per-symbol ChildObservedResult items with independent source observation timestamps
+    matched strictly to the selected price field. Does not mutate shared cache or GLOBAL_STATE.
     """
     if cancel_check and cancel_check():
         raise RuntimeError("Operation cancelled before batch quote acquisition")
@@ -2793,12 +2822,17 @@ def _acquire_batch_quotes_raw(
             )
             continue
 
-        if status == "PRE-MARKET":
-            raw_ts = q.get("preMarketTime") or q.get("regularMarketTime")
-        elif status in ("AFTER-HOURS", "CLOSED"):
-            raw_ts = q.get("postMarketTime") or q.get("regularMarketTime")
-        else:
-            raw_ts = q.get("regularMarketTime")
+        selected_price, selected_source, raw_ts = select_quote_observation(q, status)
+        if selected_price is None or selected_price <= 0:
+            child_items.append(
+                ChildObservedResult(
+                    key=ck,
+                    data=None,
+                    obs_time=None,
+                    error=f"No valid positive batch quote price for {sym}",
+                )
+            )
+            continue
 
         obs_iso = _epoch_to_utc_iso8601(raw_ts)
         payload = {
@@ -2806,6 +2840,8 @@ def _acquire_batch_quotes_raw(
             "symbol": sym,
             "status": status,
             "quote_data": dict(q),
+            "selected_price": selected_price,
+            "selected_source": selected_source,
         }
         child_items.append(
             ChildObservedResult(
@@ -2830,13 +2866,13 @@ def _acquire_symbol_fallback_raw(
     include_polygon_vol: bool = False,
     include_prev_close: bool = False,
     include_chart_open: bool = False,
-    base_obs_time: Optional[str] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
 ) -> ObservedResult:
     """
     Worker-thread per-symbol fallback/supplemental market-data acquisition.
     Preserves fallback precedence (intraday chart -> Finnhub -> fast_info -> polygon/prev_close/chart_open)
-    without reading or mutating shared cache. Returns ObservedResult with strict source obs_time.
+    without reading or mutating shared cache. Preserves actual per-source observation timestamps
+    where available and never substitutes prior batch or wall-clock timestamps.
     """
     if cancel_check and cancel_check():
         raise RuntimeError("Operation cancelled before fallback acquisition")
@@ -2890,14 +2926,22 @@ def _acquire_symbol_fallback_raw(
     if include_chart_open:
         alt_chart_open = _get_chart_open(symbol)
 
-    # Determine source observation timestamp strictly from acquired source data (never wall clock).
+    # Determine source observation timestamp strictly from acquired source data.
+    # Never substitute a prior batch quote timestamp or wall-clock time for untimestamped sources.
+    has_untimestamped_supplement = bool(
+        fetch_premarket_vol
+        or include_fast_info
+        or include_polygon_vol
+        or include_prev_close
+        or include_chart_open
+    )
     obs_iso = None
     if has_chart_price and chart_obs_utc_iso is not None:
         obs_iso = chart_obs_utc_iso
     elif finnhub_data is not None and fh_obs_iso is not None:
         obs_iso = fh_obs_iso
-    elif not need_price and base_obs_time is not None:
-        obs_iso = base_obs_time
+    elif not need_price and fetch_chart and chart_obs_utc_iso is not None and not has_untimestamped_supplement:
+        obs_iso = chart_obs_utc_iso
 
     payload = {
         "kind": "symbol_fallback",
@@ -2913,6 +2957,10 @@ def _acquire_symbol_fallback_raw(
         "polygon_vol_data": polygon_vol_data,
         "alt_prev_close": alt_prev_close,
         "alt_chart_open": alt_chart_open,
+        "source_timestamps": {
+            "chart": chart_obs_utc_iso,
+            "finnhub": fh_obs_iso,
+        },
     }
     return ObservedResult(data=payload, obs_time=obs_iso)
 
@@ -2951,7 +2999,7 @@ def _acquire_vwap_raw(
     return ObservedResult(data=None, obs_time=None)
 
 
-def _apply_quote_and_fallback_to_cache(
+def _build_quote_cache_candidate(
     symbol: str,
     status: str,
     quote_data: Optional[dict] = None,
@@ -2968,85 +3016,96 @@ def _apply_quote_and_fallback_to_cache(
     allow_cache_previous: bool = False,
     supplement_only: bool = False,
     now_ny: Optional[datetime] = None,
-) -> dict:
+) -> Tuple[Dict[str, Any], dict]:
     """
-    Coordinating-thread cache application for quote, fallback, and freshness evaluation.
-    Performs zero network I/O. Preserves session-aware price selection, provenance, and freshness.
+    Stages and validates a complete per-symbol MarketDataCache update without mutating
+    shared cache dictionaries. Raises on invalid or incomplete market-data observations
+    before any shared state changes occur.
     """
     ny_tz = ZoneInfo("America/New_York")
     if now_ny is None:
         now_ny = datetime.now(ny_tz)
+
+    updates: Dict[str, Any] = {}
+
+    def _staged(attr: str, default: Any = None) -> Any:
+        if attr in updates:
+            return updates[attr]
+        return getattr(cache, attr).get(symbol, default)
+
+    def _has_staged(attr: str) -> bool:
+        return attr in updates or symbol in getattr(cache, attr)
 
     if supplement_only:
         now_ts = t_time.time()
         if chart_fetched and chart_data is not None:
             api_price, api_vol, api_pre_vol, api_post_vol, chart_obs_iso = chart_data
             if (api_price is not None and api_price > 0) or api_vol > 0 or api_pre_vol > 0 or api_post_vol > 0:
-                cache.last_chart_fetch[symbol] = now_ts
-                cache.chart_cache[symbol] = (api_price, api_vol, api_pre_vol, api_post_vol)
+                updates["last_chart_fetch"] = now_ts
+                updates["chart_cache"] = (api_price, api_vol, api_pre_vol, api_post_vol)
                 if chart_obs_iso is not None:
                     try:
-                        cache.chart_obs_time[symbol] = parse_utc_iso8601_timestamp(chart_obs_iso).astimezone(ny_tz)
+                        updates["chart_obs_time"] = parse_utc_iso8601_timestamp(chart_obs_iso).astimezone(ny_tz)
                     except Exception:
-                        cache.chart_obs_time[symbol] = None
-            if api_vol > 0 and cache.volumes.get(symbol, 0) == 0:
-                cache.volumes[symbol] = int(api_vol)
-            if api_pre_vol > 0 and cache.pre_market_volume.get(symbol, 0) == 0:
-                cache.pre_market_volume[symbol] = int(api_pre_vol)
-            if api_post_vol > 0 and cache.after_hours_volume.get(symbol, 0) == 0:
-                cache.after_hours_volume[symbol] = int(api_post_vol)
+                        updates["chart_obs_time"] = None
+            if api_vol > 0 and _staged("volumes", 0) == 0:
+                updates["volumes"] = int(api_vol)
+            if api_pre_vol > 0 and _staged("pre_market_volume", 0) == 0:
+                updates["pre_market_volume"] = int(api_pre_vol)
+            if api_post_vol > 0 and _staged("after_hours_volume", 0) == 0:
+                updates["after_hours_volume"] = int(api_post_vol)
 
         if premarket_vol_fetched and premarket_vol_data is not None:
-            cache.last_premarket_vol_fetch[symbol] = now_ts
-            cache.premarket_vol_cache[symbol] = premarket_vol_data
+            updates["last_premarket_vol_fetch"] = now_ts
+            updates["premarket_vol_cache"] = premarket_vol_data
             if premarket_vol_data > 0:
-                cache.pre_market_volume[symbol] = int(premarket_vol_data)
+                updates["pre_market_volume"] = int(premarket_vol_data)
 
         if fast_info_data:
             fi_open = fast_info_data.get("open") or fast_info_data.get("regular_market_open")
             fi_high = fast_info_data.get("day_high") or fast_info_data.get("regular_market_day_high")
             fi_low = fast_info_data.get("day_low") or fast_info_data.get("regular_market_day_low")
-            if fi_open and to_float(fi_open) is not None and to_float(fi_open) > 0 and symbol not in cache.day_open:
-                cache.day_open[symbol] = to_float(fi_open)
-            if fi_high and to_float(fi_high) is not None and to_float(fi_high) > 0 and symbol not in cache.day_high:
-                cache.day_high[symbol] = to_float(fi_high)
-            if fi_low and to_float(fi_low) is not None and to_float(fi_low) > 0 and symbol not in cache.day_low:
-                cache.day_low[symbol] = to_float(fi_low)
-            if cache.volumes.get(symbol, 0) == 0:
+            if fi_open and to_float(fi_open) is not None and to_float(fi_open) > 0 and not _has_staged("day_open"):
+                updates["day_open"] = to_float(fi_open)
+            if fi_high and to_float(fi_high) is not None and to_float(fi_high) > 0 and not _has_staged("day_high"):
+                updates["day_high"] = to_float(fi_high)
+            if fi_low and to_float(fi_low) is not None and to_float(fi_low) > 0 and not _has_staged("day_low"):
+                updates["day_low"] = to_float(fi_low)
+            if _staged("volumes", 0) == 0:
                 v_last = fast_info_data.get("last_volume") or fast_info_data.get("three_month_average_volume") or 0
                 if v_last:
                     try:
-                        cache.volumes[symbol] = int(v_last)
+                        updates["volumes"] = int(v_last)
                     except Exception:
                         pass
-            if symbol not in cache.regular_close:
+            if not _has_staged("regular_close"):
                 fi_rc = to_float(fast_info_data.get("regular_market_previous_close") or fast_info_data.get("previous_close"))
                 if fi_rc is not None and fi_rc > 0:
-                    cache.regular_close[symbol] = fi_rc
+                    updates["regular_close"] = fi_rc
 
-        if polygon_vol_data and cache.volumes.get(symbol, 0) == 0:
+        if polygon_vol_data and _staged("volumes", 0) == 0:
             try:
-                cache.volumes[symbol] = int(polygon_vol_data)
+                updates["volumes"] = int(polygon_vol_data)
             except Exception:
                 pass
 
-        if alt_prev_close and to_float(alt_prev_close) is not None and to_float(alt_prev_close) > 0 and symbol not in cache.regular_close:
-            cache.regular_close[symbol] = to_float(alt_prev_close)
+        if alt_prev_close and to_float(alt_prev_close) is not None and to_float(alt_prev_close) > 0 and not _has_staged("regular_close"):
+            updates["regular_close"] = to_float(alt_prev_close)
 
         if alt_chart_open and alt_chart_open > 0:
-            reg_close = cache.regular_close.get(symbol)
+            reg_close = _staged("regular_close")
             if reg_close and reg_close > 0:
-                cache.gaps[symbol] = ((float(alt_chart_open) - reg_close) / reg_close) * 100
+                updates["gaps"] = ((float(alt_chart_open) - reg_close) / reg_close) * 100
 
-        return {"needs_supplement": False}
+        return updates, {"needs_supplement": False}
 
     price = None
     vol = 0
     obs_time = obs_time_override
     price_source = None
 
-    cache.session[symbol] = status
-    cache.session_liquidity[symbol] = (
+    updates["session"] = status
+    updates["session_liquidity"] = (
         "LOW" if status in ("AFTER-HOURS", "PRE-MARKET") else "HIGH"
     )
 
@@ -3059,41 +3118,48 @@ def _apply_quote_and_fallback_to_cache(
     batch_prev_close = None
     pre_vol = 0
     post_vol = 0
+    q_price = None
+    q_source = None
 
     if quote_data:
+        pre_price = to_float(quote_data.get('preMarketPrice'))
+        post_price = to_float(quote_data.get('postMarketPrice'))
+        reg_price = to_float(quote_data.get('regularMarketPrice'))
+        reg_open = to_float(quote_data.get('regularMarketOpen'))
+        reg_high = to_float(quote_data.get('regularMarketDayHigh'))
+        reg_low = to_float(quote_data.get('regularMarketDayLow'))
+        batch_prev_close = to_float(quote_data.get('regularMarketPreviousClose'))
         try:
-            pre_price = to_float(quote_data.get('preMarketPrice'))
-            post_price = to_float(quote_data.get('postMarketPrice'))
-            reg_price = to_float(quote_data.get('regularMarketPrice'))
-            reg_open = to_float(quote_data.get('regularMarketOpen'))
-            reg_high = to_float(quote_data.get('regularMarketDayHigh'))
-            reg_low = to_float(quote_data.get('regularMarketDayLow'))
-            batch_prev_close = to_float(quote_data.get('regularMarketPreviousClose'))
             vol = int(quote_data.get('regularMarketVolume', 0) or 0)
+        except Exception:
+            vol = 0
+        try:
             pre_vol = int(quote_data.get('preMarketVolume', 0) or 0)
+        except Exception:
+            pre_vol = 0
+        try:
             post_vol = int(quote_data.get('postMarketVolume', 0) or 0)
+        except Exception:
+            post_vol = 0
 
-            if obs_time is None:
-                if status == "PRE-MARKET":
-                    raw_ts = quote_data.get('preMarketTime') or quote_data.get('regularMarketTime')
-                elif status in ("AFTER-HOURS", "CLOSED"):
-                    raw_ts = quote_data.get('postMarketTime') or quote_data.get('regularMarketTime')
-                else:
-                    raw_ts = quote_data.get('regularMarketTime')
-                if raw_ts is not None:
+        q_price, q_source, q_raw_ts = select_quote_observation(quote_data, status)
+        if q_price is not None and q_price > 0:
+            price = q_price
+            price_source = q_source
+            if obs_time is None and q_raw_ts is not None:
+                q_obs_iso = _epoch_to_utc_iso8601(q_raw_ts)
+                if q_obs_iso is not None:
                     try:
-                        obs_time = datetime.fromtimestamp(int(raw_ts), ZoneInfo("UTC")).astimezone(ny_tz)
+                        obs_time = parse_utc_iso8601_timestamp(q_obs_iso).astimezone(ny_tz)
                     except Exception:
                         obs_time = None
 
-            if reg_open and reg_open > 0:
-                cache.day_open[symbol] = reg_open
-            if reg_high and reg_high > 0:
-                cache.day_high[symbol] = reg_high
-            if reg_low and reg_low > 0:
-                cache.day_low[symbol] = reg_low
-        except Exception:
-            pass
+        if reg_open and reg_open > 0:
+            updates["day_open"] = reg_open
+        if reg_high and reg_high > 0:
+            updates["day_high"] = reg_high
+        if reg_low and reg_low > 0:
+            updates["day_low"] = reg_low
 
     if fast_info_data:
         if not pre_price and fast_info_data.get('pre_market_price'):
@@ -3103,25 +3169,14 @@ def _apply_quote_and_fallback_to_cache(
         fi_open = fast_info_data.get('open') or fast_info_data.get('regular_market_open')
         fi_high = fast_info_data.get('day_high') or fast_info_data.get('regular_market_day_high')
         fi_low = fast_info_data.get('day_low') or fast_info_data.get('regular_market_day_low')
-        if fi_open and to_float(fi_open) is not None and to_float(fi_open) > 0 and symbol not in cache.day_open:
-            cache.day_open[symbol] = to_float(fi_open)
-        if fi_high and to_float(fi_high) is not None and to_float(fi_high) > 0 and symbol not in cache.day_high:
-            cache.day_high[symbol] = to_float(fi_high)
-        if fi_low and to_float(fi_low) is not None and to_float(fi_low) > 0 and symbol not in cache.day_low:
-            cache.day_low[symbol] = to_float(fi_low)
+        if fi_open and to_float(fi_open) is not None and to_float(fi_open) > 0 and not _has_staged("day_open"):
+            updates["day_open"] = to_float(fi_open)
+        if fi_high and to_float(fi_high) is not None and to_float(fi_high) > 0 and not _has_staged("day_high"):
+            updates["day_high"] = to_float(fi_high)
+        if fi_low and to_float(fi_low) is not None and to_float(fi_low) > 0 and not _has_staged("day_low"):
+            updates["day_low"] = to_float(fi_low)
 
-    # Session-aware price selection
-    if status == "PRE-MARKET" and pre_price and pre_price > 0:
-        price = pre_price
-        price_source = "BATCH_QUOTE"
-    elif status in ("AFTER-HOURS", "CLOSED") and post_price and post_price > 0:
-        price = post_price
-        price_source = "BATCH_QUOTE"
-    elif reg_price and reg_price > 0:
-        price = reg_price
-        price_source = "BATCH_QUOTE"
-
-    needs_pre_vol = (pre_vol == 0 and cache.pre_market_volume.get(symbol, 0) == 0)
+    needs_pre_vol = (pre_vol == 0 and _staged("pre_market_volume", 0) == 0)
     needs_post_vol = (status in ("AFTER-HOURS", "CLOSED") and post_vol == 0)
     now_ts = t_time.time()
 
@@ -3144,21 +3199,21 @@ def _apply_quote_and_fallback_to_cache(
                         chart_obs_dt = None
             else:
                 api_price, api_vol, api_pre_vol, api_post_vol = chart_data[:4]
-                chart_obs_dt = cache.chart_obs_time.get(symbol)
+                chart_obs_dt = _staged("chart_obs_time")
             if chart_fetched and ((api_price is not None and api_price > 0) or api_vol > 0 or api_pre_vol > 0 or api_post_vol > 0):
-                cache.last_chart_fetch[symbol] = now_ts
-                cache.chart_cache[symbol] = (api_price, api_vol, api_pre_vol, api_post_vol)
+                updates["last_chart_fetch"] = now_ts
+                updates["chart_cache"] = (api_price, api_vol, api_pre_vol, api_post_vol)
                 if chart_obs_dt is not None:
-                    cache.chart_obs_time[symbol] = chart_obs_dt
+                    updates["chart_obs_time"] = chart_obs_dt
         elif symbol in cache.last_chart_fetch and (now_ts - cache.last_chart_fetch[symbol]) < 60:
             api_price, api_vol, api_pre_vol, api_post_vol = cache.chart_cache[symbol]
-            chart_obs_dt = cache.chart_obs_time.get(symbol)
+            chart_obs_dt = _staged("chart_obs_time")
 
         if (price is None or price <= 0) and api_price is not None and api_price > 0:
             price = api_price
             price_source = "INTRADAY_CHART"
             if obs_time is None:
-                obs_time = chart_obs_dt if chart_obs_dt is not None else cache.chart_obs_time.get(symbol)
+                obs_time = chart_obs_dt if chart_obs_dt is not None else _staged("chart_obs_time")
         if vol == 0 and api_vol > 0:
             vol = api_vol
         if api_pre_vol > 0 and pre_vol == 0:
@@ -3172,8 +3227,8 @@ def _apply_quote_and_fallback_to_cache(
         if premarket_vol_data is not None:
             chart_pre_vol = premarket_vol_data
             if premarket_vol_fetched:
-                cache.last_premarket_vol_fetch[symbol] = now_ts
-                cache.premarket_vol_cache[symbol] = chart_pre_vol
+                updates["last_premarket_vol_fetch"] = now_ts
+                updates["premarket_vol_cache"] = chart_pre_vol
         elif symbol in cache.last_premarket_vol_fetch and (now_ts - cache.last_premarket_vol_fetch[symbol]) < 90:
             chart_pre_vol = cache.premarket_vol_cache.get(symbol, 0)
         if chart_pre_vol > 0:
@@ -3231,8 +3286,11 @@ def _apply_quote_and_fallback_to_cache(
         except Exception:
             vol = 0
 
-    if not allow_cache_previous and (price is None or price <= 0):
-        raise ValueError(f"No valid positive price in market-data result for {symbol}")
+    if not allow_cache_previous:
+        if price is None or not isinstance(price, (int, float)) or not math.isfinite(float(price)) or price <= 0:
+            raise ValueError(f"No valid positive price in market-data result for {symbol}")
+        if obs_time is None:
+            raise ValueError(f"Missing required source observation timestamp for {symbol}")
 
     if allow_cache_previous and (price is None or price <= 0) and symbol in cache.prices and cache.prices[symbol] > 0:
         price = cache.prices[symbol]
@@ -3251,23 +3309,23 @@ def _apply_quote_and_fallback_to_cache(
         session_status=status,
         source=price_source
     )
-    cache.price_sources[symbol] = price_source
-    cache.observation_times[symbol] = obs_time.isoformat() if obs_time else None
-    cache.retrieval_times[symbol] = now_ny.isoformat()
-    cache.price_validity[symbol] = validity
-    cache.freshness[symbol] = freshness
+    updates["price_sources"] = price_source
+    updates["observation_times"] = obs_time.isoformat() if obs_time else None
+    updates["retrieval_times"] = now_ny.isoformat()
+    updates["price_validity"] = validity
+    updates["freshness"] = freshness
 
     if vol > 0:
-        cache.volumes[symbol] = vol
+        updates["volumes"] = vol
     if pre_vol > 0:
-        cache.pre_market_volume[symbol] = pre_vol
+        updates["pre_market_volume"] = pre_vol
     if post_vol > 0:
-        cache.after_hours_volume[symbol] = post_vol
+        updates["after_hours_volume"] = post_vol
 
     need_chart_open = False
     need_prev_close = False
     if price is not None and price > 0:
-        cache.prices[symbol] = price
+        updates["prices"] = price
 
         if status == "PRE-MARKET" and (pre_price is None or pre_price == 0):
             pre_price = price
@@ -3300,32 +3358,33 @@ def _apply_quote_and_fallback_to_cache(
                 need_prev_close = True
 
         if reg_close is not None and reg_close > 0:
-            cache.regular_close[symbol] = reg_close
+            updates["regular_close"] = reg_close
 
         if pre_price is not None and pre_price > 0:
-            cache.pre_market_price[symbol] = pre_price
+            updates["pre_market_price"] = pre_price
         elif status == "PRE-MARKET":
-            cache.pre_market_price[symbol] = reg_close if (reg_close and reg_close > 0) else price
+            updates["pre_market_price"] = reg_close if (reg_close and reg_close > 0) else price
 
         if reg_close is not None and reg_close > 0:
             if status == "PRE-MARKET":
-                effective_pre = float(cache.pre_market_price.get(symbol, price))
+                effective_pre = float(_staged("pre_market_price", price))
                 pre_chg_pct_feed = quote_data.get('preMarketChangePercent') if quote_data else None
-                if pre_chg_pct_feed is not None and abs(float(pre_chg_pct_feed)) < 500:
-                    pre_chg = float(pre_chg_pct_feed)
+                pre_chg_feed_val = to_float(pre_chg_pct_feed)
+                if pre_chg_feed_val is not None and abs(pre_chg_feed_val) < 500:
+                    pre_chg = pre_chg_feed_val
                 else:
                     pre_chg = ((effective_pre - reg_close) / reg_close) * 100 if effective_pre > 0 else 0.0
-                cache.session_change[symbol] = pre_chg
-                cache.gaps[symbol] = pre_chg
-                cache.pre_market_change[symbol] = pre_chg
+                updates["session_change"] = pre_chg
+                updates["gaps"] = pre_chg
+                updates["pre_market_change"] = pre_chg
             else:
-                cache.session_change[symbol] = ((price - reg_close) / reg_close) * 100
+                session_chg = ((price - reg_close) / reg_close) * 100
+                updates["session_change"] = session_chg
                 true_gap_price = price
                 if status in ("OPEN", "CLOSED") and reg_open:
                     true_gap_price = float(reg_open)
 
                 raw_gap = ((true_gap_price - reg_close) / reg_close) * 100
-                session_chg = cache.session_change[symbol]
 
                 if status == "OPEN" and reg_open and abs(raw_gap) > 3.0:
                     if (raw_gap < -3.0 and session_chg > 0) or (raw_gap > 3.0 and session_chg < 0):
@@ -3335,33 +3394,95 @@ def _apply_quote_and_fallback_to_cache(
                         else:
                             need_chart_open = True
 
-                cache.gaps[symbol] = raw_gap
+                updates["gaps"] = raw_gap
 
             if reg_low and reg_close > 0:
                 drop_from_close = ((float(reg_low) - reg_close) / reg_close) * 100
                 if drop_from_close <= -10.0:
-                    cache.ssr_active[symbol] = True
+                    updates["ssr_active"] = True
                 else:
-                    cache.ssr_active[symbol] = cache.ssr_active.get(symbol, False)
+                    updates["ssr_active"] = _staged("ssr_active", False)
 
         if post_price is not None:
-            cache.after_hours_price[symbol] = post_price
+            updates["after_hours_price"] = post_price
             if reg_close and reg_close > 0:
-                cache.after_hours_change[symbol] = ((post_price - reg_close) / reg_close) * 100
+                updates["after_hours_change"] = ((post_price - reg_close) / reg_close) * 100
 
         if pre_price is not None and post_price is not None and post_price > 0:
-            cache.overnight_return[symbol] = ((pre_price - post_price) / post_price) * 100
+            updates["overnight_return"] = ((pre_price - post_price) / post_price) * 100
 
-    still_needs_pre_vol = (pre_vol == 0 and cache.pre_market_volume.get(symbol, 0) == 0)
-    still_needs_post_vol = (status in ("AFTER-HOURS", "CLOSED") and post_vol == 0 and cache.after_hours_volume.get(symbol, 0) == 0)
-    return {
-        "needs_supplement": bool(still_needs_pre_vol or still_needs_post_vol or need_prev_close or need_chart_open or symbol not in cache.day_open),
+    still_needs_pre_vol = (pre_vol == 0 and _staged("pre_market_volume", 0) == 0)
+    still_needs_post_vol = (status in ("AFTER-HOURS", "CLOSED") and post_vol == 0 and _staged("after_hours_volume", 0) == 0)
+    meta = {
+        "needs_supplement": bool(still_needs_pre_vol or still_needs_post_vol or need_prev_close or need_chart_open or not _has_staged("day_open")),
         "needs_pre_vol": still_needs_pre_vol,
         "needs_post_vol": still_needs_post_vol,
         "need_prev_close": need_prev_close,
         "need_chart_open": need_chart_open,
-        "need_fast_info": symbol not in cache.day_open or symbol not in cache.day_high or symbol not in cache.day_low,
+        "need_fast_info": not _has_staged("day_open") or not _has_staged("day_high") or not _has_staged("day_low"),
     }
+    return updates, meta
+
+
+def _publish_quote_cache_candidate(symbol: str, candidate: Dict[str, Any]) -> None:
+    """
+    Commits a fully validated per-symbol candidate dictionary to MarketDataCache in one step.
+    Executed only on the coordinating thread.
+    """
+    if not isinstance(candidate, dict):
+        raise ValueError(f"Invalid quote cache candidate for {symbol}")
+    target_dicts = {}
+    for attr in candidate:
+        mapping = getattr(cache, attr, None)
+        if not isinstance(mapping, dict):
+            raise ValueError(f"Invalid cache field in candidate for {symbol}: {attr}")
+        target_dicts[attr] = mapping
+    for attr, val in candidate.items():
+        target_dicts[attr][symbol] = val
+
+
+def _apply_quote_and_fallback_to_cache(
+    symbol: str,
+    status: str,
+    quote_data: Optional[dict] = None,
+    fast_info_data: Optional[dict] = None,
+    chart_data: Optional[tuple] = None,
+    chart_fetched: bool = False,
+    premarket_vol_data: Optional[int] = None,
+    premarket_vol_fetched: bool = False,
+    finnhub_data: Optional[tuple] = None,
+    polygon_vol_data: Optional[int] = None,
+    alt_prev_close: Optional[float] = None,
+    alt_chart_open: Optional[float] = None,
+    obs_time_override: Optional[datetime] = None,
+    allow_cache_previous: bool = False,
+    supplement_only: bool = False,
+    now_ny: Optional[datetime] = None,
+) -> dict:
+    """
+    Coordinating-thread atomic cache application for quote, fallback, and freshness evaluation.
+    Builds and validates the complete candidate before committing any per-symbol cache field.
+    """
+    candidate, meta = _build_quote_cache_candidate(
+        symbol=symbol,
+        status=status,
+        quote_data=quote_data,
+        fast_info_data=fast_info_data,
+        chart_data=chart_data,
+        chart_fetched=chart_fetched,
+        premarket_vol_data=premarket_vol_data,
+        premarket_vol_fetched=premarket_vol_fetched,
+        finnhub_data=finnhub_data,
+        polygon_vol_data=polygon_vol_data,
+        alt_prev_close=alt_prev_close,
+        alt_chart_open=alt_chart_open,
+        obs_time_override=obs_time_override,
+        allow_cache_previous=allow_cache_previous,
+        supplement_only=supplement_only,
+        now_ny=now_ny,
+    )
+    _publish_quote_cache_candidate(symbol, candidate)
+    return meta
 
 
 def update_price_tick(symbol, t_obj, status, quote_data=None):
@@ -3477,11 +3598,7 @@ def refresh_cached_symbol_state(symbol: str, status: str, now_ny: Optional[datet
     if now_ny is None:
         now_ny = datetime.now(ny_tz)
 
-    cache.session[symbol] = status
-    cache.session_liquidity[symbol] = (
-        "LOW" if status in ("AFTER-HOURS", "PRE-MARKET") else "HIGH"
-    )
-
+    liquidity = "LOW" if status in ("AFTER-HOURS", "PRE-MARKET") else "HIGH"
     price = cache.prices.get(symbol)
     obs_str = cache.observation_times.get(symbol)
     obs_dt = None
@@ -3498,23 +3615,29 @@ def refresh_cached_symbol_state(symbol: str, status: str, now_ny: Optional[datet
         session_status=status,
         source=cache.price_sources.get(symbol),
     )
+    cache.session[symbol] = status
+    cache.session_liquidity[symbol] = liquidity
     cache.price_validity[symbol] = validity
     cache.freshness[symbol] = freshness
 
 
 def enqueue_market_batch_quotes(symbols: Sequence[str], status: str) -> Tuple[bool, Optional[Any]]:
-    """Enqueues non-blocking batched quote acquisition on MARKET_DATA_COORDINATOR."""
+    """
+    Enqueues non-blocking batched quote acquisition on MARKET_DATA_COORDINATOR.
+    Uses a session-specific request key paired with stable per-symbol QUOTE:{sym} child keys.
+    """
     clean_syms = tuple(dict.fromkeys(str(s).strip().upper() for s in symbols if s and str(s).strip()))
     if not clean_syms:
         return False, None
-    batch_target = "BATCH_QUOTE:" + ",".join(sorted(clean_syms))
+    clean_status = str(status or "OPEN").strip().upper()
+    batch_target = f"BATCH_QUOTE:{clean_status}:" + ",".join(sorted(clean_syms))
     child_keys = tuple(WorkKey(WorkType.MARKET_DATA.value, f"QUOTE:{s}") for s in clean_syms)
     return MARKET_DATA_COORDINATOR.enqueue(
         work_type=WorkType.MARKET_DATA.value,
         target=batch_target,
         obs_time=None,
         fn=_acquire_batch_quotes_raw,
-        args=(clean_syms, status),
+        args=(clean_syms, clean_status),
         child_keys=child_keys,
     )
 
@@ -3528,16 +3651,17 @@ def enqueue_market_symbol_fallback(
     need_fast_info: bool = True,
     need_prev_close: bool = False,
     need_chart_open: bool = False,
-    base_obs_time: Optional[str] = None,
 ) -> Tuple[bool, Optional[Any]]:
     """
     Enqueues non-blocking per-symbol fallback/supplemental market-data acquisition on MARKET_DATA_COORDINATOR.
-    Respects existing 60s intraday-chart and 90s premarket-volume TTLs on the coordinating thread.
-    Shares the per-symbol QUOTE:{symbol} ordering key so fallback never overwrites newer quotes.
+    Uses a session-specific request key paired with the stable logical result key (QUOTE:{symbol}
+    for price fallbacks, QUOTE_SUPPLEMENT:{symbol} for non-price enrichment) while respecting
+    existing 60s intraday-chart and 90s premarket-volume TTLs on the coordinating thread.
     """
     if not symbol or not str(symbol).strip():
         return False, None
     sym_clean = str(symbol).strip().upper()
+    clean_status = str(status or "OPEN").strip().upper()
     now_ts = t_time.time()
 
     chart_fresh = (
@@ -3554,12 +3678,19 @@ def enqueue_market_symbol_fallback(
 
     include_polygon_vol = bool(USE_POLYGON and cache.volumes.get(sym_clean, 0) == 0)
 
+    if need_price:
+        request_target = f"QUOTE_FALLBACK:{clean_status}:{sym_clean}"
+        logical_target = f"QUOTE:{sym_clean}"
+    else:
+        request_target = f"QUOTE_SUPPLEMENT_REQ:{clean_status}:{sym_clean}"
+        logical_target = f"QUOTE_SUPPLEMENT:{sym_clean}"
+
     return MARKET_DATA_COORDINATOR.enqueue(
         work_type=WorkType.MARKET_DATA.value,
-        target=f"QUOTE_FALLBACK:{sym_clean}",
+        target=request_target,
         obs_time=None,
         fn=_acquire_symbol_fallback_raw,
-        args=(sym_clean, status),
+        args=(sym_clean, clean_status),
         kwargs={
             "need_price": need_price,
             "fetch_chart": fetch_chart,
@@ -3569,23 +3700,27 @@ def enqueue_market_symbol_fallback(
             "include_polygon_vol": include_polygon_vol,
             "include_prev_close": need_prev_close,
             "include_chart_open": need_chart_open,
-            "base_obs_time": base_obs_time,
         },
-        result_key=WorkKey(WorkType.MARKET_DATA.value, f"QUOTE:{sym_clean}"),
+        result_key=WorkKey(WorkType.MARKET_DATA.value, logical_target),
     )
 
 
 def enqueue_market_vwap(symbol: str, status: str) -> Tuple[bool, Optional[Any]]:
-    """Enqueues non-blocking intraday VWAP acquisition on MARKET_DATA_COORDINATOR."""
+    """
+    Enqueues non-blocking intraday VWAP acquisition on MARKET_DATA_COORDINATOR
+    with a session-specific request key and stable per-symbol VWAP:{symbol} result key.
+    """
     if not symbol or not str(symbol).strip():
         return False, None
     sym_clean = str(symbol).strip().upper()
+    clean_status = str(status or "OPEN").strip().upper()
     return MARKET_DATA_COORDINATOR.enqueue(
         work_type=WorkType.MARKET_DATA.value,
-        target=f"VWAP:{sym_clean}",
+        target=f"VWAP_REQUEST:{clean_status}:{sym_clean}",
         obs_time=None,
         fn=_acquire_vwap_raw,
-        args=(sym_clean, status),
+        args=(sym_clean, clean_status),
+        result_key=WorkKey(WorkType.MARKET_DATA.value, f"VWAP:{sym_clean}"),
     )
 
 
@@ -3626,10 +3761,9 @@ def apply_background_market_data_results() -> List[Tuple[WorkResult, bool, str]]
                     "need_fast_info": meta.get("need_fast_info", False),
                     "need_prev_close": meta.get("need_prev_close", False),
                     "need_chart_open": meta.get("need_chart_open", False),
-                    "base_obs_time": res.obs_time,
                 }
         elif kind == "symbol_fallback":
-            sym = res.data.get("symbol") or res.key.target.removeprefix("QUOTE:")
+            sym = res.data.get("symbol") or res.key.target.removeprefix("QUOTE:").removeprefix("QUOTE_SUPPLEMENT:")
             obs_ny = parse_utc_iso8601_timestamp(res.obs_time).astimezone(ny_tz)
             supplement_only = bool(res.data.get("supplement_only", False))
             _apply_quote_and_fallback_to_cache(
@@ -3667,9 +3801,11 @@ def apply_background_market_data_results() -> List[Tuple[WorkResult, bool, str]]
         on_publish=_publish_market_data_result,
     )
 
-    for res, applied, _ in audit:
+    for res, applied, reason in audit:
+        if applied or str(reason).startswith("Stale "):
+            continue
         target = res.key.target
-        if not applied and target.startswith("QUOTE:"):
+        if target.startswith("QUOTE:"):
             sym = target.removeprefix("QUOTE:")
             pending_fallbacks.setdefault(
                 sym,
@@ -3680,11 +3816,12 @@ def apply_background_market_data_results() -> List[Tuple[WorkResult, bool, str]]
                     "need_fast_info": True,
                     "need_prev_close": sym not in cache.regular_close,
                     "need_chart_open": False,
-                    "base_obs_time": None,
                 },
             )
-        elif not applied and target.startswith("BATCH_QUOTE:"):
-            for sym in target.removeprefix("BATCH_QUOTE:").split(","):
+        elif target.startswith("BATCH_QUOTE:"):
+            remainder = target.removeprefix("BATCH_QUOTE:")
+            sym_list_part = remainder.split(":", 1)[1] if ":" in remainder else remainder
+            for sym in sym_list_part.split(","):
                 sym = sym.strip()
                 if sym:
                     pending_fallbacks.setdefault(
@@ -3696,7 +3833,6 @@ def apply_background_market_data_results() -> List[Tuple[WorkResult, bool, str]]
                             "need_fast_info": True,
                             "need_prev_close": sym not in cache.regular_close,
                             "need_chart_open": False,
-                            "base_obs_time": None,
                         },
                     )
 

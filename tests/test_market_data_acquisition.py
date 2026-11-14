@@ -43,6 +43,49 @@ def _wait_workers_idle(coord: bi.BackgroundIntelligenceCoordinator, timeout: flo
     )
 
 
+_SYMBOL_CACHE_ATTRS = (
+    "session",
+    "session_liquidity",
+    "prices",
+    "price_sources",
+    "observation_times",
+    "retrieval_times",
+    "price_validity",
+    "freshness",
+    "day_open",
+    "day_high",
+    "day_low",
+    "volumes",
+    "pre_market_volume",
+    "after_hours_volume",
+    "regular_close",
+    "gaps",
+    "session_change",
+    "pre_market_price",
+    "pre_market_change",
+    "after_hours_price",
+    "after_hours_change",
+    "overnight_return",
+    "ssr_active",
+    "last_chart_fetch",
+    "chart_cache",
+    "chart_obs_time",
+    "last_premarket_vol_fetch",
+    "premarket_vol_cache",
+)
+
+
+_MISSING = object()
+
+
+def _snapshot_symbol_cache(symbol: str) -> dict:
+    snap = {}
+    for attr in _SYMBOL_CACHE_ATTRS:
+        d = getattr(fs.cache, attr)
+        snap[attr] = d.get(symbol, _MISSING)
+    return snap
+
+
 @contextlib.contextmanager
 def _isolated_market_coordinators(
     *,
@@ -134,8 +177,8 @@ class TestStage222WorkerSeparationAndIsolation(_MarketDataTestBase):
                 self.assertTrue(started_event.wait(timeout=2.0))
                 self.assertNotIn("AAPL", fs.cache.prices)
 
-                # While blocked, duplicate cycle for same symbols coalesces (no new sequence, single provider call)
-                batch_key = bi.WorkKey(bi.WorkType.MARKET_DATA.value, "BATCH_QUOTE:AAPL,NVDA")
+                # While blocked, duplicate cycle for same symbols and session coalesces (no new sequence, single provider call)
+                batch_key = bi.WorkKey(bi.WorkType.MARKET_DATA.value, "BATCH_QUOTE:OPEN:AAPL,NVDA")
                 seq_before = mkt_coord.get_latest_issued_sequence(batch_key)
                 stats2 = fs.coordinate_market_data_cycle(["AAPL", "NVDA"], "OPEN", ["AAPL"], now_ny=now_ny)
                 self.assertEqual(mkt_coord.get_latest_issued_sequence(batch_key), seq_before)
@@ -333,21 +376,40 @@ class TestStage222TimestampsBatchAndOrdering(_MarketDataTestBase):
                             "regularMarketPrice": 205.0,
                             "regularMarketTime": ts_2,
                         },
-                        # MSFT missing/invalid price -> partial batch invalid symbol
+                        # MSFT missing/invalid price -> partial batch invalid symbol with non-price fields
                         "MSFT": {
                             "regularMarketPrice": 0,
                             "regularMarketTime": ts_2,
+                            "regularMarketOpen": 999.0,
+                            "regularMarketDayHigh": 1005.0,
+                            "regularMarketDayLow": 990.0,
+                            "regularMarketVolume": 555_555,
+                            "regularMarketPreviousClose": 995.0,
                         },
                     }
                 finally:
                     batch2_done.set()
             return {}
 
-        # Pre-seed MSFT accepted state so partial batch failure must leave it completely intact
+        # Pre-seed complete MSFT accepted state so partial batch failure must leave all relevant fields intact
+        msft_obs_iso = datetime.fromtimestamp(_epoch_after(now_ny, -60), UTC_TZ).astimezone(NY_TZ).isoformat()
+        msft_ret_iso = datetime.fromtimestamp(_epoch_after(now_ny, -55), UTC_TZ).astimezone(NY_TZ).isoformat()
+        fs.cache.session["MSFT"] = "OPEN"
+        fs.cache.session_liquidity["MSFT"] = "HIGH"
         fs.cache.prices["MSFT"] = 333.33
-        fs.cache.volumes["MSFT"] = 777
-        fs.cache.observation_times["MSFT"] = _utc_iso(_epoch_after(now_ny, -60))
+        fs.cache.price_sources["MSFT"] = "BATCH_QUOTE"
+        fs.cache.observation_times["MSFT"] = msft_obs_iso
+        fs.cache.retrieval_times["MSFT"] = msft_ret_iso
+        fs.cache.price_validity["MSFT"] = "VALID"
         fs.cache.freshness["MSFT"] = "CURRENT"
+        fs.cache.volumes["MSFT"] = 777
+        fs.cache.day_open["MSFT"] = 330.0
+        fs.cache.day_high["MSFT"] = 335.0
+        fs.cache.day_low["MSFT"] = 329.0
+        fs.cache.regular_close["MSFT"] = 325.0
+        fs.cache.gaps["MSFT"] = 1.54
+        fs.cache.session_change["MSFT"] = 2.56
+        msft_before = _snapshot_symbol_cache("MSFT")
 
         with _isolated_market_coordinators(max_workers=2) as (mkt_coord, _, _, _):
             try:
@@ -366,9 +428,8 @@ class TestStage222TimestampsBatchAndOrdering(_MarketDataTestBase):
                     self.assertTrue(applied_map2["QUOTE:AAPL"])
                     self.assertFalse(applied_map2["QUOTE:MSFT"])
                     self.assertAlmostEqual(fs.cache.prices["AAPL"], 205.0)
-                    # Partial batch failure did not corrupt MSFT or AAPL
-                    self.assertAlmostEqual(fs.cache.prices["MSFT"], 333.33)
-                    self.assertEqual(fs.cache.volumes["MSFT"], 777)
+                    # Partial batch failure did not corrupt any MSFT cache field
+                    self.assertEqual(_snapshot_symbol_cache("MSFT"), msft_before)
 
                     # Release Batch 1: AAPL (seq 1) must be rejected as stale, NVDA (seq 1) must apply cleanly
                     batch1_gate.set()
@@ -781,6 +842,408 @@ class TestStage222SemanticsTTLsSessionsAndShutdown(_MarketDataTestBase):
             lock = coord.get_key_lock(k)
             self.assertTrue(lock.acquire(blocking=False))
             lock.release()
+
+
+class TestStage222RemediationRequirements(_MarketDataTestBase):
+    def test_16_session_transition_batch_quote_does_not_coalesce_and_rejects_old_session(self):
+        now_ny = datetime.now(NY_TZ).replace(microsecond=0)
+        ts_pre = _epoch_after(now_ny, -60)
+        ts_open = _epoch_after(now_ny, -15)
+        pre_entered = threading.Event()
+        pre_gate = threading.Event()
+        calls = []
+
+        def fake_batch(tickers):
+            idx = len(calls)
+            calls.append(tuple(tickers))
+            if idx == 0:
+                pre_entered.set()
+                pre_gate.wait(timeout=3.0)
+                return {
+                    s: {"preMarketPrice": 180.0, "preMarketTime": ts_pre, "regularMarketPrice": 179.0, "regularMarketTime": ts_pre}
+                    for s in tickers
+                }
+            return {
+                s: {"regularMarketPrice": 192.5, "regularMarketTime": ts_open}
+                for s in tickers
+            }
+
+        with _isolated_market_coordinators(max_workers=2) as (mkt_coord, _, _, _):
+            try:
+                with patch.object(fs, "get_batch_quotes", side_effect=fake_batch):
+                    ok_pre, item_pre = fs.enqueue_market_batch_quotes(["AAPL", "NVDA"], "PRE-MARKET")
+                    self.assertTrue(ok_pre)
+                    self.assertTrue(pre_entered.wait(timeout=2.0))
+
+                    # Different session must NOT coalesce; issues newer QUOTE:AAPL & QUOTE:NVDA sequences
+                    ok_open, item_open = fs.enqueue_market_batch_quotes(["AAPL", "NVDA"], "OPEN")
+                    self.assertTrue(ok_open)
+                    self.assertNotEqual(item_open.key, item_pre.key)
+                    self.assertTrue(item_open.event.wait(timeout=2.0))
+
+                    # Same-session duplicate remains bounded & coalesces onto in-flight/queued or fresh item cleanly
+                    ok_dup, item_dup = fs.enqueue_market_batch_quotes(["AAPL", "NVDA"], "PRE-MARKET")
+                    self.assertTrue(ok_dup)
+                    self.assertEqual(item_dup.key, item_pre.key)
+                    self.assertEqual(
+                        item_dup.child_sequences[bi.WorkKey(bi.WorkType.MARKET_DATA.value, "QUOTE:AAPL")],
+                        item_pre.child_sequences[bi.WorkKey(bi.WorkType.MARKET_DATA.value, "QUOTE:AAPL")],
+                    )
+
+                    # Release old PRE-MARKET worker and apply all completed results
+                    pre_gate.set()
+                    self.assertTrue(_wait_workers_idle(mkt_coord))
+                    audit = fs.apply_background_market_data_results()
+                    res_map = {(r.key.target, r.sequence): ok for r, ok, _ in audit}
+
+                    self.assertFalse(res_map[("QUOTE:AAPL", 1)])
+                    self.assertFalse(res_map[("QUOTE:NVDA", 1)])
+                    self.assertTrue(res_map[("QUOTE:AAPL", 2)])
+                    self.assertTrue(res_map[("QUOTE:NVDA", 2)])
+                    self.assertAlmostEqual(fs.cache.prices["AAPL"], 192.5)
+                    self.assertEqual(fs.cache.session["AAPL"], "OPEN")
+                    self.assertEqual(
+                        fs.cache.observation_times["AAPL"],
+                        datetime.fromtimestamp(ts_open, UTC_TZ).astimezone(NY_TZ).isoformat(),
+                    )
+            finally:
+                pre_gate.set()
+
+    def test_17_session_transition_symbol_fallback_and_vwap_ordering_and_same_session_dedup(self):
+        now_ny = datetime.now(NY_TZ).replace(microsecond=0)
+        ts_pre = _epoch_after(now_ny, -70)
+        ts_open = _epoch_after(now_ny, -10)
+        fb_pre_entered = threading.Event()
+        fb_pre_gate = threading.Event()
+        vwap_pre_entered = threading.Event()
+        vwap_pre_gate = threading.Event()
+
+        def fake_chart(sym, status):
+            if status == "PRE-MARKET":
+                fb_pre_entered.set()
+                fb_pre_gate.wait(timeout=3.0)
+                return 140.0, 1000, 500, 0, _utc_iso(ts_pre)
+            return 155.0, 2000, 0, 0, _utc_iso(ts_open)
+
+        def fake_vwap_bars(sym, status):
+            if status == "PRE-MARKET":
+                vwap_pre_entered.set()
+                vwap_pre_gate.wait(timeout=3.0)
+                return [(139.0, 139.0, 139.0, 100.0)], _utc_iso(ts_pre), False
+            return [(154.0, 154.0, 154.0, 200.0)], _utc_iso(ts_open), False
+
+        with _isolated_market_coordinators(max_workers=4) as (mkt_coord, _, _, _):
+            try:
+                with patch.object(fs, "_acquire_live_chart_data_raw", side_effect=fake_chart), \
+                     patch.object(fs, "get_premarket_volume_chart", return_value=0), \
+                     patch.object(fs, "get_finnhub_quote", return_value=(0, 0, 0)), \
+                     patch.object(fs, "_extract_fast_info_snapshot", return_value={}), \
+                     patch.object(fs, "_acquire_true_intraday_vwap_bars", side_effect=fake_vwap_bars):
+                    # 1. Symbol fallback transition: PRE-MARKET blocked, OPEN issued
+                    ok_fb1, item_fb1 = fs.enqueue_market_symbol_fallback("AAPL", "PRE-MARKET", need_price=True)
+                    self.assertTrue(ok_fb1)
+                    self.assertTrue(fb_pre_entered.wait(timeout=2.0))
+                    ok_fb_dup, item_fb_dup = fs.enqueue_market_symbol_fallback("AAPL", "PRE-MARKET", need_price=True)
+                    self.assertTrue(ok_fb_dup)
+                    self.assertEqual(item_fb_dup.key, item_fb1.key)
+                    self.assertEqual(item_fb_dup.sequence, item_fb1.sequence)
+
+                    ok_fb2, item_fb2 = fs.enqueue_market_symbol_fallback("AAPL", "OPEN", need_price=True)
+                    self.assertTrue(ok_fb2)
+                    self.assertNotEqual(item_fb2.key, item_fb1.key)
+                    self.assertEqual(item_fb2.result_key, item_fb1.result_key)
+                    self.assertTrue(item_fb2.event.wait(timeout=2.0))
+
+                    # 2. VWAP transition: PRE-MARKET blocked, OPEN issued; shares VWAP:AAPL independent of QUOTE:AAPL
+                    ok_v1, item_v1 = fs.enqueue_market_vwap("AAPL", "PRE-MARKET")
+                    self.assertTrue(ok_v1)
+                    self.assertTrue(vwap_pre_entered.wait(timeout=2.0))
+                    ok_v_dup, item_v_dup = fs.enqueue_market_vwap("AAPL", "PRE-MARKET")
+                    self.assertTrue(ok_v_dup)
+                    self.assertEqual(item_v_dup.key, item_v1.key)
+                    self.assertEqual(item_v_dup.sequence, item_v1.sequence)
+
+                    ok_v2, item_v2 = fs.enqueue_market_vwap("AAPL", "OPEN")
+                    self.assertTrue(ok_v2)
+                    self.assertNotEqual(item_v2.key, item_v1.key)
+                    self.assertEqual(item_v2.result_key, bi.WorkKey(bi.WorkType.MARKET_DATA.value, "VWAP:AAPL"))
+                    self.assertTrue(item_v2.event.wait(timeout=2.0))
+
+                    fb_pre_gate.set()
+                    vwap_pre_gate.set()
+                    self.assertTrue(_wait_workers_idle(mkt_coord))
+                    audit = fs.apply_background_market_data_results()
+                    res_map = {(r.key.target, r.sequence): ok for r, ok, _ in audit}
+
+                    self.assertFalse(res_map[("QUOTE:AAPL", 1)])
+                    self.assertTrue(res_map[("QUOTE:AAPL", 2)])
+                    self.assertFalse(res_map[("VWAP:AAPL", 1)])
+                    self.assertTrue(res_map[("VWAP:AAPL", 2)])
+                    self.assertAlmostEqual(fs.cache.prices["AAPL"], 155.0)
+                    self.assertAlmostEqual(fs.cache.vwaps["AAPL"], 154.0)
+            finally:
+                fb_pre_gate.set()
+                vwap_pre_gate.set()
+
+    def test_18_session_oscillation_premarket_open_premarket_never_accepts_oldest(self):
+        now_ny = datetime.now(NY_TZ).replace(microsecond=0)
+        ts_1 = _epoch_after(now_ny, -120)
+        ts_2 = _epoch_after(now_ny, -60)
+        pre1_entered = threading.Event()
+        pre1_gate = threading.Event()
+
+        def fake_batch(tickers):
+            if not pre1_entered.is_set():
+                pre1_entered.set()
+                pre1_gate.wait(timeout=3.0)
+                return {s: {"preMarketPrice": 111.0, "preMarketTime": ts_1} for s in tickers}
+            return {s: {"regularMarketPrice": 222.0, "regularMarketTime": ts_2} for s in tickers}
+
+        with _isolated_market_coordinators(max_workers=2) as (mkt_coord, _, _, _):
+            try:
+                with patch.object(fs, "get_batch_quotes", side_effect=fake_batch):
+                    # 1. PRE-MARKET request stuck in flight (QUOTE:AAPL seq=1)
+                    ok1, item1 = fs.enqueue_market_batch_quotes(["AAPL"], "PRE-MARKET")
+                    self.assertTrue(ok1)
+                    self.assertTrue(pre1_entered.wait(timeout=2.0))
+
+                    # 2. Transition to OPEN -> finishes and publishes (QUOTE:AAPL seq=2)
+                    ok2, item2 = fs.enqueue_market_batch_quotes(["AAPL"], "OPEN")
+                    self.assertTrue(ok2)
+                    self.assertTrue(item2.event.wait(timeout=2.0))
+                    audit_open = fs.apply_background_market_data_results()
+                    self.assertTrue(audit_open[0][1])
+                    self.assertAlmostEqual(fs.cache.prices["AAPL"], 222.0)
+
+                    # 3. Transition back PRE-MARKET while Req 1 still in flight -> Req 1 must NEVER become valid
+                    ok3, item3 = fs.enqueue_market_batch_quotes(["AAPL"], "PRE-MARKET")
+                    self.assertTrue(ok3)
+                    self.assertEqual(item3.child_sequences[bi.WorkKey(bi.WorkType.MARKET_DATA.value, "QUOTE:AAPL")], 1)
+
+                    pre1_gate.set()
+                    self.assertTrue(_wait_workers_idle(mkt_coord))
+                    audit_old = fs.apply_background_market_data_results()
+                    self.assertEqual(len(audit_old), 1)
+                    self.assertFalse(audit_old[0][1])
+                    self.assertAlmostEqual(fs.cache.prices["AAPL"], 222.0)
+            finally:
+                pre1_gate.set()
+
+    def test_19_atomic_cache_publication_rejects_invalid_quote_without_partial_mutation(self):
+        now_ny = datetime.now(NY_TZ).replace(microsecond=0)
+        ts_prev = _epoch_after(now_ny, -60)
+        ts_bad_quote = _epoch_after(now_ny, -20)
+        ts_valid_later = _epoch_after(now_ny, -5)
+        obs_prev_iso = _utc_iso(ts_prev)
+        obs_prev_ny_iso = datetime.fromtimestamp(ts_prev, UTC_TZ).astimezone(NY_TZ).isoformat()
+
+        # Pre-seed complete symbol cache across all relevant fields
+        fs.cache.session["AAPL"] = "OPEN"
+        fs.cache.session_liquidity["AAPL"] = "HIGH"
+        fs.cache.prices["AAPL"] = 200.0
+        fs.cache.price_sources["AAPL"] = "BATCH_QUOTE"
+        fs.cache.observation_times["AAPL"] = obs_prev_ny_iso
+        fs.cache.retrieval_times["AAPL"] = obs_prev_ny_iso
+        fs.cache.price_validity["AAPL"] = "VALID"
+        fs.cache.freshness["AAPL"] = "CURRENT"
+        fs.cache.day_open["AAPL"] = 198.0
+        fs.cache.day_high["AAPL"] = 202.0
+        fs.cache.day_low["AAPL"] = 197.0
+        fs.cache.volumes["AAPL"] = 100_000
+        fs.cache.pre_market_volume["AAPL"] = 5_000
+        fs.cache.after_hours_volume["AAPL"] = 1_000
+        fs.cache.regular_close["AAPL"] = 195.0
+        fs.cache.gaps["AAPL"] = 1.5
+        fs.cache.session_change["AAPL"] = 2.56
+        fs.cache.pre_market_price["AAPL"] = 197.5
+        fs.cache.pre_market_change["AAPL"] = 1.28
+        fs.cache.after_hours_price["AAPL"] = 199.0
+        fs.cache.after_hours_change["AAPL"] = 2.05
+        fs.cache.overnight_return["AAPL"] = -0.75
+        fs.cache.ssr_active["AAPL"] = False
+        before_snap = _snapshot_symbol_cache("AAPL")
+
+        with _isolated_market_coordinators() as (_, mkt_app, _, _):
+            key = bi.WorkKey(bi.WorkType.MARKET_DATA.value, "QUOTE:AAPL")
+            bad_res = bi.WorkResult(
+                key=key,
+                sequence=1,
+                obs_time=_utc_iso(ts_bad_quote),
+                data={
+                    "kind": "batch_quote",
+                    "symbol": "AAPL",
+                    "status": "PRE-MARKET",
+                    "quote_data": {
+                        "regularMarketPrice": 0,  # invalid price
+                        "regularMarketOpen": 999.0,
+                        "regularMarketDayHigh": 1005.0,
+                        "regularMarketDayLow": 990.0,
+                        "regularMarketVolume": 777_777,
+                        "preMarketVolume": 88_888,
+                        "postMarketVolume": 99_999,
+                        "regularMarketPreviousClose": 980.0,
+                    },
+                },
+            )
+
+            def publish_fn(res):
+                obs_ny = bi.parse_utc_iso8601_timestamp(res.obs_time).astimezone(NY_TZ)
+                fs._apply_quote_and_fallback_to_cache(
+                    symbol="AAPL",
+                    status=res.data["status"],
+                    quote_data=res.data["quote_data"],
+                    obs_time_override=obs_ny,
+                    allow_cache_previous=False,
+                    now_ny=now_ny,
+                )
+
+            audit_bad = mkt_app.apply_results(
+                [bad_res],
+                grounding_target={},
+                scout_cache_target={},
+                scout_category_map={},
+                latest_issued_provider=lambda _k: 1,
+                on_publish=publish_fn,
+            )
+            self.assertFalse(audit_bad[0][1])
+            self.assertEqual(_snapshot_symbol_cache("AAPL"), before_snap)
+            self.assertEqual(mkt_app.get_last_applied(key), (-1, ""))
+            lock = mkt_app.get_key_lock(key)
+            self.assertTrue(lock.acquire(blocking=False))
+            lock.release()
+
+            # Valid subsequent result publishes cleanly and advances sequence & obs_time
+            good_iso = _utc_iso(ts_valid_later)
+            good_res = bi.WorkResult(
+                key=key,
+                sequence=2,
+                obs_time=good_iso,
+                data={
+                    "kind": "batch_quote",
+                    "symbol": "AAPL",
+                    "status": "OPEN",
+                    "quote_data": {
+                        "regularMarketPrice": 212.0,
+                        "regularMarketOpen": 210.0,
+                        "regularMarketDayHigh": 213.0,
+                        "regularMarketDayLow": 209.0,
+                        "regularMarketVolume": 200_000,
+                        "regularMarketPreviousClose": 205.0,
+                        "regularMarketTime": ts_valid_later,
+                    },
+                },
+            )
+            audit_good = mkt_app.apply_results(
+                [good_res],
+                grounding_target={},
+                scout_cache_target={},
+                scout_category_map={},
+                latest_issued_provider=lambda _k: 2,
+                on_publish=publish_fn,
+            )
+            self.assertTrue(audit_good[0][1])
+            self.assertEqual(mkt_app.get_last_applied(key), (2, good_iso))
+            self.assertAlmostEqual(fs.cache.prices["AAPL"], 212.0)
+            self.assertAlmostEqual(fs.cache.day_open["AAPL"], 210.0)
+
+    def test_20_quote_field_and_source_timestamp_strict_coherence(self):
+        now_ny = datetime.now(NY_TZ).replace(microsecond=0)
+        ts_reg = _epoch_after(now_ny, -300)
+        ts_pre = _epoch_after(now_ny, -45)
+        ts_post = _epoch_after(now_ny, -20)
+        ny_reg = datetime.fromtimestamp(ts_reg, UTC_TZ).astimezone(NY_TZ).isoformat()
+        ny_pre = datetime.fromtimestamp(ts_pre, UTC_TZ).astimezone(NY_TZ).isoformat()
+        ny_post = datetime.fromtimestamp(ts_post, UTC_TZ).astimezone(NY_TZ).isoformat()
+
+        cases = [
+            # 1. PRE-MARKET with valid premarket price & time
+            ("PRE-MARKET", {"preMarketPrice": 152.0, "preMarketTime": ts_pre, "regularMarketPrice": 150.0, "regularMarketTime": ts_reg}, True, 152.0, ny_pre),
+            # 2. PRE-MARKET without premarket price -> falls back to regular price & regular time (NOT preMarketTime)
+            ("PRE-MARKET", {"preMarketPrice": None, "preMarketTime": ts_pre, "regularMarketPrice": 150.0, "regularMarketTime": ts_reg}, True, 150.0, ny_reg),
+            # 3. AFTER-HOURS with valid postmarket price & time
+            ("AFTER-HOURS", {"postMarketPrice": 154.0, "postMarketTime": ts_post, "regularMarketPrice": 150.0, "regularMarketTime": ts_reg}, True, 154.0, ny_post),
+            # 4. AFTER-HOURS without postmarket price -> falls back to regular price & regular time (NOT postMarketTime)
+            ("AFTER-HOURS", {"postMarketPrice": None, "postMarketTime": ts_post, "regularMarketPrice": 150.0, "regularMarketTime": ts_reg}, True, 150.0, ny_reg),
+            # 5. Selected field missing timestamp -> fail closed (never borrow regularMarketTime)
+            ("PRE-MARKET", {"preMarketPrice": 153.0, "preMarketTime": None, "regularMarketPrice": 150.0, "regularMarketTime": ts_reg}, False, None, None),
+            # 6. Selected field invalid / ambiguous timestamp -> fail closed
+            ("AFTER-HOURS", {"postMarketPrice": 155.0, "postMarketTime": "2026-11-14T21:00:00-00:00", "regularMarketPrice": 150.0, "regularMarketTime": ts_reg}, False, None, None),
+            ("OPEN", {"regularMarketPrice": 151.0, "regularMarketTime": "2026-11-14T15:30:00"}, False, None, None),
+        ]
+
+        for idx, (status, q_payload, should_apply, exp_price, exp_ny_iso) in enumerate(cases):
+            sym = f"T{idx}"
+            fs.cache.clear()
+            with _isolated_market_coordinators() as (mkt_coord, _, _, _):
+                with patch.object(fs, "get_batch_quotes", return_value={sym: q_payload}):
+                    acc, _ = fs.enqueue_market_batch_quotes([sym], status)
+                    self.assertTrue(acc)
+                    self.assertTrue(_wait_workers_idle(mkt_coord))
+                    audit = fs.apply_background_market_data_results()
+                    self.assertEqual(len(audit), 1)
+                    self.assertEqual(audit[0][1], should_apply, f"Case {idx} ({status}) got {audit[0][2]}")
+                    if should_apply:
+                        self.assertAlmostEqual(fs.cache.prices[sym], exp_price)
+                        self.assertEqual(fs.cache.price_sources[sym], "BATCH_QUOTE")
+                        self.assertEqual(fs.cache.observation_times[sym], exp_ny_iso)
+                    else:
+                        self.assertNotIn(sym, fs.cache.prices)
+                        self.assertNotIn(sym, fs.cache.observation_times)
+
+    def test_21_supplemental_fallback_never_borrows_prior_batch_or_invents_timestamps(self):
+        now_ny = datetime.now(NY_TZ).replace(microsecond=0)
+        ts_chart = _epoch_after(now_ny, -40)
+
+        # Untimestamped supplemental sources (fast_info / premarket_vol / prev_close) yield obs_time=None
+        with patch.object(fs, "get_premarket_volume_chart", return_value=12345), \
+             patch.object(fs, "_extract_fast_info_snapshot", return_value={"open": 199.0}), \
+             patch.object(fs, "get_previous_close", return_value=195.0):
+            obs_supp = fs._acquire_symbol_fallback_raw(
+                "AAPL",
+                "PRE-MARKET",
+                need_price=False,
+                fetch_chart=False,
+                fetch_premarket_vol=True,
+                include_fast_info=True,
+                include_prev_close=True,
+            )
+            self.assertIsNone(obs_supp.obs_time)
+
+        # Even if chart AND fast_info run in supplement mode, untimestamped fast_info must not borrow chart ts
+        with patch.object(fs, "_acquire_live_chart_data_raw", return_value=(None, 1000, 500, 0, _utc_iso(ts_chart))), \
+             patch.object(fs, "get_premarket_volume_chart", return_value=500), \
+             patch.object(fs, "_extract_fast_info_snapshot", return_value={"open": 199.0}):
+            obs_mixed = fs._acquire_symbol_fallback_raw(
+                "AAPL",
+                "OPEN",
+                need_price=False,
+                fetch_chart=True,
+                fetch_premarket_vol=True,
+                include_fast_info=True,
+            )
+            self.assertIsNone(obs_mixed.obs_time)
+            self.assertEqual(obs_mixed.data["source_timestamps"]["chart"], _utc_iso(ts_chart))
+
+        # Enqueueing supplement fallback uses separate QUOTE_SUPPLEMENT key and does not advance QUOTE:AAPL
+        with _isolated_market_coordinators() as (mkt_coord, _, _, _):
+            with patch.object(fs, "_acquire_live_chart_data_raw", return_value=(None, 0, 0, 0, None)), \
+                 patch.object(fs, "get_premarket_volume_chart", return_value=12345), \
+                 patch.object(fs, "_extract_fast_info_snapshot", return_value={"open": 199.0}):
+                ok, item = fs.enqueue_market_symbol_fallback(
+                    "AAPL",
+                    "PRE-MARKET",
+                    need_price=False,
+                    needs_pre_vol=True,
+                    need_fast_info=True,
+                )
+                self.assertTrue(ok)
+                self.assertEqual(item.result_key, bi.WorkKey(bi.WorkType.MARKET_DATA.value, "QUOTE_SUPPLEMENT:AAPL"))
+                self.assertEqual(mkt_coord.get_latest_issued_sequence(bi.WorkKey(bi.WorkType.MARKET_DATA.value, "QUOTE:AAPL")), 0)
+                self.assertTrue(_wait_workers_idle(mkt_coord))
+                audit = fs.apply_background_market_data_results()
+                self.assertEqual(len(audit), 1)
+                self.assertFalse(audit[0][1])
+                self.assertIn("Missing required source observation timestamp", audit[0][2])
 
 
 if __name__ == "__main__":
