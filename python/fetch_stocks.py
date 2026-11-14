@@ -514,13 +514,21 @@ def _get_dynamic_scout_tickers(category: str) -> list:
             cached = DYNAMIC_SCOUT_CACHE[category_clean]
             if isinstance(cached, dict):
                 cached_time = cached.get("cached_at")
-                if (
+                valid_cache_time = (
                     isinstance(cached_time, (int, float))
                     and not isinstance(cached_time, bool)
-                    and math.isfinite(cached_time)
-                ):
-                    if (now - cached_time) < 14400: # 4-hour cache TTL
-                        return cached.get("tickers", [])
+                )
+                if valid_cache_time:
+                    try:
+                        valid_cache_time = math.isfinite(cached_time)
+                        if valid_cache_time:
+                            age = now - cached_time
+                            valid_cache_time = 0 <= age < 14400
+                    except (OverflowError, TypeError, ValueError):
+                        valid_cache_time = False
+
+                if valid_cache_time:
+                    return cached.get("tickers", [])
 
     # Enqueue background discovery without blocking; no fabricated source observation timestamp
     enqueue_scout_discovery(category_clean, obs_time=None)

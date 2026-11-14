@@ -1388,7 +1388,7 @@ class TestStage21FinalCorrectnessRequirements(unittest.TestCase):
         import math
         from fetch_stocks import _get_dynamic_scout_tickers, DYNAMIC_SCOUT_CACHE, DYNAMIC_SCOUT_CACHE_LOCK
 
-        # 1. Missing cached_at with timestamp=None expires safely, preserves timestamp, enqueues discovery
+        # 0. Missing cached_at with timestamp=None -> Cache expires safely
         with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
             with DYNAMIC_SCOUT_CACHE_LOCK:
                 DYNAMIC_SCOUT_CACHE["MISSING_NONE_TS"] = {
@@ -1407,33 +1407,33 @@ class TestStage21FinalCorrectnessRequirements(unittest.TestCase):
                 with DYNAMIC_SCOUT_CACHE_LOCK:
                     DYNAMIC_SCOUT_CACHE.pop("MISSING_NONE_TS", None)
 
-        # 2. Missing cached_at with a recent numeric timestamp expires; MUST NOT produce a cache hit
+        # 1. Missing cached_at with recent numeric source timestamp -> Cache expires, enqueues discovery
         with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
-            recent_ts = time.time() - 60
+            recent_num = time.time() - 60
             with DYNAMIC_SCOUT_CACHE_LOCK:
-                DYNAMIC_SCOUT_CACHE["MISSING_NUMERIC_TS"] = {
+                DYNAMIC_SCOUT_CACHE["MISSING_NUM_TS"] = {
                     "tickers": ["OLD"],
-                    "timestamp": recent_ts,
+                    "timestamp": recent_num,
                 }
             try:
-                res = _get_dynamic_scout_tickers("MISSING_NUMERIC_TS")
+                res = _get_dynamic_scout_tickers("MISSING_NUM_TS")
                 self.assertNotEqual(res, ["OLD"])  # Must NOT produce cache hit
                 self.assertEqual(dummy.pending_count(), 1)
                 self.assertEqual(len(dummy._workers), 0)
                 mock_scout_raw.assert_not_called()
                 mock_runner.assert_not_called()
-                self.assertEqual(DYNAMIC_SCOUT_CACHE["MISSING_NUMERIC_TS"]["timestamp"], recent_ts)
+                self.assertEqual(DYNAMIC_SCOUT_CACHE["MISSING_NUM_TS"]["timestamp"], recent_num)
             finally:
                 with DYNAMIC_SCOUT_CACHE_LOCK:
-                    DYNAMIC_SCOUT_CACHE.pop("MISSING_NUMERIC_TS", None)
+                    DYNAMIC_SCOUT_CACHE.pop("MISSING_NUM_TS", None)
 
-        # 3. Missing cached_at with a recent ISO-8601 timestamp expires; MUST NOT produce a cache hit
+        # 2. Missing cached_at with recent ISO source timestamp -> Cache expires, enqueues discovery
         with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
-            iso_ts = "2026-11-14T20:00:00Z"
+            recent_iso = "2026-11-14T20:00:00Z"
             with DYNAMIC_SCOUT_CACHE_LOCK:
                 DYNAMIC_SCOUT_CACHE["MISSING_ISO_TS"] = {
                     "tickers": ["OLD"],
-                    "timestamp": iso_ts,
+                    "timestamp": recent_iso,
                 }
             try:
                 res = _get_dynamic_scout_tickers("MISSING_ISO_TS")
@@ -1442,31 +1442,31 @@ class TestStage21FinalCorrectnessRequirements(unittest.TestCase):
                 self.assertEqual(len(dummy._workers), 0)
                 mock_scout_raw.assert_not_called()
                 mock_runner.assert_not_called()
-                self.assertEqual(DYNAMIC_SCOUT_CACHE["MISSING_ISO_TS"]["timestamp"], iso_ts)
+                self.assertEqual(DYNAMIC_SCOUT_CACHE["MISSING_ISO_TS"]["timestamp"], recent_iso)
             finally:
                 with DYNAMIC_SCOUT_CACHE_LOCK:
                     DYNAMIC_SCOUT_CACHE.pop("MISSING_ISO_TS", None)
 
-        # 4. cached_at=None with a recent source timestamp expires
+        # 3. cached_at=None with recent source timestamp -> Cache expires
         with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
             recent_ts = time.time() - 30
             with DYNAMIC_SCOUT_CACHE_LOCK:
-                DYNAMIC_SCOUT_CACHE["CACHED_AT_NONE_RECENT"] = {
+                DYNAMIC_SCOUT_CACHE["CACHED_AT_NONE"] = {
                     "tickers": ["OLD"],
                     "cached_at": None,
                     "timestamp": recent_ts,
                 }
             try:
-                res = _get_dynamic_scout_tickers("CACHED_AT_NONE_RECENT")
+                res = _get_dynamic_scout_tickers("CACHED_AT_NONE")
                 self.assertNotEqual(res, ["OLD"])
                 self.assertEqual(dummy.pending_count(), 1)
                 mock_scout_raw.assert_not_called()
-                self.assertEqual(DYNAMIC_SCOUT_CACHE["CACHED_AT_NONE_RECENT"]["timestamp"], recent_ts)
+                self.assertEqual(DYNAMIC_SCOUT_CACHE["CACHED_AT_NONE"]["timestamp"], recent_ts)
             finally:
                 with DYNAMIC_SCOUT_CACHE_LOCK:
-                    DYNAMIC_SCOUT_CACHE.pop("CACHED_AT_NONE_RECENT", None)
+                    DYNAMIC_SCOUT_CACHE.pop("CACHED_AT_NONE", None)
 
-        # 5. Invalid string cached_at expires
+        # 4. String cached_at -> Cache expires
         with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
             with DYNAMIC_SCOUT_CACHE_LOCK:
                 DYNAMIC_SCOUT_CACHE["CACHED_AT_STR"] = {
@@ -1484,7 +1484,7 @@ class TestStage21FinalCorrectnessRequirements(unittest.TestCase):
                 with DYNAMIC_SCOUT_CACHE_LOCK:
                     DYNAMIC_SCOUT_CACHE.pop("CACHED_AT_STR", None)
 
-        # 6. Boolean cached_at expires (True / False are ints in Python but invalid timestamps)
+        # 5. Boolean cached_at (True and False) -> Cache expires
         for b_val in (True, False):
             with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
                 key = f"CACHED_AT_BOOL_{b_val}"
@@ -1504,7 +1504,7 @@ class TestStage21FinalCorrectnessRequirements(unittest.TestCase):
                     with DYNAMIC_SCOUT_CACHE_LOCK:
                         DYNAMIC_SCOUT_CACHE.pop(key, None)
 
-        # 7. Non-finite numeric cached_at values expire (NaN, +inf, -inf)
+        # 6. NaN, Positive infinity, Negative infinity -> Cache expires
         for nf_val, nf_name in [(float("nan"), "NAN"), (float("inf"), "POS_INF"), (float("-inf"), "NEG_INF")]:
             with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
                 key = f"CACHED_AT_{nf_name}"
@@ -1524,41 +1524,135 @@ class TestStage21FinalCorrectnessRequirements(unittest.TestCase):
                     with DYNAMIC_SCOUT_CACHE_LOCK:
                         DYNAMIC_SCOUT_CACHE.pop(key, None)
 
-        # 8. Valid finite numeric cached_at within four hours produces a cache hit
+        # 7. Future finite float -> Cache expires
+        with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
+            future_float = time.time() + 600.0
+            with DYNAMIC_SCOUT_CACHE_LOCK:
+                DYNAMIC_SCOUT_CACHE["FUTURE_FLOAT"] = {
+                    "tickers": ["OLD"],
+                    "cached_at": future_float,
+                    "timestamp": 1000.0,
+                }
+            try:
+                res = _get_dynamic_scout_tickers("FUTURE_FLOAT")
+                self.assertNotEqual(res, ["OLD"])
+                self.assertEqual(dummy.pending_count(), 1)
+                mock_scout_raw.assert_not_called()
+                self.assertEqual(DYNAMIC_SCOUT_CACHE["FUTURE_FLOAT"]["timestamp"], 1000.0)
+            finally:
+                with DYNAMIC_SCOUT_CACHE_LOCK:
+                    DYNAMIC_SCOUT_CACHE.pop("FUTURE_FLOAT", None)
+
+        # 8. Future finite integer -> Cache expires
+        with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
+            future_int = int(time.time() + 3600)
+            with DYNAMIC_SCOUT_CACHE_LOCK:
+                DYNAMIC_SCOUT_CACHE["FUTURE_INT"] = {
+                    "tickers": ["OLD"],
+                    "cached_at": future_int,
+                    "timestamp": 1000.0,
+                }
+            try:
+                res = _get_dynamic_scout_tickers("FUTURE_INT")
+                self.assertNotEqual(res, ["OLD"])
+                self.assertEqual(dummy.pending_count(), 1)
+                mock_scout_raw.assert_not_called()
+                self.assertEqual(DYNAMIC_SCOUT_CACHE["FUTURE_INT"]["timestamp"], 1000.0)
+            finally:
+                with DYNAMIC_SCOUT_CACHE_LOCK:
+                    DYNAMIC_SCOUT_CACHE.pop("FUTURE_INT", None)
+
+        # 9. Extremely large positive integer -> Cache expires without exception
+        with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
+            huge_pos_int = 10**1000
+            with DYNAMIC_SCOUT_CACHE_LOCK:
+                DYNAMIC_SCOUT_CACHE["HUGE_POS_INT"] = {
+                    "tickers": ["OLD"],
+                    "cached_at": huge_pos_int,
+                    "timestamp": 1000.0,
+                }
+            try:
+                res = _get_dynamic_scout_tickers("HUGE_POS_INT")
+                self.assertNotEqual(res, ["OLD"])
+                self.assertEqual(dummy.pending_count(), 1)
+                mock_scout_raw.assert_not_called()
+                self.assertEqual(DYNAMIC_SCOUT_CACHE["HUGE_POS_INT"]["timestamp"], 1000.0)
+            finally:
+                with DYNAMIC_SCOUT_CACHE_LOCK:
+                    DYNAMIC_SCOUT_CACHE.pop("HUGE_POS_INT", None)
+
+        # 10. Extremely large negative integer -> Cache expires without exception
+        with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
+            huge_neg_int = -10**1000
+            with DYNAMIC_SCOUT_CACHE_LOCK:
+                DYNAMIC_SCOUT_CACHE["HUGE_NEG_INT"] = {
+                    "tickers": ["OLD"],
+                    "cached_at": huge_neg_int,
+                    "timestamp": 1000.0,
+                }
+            try:
+                res = _get_dynamic_scout_tickers("HUGE_NEG_INT")
+                self.assertNotEqual(res, ["OLD"])
+                self.assertEqual(dummy.pending_count(), 1)
+                mock_scout_raw.assert_not_called()
+                self.assertEqual(DYNAMIC_SCOUT_CACHE["HUGE_NEG_INT"]["timestamp"], 1000.0)
+            finally:
+                with DYNAMIC_SCOUT_CACHE_LOCK:
+                    DYNAMIC_SCOUT_CACHE.pop("HUGE_NEG_INT", None)
+
+        # 11. Valid timestamp just inside four-hour boundary -> Cache hit
         with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
             with DYNAMIC_SCOUT_CACHE_LOCK:
-                DYNAMIC_SCOUT_CACHE["VALID_HIT"] = {
-                    "tickers": ["HIT_TICKER"],
-                    "cached_at": time.time() - 300,  # 5m old (< 14400s)
+                DYNAMIC_SCOUT_CACHE["JUST_INSIDE_4H"] = {
+                    "tickers": ["FRESH_TICKER"],
+                    "cached_at": time.time() - 14390,  # 10 seconds before 4-hour mark
                     "timestamp": "2026-11-14T19:00:00Z",
                 }
             try:
-                res = _get_dynamic_scout_tickers("VALID_HIT")
-                self.assertEqual(res, ["HIT_TICKER"])
+                res = _get_dynamic_scout_tickers("JUST_INSIDE_4H")
+                self.assertEqual(res, ["FRESH_TICKER"])
                 self.assertEqual(dummy.pending_count(), 0)  # No enqueue
                 mock_scout_raw.assert_not_called()
-                self.assertEqual(DYNAMIC_SCOUT_CACHE["VALID_HIT"]["timestamp"], "2026-11-14T19:00:00Z")
+                self.assertEqual(DYNAMIC_SCOUT_CACHE["JUST_INSIDE_4H"]["timestamp"], "2026-11-14T19:00:00Z")
             finally:
                 with DYNAMIC_SCOUT_CACHE_LOCK:
-                    DYNAMIC_SCOUT_CACHE.pop("VALID_HIT", None)
+                    DYNAMIC_SCOUT_CACHE.pop("JUST_INSIDE_4H", None)
 
-        # 9. Valid finite numeric cached_at older than four hours expires
+        # 12. Timestamp exactly at four-hour boundary -> Cache expires
         with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
             with DYNAMIC_SCOUT_CACHE_LOCK:
-                DYNAMIC_SCOUT_CACHE["VALID_EXPIRED"] = {
-                    "tickers": ["OLD_STALE"],
+                DYNAMIC_SCOUT_CACHE["EXACT_4H_BOUNDARY"] = {
+                    "tickers": ["OLD"],
+                    "cached_at": time.time() - 14400.0,  # Exactly 14400s
+                    "timestamp": "2026-11-14T19:00:00Z",
+                }
+            try:
+                res = _get_dynamic_scout_tickers("EXACT_4H_BOUNDARY")
+                self.assertNotEqual(res, ["OLD"])
+                self.assertEqual(dummy.pending_count(), 1)
+                mock_scout_raw.assert_not_called()
+                self.assertEqual(DYNAMIC_SCOUT_CACHE["EXACT_4H_BOUNDARY"]["timestamp"], "2026-11-14T19:00:00Z")
+            finally:
+                with DYNAMIC_SCOUT_CACHE_LOCK:
+                    DYNAMIC_SCOUT_CACHE.pop("EXACT_4H_BOUNDARY", None)
+
+        # 13. Timestamp older than four hours -> Cache expires
+        with isolated_coordinator_context() as (dummy, mock_scout_raw, _, mock_runner):
+            with DYNAMIC_SCOUT_CACHE_LOCK:
+                DYNAMIC_SCOUT_CACHE["OLDER_THAN_4H"] = {
+                    "tickers": ["OLD"],
                     "cached_at": time.time() - 15000,  # > 4h
                     "timestamp": "2026-11-14T10:00:00Z",
                 }
             try:
-                res = _get_dynamic_scout_tickers("VALID_EXPIRED")
-                self.assertNotEqual(res, ["OLD_STALE"])
+                res = _get_dynamic_scout_tickers("OLDER_THAN_4H")
+                self.assertNotEqual(res, ["OLD"])
                 self.assertEqual(dummy.pending_count(), 1)
                 mock_scout_raw.assert_not_called()
-                self.assertEqual(DYNAMIC_SCOUT_CACHE["VALID_EXPIRED"]["timestamp"], "2026-11-14T10:00:00Z")
+                self.assertEqual(DYNAMIC_SCOUT_CACHE["OLDER_THAN_4H"]["timestamp"], "2026-11-14T10:00:00Z")
             finally:
                 with DYNAMIC_SCOUT_CACHE_LOCK:
-                    DYNAMIC_SCOUT_CACHE.pop("VALID_EXPIRED", None)
+                    DYNAMIC_SCOUT_CACHE.pop("OLDER_THAN_4H", None)
 
 
 if __name__ == "__main__":
