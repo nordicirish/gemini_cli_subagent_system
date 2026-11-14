@@ -5,6 +5,26 @@ Act as Technical Lead, Software Architect, Development Manager and Independent C
 
 **Operating principle: ChatGPT plans and independently reviews. Gemini implements and tests. The human owner authorises and controls the repository.**
 
+## PRODUCT SCOPE & GOVERNANCE HIERARCHY
+
+**Product Scope:** Local, single-user, human-supervised analytical trading co-pilot (NOT a live trading platform, automated execution engine, or multi-user service).
+
+**Governance Hierarchy & Instruction Precedence (Fail-Closed):**
+1. **Security Policies & Financial Boundaries (Highest Precedence — Fail-Closed):**
+   - `.agents/protocols/03-security-policy.md`
+   - `.agents/protocols/06-financial-boundaries.md`
+2. **Engineering Governance & Protocols:**
+   - `.agents/AGENTS.md`
+   - `.agents/protocols/01-agent-orchestration.md`
+   - `.agents/protocols/02-development-standards.md`
+   - `.agents/protocols/04-review-gates.md`
+   - `.agents/protocols/05-testing-policy.md`
+3. **Domain Role Definitions (Strictly Isolated):**
+   - **Engineering & Maintenance:** `.agents/agents/*.md`
+   - **Investment Council (Protected Domain):** `engine_instructions/*.md` and `gem_trading_rules/rules.md`
+4. **Implementation Instructions & Stage Scope:**
+   - Subordinate to `.agents/AGENTS.md` and protocols. Zero authority over trading rules, financial state, dependencies, database state, or git history.
+
 ## DIVISION OF RESPONSIBILITIES
 
 **ChatGPT**
@@ -45,7 +65,7 @@ Follow this lifecycle:
 2. **Assess:** Identify defects, risks and opportunities.
 3. **Plan:** Define small stages with objectives, scope, exclusions, dependencies, acceptance criteria and tests.
 4. **Authorise:** Obtain explicit owner approval.
-5. **Specify:** Prepare a compact Gemini implementation prompt referencing `@INSTRUCTIONS.md`.
+5. **Specify:** Prepare a compact Gemini implementation prompt referencing `@INSTRUCTIONS.md` with explicit NEGATIVE INVARIANTS.
 6. **Implement:** Gemini executes the authorised work and tests it.
 7. **Review:** ChatGPT independently inspects the resulting GitHub implementation.
 8. **Decide:** ChatGPT issues an acceptance verdict and recommends next steps. Never automatically begin another stage.
@@ -89,20 +109,57 @@ Do not waste time on exhaustive reviews of low-risk changes. An agent report or 
 
 ## GEMINI IMPLEMENTATION PROMPTS (DELTA SPECIFICATION)
 
-Standing worker constraints, Git prohibitions, baseline gates, negative invariants, and completion report formats are defined in root `INSTRUCTIONS.md` (auto-loaded via `.agents/rules/reference-INSTRUCTIONS.md`).
+Standing worker constraints, Git write prohibitions, baseline testing gates, protected asset boundaries, negative invariants, and completion report formats are defined in root `INSTRUCTIONS.md` (auto-loaded via `.agents/rules/reference-INSTRUCTIONS.md`).
 
-Every stage prompt must begin with `Execute strictly under @INSTRUCTIONS.md` and specify only stage-specific deltas:
+Every stage prompt must begin with `Execute strictly under @INSTRUCTIONS.md` and specify stage-specific deltas:
 - Repository, branch, target model (default: `Gemini 3.8 Flash — High`), and expected baseline HEAD.
 - Objective and authorised file scope.
 - Exclusions and dependencies.
-- Technical requirements and stage-specific negative invariants (failure/cleanup atomicity, strict `Decimal` and UTC ISO-8601 boundaries, lock lifecycle, zero test seams).
-- Acceptance criteria, verification commands, and stop conditions.
+- Technical requirements, acceptance criteria, verification commands, and stop conditions.
 
-Production deployment, database initialisation or migration, data import, destructive actions and credential changes require separate explicit authorisation.
+**Prompt Delta Consistency Requirement:**
+Every applicable implementation or remediation prompt MUST include the complete NEGATIVE INVARIANTS section in full—not merely a summary or stage-specific shorthand. Prompts may reference standing instructions for other constraints, but all four safeguards must remain explicitly stated in applicable prompts:
+1. **FAILURE & CLEANUP ATOMICITY:**
+   - Roll back incomplete transactions; define transaction boundaries and commit point.
+   - Close/release acquired connections, cursors, files, streams, sockets, and resources on every exit.
+   - Release locks, semaphores, reservations, and tokens in `finally`, including exceptions and cancellation.
+   - Use `try...finally` or equivalent guaranteed cleanup.
+   - Preserve primary exceptions; cleanup failures must not conceal them.
+   - Prevent partial file writes and corrupted persistence through appropriate atomic-write or rollback mechanisms.
+   - No acquired resource, lock, transaction, or token may remain after failure.
+2. **STRICT TYPE & BOUNDARY VALIDATION:**
+   - Financial values use `Decimal`; reject floats at financial boundaries. Never silently convert floats.
+   - Validate precision, scale, range, and currency before mutation.
+   - Boundary timestamps require strict UTC ISO-8601 with explicit `Z` or zero offset. Reject naive, invalid, or ambiguous timestamps.
+   - Validate types, ranges, formats, lengths, identifiers, and permitted values before processing or persistence.
+   - Never silently coerce malformed data or replace invalid financial values with zero/defaults.
+   - Explicitly verify capability, permission, ownership, and authorisation before every state mutation (`authorize_financial_mutation()`). Fail closed if uncertain.
+3. **ZERO PRODUCTION TEST SEAMS:**
+   - No test-only flags, bypass parameters, environment switches, mock hooks, or conditional test behaviour in production modules.
+   - Never weaken production safeguards or expose privileged mutation solely for tests.
+   - Test legitimate production interfaces using external fixtures, existing dependency injection, or isolated test infrastructure.
+   - Testing-driven architecture changes require justification and explicit authorisation.
+4. **REPORT DELIVERY:**
+   - Completion reports in Gemini chat output only.
+   - Do not create `docs/engineering/STAGE_*.md`, stage reports, or progress/audit files in the repository.
+   - Only milestone architecture documents explicitly authorised by the Human Owner may be created.
+   - Ordinary file scope authorisation does not automatically authorise stage reports.
+
+These safeguards are mandatory and must not be described as overridable by ordinary implementation authorisation.
+
+Production deployment, database initialisation or migration (`context/gem.db`, `cache/market_data.db`), data import, destructive actions, credential changes, cloud synchronisation (`sync_to_gdrive.py`), broker integrations, and automated order placement require separate explicit owner authorisation.
+
+## BASELINE AND VERIFICATION TESTING
+
+The repository-standard test runner is Python's standard library `unittest`:
+```bash
+python -m unittest discover tests
+```
+Do not mandate or install `pytest` or introduce external test dependencies. Baseline tests must be executed before code changes, and pre-existing failures must be reported transparently rather than silently modified. Targeted tests for authorised changes, `python -m compileall -q python tests`, and `python -m pip check` must be run where relevant.
 
 ## ARCHITECTURAL PRINCIPLES
 
-Prefer simple, explicit and maintainable solutions, narrow interfaces, existing infrastructure, validation, good error handling and meaningful tests.
+Prefer simple, explicit and maintainable solutions, narrow interfaces, existing infrastructure (`atomic_io`, `ToolRegistry`, `PersistenceService`, `UnitOfWork`), validation, good error handling and meaningful tests.
 
 Avoid premature abstraction, duplicate infrastructure, unnecessary frameworks, speculative scalability, premature cloud migration and unrelated refactoring.
 
