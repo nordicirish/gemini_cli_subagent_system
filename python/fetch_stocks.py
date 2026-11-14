@@ -16,6 +16,17 @@ import warnings
 # Silence yfinance internal inplace deprecation warnings triggered by Pandas 3.1+ (PDEP-8)
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"^yfinance")
 import pandas as pd
+from pandas.tseries.holiday import (
+    AbstractHolidayCalendar,
+    Holiday,
+    nearest_workday,
+    USMartinLutherKingJr,
+    USPresidentsDay,
+    USMemorialDay,
+    USLaborDay,
+    USThanksgivingDay,
+    GoodFriday,
+)
 import numpy as np
 import requests
 from datetime import datetime, time, timedelta
@@ -1121,6 +1132,35 @@ def safe_yf_get(url, timeout=3):
     # Fallback to standard requests.Session if curl_cffi fails internally
     return session.get(url, timeout=timeout)
 
+class USTradingCalendar(AbstractHolidayCalendar):
+    """Canonical US Equity Market (NYSE/NASDAQ) Holiday Schedule using pandas components."""
+    rules = [
+        Holiday("New Years Day", month=1, day=1, observance=nearest_workday),
+        USMartinLutherKingJr,
+        USPresidentsDay,
+        GoodFriday,
+        USMemorialDay,
+        Holiday("Juneteenth", month=6, day=19, start_date="2021-06-18", observance=nearest_workday),
+        Holiday("Independence Day", month=7, day=4, observance=nearest_workday),
+        USLaborDay,
+        USThanksgivingDay,
+        Holiday("Christmas", month=12, day=25, observance=nearest_workday),
+    ]
+
+_HOLIDAY_CACHE: dict[int, set] = {}
+
+def is_market_holiday(d) -> bool:
+    """Checks if date is an official US equity market exchange holiday."""
+    try:
+        ts = pd.Timestamp(d).normalize()
+        year = ts.year
+        if year not in _HOLIDAY_CACHE:
+            cal = USTradingCalendar()
+            _HOLIDAY_CACHE[year] = set(cal.holidays(start=f"{year}-01-01", end=f"{year}-12-31"))
+        return ts in _HOLIDAY_CACHE[year]
+    except Exception:
+        return False
+
 def get_market_status(ny_dt=None):
     ny_tz = ZoneInfo("America/New_York")
     if ny_dt is None:
@@ -1129,9 +1169,17 @@ def get_market_status(ny_dt=None):
         ny_now = ny_dt.replace(tzinfo=ny_tz)
     else:
         ny_now = ny_dt.astimezone(ny_tz)
-    t = ny_now.time()
+    
+    # 1. Weekends: Saturday (5), Sunday (6)
     if ny_now.weekday() >= 5:
         return "CLOSED"
+        
+    # 2. Exchange Holidays:
+    if is_market_holiday(ny_now.date()):
+        return "CLOSED"
+        
+    # 3. Market Session Hours (ET)
+    t = ny_now.time()
     if time(4, 0) <= t < time(9, 30):
         return "PRE-MARKET"
     if time(9, 30) <= t < time(16, 0):
@@ -1180,6 +1228,30 @@ def to_float(val, default=None):
     status, num = classify_market_numeric(val)
     return num if status == "VALID" else default
 
+def is_price_actionable(symbol: str) -> bool:
+    """
+    Evaluates whether a symbol's price observation is currently actionable for signal generation.
+    Fails closed:
+    - Must have a valid positive price.
+    - price_validity must be 'VALID'.
+    - freshness must be 'CURRENT' or 'DELAYED'.
+    - Stale, historical, unavailable, or invalid observations cannot produce actionable signals.
+    """
+    p = cache.prices.get(symbol)
+    if p is None or p <= 0:
+        return False
+        
+    validity = cache.price_validity.get(symbol)
+    freshness = cache.freshness.get(symbol)
+    
+    if validity != "VALID":
+        return False
+        
+    if freshness not in ("CURRENT", "DELAYED"):
+        return False
+        
+    return True
+
 def determine_market_freshness(price, obs_time, current_ny=None, session_status=None, max_stale_seconds=1200, source=None):
     """
     Evaluates market data freshness and validity for a given price observation.
@@ -1190,6 +1262,7 @@ def determine_market_freshness(price, obs_time, current_ny=None, session_status=
         current_ny: datetime representing current time in NY timezone (defaults to now).
         session_status: Market session ("OPEN", "PRE-MARKET", "AFTER-HOURS", "CLOSED"). Defaults to get_market_status(current_ny).
         max_stale_seconds: Maximum age in seconds before an observation in an active session is marked STALE (default: 1200s / 20 mins).
+        source: Provider source identity (e.g. BATCH_QUOTE, FAST_INFO, INTRADAY_CHART).
         
     Returns:
         (price_validity, freshness)
@@ -1220,22 +1293,22 @@ def determine_market_freshness(price, obs_time, current_ny=None, session_status=
     else:
         obs_dt = obs_time.astimezone(ny_tz)
 
-    # Market Closure (Weekends, Holidays, or Overnight 20:00 - 04:00):
+    # 1. Reject materially future-dated observations BEFORE any session-specific logic
+    age_seconds = (current_ny - obs_dt).total_seconds()
+    if age_seconds < -60: # 60 seconds allowable clock drift tolerance
+        return ("INVALID", "UNAVAILABLE")
+
+    # 2. Market Closure (Weekends, Exchange Holidays, Overnight 20:00 - 04:00):
     # A previous-session close observation is valid historical data, NOT an error,
     # and MUST NOT be marked as current live price.
     if session_status == "CLOSED":
         return ("VALID", "HISTORICAL")
 
-    # In active market sessions (OPEN, PRE-MARKET, AFTER-HOURS):
+    # 3. Active Market Sessions (OPEN, PRE-MARKET, AFTER-HOURS):
     # If observation is from a previous calendar day:
     if obs_dt.date() < current_ny.date():
         # Previous-session close cannot masquerade as current live price during an active session
         return ("STALE", "STALE")
-
-    # Future timestamps are invalid
-    age_seconds = (current_ny - obs_dt).total_seconds()
-    if age_seconds < -60: # Allow slight clock drift (up to 1 min)
-        return ("INVALID", "UNAVAILABLE")
 
     if session_status == "OPEN":
         # During regular hours (09:30 - 16:00)
@@ -1265,6 +1338,54 @@ def determine_market_freshness(price, obs_time, current_ny=None, session_status=
         return ("VALID", "CURRENT")
 
     return ("VALID", "CURRENT")
+
+def validate_historical_dataframe(hist: pd.DataFrame, existing_df: pd.DataFrame | None = None) -> tuple[bool, str]:
+    """
+    Validates an incoming historical price DataFrame against structural, content,
+    and material completeness requirements before updating cache.
+    
+    Returns:
+        (is_valid: bool, reason: str)
+    """
+    if hist is None or not isinstance(hist, pd.DataFrame):
+        return False, "Not a pandas DataFrame"
+    if hist.empty:
+        return False, "Empty DataFrame"
+    if "Close" not in hist.columns:
+        return False, "Missing required 'Close' column"
+
+    close_col = hist["Close"]
+    if isinstance(close_col, pd.DataFrame):
+        close_col = close_col.iloc[:, 0]
+
+    total_rows = len(close_col)
+    if total_rows == 0:
+        return False, "Zero rows in Close series"
+
+    # 1. Content validation: Check non-finite, invalid, or non-positive closes
+    valid_closes = [
+        c_val for c in close_col
+        if (c_val := to_float(c)) is not None and c_val > 0
+    ]
+    valid_count = len(valid_closes)
+
+    # Require at least 5 valid closes and at least 95% valid rows (rejects single-valid-close corrupted responses)
+    if valid_count < 5 or (valid_count / total_rows) < 0.95:
+        return False, f"Excessive invalid or non-finite closes ({valid_count}/{total_rows} valid)"
+
+    # Latest close must be finite and positive
+    latest_close = to_float(close_col.iloc[-1])
+    if latest_close is None or latest_close <= 0:
+        return False, "Latest close in history is non-finite or non-positive"
+
+    # 2. Material truncation check relative to existing valid cache
+    if existing_df is not None and isinstance(existing_df, pd.DataFrame) and not existing_df.empty:
+        existing_len = len(existing_df)
+        # If existing has substantial history (>= 30 bars), incoming cannot be materially truncated (< 75% of existing)
+        if existing_len >= 30 and total_rows < int(existing_len * 0.75):
+            return False, f"Materially truncated response: {total_rows} rows vs {existing_len} existing rows"
+
+    return True, "Valid"
 
 def format_volume(vol, symbol):
     try:
@@ -1363,6 +1484,9 @@ def get_live_chart_data(symbol, status):
     - after_hours_vol (volume from 16:00 to 20:00 ET today)
     """
     try:
+        ny_tz = ZoneInfo("America/New_York")
+        now = datetime.now(ny_tz)
+
         # Use range=5d to bridge weekends/holidays and ensure we get today's data
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1m&includePrePost=true"
         # Use safe_yf_get to fallback if curl_cffi fails
@@ -1385,10 +1509,7 @@ def get_live_chart_data(symbol, status):
                     try:
                         cache.chart_obs_time[symbol] = datetime.fromtimestamp(ts, ZoneInfo("UTC")).astimezone(ny_tz)
                     except Exception:
-                        pass
-
-        ny_tz = ZoneInfo("America/New_York")
-        now = datetime.now(ny_tz)
+                        cache.chart_obs_time[symbol] = None
 
         pre_vol = 0
         reg_vol = 0
@@ -1563,20 +1684,21 @@ def fallback_vwap(symbol):
 
 def get_finnhub_quote(symbol):
     if not USE_FINNHUB:
-        return None, None
+        return None, None, None
     try:
         url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_API_KEY}"
         r = session.get(url, timeout=2)
         if r.status_code != 200:
-            return None, None
+            return None, None, None
         data = r.json()
-        c = float(data.get('c', 0))
-        pc = float(data.get('pc', 0))
-        if c > 0:
-            return c, pc
+        c = to_float(data.get('c'))
+        pc = to_float(data.get('pc'))
+        t = data.get('t')
+        if c and c > 0:
+            return c, pc, t
     except:
         pass
-    return None, None
+    return None, None, None
 
 def get_polygon_history_df(symbol):
     if not USE_POLYGON:
@@ -1882,9 +2004,10 @@ def get_today_str():
 
 def update_history_and_technicals(symbol, t_obj):
     today_str = get_today_str()
+    existing_hist = cache.history.get(symbol)
     if (symbol in cache.history 
-            and cache.history[symbol] is not None
-            and not cache.history[symbol].empty 
+            and existing_hist is not None
+            and not existing_hist.empty 
             and cache.last_history_fetch_date.get(symbol) == today_str):
         # Already updated today! Skip download.
         return
@@ -1904,28 +2027,12 @@ def update_history_and_technicals(symbol, t_obj):
         except:
             hist = None
 
-    # Validate hist
-    is_valid_hist = False
-    if hist is not None and not hist.empty and 'Close' in hist.columns:
-        close_col = hist['Close']
-        if isinstance(close_col, pd.DataFrame):
-            close_col = close_col.iloc[:, 0]
-        valid_closes = [c_val for c in close_col if (c_val := to_float(c)) is not None and c_val > 0]
-        if len(valid_closes) > 0:
-            is_valid_hist = True
-
-    # Partial response handling:
-    # If existing cache has >= 20 bars and new hist has < 20 bars, do not contaminate valid history
-    if is_valid_hist and symbol in cache.history and cache.history[symbol] is not None and not cache.history[symbol].empty:
-        existing_len = len(cache.history[symbol])
-        new_len = len(hist)
-        if existing_len >= 20 and new_len < 20:
-            print(f"[Warning] Partial history for {symbol} ({new_len} vs {existing_len}); preserving existing.")
-            return
-
-    if not is_valid_hist:
-        # If existing valid history exists: PRESERVE IT! Do not contaminate or overwrite!
-        if symbol in cache.history and cache.history[symbol] is not None and not cache.history[symbol].empty:
+    # Validate incoming historical DataFrame
+    is_valid, reason = validate_historical_dataframe(hist, existing_hist)
+    if not is_valid:
+        if existing_hist is not None and not existing_hist.empty:
+            # Preserve existing valid history and technicals
+            print(f"[Warning] Historical refresh for {symbol} rejected ({reason}); preserving existing cache.")
             return
 
         # If no prior history existed: do NOT fabricate dummy 0.0 row!
@@ -2257,10 +2364,18 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
             pre_vol = chart_pre_vol
 
     if (price is None or price <= 0) and USE_FINNHUB:
-        fh_c, fh_pc = get_finnhub_quote(symbol)
+        fh_c, fh_pc, fh_t = get_finnhub_quote(symbol)
         if fh_c and fh_c > 0:
             price = fh_c
             price_source = "FINNHUB"
+            if fh_t:
+                try:
+                    ny_tz = ZoneInfo("America/New_York")
+                    obs_time = datetime.fromtimestamp(int(fh_t), ZoneInfo("UTC")).astimezone(ny_tz)
+                except Exception:
+                    obs_time = None
+            else:
+                obs_time = None
 
     # --- Final fallback to fast_info ---
     try:
@@ -2275,16 +2390,19 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
                 if fi_p and fi_p > 0:
                     price = fi_p
                     price_source = "FAST_INFO"
+                    obs_time = None
             elif status in ("AFTER-HOURS", "CLOSED") and getattr(fi, 'post_market_price', None):
                 fi_p = to_float(getattr(fi, 'post_market_price', None))
                 if fi_p and fi_p > 0:
                     price = fi_p
                     price_source = "FAST_INFO"
+                    obs_time = None
             elif getattr(fi, 'last_price', None):
                 fi_p = to_float(getattr(fi, 'last_price', None))
                 if fi_p and fi_p > 0:
                     price = fi_p
                     price_source = "FAST_INFO"
+                    obs_time = None
     except Exception:
         pass
 
@@ -2489,6 +2607,8 @@ def calculate_rvol(symbol):
 
 
 def distance_from_vwap(symbol):
+    if not is_price_actionable(symbol):
+        return 0.0
     p = cache.prices.get(symbol)
     v = cache.vwaps.get(symbol)
 
@@ -2499,9 +2619,15 @@ def distance_from_vwap(symbol):
 
 
 def classify_signal(symbol):
-    p = cache.prices.get(symbol)
-    if p is None or p <= 0 or cache.price_validity.get(symbol) in ("INVALID", "UNAVAILABLE"):
-        return "NEUTRAL"
+    if not is_price_actionable(symbol):
+        validity = cache.price_validity.get(symbol, "UNAVAILABLE")
+        freshness = cache.freshness.get(symbol, "UNAVAILABLE")
+        if validity == "STALE" or freshness == "STALE":
+            return "STALE"
+        if freshness == "HISTORICAL":
+            return "HISTORICAL"
+        return "UNAVAILABLE"
+
     t = cache.technicals.get(symbol, {})
     rsi = t.get("RSI")
     atr = t.get("ATR_Pct") or 0.0
@@ -2522,11 +2648,14 @@ def classify_signal(symbol):
 
 
 def calculate_score(symbol):
+    if not is_price_actionable(symbol):
+        return 0, ""
+
     t = cache.technicals.get(symbol, {})
     p = cache.prices.get(symbol)
     v = cache.vwaps.get(symbol, 0)
 
-    if p is None or p <= 0 or not t or cache.price_validity.get(symbol) in ("INVALID", "UNAVAILABLE"):
+    if p is None or p <= 0 or not t:
         return 0, ""
 
     score = 0
@@ -3411,7 +3540,7 @@ def run_daemon():
                         "ma_50": 0.0,
                         "ma_200": 0.0,
                         "score": 0,
-                        "signal": "NEUTRAL",
+                        "signal": "UNAVAILABLE",
                         "trend": "FLAT",
                         "note": "NO DATA",
                         "fib_forecast": calculate_fib_forecast(sym, 0.0, None)
@@ -3532,6 +3661,22 @@ def run_daemon():
                 else:
                     _dealer_posture = "NEUTRAL"
 
+                actionable = is_price_actionable(sym)
+                val_status = cache.price_validity.get(sym, "UNAVAILABLE")
+                fresh_status = cache.freshness.get(sym, "UNAVAILABLE")
+
+                if not actionable:
+                    if val_status == "STALE" or fresh_status == "STALE":
+                        item_status = "STALE"
+                    elif fresh_status == "HISTORICAL":
+                        item_status = "HISTORICAL"
+                    elif val_status == "INVALID":
+                        item_status = "INVALID"
+                    else:
+                        item_status = "UNAVAILABLE"
+                else:
+                    item_status = "ACTIVE"
+
                 if authoritative_state_error is not None:
                     # Halt scout classification if authoritative financial state is compromised
                     is_scout = False
@@ -3543,13 +3688,13 @@ def run_daemon():
                     "ticker": sym,
                     "session": cache.session.get(sym),
                     "session_liquidity": cache.session_liquidity.get(sym),
-                    "status": "ACTIVE",
+                    "status": item_status,
                     "ssr_active": cache.ssr_active.get(sym, False),
                     
                     # Prices
                     "price": float(p),
-                    "price_validity": cache.price_validity.get(sym, "VALID"),
-                    "freshness": cache.freshness.get(sym, "CURRENT"),
+                    "price_validity": val_status,
+                    "freshness": fresh_status,
                     "price_source": cache.price_sources.get(sym, "UNKNOWN"),
                     "observation_time": cache.observation_times.get(sym),
                     "retrieval_time": cache.retrieval_times.get(sym),
@@ -3603,7 +3748,7 @@ def run_daemon():
                     "ma_20": float(techs.get("SMA_20") or 0.0),
                     "ma_50": float(techs.get("SMA_50") or 0.0),
                     "ma_200": float(techs.get("SMA_200") or 0.0),
-                    "score": int(score),
+                    "score": int(score) if actionable else 0,
                     "signal": classify_signal(sym),
                     # trend label thresholds: gem_trading_rules/rules.md > TREND_SCORE_UP_THRESHOLD / TREND_SCORE_DOWN_THRESHOLD
                     # For INVERSE_MACRO: JSON trend uses equity-perspective (negated score)

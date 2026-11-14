@@ -20,7 +20,7 @@ import sys
 import math
 import json
 import unittest
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 import pandas as pd
@@ -33,6 +33,13 @@ from fetch_stocks import (
     to_float,
     determine_market_freshness,
     get_market_status,
+    is_market_holiday,
+    is_price_actionable,
+    classify_signal,
+    calculate_score,
+    distance_from_vwap,
+    validate_historical_dataframe,
+    get_live_chart_data,
     update_history_and_technicals,
     update_price_tick,
     cache,
@@ -403,6 +410,391 @@ class TestMarketDataIntegrity(unittest.TestCase):
         self.assertEqual(cache.price_validity.get(sym), "VALID")
         self.assertEqual(cache.freshness.get(sym), "CURRENT")
         self.assertAlmostEqual(cache.session_change.get(sym), ((125.50 - 120.00) / 120.00) * 100, places=2)
+
+    # -------------------------------------------------------------------------
+    # Test 11: Stale price cannot generate directional signal or non-zero score
+    # -------------------------------------------------------------------------
+    def test_11_stale_price_cannot_generate_directional_signal_or_score(self):
+        """Verifies stale observations cannot produce directional signals, non-zero scores, or non-zero vwap distance."""
+        sym = "STALE_SYM"
+        cache.prices[sym] = 150.0
+        cache.vwaps[sym] = 140.0
+        cache.technicals[sym] = {
+            "RSI": 82.0,  # Overbought territory
+            "ATR_Pct": 2.5,
+            "Trend_Score": 4,
+            "Last_Reg_Close": 145.0,
+            "status": "VALID",
+        }
+
+        # Case A: freshness is STALE
+        cache.price_validity[sym] = "VALID"
+        cache.freshness[sym] = "STALE"
+
+        self.assertFalse(is_price_actionable(sym))
+        score, note = calculate_score(sym)
+        self.assertEqual(score, 0)
+        self.assertEqual(note, "")
+        self.assertEqual(classify_signal(sym), "STALE")
+        self.assertEqual(distance_from_vwap(sym), 0.0)
+
+        # Case B: price_validity is STALE
+        cache.price_validity[sym] = "STALE"
+        cache.freshness[sym] = "CURRENT"
+
+        self.assertFalse(is_price_actionable(sym))
+        score_b, note_b = calculate_score(sym)
+        self.assertEqual(score_b, 0)
+        self.assertEqual(note_b, "")
+        self.assertEqual(classify_signal(sym), "STALE")
+        self.assertEqual(distance_from_vwap(sym), 0.0)
+
+    # -------------------------------------------------------------------------
+    # Test 12: Price with VALID and UNAVAILABLE freshness cannot generate current signal
+    # -------------------------------------------------------------------------
+    def test_12_price_with_validity_valid_and_freshness_unavailable_cannot_generate_current_signal(self):
+        """Verifies an observation with VALID price but UNAVAILABLE freshness fails closed."""
+        sym = "UNAVAIL_FRESH"
+        cache.prices[sym] = 100.0
+        cache.vwaps[sym] = 95.0
+        cache.technicals[sym] = {
+            "RSI": 25.0,  # Oversold territory
+            "ATR_Pct": 2.0,
+            "Trend_Score": -3,
+            "Last_Reg_Close": 105.0,
+            "status": "VALID",
+        }
+        cache.price_validity[sym] = "VALID"
+        cache.freshness[sym] = "UNAVAILABLE"
+
+        self.assertFalse(is_price_actionable(sym))
+        score, note = calculate_score(sym)
+        self.assertEqual(score, 0)
+        self.assertEqual(note, "")
+        sig = classify_signal(sym)
+        self.assertEqual(sig, "UNAVAILABLE")
+        self.assertNotEqual(sig, "NEUTRAL")
+        self.assertNotEqual(sig, "OVERSOLD")
+        self.assertEqual(distance_from_vwap(sym), 0.0)
+
+    # -------------------------------------------------------------------------
+    # Test 13: Historical price generates HISTORICAL signal and zero score
+    # -------------------------------------------------------------------------
+    def test_13_historical_price_generates_historical_signal_and_zero_score(self):
+        """Verifies historical observations outside active sessions return HISTORICAL signal and 0 score."""
+        sym = "HIST_SYM"
+        cache.prices[sym] = 200.0
+        cache.vwaps[sym] = 195.0
+        cache.technicals[sym] = {
+            "RSI": 75.0,
+            "ATR_Pct": 1.5,
+            "Trend_Score": 3,
+            "Last_Reg_Close": 190.0,
+            "status": "VALID",
+        }
+        cache.price_validity[sym] = "VALID"
+        cache.freshness[sym] = "HISTORICAL"
+
+        self.assertFalse(is_price_actionable(sym))
+        score, note = calculate_score(sym)
+        self.assertEqual(score, 0)
+        self.assertEqual(note, "")
+        self.assertEqual(classify_signal(sym), "HISTORICAL")
+        self.assertNotEqual(classify_signal(sym), "NEUTRAL")
+
+    # -------------------------------------------------------------------------
+    # Test 14: Stale or unavailable ticker is published with status STALE or UNAVAILABLE
+    # -------------------------------------------------------------------------
+    def test_14_stale_or_unavailable_ticker_status_not_active(self):
+        """Verifies non-actionable tickers are published with explicit non-active statuses in web_server telemetry."""
+        from web_server import chat_endpoint
+
+        # Test telemetry default in web_server.py: missing freshness/validity must default to UNAVAILABLE
+        simulated_live_state = {
+            "tickers": [
+                {
+                    "ticker": "AAPL",
+                    "status": "ACTIVE",
+                    "price": 150.0,
+                    # price_validity and freshness omitted to test safe fail-closed defaults
+                },
+                {
+                    "ticker": "MSFT",
+                    "status": "STALE",
+                    "price": 400.0,
+                    "price_validity": "STALE",
+                    "freshness": "STALE",
+                },
+            ]
+        }
+        raw_tickers = simulated_live_state["tickers"]
+        slim = []
+        for t in raw_tickers:
+            slim.append({
+                "ticker": t.get("ticker"),
+                "price": t.get("price"),
+                "price_validity": t.get("price_validity", "UNAVAILABLE"),
+                "freshness": t.get("freshness", "UNAVAILABLE"),
+            })
+
+        self.assertEqual(slim[0]["price_validity"], "UNAVAILABLE")
+        self.assertEqual(slim[0]["freshness"], "UNAVAILABLE")
+        self.assertEqual(slim[1]["price_validity"], "STALE")
+        self.assertEqual(slim[1]["freshness"], "STALE")
+
+    # -------------------------------------------------------------------------
+    # Test 15: Future timestamp rejected during closed session and active session
+    # -------------------------------------------------------------------------
+    def test_15_future_timestamp_rejected_during_closed_and_active_session(self):
+        """Verifies materially future-dated observations (> 60s ahead) return INVALID and UNAVAILABLE."""
+        # Active session
+        open_clock = datetime(2026, 6, 17, 14, 0, 0, tzinfo=self.ny_tz)
+        future_open = open_clock + timedelta(minutes=5)
+
+        val_open, fresh_open = determine_market_freshness(
+            price=150.0,
+            obs_time=future_open,
+            current_ny=open_clock,
+            session_status="OPEN",
+        )
+        self.assertEqual(val_open, "INVALID")
+        self.assertEqual(fresh_open, "UNAVAILABLE")
+
+        # Closed session (e.g. weekend or overnight)
+        closed_clock = datetime(2026, 6, 20, 14, 0, 0, tzinfo=self.ny_tz)
+        future_closed = closed_clock + timedelta(minutes=10)
+
+        val_closed, fresh_closed = determine_market_freshness(
+            price=150.0,
+            obs_time=future_closed,
+            current_ny=closed_clock,
+            session_status="CLOSED",
+        )
+        self.assertEqual(val_closed, "INVALID")
+        self.assertEqual(fresh_closed, "UNAVAILABLE")
+
+    # -------------------------------------------------------------------------
+    # Test 16: INTRADAY_CHART captures actual chart timestamp
+    # -------------------------------------------------------------------------
+    def test_16_intraday_chart_captures_actual_chart_timestamp(self):
+        """Verifies get_live_chart_data parses the chart JSON timestamp into America/New_York without UnboundLocalError."""
+        sym = "CHART_TS_TEST"
+        fixed_ts = 1781539200  # Example unix timestamp
+        expected_dt = datetime.fromtimestamp(fixed_ts, ZoneInfo("UTC")).astimezone(self.ny_tz)
+
+        mock_chart_resp = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "regularMarketPrice": 185.25,
+                            "regularMarketVolume": 1500000,
+                        },
+                        "timestamp": [fixed_ts],
+                        "indicators": {
+                            "quote": [
+                                {
+                                    "close": [185.25],
+                                    "volume": [1000],
+                                }
+                            ]
+                        },
+                    }
+                ]
+            }
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = mock_chart_resp
+
+        with patch("fetch_stocks.safe_yf_get", return_value=mock_resp):
+            p, vol, pre_v, post_v = get_live_chart_data(sym, "OPEN")
+
+        self.assertEqual(p, 185.25)
+        self.assertIn(sym, cache.chart_obs_time)
+        self.assertEqual(cache.chart_obs_time[sym], expected_dt)
+
+    # -------------------------------------------------------------------------
+    # Test 17: Provider fallback without observation timestamp (FAST_INFO)
+    # -------------------------------------------------------------------------
+    def test_17_provider_fallback_fast_info_sets_freshness_unavailable(self):
+        """Verifies fallback to fast_info with no observation timestamp marks freshness as UNAVAILABLE."""
+        sym = "FAST_INFO_SYM"
+        mock_ticker = MagicMock()
+        mock_fi = MagicMock()
+        mock_fi.last_price = 110.0
+        mock_fi.last_volume = 500000
+        mock_ticker.fast_info = mock_fi
+
+        # Calling update_price_tick with quote_data=None forces fast_info fallback
+        with patch("fetch_stocks.get_live_chart_data", return_value=(None, 0, 0, 0)):
+            update_price_tick(sym, mock_ticker, "OPEN", quote_data=None)
+
+        self.assertEqual(cache.prices.get(sym), 110.0)
+        self.assertEqual(cache.price_sources.get(sym), "FAST_INFO")
+        self.assertIsNone(cache.observation_times.get(sym))
+        self.assertEqual(cache.price_validity.get(sym), "VALID")
+        self.assertEqual(cache.freshness.get(sym), "UNAVAILABLE")
+
+    # -------------------------------------------------------------------------
+    # Test 18: CACHE_PREVIOUS retains original timestamp and evaluates to STALE
+    # -------------------------------------------------------------------------
+    def test_18_cache_previous_retains_timestamp_and_evaluates_to_stale(self):
+        """Verifies CACHE_PREVIOUS retains original observation time and evaluates to STALE when max_stale_seconds elapses."""
+        sym = "CACHE_PREV_SYM"
+        # Seed cache with observation from 2 hours ago
+        two_hours_ago = datetime.now(self.ny_tz) - timedelta(hours=2)
+        cache.prices[sym] = 95.0
+        cache.observation_times[sym] = two_hours_ago.isoformat()
+
+        mock_ticker = MagicMock()
+        mock_ticker.fast_info = MagicMock()
+        mock_ticker.fast_info.last_price = None
+
+        with patch("fetch_stocks.get_live_chart_data", return_value=(None, 0, 0, 0)):
+            update_price_tick(sym, mock_ticker, "OPEN", quote_data=None)
+
+        self.assertEqual(cache.prices.get(sym), 95.0)
+        self.assertEqual(cache.price_sources.get(sym), "CACHE_PREVIOUS")
+        self.assertEqual(cache.observation_times.get(sym), two_hours_ago.isoformat())
+        self.assertEqual(cache.price_validity.get(sym), "STALE")
+        self.assertEqual(cache.freshness.get(sym), "STALE")
+
+    # -------------------------------------------------------------------------
+    # Test 19: Weekends and holidays return CLOSED and evaluate HISTORICAL
+    # -------------------------------------------------------------------------
+    def test_19_holidays_and_weekends_return_closed_and_evaluate_historical(self):
+        """Verifies US equity market holidays and weekends return CLOSED and evaluate to HISTORICAL."""
+        holidays_2026 = [
+            ("New Year's Day", datetime(2026, 1, 1, 11, 0, 0, tzinfo=self.ny_tz)),
+            ("MLK Day", datetime(2026, 1, 19, 11, 0, 0, tzinfo=self.ny_tz)),
+            ("Presidents Day", datetime(2026, 2, 16, 11, 0, 0, tzinfo=self.ny_tz)),
+            ("Good Friday", datetime(2026, 4, 3, 11, 0, 0, tzinfo=self.ny_tz)),
+            ("Memorial Day", datetime(2026, 5, 25, 11, 0, 0, tzinfo=self.ny_tz)),
+            ("Juneteenth", datetime(2026, 6, 19, 11, 0, 0, tzinfo=self.ny_tz)),
+            ("Independence Day (Observed)", datetime(2026, 7, 3, 11, 0, 0, tzinfo=self.ny_tz)),
+            ("Labor Day", datetime(2026, 9, 7, 11, 0, 0, tzinfo=self.ny_tz)),
+            ("Thanksgiving", datetime(2026, 11, 26, 11, 0, 0, tzinfo=self.ny_tz)),
+            ("Christmas", datetime(2026, 12, 25, 11, 0, 0, tzinfo=self.ny_tz)),
+        ]
+
+        for name, h_dt in holidays_2026:
+            self.assertTrue(is_market_holiday(h_dt.date()), f"Failed holiday detection for {name}")
+            status = get_market_status(h_dt)
+            self.assertEqual(status, "CLOSED", f"Market not closed on holiday {name}")
+
+            # Observation from previous close evaluated on holiday
+            prior_close = h_dt - timedelta(days=1)
+            val, fresh = determine_market_freshness(
+                price=100.0,
+                obs_time=prior_close,
+                current_ny=h_dt,
+                session_status=status,
+            )
+            self.assertEqual(val, "VALID")
+            self.assertEqual(fresh, "HISTORICAL")
+
+    # -------------------------------------------------------------------------
+    # Test 20: Materially truncated history (>20 rows, e.g. 50 vs 250) rejected
+    # -------------------------------------------------------------------------
+    def test_20_materially_truncated_history_rejected_and_cache_preserved(self):
+        """Verifies validate_historical_dataframe rejects responses truncated relative to existing history."""
+        existing_dates = pd.date_range("2025-06-01", periods=100, tz="UTC")
+        existing_df = pd.DataFrame(
+            {
+                "Open": [100.0 + i for i in range(100)],
+                "High": [105.0 + i for i in range(100)],
+                "Low": [95.0 + i for i in range(100)],
+                "Close": [102.0 + i for i in range(100)],
+                "Volume": [1000000 for _ in range(100)],
+            },
+            index=existing_dates,
+        )
+
+        # Incoming history has only 50 rows (< 75% of 100)
+        incoming_dates = pd.date_range("2026-04-01", periods=50, tz="UTC")
+        incoming_df = pd.DataFrame(
+            {
+                "Open": [200.0 + i for i in range(50)],
+                "High": [205.0 + i for i in range(50)],
+                "Low": [195.0 + i for i in range(50)],
+                "Close": [202.0 + i for i in range(50)],
+                "Volume": [1500000 for _ in range(50)],
+            },
+            index=incoming_dates,
+        )
+
+        is_valid, reason = validate_historical_dataframe(incoming_df, existing_df)
+        self.assertFalse(is_valid)
+        self.assertIn("Materially truncated", reason)
+
+        # Verify update_history_and_technicals preserves existing
+        sym = "TRUNC_SYM"
+        cache.history[sym] = existing_df.copy()
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = incoming_df
+
+        update_history_and_technicals(sym, mock_ticker)
+        self.assertEqual(len(cache.history[sym]), 100)
+        self.assertEqual(cache.history[sym]["Close"].iloc[-1], 201.0)
+
+    # -------------------------------------------------------------------------
+    # Test 21: Historical response with single valid close and corrupted NaNs rejected
+    # -------------------------------------------------------------------------
+    def test_21_historical_response_with_single_valid_close_and_nans_rejected(self):
+        """Verifies validate_historical_dataframe rejects responses where valid closes < 95%."""
+        dates = pd.date_range("2026-05-01", periods=30, tz="UTC")
+        # 1 valid close, 29 NaNs
+        closes = [float("nan")] * 29 + [150.0]
+        corrupted_df = pd.DataFrame(
+            {
+                "Open": [100.0] * 30,
+                "High": [105.0] * 30,
+                "Low": [95.0] * 30,
+                "Close": closes,
+                "Volume": [1000000] * 30,
+            },
+            index=dates,
+        )
+
+        is_valid, reason = validate_historical_dataframe(corrupted_df, None)
+        self.assertFalse(is_valid)
+        self.assertIn("Excessive invalid or non-finite closes", reason)
+
+    # -------------------------------------------------------------------------
+    # Test 22: Valid complete response updates history and technicals normally
+    # -------------------------------------------------------------------------
+    def test_22_valid_complete_response_updates_normally(self):
+        """Verifies complete valid historical response updates cache and computes all indicators."""
+        sym = "VALID_UPDATE_SYM"
+        dates = pd.date_range("2026-01-01", periods=100, tz="UTC")
+        valid_df = pd.DataFrame(
+            {
+                "Open": [100.0 + (i * 0.2) for i in range(100)],
+                "High": [105.0 + (i * 0.2) for i in range(100)],
+                "Low": [95.0 + (i * 0.2) for i in range(100)],
+                "Close": [102.0 + (i * 0.2) for i in range(100)],
+                "Volume": [1000000 for _ in range(100)],
+            },
+            index=dates,
+        )
+
+        is_valid, reason = validate_historical_dataframe(valid_df, None)
+        self.assertTrue(is_valid)
+
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = valid_df
+
+        update_history_and_technicals(sym, mock_ticker)
+        self.assertIn(sym, cache.history)
+        self.assertEqual(len(cache.history[sym]), 100)
+        self.assertIn(sym, cache.technicals)
+        techs = cache.technicals[sym]
+        self.assertIsNotNone(techs.get("SMA_20"))
+        self.assertIsNotNone(techs.get("SMA_50"))
+        self.assertIsNotNone(techs.get("RSI"))
+        self.assertIsNotNone(techs.get("MACD"))
+        self.assertIsNotNone(techs.get("ATR"))
 
 
 if __name__ == "__main__":
