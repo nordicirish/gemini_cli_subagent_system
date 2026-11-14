@@ -49,3 +49,65 @@ Engineering agents MUST NOT:
 - **Reintroduce Cloud Sync or Broker Execution:** Do not add Google Drive synchronization (`sync_to_gdrive.py`), remote cloud bypasses, broker integrations, or automated order placement.
 - **Perform Git Write Operations:** Never run `git commit`, `git amend`, `git push`, `git pull`, branch creation/switching, `git merge`, `git reset`, `git rebase`, or `git cherry-pick`. The Human Repository Owner exclusively controls git history.
 - **Self-Approve or Auto-Advance Stages:** Stop when the authorised stage scope is complete, report results factually, and wait for independent review and explicit Human Owner sign-off before starting any subsequent stage.
+
+---
+
+## 4. Mandatory Implementation Handover Template
+
+All engineering and remediation completions must use the following standard handover format:
+
+```
+GEM — Implementation Handover
+
+Repository: nordicirish/gemini_cli_subagent_system
+Branch: main
+Baseline HEAD: [commit]
+Ending HEAD: [commit]
+Working tree: Clean / Modified (list files)
+
+1. Implementation
+
+Objective: [One sentence]
+
+Changes: [Brief summary of actual changes]
+
+Files changed: [List paths]
+
+Deviations/blockers: None / [Details]
+
+2. Tests
+
+Test suite
+
+Result
+
+[Suite]
+
+[Passed / Failed / Skipped]
+
+[Suite]
+
+[Passed / Failed / Skipped]
+
+Compilation: Passed / Failed / Not run
+Dependency check: Passed / Failed / Not run
+
+3. Integrity and restrictions
+
+Protected assets: Unchanged / Not verified
+
+Production database operations: None / [Details]
+
+Git write operations: None
+
+Other authorised restrictions: Complied / [Details]
+
+4. Outstanding issues
+
+[None, or concise list]
+
+Implementation complete. Awaiting independent ChatGPT review.
+
+5 Comprehensive commit message to user
+```
+
