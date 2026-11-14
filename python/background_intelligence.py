@@ -71,6 +71,7 @@ def parse_utc_iso8601_timestamp(ts: Any) -> datetime:
 class WorkType(str, enum.Enum):
     GROUNDING = "grounding"
     SCOUT = "scout"
+    MARKET_DATA = "market_data"
 
 
 class WorkStatus(str, enum.Enum):
@@ -612,6 +613,9 @@ class BackgroundResultApplicator:
         cannot be issued between sequence validation and result publication.
         When on_publish is provided, it is executed under key_lock before the sequence
         is marked as applied and key_lock is released.
+        MARKET_DATA results require a valid source observation timestamp and an explicit
+        on_publish callback; they never mutate grounding/scout targets, and the applied
+        sequence/timestamp advance only after on_publish succeeds.
         Returns list of (result, applied, reason).
         """
         audit = []
@@ -665,7 +669,7 @@ class BackgroundResultApplicator:
                             logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
                             audit.append((r, False, msg))
                             continue
-                    elif require_source_time or r.key.work_type == "market_data":
+                    elif require_source_time or r.key.work_type == WorkType.MARKET_DATA.value:
                         msg = "Missing required source observation timestamp"
                         logger.warning(f"[BackgroundResultApplicator] {r.key} rejected fail-closed: {msg}")
                         audit.append((r, False, msg))
@@ -685,6 +689,16 @@ class BackgroundResultApplicator:
                             for t in r.data:
                                 if isinstance(t, str):
                                     scout_category_map[t.upper()] = r.key.target
+                        applied = True
+                    elif r.key.work_type == WorkType.MARKET_DATA.value:
+                        # Market-data results are never assigned to shared state here.
+                        # The explicit, caller-supplied on_publish callback (executed below on the
+                        # coordinating thread under key_lock) is the only permitted publication route.
+                        if on_publish is None or not callable(on_publish):
+                            msg = "Market-data publication callback required"
+                            logger.warning(f"[BackgroundResultApplicator] {r.key} rejected fail-closed: {msg}")
+                            audit.append((r, False, msg))
+                            continue
                         applied = True
                     else:
                         audit.append((r, False, f"Unknown work type: {r.key.work_type}"))

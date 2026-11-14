@@ -1659,5 +1659,506 @@ class TestStage21FinalCorrectnessRequirements(unittest.TestCase):
                     DYNAMIC_SCOUT_CACHE.pop("OLDER_THAN_4H", None)
 
 
+MD = WorkType.MARKET_DATA.value
+T1 = "2026-11-14T19:00:00Z"
+T2 = "2026-11-14T19:05:00Z"
+T3 = "2026-11-14T19:10:00Z"
+
+
+def _collect_results(coordinator, count, timeout=5.0):
+    """Polls a coordinator's real handoff until `count` results are drained (or timeout)."""
+    collected = []
+    deadline = time.monotonic() + timeout
+    while len(collected) < count and time.monotonic() < deadline:
+        collected.extend(coordinator.drain_results())
+        if len(collected) < count:
+            time.sleep(0.01)
+    return collected
+
+
+class TestMarketDataWorkloadIsolation(unittest.TestCase):
+    """Stage 2.2.1: separately instantiated coordinators are fully independent."""
+
+    def _make(self, **kwargs):
+        coord = BackgroundIntelligenceCoordinator(**kwargs)
+        self.addCleanup(coord.shutdown, 2.0)
+        return coord
+
+    def setUp(self):
+        self.gate = threading.Event()
+        # Registered first so it runs LAST (cleanups are LIFO): coordinators shut down after gate release.
+        self.addCleanup(self.gate.set)
+        self.md = self._make(max_workers=1, max_queue_size=2, max_results_size=2)
+        self.ai = self._make(max_workers=1, max_queue_size=2, max_results_size=2)
+
+    def test_01_market_data_work_enqueued_and_processed_by_separate_coordinator(self):
+        accepted, item = self.md.enqueue(MD, "AAPL", T1, lambda: {"price": "1"})
+        self.assertTrue(accepted)
+        self.assertTrue(item.event.wait(timeout=5.0))
+        self.assertEqual(item.status, WorkStatus.COMPLETED)
+        self.assertEqual(item.key.work_type, "market_data")
+
+        results = _collect_results(self.md, 1)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].key, WorkKey(MD, "AAPL"))
+        self.assertEqual(results[0].data, {"price": "1"})
+        self.assertEqual(results[0].obs_time, T1)
+        # Nothing leaked into the other coordinator
+        self.assertEqual(self.ai.total_work_count(), 0)
+        self.assertEqual(self.ai.drain_results(), [])
+
+    def test_02_coordinators_share_no_state(self):
+        for attr in (
+            "_workers", "_queue", "_results_queue", "_overflow_results", "_pending_keys",
+            "_in_flight_keys", "_sequences", "_latest_issued_sequence", "_key_locks",
+            "_shutdown_event", "_lock", "cooldown_tracker",
+        ):
+            with self.subTest(attr=attr):
+                self.assertIsNot(getattr(self.md, attr), getattr(self.ai, attr))
+        md_threads = {id(t) for t in self.md._workers}
+        ai_threads = {id(t) for t in self.ai._workers}
+        self.assertFalse(md_threads & ai_threads)
+        self.assertIsNot(self.md.cooldown_tracker._failures, self.ai.cooldown_tracker._failures)
+        self.assertIsNot(self.md.cooldown_tracker._deadlines, self.ai.cooldown_tracker._deadlines)
+
+        # Same logical key gets an independent sequence counter in each coordinator
+        _, md_item = self.md.enqueue(MD, "SAME", T1, lambda: 1)
+        _, ai_item = self.ai.enqueue(MD, "SAME", T1, lambda: 1)
+        self.assertTrue(md_item.event.wait(5.0))
+        self.assertTrue(ai_item.event.wait(5.0))
+        self.assertEqual(md_item.sequence, 1)
+        self.assertEqual(ai_item.sequence, 1)
+        _, md_item2 = self.md.enqueue(MD, "SAME", T2, lambda: 2)
+        self.assertEqual(md_item2.sequence, 2)
+        self.assertEqual(self.ai.get_latest_issued_sequence(WorkKey(MD, "SAME")), 1)
+
+    def test_03_blocked_market_data_worker_does_not_block_intelligence_work(self):
+        started = threading.Event()
+
+        def blocked():
+            started.set()
+            self.gate.wait(timeout=10.0)
+            return {"v": 1}
+
+        _, md_item = self.md.enqueue(MD, "BLOCK", T1, blocked)
+        self.assertTrue(started.wait(timeout=5.0))
+        self.assertEqual(self.md.in_flight_count(), 1)
+
+        _, ai_item = self.ai.enqueue("grounding", "AAPL", T1, lambda: {"ok": True})
+        self.assertTrue(ai_item.event.wait(timeout=5.0))
+        self.assertEqual(ai_item.status, WorkStatus.COMPLETED)
+        # Market-data worker is still blocked and holds only its own capacity
+        self.assertEqual(md_item.status, WorkStatus.IN_FLIGHT)
+        self.assertEqual(self.md.in_flight_count(), 1)
+        self.assertEqual(self.ai.in_flight_count(), 0)
+
+        self.gate.set()
+        self.assertTrue(md_item.event.wait(timeout=5.0))
+
+    def test_04_queue_saturation_in_one_coordinator_does_not_affect_another(self):
+        started = threading.Event()
+
+        def blocked():
+            started.set()
+            self.gate.wait(timeout=10.0)
+            return True
+
+        self.md.enqueue(MD, "OCC", T1, blocked)
+        self.assertTrue(started.wait(timeout=5.0))
+
+        accepted_count = 0
+        rejected = False
+        for i in range(20):
+            acc, _ = self.md.enqueue(MD, f"Q{i}", T1, blocked)
+            if acc:
+                accepted_count += 1
+            else:
+                rejected = True
+                break
+        self.assertTrue(rejected, "market-data coordinator must saturate and reject")
+        self.assertLessEqual(accepted_count, self.md.max_queue_size + self.md.max_results_size)
+
+        # The other coordinator is unaffected and still accepts and completes work
+        acc, ai_item = self.ai.enqueue("grounding", "MSFT", T1, lambda: {"ok": 1})
+        self.assertTrue(acc)
+        self.assertTrue(ai_item.event.wait(timeout=5.0))
+        self.assertEqual(ai_item.status, WorkStatus.COMPLETED)
+
+    def test_05_cooldown_state_is_independent(self):
+        key = WorkKey(MD, "FAILSYM")
+
+        def failing():
+            raise RuntimeError("provider outage")
+
+        _, item = self.md.enqueue(MD, "FAILSYM", T1, failing)
+        self.assertTrue(item.event.wait(timeout=5.0))
+        self.assertEqual(item.status, WorkStatus.FAILED)
+        self.assertTrue(self.md.cooldown_tracker.is_in_cooldown(key))
+        self.assertFalse(self.ai.cooldown_tracker.is_in_cooldown(key))
+
+        acc_md, _ = self.md.enqueue(MD, "FAILSYM", T2, lambda: 1)
+        self.assertFalse(acc_md, "market-data key must be rejected during its own cooldown")
+        acc_ai, ai_item = self.ai.enqueue(MD, "FAILSYM", T2, lambda: 1)
+        self.assertTrue(acc_ai)
+        self.assertTrue(ai_item.event.wait(timeout=5.0))
+        self.assertEqual(ai_item.status, WorkStatus.COMPLETED)
+
+    def test_06_shutdown_lifecycles_are_independent(self):
+        self.assertTrue(self.md.shutdown(timeout=2.0))
+        for t in self.md._workers:
+            self.assertFalse(t.is_alive())
+        for t in self.ai._workers:
+            self.assertTrue(t.is_alive())
+        acc, _ = self.md.enqueue(MD, "AAPL", T1, lambda: 1)
+        self.assertFalse(acc)
+
+        acc, item = self.ai.enqueue("grounding", "AAPL", T1, lambda: 1)
+        self.assertTrue(acc)
+        self.assertTrue(item.event.wait(timeout=5.0))
+        self.assertEqual(item.status, WorkStatus.COMPLETED)
+
+    def test_17a_shutdown_cancels_inflight_and_queued_work_and_stops_all_workers(self):
+        coord = self._make(max_workers=2, max_queue_size=4, max_results_size=4)
+        started = [threading.Event(), threading.Event()]
+
+        def make_blocker(idx):
+            def blocker(cancel_check):
+                started[idx].set()
+                while not cancel_check():
+                    time.sleep(0.01)
+                raise RuntimeError("cancelled by coordinator")
+            return blocker
+
+        _, in1 = coord.enqueue(MD, "IN1", T1, make_blocker(0))
+        _, in2 = coord.enqueue(MD, "IN2", T1, make_blocker(1))
+        self.assertTrue(started[0].wait(5.0))
+        self.assertTrue(started[1].wait(5.0))
+        _, q1 = coord.enqueue(MD, "Q1", T1, lambda: 1)
+        _, q2 = coord.enqueue(MD, "Q2", T1, lambda: 1)
+        self.assertEqual(coord.pending_count(), 2)
+
+        self.assertTrue(coord.shutdown(timeout=5.0))
+        for t in coord._workers:
+            self.assertFalse(t.is_alive())
+        for it in (in1, in2, q1, q2):
+            self.assertEqual(it.status, WorkStatus.CANCELLED)
+            self.assertTrue(it.event.is_set())
+        self.assertEqual(coord.pending_count(), 0)
+        self.assertEqual(coord.in_flight_count(), 0)
+        self.assertEqual(coord.drain_results(), [])
+        self.assertEqual(coord.total_work_count(), 0)
+
+    def test_17b_cancel_work_cancels_market_data_work_without_publishing(self):
+        started = threading.Event()
+
+        def blocker(cancel_check):
+            started.set()
+            while not cancel_check():
+                time.sleep(0.01)
+            return {"late": True}
+
+        key = WorkKey(MD, "CANCELME")
+        _, item = self.md.enqueue(MD, "CANCELME", T1, blocker)
+        self.assertTrue(started.wait(5.0))
+        self.assertTrue(self.md.cancel_work(key))
+        self.assertTrue(item.event.wait(timeout=5.0))
+        self.assertEqual(item.status, WorkStatus.CANCELLED)
+        time.sleep(0.05)
+        self.assertEqual(self.md.drain_results(), [])
+        self.assertEqual(self.md.in_flight_count(), 0)
+
+
+class TestMarketDataResultApplication(unittest.TestCase):
+    """Stage 2.2.1: controlled market-data result application via explicit on_publish callback."""
+
+    def setUp(self):
+        self.applicator = BackgroundResultApplicator()
+        self.key = WorkKey(MD, "AAPL")
+        self.published = []
+
+    def _publish(self, result):
+        self.published.append(result)
+
+    def _apply(self, results, on_publish="default", latest_issued=None, **kw):
+        cb = self._publish if on_publish == "default" else on_publish
+        g, s, m = {}, {}, {}
+        audit = self.applicator.apply_results(
+            results, g, s, m, latest_issued_provider=latest_issued, on_publish=cb, **kw
+        )
+        self.assertEqual((g, s, m), ({}, {}, {}), "market data must never mutate grounding/scout targets")
+        return audit
+
+    def _res(self, seq=1, obs=T1, data=None, error=None, key=None):
+        return WorkResult(
+            key=key or self.key, sequence=seq, obs_time=obs,
+            data={"price": "1"} if data is None and error is None else data, error=error,
+        )
+
+    def test_05_callback_is_required(self):
+        audit = self._apply([self._res()], on_publish=None)
+        self.assertFalse(audit[0][1])
+        self.assertIn("callback required", audit[0][2])
+        self.assertEqual(self.applicator.get_last_applied(self.key), (-1, ""))
+
+        audit = self._apply([self._res()], on_publish="not-callable")
+        self.assertFalse(audit[0][1])
+        self.assertIn("callback required", audit[0][2])
+        self.assertEqual(self.applicator.get_last_applied(self.key), (-1, ""))
+
+        # State was not advanced, so the same result can still be applied with a real callback
+        audit = self._apply([self._res()])
+        self.assertTrue(audit[0][1])
+        self.assertEqual(len(self.published), 1)
+
+    def test_06_callback_runs_on_coordinating_thread_under_key_lock(self):
+        main_ident = threading.get_ident()
+        seen = {}
+
+        def cb(result):
+            seen["ident"] = threading.get_ident()
+            probe = {}
+
+            def other_thread():
+                lock = self.applicator.get_key_lock(self.key)
+                probe["acquired"] = lock.acquire(blocking=False)
+                if probe["acquired"]:
+                    lock.release()
+
+            t = threading.Thread(target=other_thread)
+            t.start()
+            t.join(timeout=5.0)
+            seen["other_thread_acquired"] = probe.get("acquired")
+
+        audit = self._apply([self._res()], on_publish=cb)
+        self.assertTrue(audit[0][1])
+        self.assertEqual(seen["ident"], main_ident)
+        self.assertFalse(seen["other_thread_acquired"], "callback must run while key lock is held")
+
+    def test_06b_end_to_end_callback_not_executed_in_worker(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=1)
+        self.addCleanup(coord.shutdown, 2.0)
+        worker_ident = {}
+
+        def acquire():
+            worker_ident["id"] = threading.get_ident()
+            return {"price": "9"}
+
+        _, item = coord.enqueue(MD, "AAPL", T1, acquire)
+        self.assertTrue(item.event.wait(5.0))
+        results = _collect_results(coord, 1)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(self.published, [], "worker completion must not publish")
+
+        cb_ident = {}
+        applicator = BackgroundResultApplicator(coordinator=coord)
+        applicator.apply_results(
+            results, {}, {}, {}, on_publish=lambda r: cb_ident.setdefault("id", threading.get_ident())
+        )
+        self.assertEqual(cb_ident["id"], threading.get_ident())
+        self.assertNotEqual(cb_ident["id"], worker_ident["id"])
+
+    def test_07_valid_utc_timestamps_accepted(self):
+        for i, ts in enumerate(
+            ["2026-11-14T19:00:00Z", "2026-11-14T19:00:01+00:00", "2026-11-14T19:00:02.123456Z"], start=1
+        ):
+            with self.subTest(ts=ts):
+                audit = self._apply([self._res(seq=i, obs=ts)])
+                self.assertTrue(audit[0][1], audit[0][2])
+                self.assertEqual(self.applicator.get_last_applied(self.key), (i, ts))
+        self.assertEqual(len(self.published), 3)
+
+    def test_08_missing_timestamps_rejected(self):
+        for ts in (None, "", "   "):
+            with self.subTest(ts=ts):
+                audit = self._apply([self._res(obs=ts)])
+                self.assertFalse(audit[0][1])
+                self.assertIn("Missing required source observation timestamp", audit[0][2])
+        self.assertEqual(self.published, [])
+        self.assertEqual(self.applicator.get_last_applied(self.key), (-1, ""))
+
+    def test_09_naive_malformed_ambiguous_and_nonzero_offset_timestamps_rejected(self):
+        bad = [
+            "2026-11-14T19:00:00",        # naive
+            "2026-11-14 19:00:00Z",       # malformed separator
+            "not-a-timestamp",            # malformed
+            "2026-02-31T19:00:00Z",       # impossible date
+            "2026-11-14T19:00:00-00:00",  # ambiguous
+            "2026-11-14T19:00:00+05:00",  # non-zero offset
+            "2026-11-14T19:00:00-05:00",  # non-zero offset
+            12345,                        # non-string
+        ]
+        for ts in bad:
+            with self.subTest(ts=ts):
+                audit = self._apply([self._res(obs=ts)])
+                self.assertFalse(audit[0][1])
+                self.assertIn("Invalid observation timestamp", audit[0][2])
+        self.assertEqual(self.published, [])
+        self.assertEqual(self.applicator.get_last_applied(self.key), (-1, ""))
+
+    def test_10_older_or_equal_sequence_rejected(self):
+        self.assertTrue(self._apply([self._res(seq=2, obs=T1)])[0][1])
+        for seq in (1, 2):
+            with self.subTest(seq=seq):
+                audit = self._apply([self._res(seq=seq, obs=T2)])
+                self.assertFalse(audit[0][1])
+                self.assertIn("Stale sequence", audit[0][2])
+        self.assertEqual(len(self.published), 1)
+        self.assertEqual(self.applicator.get_last_applied(self.key), (2, T1))
+
+    def test_11_result_superseded_by_newer_issued_sequence_rejected(self):
+        audit = self._apply([self._res(seq=2)], latest_issued={self.key: 3})
+        self.assertFalse(audit[0][1])
+        self.assertIn("older than latest issued", audit[0][2])
+        self.assertEqual(self.published, [])
+        self.assertEqual(self.applicator.get_last_applied(self.key), (-1, ""))
+
+    def test_11b_end_to_end_superseded_by_real_coordinator_sequence(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=1)
+        self.addCleanup(coord.shutdown, 2.0)
+        _, first = coord.enqueue(MD, "AAPL", T1, lambda: {"p": "1"})
+        self.assertTrue(first.event.wait(5.0))
+        _, second = coord.enqueue(MD, "AAPL", T2, lambda: {"p": "2"})
+        self.assertEqual(second.sequence, 2)
+        self.assertTrue(second.event.wait(5.0))
+        results = sorted(_collect_results(coord, 2), key=lambda r: r.sequence)
+        self.assertEqual([r.sequence for r in results], [1, 2])
+
+        applicator = BackgroundResultApplicator(coordinator=coord)
+        audit = applicator.apply_results(results, {}, {}, {}, on_publish=self._publish)
+        self.assertFalse(audit[0][1])
+        self.assertIn("older than latest issued", audit[0][2])
+        self.assertTrue(audit[1][1])
+        self.assertEqual([r.sequence for r in self.published], [2])
+
+    def test_12_older_source_observation_rejected(self):
+        self.assertTrue(self._apply([self._res(seq=1, obs=T2)])[0][1])
+        audit = self._apply([self._res(seq=2, obs=T1)])
+        self.assertFalse(audit[0][1])
+        self.assertIn("Stale observation", audit[0][2])
+        self.assertEqual(len(self.published), 1)
+        self.assertEqual(self.applicator.get_last_applied(self.key), (1, T2))
+
+    def test_13_failed_or_missing_data_results_cannot_publish(self):
+        failed = self._res(error="provider outage", data=None)
+        missing = WorkResult(key=self.key, sequence=2, obs_time=T1, data=None, error=None)
+        audit = self._apply([failed, missing])
+        self.assertFalse(audit[0][1])
+        self.assertFalse(audit[1][1])
+        self.assertEqual(self.published, [])
+        self.assertEqual(self.applicator.get_last_applied(self.key), (-1, ""))
+
+    def test_13b_end_to_end_worker_failure_cannot_publish(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=1)
+        self.addCleanup(coord.shutdown, 2.0)
+
+        def failing():
+            raise RuntimeError("provider outage")
+
+        _, item = coord.enqueue(MD, "AAPL", T1, failing)
+        self.assertTrue(item.event.wait(5.0))
+        results = _collect_results(coord, 1)
+        self.assertEqual(len(results), 1)
+        self.assertIsNotNone(results[0].error)
+        audit = BackgroundResultApplicator(coordinator=coord).apply_results(
+            results, {}, {}, {}, on_publish=self._publish
+        )
+        self.assertFalse(audit[0][1])
+        self.assertEqual(self.published, [])
+
+    def test_14_callback_failure_does_not_advance_sequence_or_timestamp(self):
+        def boom(result):
+            raise RuntimeError("publish failed")
+
+        audit = self._apply([self._res(seq=1, obs=T1)], on_publish=boom)
+        self.assertFalse(audit[0][1])
+        self.assertIn("Publication failed", audit[0][2])
+        self.assertEqual(self.applicator.get_last_applied(self.key), (-1, ""))
+
+        # With prior applied state, a failed publication preserves exactly that prior state
+        self.assertTrue(self._apply([self._res(seq=2, obs=T1)])[0][1])
+        audit = self._apply([self._res(seq=3, obs=T2)], on_publish=boom)
+        self.assertFalse(audit[0][1])
+        self.assertEqual(self.applicator.get_last_applied(self.key), (2, T1))
+        # Key lock is released after the failure
+        lock = self.applicator.get_key_lock(self.key)
+        self.assertTrue(lock.acquire(blocking=False))
+        lock.release()
+
+    def test_15_later_valid_result_applies_after_failed_publication(self):
+        def boom(result):
+            raise RuntimeError("publish failed")
+
+        self.assertFalse(self._apply([self._res(seq=1, obs=T1)], on_publish=boom)[0][1])
+        # Retry of the same sequence is still permitted because nothing advanced
+        self.assertTrue(self._apply([self._res(seq=1, obs=T1)])[0][1])
+        self.assertFalse(self._apply([self._res(seq=2, obs=T2)], on_publish=boom)[0][1])
+        # A later valid result is applied
+        self.assertTrue(self._apply([self._res(seq=3, obs=T3)])[0][1])
+        self.assertEqual(self.applicator.get_last_applied(self.key), (3, T3))
+        self.assertEqual([r.sequence for r in self.published], [1, 3])
+
+    def test_16_grounding_and_scout_semantics_remain_compatible(self):
+        applicator = BackgroundResultApplicator()
+        grounding, scout_cache, scout_map = {}, {}, {}
+        g_key = WorkKey("grounding", "AAPL")
+        s_key = WorkKey("scout", "Technology")
+        published = []
+
+        results = [
+            WorkResult(key=g_key, sequence=1, obs_time=T1, data={"headline": "x"}),
+            WorkResult(key=s_key, sequence=1, obs_time=T1, data=["msft", "NVDA"]),
+        ]
+        audit = applicator.apply_results(results, grounding, scout_cache, scout_map)
+        self.assertTrue(all(a[1] for a in audit))
+        self.assertEqual(grounding["AAPL"], {"headline": "x"})
+        self.assertEqual(scout_cache["TECHNOLOGY"]["tickers"], ["msft", "NVDA"])
+        self.assertEqual(scout_map, {"MSFT": "TECHNOLOGY", "NVDA": "TECHNOLOGY"})
+
+        # Grounding without a source timestamp is still accepted (only market data requires one)
+        audit = applicator.apply_results(
+            [WorkResult(key=WorkKey("grounding", "MSFT"), sequence=1, obs_time=None, data={"h": 1})],
+            grounding, scout_cache, scout_map,
+        )
+        self.assertTrue(audit[0][1])
+        # Grounding callback still runs and is optional
+        audit = applicator.apply_results(
+            [WorkResult(key=g_key, sequence=2, obs_time=T2, data={"headline": "y"})],
+            grounding, scout_cache, scout_map, on_publish=published.append,
+        )
+        self.assertTrue(audit[0][1])
+        self.assertEqual(len(published), 1)
+        # Stale grounding still rejected; unknown type still rejected
+        audit = applicator.apply_results(
+            [WorkResult(key=g_key, sequence=1, obs_time=T3, data={"headline": "z"})],
+            grounding, scout_cache, scout_map,
+        )
+        self.assertFalse(audit[0][1])
+        self.assertEqual(grounding["AAPL"], {"headline": "y"})
+        audit = applicator.apply_results(
+            [WorkResult(key=WorkKey("bogus", "X"), sequence=1, obs_time=T1, data=1)],
+            grounding, scout_cache, scout_map,
+        )
+        self.assertFalse(audit[0][1])
+        self.assertIn("Unknown work type", audit[0][2])
+        # require_source_time still fail-closes grounding when requested
+        audit = applicator.apply_results(
+            [WorkResult(key=WorkKey("grounding", "NVDA"), sequence=1, obs_time=None, data={"h": 1})],
+            grounding, scout_cache, scout_map, require_source_time=True,
+        )
+        self.assertFalse(audit[0][1])
+
+    def test_market_data_and_other_work_types_have_independent_applied_state(self):
+        applicator = BackgroundResultApplicator()
+        grounding, scout_cache, scout_map = {}, {}, {}
+        results = [
+            WorkResult(key=WorkKey("grounding", "AAPL"), sequence=1, obs_time=T1, data={"h": 1}),
+            WorkResult(key=WorkKey(MD, "AAPL"), sequence=1, obs_time=T1, data={"p": "1"}),
+        ]
+        audit = applicator.apply_results(results, grounding, scout_cache, scout_map, on_publish=self._publish)
+        self.assertTrue(all(a[1] for a in audit))
+        self.assertEqual([r.key.work_type for r in self.published], ["grounding", "market_data"])
+        self.assertEqual(grounding["AAPL"], {"h": 1})
+
+
 if __name__ == "__main__":
     unittest.main()
