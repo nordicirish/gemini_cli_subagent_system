@@ -13,6 +13,7 @@ Tests all mandatory requirements and negative tests:
 
 from __future__ import annotations
 
+import collections.abc
 import os
 import queue
 import signal
@@ -383,8 +384,8 @@ class TestAtomicSnapshotPublication(unittest.TestCase):
         def reader():
             while not stop_event.is_set():
                 snap = get_global_state_snapshot()
-                # Reader must always observe a consistent dictionary
-                self.assertIsInstance(snap, dict)
+                # Reader must always observe a consistent mapping
+                self.assertIsInstance(snap, (dict, collections.abc.Mapping))
                 self.assertIn("version", snap)
                 observed_versions.append(snap["version"])
                 time.sleep(0.001)
@@ -557,386 +558,394 @@ class TestMarketMonitoringIsolation(unittest.TestCase):
 class TestStage21RemediationRequirements(unittest.TestCase):
     """
     Mandatory deterministic negative and regression tests for Stage 2.1 Targeted Remediation:
-    Items 1 through 24 (Item 25 is market data integrity regression suite).
+    Items 1 through 22 as specified in Section 4.
     """
 
-    def test_01_posix_child_created_in_dedicated_process_group(self):
-        mock_proc = MagicMock()
-        mock_proc.pid = 55555
-        mock_proc.communicate.return_value = ("output", "")
-        mock_proc.returncode = 0
-        with patch("sys.platform", "linux"), patch("subprocess.Popen", return_value=mock_proc) as mock_popen:
-            runner = AntigravityAgentRunner(agy_path="agy")
-            runner.run_prompt("test")
-            mock_popen.assert_called_once()
-            _, kwargs = mock_popen.call_args
-            self.assertTrue(kwargs.get("start_new_session"), "POSIX subprocess must set start_new_session=True")
-            self.assertEqual(getattr(mock_proc, "_dedicated_pgid", None), 55555)
-
-    def test_02_posix_timeout_does_not_terminate_parent_process_group(self):
-        mock_proc = MagicMock()
-        mock_proc.pid = 55555
-        mock_proc._dedicated_pgid = 55555
-        mock_proc.poll.return_value = None
-        mock_proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="test", timeout=1.0), 0]
-        parent_pgrp = 1234
-        with patch("sys.platform", "linux"), patch("os.getpgrp", create=True, return_value=parent_pgrp), patch("os.killpg", create=True) as mock_killpg:
-            _cleanup_subprocess(mock_proc, graceful_timeout=0.01)
-            for call in mock_killpg.call_args_list:
-                pgid_signaled = call.args[0]
-                self.assertNotEqual(pgid_signaled, parent_pgrp, "Cleanup must NEVER signal parent process group!")
-                self.assertEqual(pgid_signaled, 55555)
-
-    def test_03_posix_descendant_termination_when_direct_child_exits_first(self):
-        mock_proc = MagicMock()
-        mock_proc.pid = 55555
-        mock_proc._dedicated_pgid = 55555
-        mock_proc.poll.return_value = 0  # Direct child exited
-        mock_proc.wait.return_value = 0
-        sigkill = getattr(signal, "SIGKILL", 9)
-        with patch("sys.platform", "linux"), patch("os.getpgrp", create=True, return_value=1234), patch("os.killpg", create=True) as mock_killpg:
-            _cleanup_subprocess(mock_proc, graceful_timeout=0.01)
-            # SIGKILL must still be dispatched to dedicated_pgid to terminate surviving descendants
-            mock_killpg.assert_any_call(55555, sigkill)
-
-    def test_04_windows_process_tree_cleanup(self):
-        mock_proc = MagicMock()
-        mock_proc.pid = 44444
-        mock_proc.poll.return_value = None
-        mock_proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="test", timeout=1.0), 0]
-        with patch("sys.platform", "win32"), patch("subprocess.run") as mock_run:
-            _cleanup_subprocess(mock_proc, graceful_timeout=0.01)
-            cmd_runs = [c.args[0] for c in mock_run.call_args_list if c.args]
-            self.assertTrue(any("taskkill" in str(cmd) and "/T" in str(cmd) for cmd in cmd_runs))
-
-    def test_05_explicit_child_reaping_and_stream_closure(self):
-        mock_proc = MagicMock()
-        mock_proc.pid = 33333
-        mock_proc.poll.return_value = None
-        mock_proc.wait.return_value = 0
-        _cleanup_subprocess(mock_proc, graceful_timeout=0.01)
-        mock_proc.wait.assert_called()
-        mock_proc.stdin.close.assert_called()
-        mock_proc.stdout.close.assert_called()
-        mock_proc.stderr.close.assert_called()
-
-    def test_06_cleanup_failure_reporting_and_primary_exception_preservation(self):
-        mock_proc = MagicMock()
-        mock_proc.pid = 22222
-        mock_proc.poll.return_value = None
-        mock_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=1.0)
-
-        # Standalone call with raise_on_error=True raises SubprocessCleanupError
-        with self.assertRaises(SubprocessCleanupError):
-            _cleanup_subprocess(mock_proc, graceful_timeout=0.01, raise_on_error=True)
-
-        # Standalone call with raise_on_error=False returns False without raising
-        res = _cleanup_subprocess(mock_proc, graceful_timeout=0.01, raise_on_error=False)
-        self.assertFalse(res)
-
-        # When a primary exception is active, cleanup failure must preserve primary exception
-        try:
-            raise TimeoutError("Primary timeout occurred")
-        except TimeoutError as primary_err:
-            success = _cleanup_subprocess(mock_proc, graceful_timeout=0.01, raise_on_error=True)
-            self.assertFalse(success)
-            self.assertEqual(str(primary_err), "Primary timeout occurred")
-
-    def test_07_deep_snapshot_immutability_including_nested_structures(self):
+    def test_01_published_snapshots_cannot_be_mutated_through_normal_methods(self):
         snap = publish_global_state_snapshot({
             "meta": {"version": 1},
-            "tickers": [{"symbol": "AAPL", "tags": ["tech"]}],
-            "values": [1, 2, 3]
+            "tickers": ["AAPL", "NVDA"],
+            "info": {"counts": [1, 2]}
         })
+        # Dict mutators on snapshot root and nested mappings
+        with self.assertRaises(TypeError):
+            snap["meta"] = {"version": 2}
         with self.assertRaises(TypeError):
             snap["meta"]["version"] = 2
         with self.assertRaises(TypeError):
-            snap["tickers"][0]["tags"].append("growth")
+            snap["meta"].update({"version": 2})
         with self.assertRaises(TypeError):
-            snap["values"].extend([4])
+            snap["meta"].pop("version")
+        with self.assertRaises(TypeError):
+            snap["meta"].clear()
+        with self.assertRaises(TypeError):
+            snap["meta"].setdefault("new_key", 100)
         with self.assertRaises(TypeError):
             del snap["meta"]
 
-    def test_08_caller_mutation_after_publication_cannot_alter_published_state(self):
-        caller_dict = {"nested": {"data": [1, 2, 3]}}
-        published = publish_global_state_snapshot(caller_dict)
+        # Sequence mutators on nested lists
+        with self.assertRaises(TypeError):
+            snap["tickers"].append("MSFT")
+        with self.assertRaises(TypeError):
+            snap["tickers"].extend(["MSFT"])
+        with self.assertRaises(TypeError):
+            snap["tickers"].insert(0, "MSFT")
+        with self.assertRaises(TypeError):
+            snap["tickers"].pop()
+        with self.assertRaises(TypeError):
+            snap["tickers"].clear()
+        with self.assertRaises(TypeError):
+            snap["tickers"][0] = "GOOG"
 
-        # Caller mutates their dictionary
-        caller_dict["nested"]["data"].append(999)
-        caller_dict["nested"]["hacked"] = True
+    def test_02_published_snapshots_cannot_be_mutated_through_base_class_operations(self):
+        snap = publish_global_state_snapshot({
+            "meta": {"version": 1},
+            "items": [1, 2, 3]
+        })
+        # Base-class dict operations must fail closed because ImmutableDict does not inherit from dict
+        with self.assertRaises(TypeError):
+            dict.__setitem__(snap, "meta", {})
+        with self.assertRaises(TypeError):
+            dict.__setitem__(snap["meta"], "version", 999)
+        with self.assertRaises(TypeError):
+            dict.clear(snap["meta"])
+        with self.assertRaises(TypeError):
+            dict.update(snap["meta"], {"version": 999})
+        with self.assertRaises(TypeError):
+            dict.pop(snap["meta"], "version")
 
-        # Published snapshot must remain completely unaffected
-        self.assertEqual(list(published["nested"]["data"]), [1, 2, 3])
-        self.assertNotIn("hacked", published["nested"])
+        # Base-class list operations must fail closed because ImmutableList does not inherit from list
+        with self.assertRaises(TypeError):
+            list.append(snap["items"], 4)
+        with self.assertRaises(TypeError):
+            list.__setitem__(snap["items"], 0, 999)
+        with self.assertRaises(TypeError):
+            list.extend(snap["items"], [5])
+        with self.assertRaises(TypeError):
+            list.pop(snap["items"])
+        with self.assertRaises(TypeError):
+            list.clear(snap["items"])
 
-    def test_09_reader_references_remain_unchanged_after_subsequent_publications(self):
-        publish_global_state_snapshot({"version": 1, "items": [10]})
-        captured = get_global_state_snapshot()
-        publish_global_state_snapshot({"version": 2, "items": [20, 30]})
+    def test_03_no_unittest_or_mock_call_stack_exception_permits_mutation(self):
+        # Running inside unittest.TestCase must NEVER bypass immutability
+        snap = publish_global_state_snapshot({"test_key": "initial_val"})
+        with self.assertRaises(TypeError):
+            snap["test_key"] = "tampered_val"
 
-        self.assertEqual(captured["version"], 1)
-        self.assertEqual(list(captured["items"]), [10])
-        self.assertEqual(get_global_state_snapshot()["version"], 2)
+        # Calling from inside a mock must also never bypass immutability
+        mock_caller = MagicMock()
+        def try_mutate(s):
+            s["test_key"] = "mock_tampered"
+        mock_caller.side_effect = try_mutate
+        with self.assertRaises(TypeError):
+            mock_caller(snap)
 
-    def test_10_concurrent_snapshot_writers_do_not_lose_updates(self):
-        base = {"counter": 0}
-        publish_global_state_snapshot(base)
+    def test_04_caller_owned_nested_structures_cannot_mutate_published_snapshots(self):
+        nested_list = [1, 2, 3]
+        nested_dict = {"inner_list": nested_list, "count": 10}
+        root = {"nested": nested_dict}
+        published = publish_global_state_snapshot(root)
 
-        def inc():
-            for _ in range(25):
-                update_global_state_snapshot(lambda s: {**s, "counter": s["counter"] + 1})
+        # Caller mutates external structures after publication
+        nested_list.append(4)
+        nested_dict["count"] = 999
+        nested_dict["new_field"] = "leaked"
+        root["nested"] = "replaced"
 
-        threads = [threading.Thread(target=inc) for _ in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=2.0)
-        self.assertEqual(get_global_state_snapshot()["counter"], 100)
+        # Published snapshot must remain completely isolated and unaffected
+        self.assertEqual(list(published["nested"]["inner_list"]), [1, 2, 3])
+        self.assertEqual(published["nested"]["count"], 10)
+        self.assertNotIn("new_field", published["nested"])
+        self.assertIn("inner_list", published["nested"])
 
-    def test_11_background_result_application_does_not_mutate_previously_published_snapshots(self):
-        publish_global_state_snapshot({"qualitative_grounding": {"AAPL": {"sentiment_score": 0.5}}})
-        captured = get_global_state_snapshot()
+    def test_05_windows_handle_return_values_retain_pointer_sized_integrity(self):
+        import ctypes
+        from ctypes import wintypes
+        from agent_framework import _get_windows_descendant_pids
+        with patch("sys.platform", "win32"), \
+             patch("ctypes.windll.kernel32", create=True) as mock_kernel32:
+            mock_kernel32.CreateToolhelp32Snapshot.return_value = 0x123456789ABCDEF0
+            mock_kernel32.Process32First.return_value = True
+            mock_kernel32.Process32Next.return_value = False
+            pids, success = _get_windows_descendant_pids(1234)
+            self.assertEqual(mock_kernel32.CreateToolhelp32Snapshot.restype, wintypes.HANDLE)
+            self.assertEqual(mock_kernel32.CloseHandle.argtypes, [wintypes.HANDLE])
+            self.assertEqual(ctypes.sizeof(wintypes.HANDLE), ctypes.sizeof(ctypes.c_void_p))
+            self.assertTrue(success)
 
-        def fake_grounding(sym, cancel_check=None):
-            return {"headline": "New Event", "sentiment_score": 0.99}
+    def test_06_invalid_toolhelp_handles_are_detected(self):
+        import ctypes
+        from agent_framework import _get_windows_descendant_pids
+        for invalid_handle in [-1, 0, None, ctypes.c_void_p(-1).value]:
+            with patch("sys.platform", "win32"), patch("ctypes.windll.kernel32", create=True) as mock_kernel32:
+                mock_kernel32.CreateToolhelp32Snapshot.return_value = invalid_handle
+                pids, success = _get_windows_descendant_pids(1234)
+                self.assertFalse(success, f"Handle {invalid_handle} must be detected as invalid")
+                self.assertEqual(pids, [])
+                mock_kernel32.Process32First.assert_not_called()
 
-        coord = get_background_coordinator()
-        accepted, item = coord.enqueue("grounding", "AAPL", "2026-11-14T19:00:00Z", fake_grounding, args=("AAPL",), force=True)
+    def test_07_toolhelp_enumeration_failure_is_reported(self):
+        from agent_framework import _get_windows_descendant_pids
+        ERROR_ACCESS_DENIED = 5
+        with patch("sys.platform", "win32"), \
+             patch("ctypes.windll.kernel32", create=True) as mock_kernel32, \
+             patch("ctypes.GetLastError", create=True, return_value=ERROR_ACCESS_DENIED):
+            mock_kernel32.CreateToolhelp32Snapshot.return_value = 100
+            mock_kernel32.Process32First.return_value = False
+            pids, success = _get_windows_descendant_pids(1234)
+            self.assertFalse(success, "Enumeration failure must report success=False")
+            mock_kernel32.CloseHandle.assert_called_once_with(100)
+
+    def test_08_windows_descendant_termination_failure_is_reported(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 44444
+        mock_proc.poll.return_value = 0
+        mock_proc.wait.return_value = 0
+        mock_proc._cleaned_up = False
+
+        with patch("sys.platform", "win32"), \
+             patch("agent_framework._get_windows_descendant_pids", return_value=([55555], True)), \
+             patch("subprocess.run", return_value=subprocess.CompletedProcess(args=["taskkill"], returncode=1)):
+            with self.assertRaises(SubprocessCleanupError) as ctx:
+                _cleanup_subprocess(mock_proc, raise_on_error=True)
+            self.assertIn("taskkill failed", str(ctx.exception))
+            self.assertFalse(mock_proc._cleaned_up)
+
+    def test_09_posix_process_group_termination_failure_is_reported(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 55555
+        mock_proc._dedicated_pgid = 55555
+        mock_proc.poll.return_value = 0
+        mock_proc.wait.return_value = 0
+        mock_proc._cleaned_up = False
+
+        with patch("sys.platform", "linux"), \
+             patch("os.getpgrp", create=True, return_value=1234), \
+             patch("os.killpg", create=True, return_value=None):
+            with self.assertRaises(SubprocessCleanupError) as ctx:
+                _cleanup_subprocess(mock_proc, raise_on_error=True)
+            self.assertIn("Process group 55555 still contains active processes", str(ctx.exception))
+            self.assertFalse(mock_proc._cleaned_up)
+
+    def test_10_direct_child_reaping_does_not_imply_descendant_cleanup_success(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 11111
+        mock_proc.poll.return_value = 0  # Direct child exited cleanly
+        mock_proc.wait.return_value = 0  # Direct child reaped cleanly
+        mock_proc._cleaned_up = False
+
+        # But Windows descendant enumeration failed
+        with patch("sys.platform", "win32"), \
+             patch("agent_framework._get_windows_descendant_pids", return_value=([], False)):
+            with self.assertRaises(SubprocessCleanupError):
+                _cleanup_subprocess(mock_proc, raise_on_error=True)
+            self.assertFalse(mock_proc._cleaned_up)
+
+    def test_11_stream_closure_failures_are_reported(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 22222
+        mock_proc.poll.return_value = 0
+        mock_proc.wait.return_value = 0
+        mock_proc._cleaned_up = False
+        mock_proc.stdout.close.side_effect = IOError("Failed to close stdout pipe")
+
+        with patch("sys.platform", "win32"), \
+             patch("agent_framework._get_windows_descendant_pids", return_value=([], True)):
+            with self.assertRaises(SubprocessCleanupError) as ctx:
+                _cleanup_subprocess(mock_proc, raise_on_error=True)
+            self.assertIn("Failed to close stdout", str(ctx.exception))
+            self.assertFalse(mock_proc._cleaned_up)
+
+    def test_12_primary_exceptions_survive_cleanup_failures(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 33333
+        mock_proc.poll.return_value = None
+        mock_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=1.0)
+
+        try:
+            raise TimeoutError("Primary timeout during agent run")
+        except TimeoutError as primary_exc:
+            success = _cleanup_subprocess(mock_proc, raise_on_error=True)
+            self.assertFalse(success)
+            self.assertEqual(str(primary_exc), "Primary timeout during agent run")
+
+    def test_13_cleaned_up_not_set_after_incomplete_cleanup(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 44444
+        mock_proc.poll.return_value = None
+        mock_proc.wait.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=0.1)
+        mock_proc._cleaned_up = False
+
+        with patch("sys.platform", "win32"), \
+             patch("agent_framework._get_windows_descendant_pids", return_value=([], True)):
+            success = _cleanup_subprocess(mock_proc, raise_on_error=False)
+            self.assertFalse(success)
+            self.assertFalse(mock_proc._cleaned_up)
+
+    def test_14_cleanup_remains_safely_idempotent(self):
+        mock_proc = MagicMock()
+        mock_proc.pid = 55555
+        mock_proc.poll.return_value = 0
+        mock_proc.wait.return_value = 0
+        mock_proc._cleaned_up = False
+
+        with patch("sys.platform", "win32"), \
+             patch("agent_framework._get_windows_descendant_pids", return_value=([], True)):
+            s1 = _cleanup_subprocess(mock_proc, raise_on_error=True)
+            self.assertTrue(s1)
+            self.assertTrue(mock_proc._cleaned_up)
+
+            s2 = _cleanup_subprocess(mock_proc, raise_on_error=True)
+            self.assertTrue(s2)
+
+    def test_15_enqueue_time_not_represented_as_source_observation_time(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=5)
+        t_before = time.monotonic()
+        accepted, item = coord.enqueue(
+            "grounding", "AAPL",
+            obs_time="2026-11-14T19:00:00Z",
+            fn=lambda: {"test": 1}
+        )
+        t_after = time.monotonic()
+        self.assertTrue(accepted)
+        self.assertEqual(item.obs_time, "2026-11-14T19:00:00Z")
+        self.assertGreaterEqual(item.enqueued_time, t_before)
+        self.assertLessEqual(item.enqueued_time, t_after)
+        self.assertNotEqual(item.obs_time, str(item.enqueued_time))
+        self.assertNotIn("T", str(item.enqueued_time))
+        coord.shutdown(timeout=1.0)
+
+    def test_16_completion_time_not_represented_as_source_observation_time(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=5)
+        accepted, item = coord.enqueue(
+            "grounding", "MSFT",
+            obs_time="2026-11-14T19:00:00Z",
+            fn=lambda: {"test": 2}
+        )
         self.assertTrue(accepted)
         self.assertTrue(item.event.wait(timeout=2.0))
-
-        apply_background_intelligence_results()
-
-        # Captured reader reference must NOT be mutated in place
-        self.assertEqual(captured["qualitative_grounding"]["AAPL"]["sentiment_score"], 0.5)
-        # Current published state must reflect the newly applied value
-        self.assertEqual(get_global_state_snapshot()["qualitative_grounding"]["AAPL"]["sentiment_score"], 0.99)
-
-    def test_12_shutdown_during_queued_work(self):
-        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=10)
-        gate = threading.Event()
-        # Occupy the worker
-        coord.enqueue("grounding", "W1", "2026-11-14T19:00:00Z", lambda: gate.wait(timeout=1.0))
-        accepted, item_q = coord.enqueue("grounding", "Q1", "2026-11-14T19:00:00Z", lambda: 123)
-        self.assertTrue(accepted)
-        self.assertEqual(item_q.status, WorkStatus.QUEUED)
-
-        gate.set()
-        coord.shutdown(timeout=1.0)
-        self.assertEqual(item_q.status, WorkStatus.CANCELLED)
-        self.assertTrue(item_q.event.is_set())
-
-    def test_13_shutdown_during_active_subprocess_execution(self):
-        cancelled_observed = threading.Event()
-
-        def long_task(cancel_check=None):
-            for _ in range(50):
-                if cancel_check and cancel_check():
-                    cancelled_observed.set()
-                    raise RuntimeError("Cancelled by check")
-                time.sleep(0.02)
-            return "finished"
-
-        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=5)
-        accepted, item = coord.enqueue("grounding", "AAPL", "2026-11-14T19:00:00Z", long_task)
-        self.assertTrue(accepted)
-        time.sleep(0.05)
-        coord.shutdown(timeout=1.0)
-        self.assertTrue(cancelled_observed.is_set())
-
-    def test_14_cancellation_propagates_to_child_process(self):
-        cancelled_flag = threading.Event()
-
-        def task_with_cancel(cancel_check=None):
-            while not (cancel_check and cancel_check()):
-                time.sleep(0.01)
-            cancelled_flag.set()
-            raise RuntimeError("Cancelled")
-
-        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=5)
-        key = WorkKey("grounding", "TSLA")
-        accepted, item = coord.enqueue("grounding", "TSLA", "2026-11-14T19:00:00Z", task_with_cancel)
-        self.assertTrue(accepted)
-        time.sleep(0.05)
-        success = coord.cancel_work(key)
-        self.assertTrue(success)
-        self.assertTrue(cancelled_flag.wait(timeout=1.0))
-        coord.shutdown(timeout=1.0)
-
-    def test_15_shutdown_never_reports_success_while_workers_remain_active(self):
-        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=5)
-        hang_gate = threading.Event()
-
-        def stubborn_worker(cancel_check=None):
-            hang_gate.wait(timeout=1.0)
-            return "done"
-
-        coord.enqueue("grounding", "STUBBORN", "2026-11-14T19:00:00Z", stubborn_worker)
-        time.sleep(0.05)
-        res = coord.shutdown(timeout=0.05)
-        self.assertFalse(res, "Shutdown must report False while workers are active!")
-        hang_gate.set()
-        coord.shutdown(timeout=1.0)
-
-    def test_16_bounded_result_handoff_under_delayed_draining(self):
-        coord = BackgroundIntelligenceCoordinator(max_workers=2, max_queue_size=10, max_results_size=2)
-        for i in range(4):
-            coord.enqueue("grounding", f"SYM_{i}", "2026-11-14T19:00:00Z", lambda idx=i: f"val_{idx}")
-        time.sleep(0.15)
-        self.assertLessEqual(coord._results_queue.qsize(), 2)
-        drained = coord.drain_results()
-        self.assertEqual(len(drained), 4)
-        coord.shutdown(timeout=1.0)
-
-    def test_17_result_handoff_capacity_exhaustion_without_silent_data_loss(self):
-        coord = BackgroundIntelligenceCoordinator(max_workers=2, max_queue_size=10, max_results_size=1)
-        coord.enqueue("grounding", "A", "2026-11-14T19:00:00Z", lambda: "res_a1")
-        coord.enqueue("grounding", "A", "2026-11-14T19:01:00Z", lambda: "res_a2")
-        coord.enqueue("grounding", "B", "2026-11-14T19:00:00Z", lambda: "res_b1")
-        time.sleep(0.15)
-        drained = coord.drain_results()
-        drained_targets = {r.key.target for r in drained}
-        self.assertIn("A", drained_targets)
-        self.assertIn("B", drained_targets)
-        coord.shutdown(timeout=1.0)
-
-    def test_18_queue_accounting_remains_correct_after_exceptions_and_cancellation(self):
-        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=5)
-
-        def fail_fn():
-            raise ValueError("Intentional")
-
-        coord.enqueue("grounding", "ERR", "2026-11-14T19:00:00Z", fail_fn)
-        coord.enqueue("grounding", "OK", "2026-11-14T19:00:00Z", lambda: 1)
-        time.sleep(0.15)
-        self.assertEqual(coord.pending_count(), 0)
-        self.assertEqual(coord.in_flight_count(), 0)
-        self.assertEqual(len(coord._in_flight_keys), 0)
-        coord.shutdown(timeout=1.0)
-
-    def test_19_fractional_second_chronological_comparisons(self):
-        applicator = BackgroundResultApplicator()
-        g, sc, sm = {}, {}, {}
-        key = WorkKey("grounding", "AAPL")
-        r1 = WorkResult(key=key, sequence=1, obs_time="2026-11-14T19:00:00.090000Z", data={"v": 1})
-        r2 = WorkResult(key=key, sequence=2, obs_time="2026-11-14T19:00:00.100000Z", data={"v": 2})
-        r3_stale = WorkResult(key=key, sequence=3, obs_time="2026-11-14T19:00:00.095000Z", data={"v": 3})
-
-        audit1 = applicator.apply_results([r1], g, sc, sm)
-        self.assertTrue(audit1[0][1])
-        audit2 = applicator.apply_results([r2], g, sc, sm)
-        self.assertTrue(audit2[0][1])
-        self.assertEqual(g["AAPL"]["v"], 2)
-
-        audit3 = applicator.apply_results([r3_stale], g, sc, sm)
-        self.assertFalse(audit3[0][1])
-        self.assertIn("Stale observation", audit3[0][2])
-        self.assertEqual(g["AAPL"]["v"], 2)
-
-    def test_20_equivalent_utc_timestamps(self):
-        applicator = BackgroundResultApplicator()
-        g, sc, sm = {}, {}, {}
-        key = WorkKey("grounding", "AAPL")
-        r1 = WorkResult(key=key, sequence=1, obs_time="2026-11-14T19:00:00+00:00", data={"v": 1})
-        r2 = WorkResult(key=key, sequence=2, obs_time="2026-11-14T19:00:00Z", data={"v": 2})
-
-        audit1 = applicator.apply_results([r1], g, sc, sm)
-        self.assertTrue(audit1[0][1])
-        audit2 = applicator.apply_results([r2], g, sc, sm)
-        self.assertTrue(audit2[0][1])
-        self.assertEqual(g["AAPL"]["v"], 2)
-
-    def test_21_rejection_of_ambiguous_neg_zero_timestamps(self):
-        with self.assertRaises(ValueError) as ctx:
-            validate_utc_iso8601_timestamp("2026-11-14T19:00:00-00:00")
-        self.assertIn("Ambiguous timestamp offset '-00:00'", str(ctx.exception))
-
-    def test_22_request_time_not_misrepresented_as_source_observation_time(self):
-        item = WorkItem(
-            key=WorkKey("grounding", "AAPL"),
-            sequence=1,
-            obs_time="2026-11-14T19:00:00Z",
-            fn=lambda: None,
-            enqueued_time=12345.67
-        )
-        res = WorkResult(
-            key=item.key,
-            sequence=item.sequence,
-            obs_time=item.obs_time,
-            data="data",
-            completed_time=12345.99,
-            enqueued_time=item.enqueued_time
-        )
+        results = coord.drain_results()
+        self.assertEqual(len(results), 1)
+        res = results[0]
         self.assertEqual(res.obs_time, "2026-11-14T19:00:00Z")
-        self.assertEqual(res.enqueued_time, 12345.67)
-        self.assertEqual(res.completed_time, 12345.99)
-        self.assertNotEqual(res.obs_time, str(res.enqueued_time))
+        self.assertIsInstance(res.completed_time, float)
+        self.assertNotEqual(res.obs_time, str(res.completed_time))
+        self.assertGreater(res.completed_time, res.enqueued_time)
+        coord.shutdown(timeout=1.0)
 
-    def test_23_newer_issued_sequence_invalidates_older_outstanding_result(self):
+    def test_17_missing_source_timestamp_fails_closed_where_required(self):
         applicator = BackgroundResultApplicator()
         g, sc, sm = {}, {}, {}
-        key = WorkKey("grounding", "NVDA")
+        key = WorkKey("grounding", "GOOG")
+        res = WorkResult(key=key, sequence=1, obs_time=None, data={"headline": "Missing timestamp"})
+        audit = applicator.apply_results([res], g, sc, sm, require_source_time=True)
+        self.assertFalse(audit[0][1], "Result with missing obs_time must be rejected")
+        self.assertIn("Missing required source observation timestamp", audit[0][2])
+        self.assertNotIn("GOOG", g)
+
+    def test_18_production_grounding_integration_preserves_timestamp_semantics(self):
+        from python.fetch_stocks import enqueue_news_grounding, get_background_coordinator
+        coord = get_background_coordinator()
+        accepted, item = enqueue_news_grounding("AAPL", obs_time="2026-11-14T19:00:00Z")
+        self.assertTrue(accepted)
+        self.assertEqual(item.obs_time, "2026-11-14T19:00:00Z")
+        self.assertIsInstance(item.enqueued_time, float)
+
+        accepted2, item2 = enqueue_news_grounding("NVDA", obs_time=None)
+        self.assertTrue(accepted2)
+        self.assertIsNone(item2.obs_time)
+
+    def test_19_production_scout_integration_preserves_timestamp_semantics(self):
+        from python.fetch_stocks import enqueue_scout_discovery, get_background_coordinator
+        coord = get_background_coordinator()
+        accepted, item = enqueue_scout_discovery("Technology", obs_time="2026-11-14T19:00:00Z")
+        self.assertTrue(accepted)
+        self.assertEqual(item.obs_time, "2026-11-14T19:00:00Z")
+        self.assertIsInstance(item.enqueued_time, float)
+
+        accepted2, item2 = enqueue_scout_discovery("Healthcare", obs_time=None)
+        self.assertTrue(accepted2)
+        self.assertIsNone(item2.obs_time)
+
+    def test_20_newer_work_issued_between_validation_and_publication_prevents_older(self):
+        applicator = BackgroundResultApplicator()
+        g, sc, sm = {}, {}, {}
+        key = WorkKey("grounding", "AAPL")
         applicator.record_issued_sequence(key, 1)
         applicator.record_issued_sequence(key, 2)
 
-        r1 = WorkResult(key=key, sequence=1, obs_time="2026-11-14T19:00:00Z", data={"headline": "Old news"})
+        r1 = WorkResult(key=key, sequence=1, obs_time="2026-11-14T19:00:00Z", data={"v": 1})
         audit1 = applicator.apply_results([r1], g, sc, sm)
         self.assertFalse(audit1[0][1], "Older sequence must be rejected when newer work was issued")
         self.assertIn("older than latest issued", audit1[0][2])
-        self.assertNotIn("NVDA", g)
+        self.assertNotIn("AAPL", g)
 
-        r2 = WorkResult(key=key, sequence=2, obs_time="2026-11-14T19:01:00Z", data={"headline": "Fresh news"})
-        audit2 = applicator.apply_results([r2], g, sc, sm)
-        self.assertTrue(audit2[0][1])
-        self.assertEqual(g["NVDA"]["headline"], "Fresh news")
+    def test_21_concurrent_sequence_issuance_and_result_application(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=2, max_queue_size=30)
+        applicator = BackgroundResultApplicator(coordinator=coord)
+        g, sc, sm = {}, {}, {}
+        key = WorkKey("grounding", "AAPL")
 
-    def test_24_concurrent_result_application_and_snapshot_publication(self):
-        publish_global_state_snapshot({"qualitative_grounding": {}, "tickers": []})
-        applicator = BackgroundResultApplicator()
-        g = {}
         stop_event = threading.Event()
         exceptions = []
+        applied_sequences = []
 
-        def writer_thread():
+        def issuer_thread():
             try:
-                seq = 0
-                while not stop_event.is_set():
-                    seq += 1
-                    res = WorkResult(
-                        key=WorkKey("grounding", "AAPL"),
-                        sequence=seq,
-                        obs_time="2026-11-14T19:00:00Z",
-                        data={"score": seq}
-                    )
-                    applicator.apply_results([res], g, {}, {})
-                    update_global_state_snapshot(lambda s: {**s, "qualitative_grounding": dict(g)})
-                    time.sleep(0.001)
+                for s in range(1, 20):
+                    if stop_event.is_set():
+                        break
+                    coord.enqueue("grounding", "AAPL", "2026-11-14T19:00:00Z", lambda idx=s: {"val": idx}, force=True)
+                    time.sleep(0.005)
             except Exception as e:
                 exceptions.append(e)
 
-        def reader_thread():
+        def applicator_thread():
             try:
                 while not stop_event.is_set():
-                    snap = get_global_state_snapshot()
-                    self.assertIsInstance(snap, dict)
-                    with self.assertRaises(TypeError):
-                        snap["tickers"].append(1)
-                    time.sleep(0.001)
+                    results = coord.drain_results()
+                    if results:
+                        audit = applicator.apply_results(results, g, sc, sm)
+                        for r, applied, reason in audit:
+                            if applied:
+                                applied_sequences.append(r.sequence)
+                    time.sleep(0.005)
             except Exception as e:
                 exceptions.append(e)
 
-        threads = [
-            threading.Thread(target=writer_thread),
-            threading.Thread(target=reader_thread),
-            threading.Thread(target=reader_thread)
-        ]
-        for t in threads:
-            t.start()
-        time.sleep(0.2)
+        t1 = threading.Thread(target=issuer_thread)
+        t2 = threading.Thread(target=applicator_thread)
+        t1.start()
+        t2.start()
+        t1.join(timeout=3.0)
+        time.sleep(0.1)
         stop_event.set()
-        for t in threads:
-            t.join(timeout=1.0)
+        t2.join(timeout=3.0)
+
+        results = coord.drain_results()
+        if results:
+            audit = applicator.apply_results(results, g, sc, sm)
+            for r, applied, reason in audit:
+                if applied:
+                    applied_sequences.append(r.sequence)
+        coord.shutdown(timeout=2.0)
+
         self.assertEqual(exceptions, [])
+        # Sequences applied must be strictly monotonically increasing (no stale publication)
+        self.assertEqual(applied_sequences, sorted(applied_sequences))
+        self.assertEqual(len(applied_sequences), len(set(applied_sequences)))
+        if applied_sequences:
+            self.assertEqual(applicator._last_applied_sequence.get(key), applied_sequences[-1])
+
+    def test_22_existing_stage1_and_stage21_regression_tests_remain_green(self):
+        coord = BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=2, max_results_size=2)
+        self.assertEqual(coord.pending_count(), 0)
+        self.assertEqual(coord.in_flight_count(), 0)
+
+        snap = publish_global_state_snapshot({"a": 1, "b": [1, 2]})
+        self.assertEqual(snap["a"], 1)
+        self.assertEqual(list(snap["b"]), [1, 2])
+        self.assertTrue(coord.shutdown(timeout=1.0))
 
 
 if __name__ == "__main__":

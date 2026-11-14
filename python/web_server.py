@@ -4,6 +4,7 @@ import sys
 import uvicorn
 import asyncio
 import json
+import collections.abc
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
@@ -598,7 +599,7 @@ def chat_endpoint(req: ChatRequest):
         if (
             financial_valid is False
             or (local_storage is None and "local_storage_state" in live_state)
-            or ("local_storage_state" in live_state and not isinstance(local_storage, dict))
+            or ("local_storage_state" in live_state and not isinstance(local_storage, (dict, collections.abc.Mapping)))
         ):
             err_msg = live_state.get("persistence_error") or live_state.get("status") or "Authoritative financial state unavailable"
             framework.log(f"[Security Alert] Chat dispatch halted: financial state degraded ({err_msg}).")
@@ -615,7 +616,7 @@ def chat_endpoint(req: ChatRequest):
                 service = get_persistence_service()
                 service.get_portfolio_basket()
                 ssot_direct = service.get_ssot_data()
-                if not isinstance(ssot_direct, dict):
+                if not isinstance(ssot_direct, (dict, collections.abc.Mapping)):
                     raise PersistenceValidationError("SSoT root must be a dictionary")
                 ssot = ssot_direct
             except Exception as pe:
@@ -630,13 +631,13 @@ def chat_endpoint(req: ChatRequest):
 
         # 2. Authoritative SSoT Structure Validation & Extraction
         try:
-            if not isinstance(ssot, dict):
+            if not isinstance(ssot, (dict, collections.abc.Mapping)):
                 raise PersistenceValidationError(f"Authoritative SSoT root must be a dict, got {type(ssot).__name__}")
 
             # Validate mutable_state if present
             if "mutable_state" in ssot:
                 ms = ssot["mutable_state"]
-                if not isinstance(ms, dict):
+                if not isinstance(ms, (dict, collections.abc.Mapping)):
                     raise PersistenceValidationError(
                         f"Authoritative SSoT mutable_state must be a dict, got {type(ms).__name__}"
                     )
@@ -650,13 +651,13 @@ def chat_endpoint(req: ChatRequest):
 
             if raw_portfolio is None:
                 portfolio = []
-            elif not isinstance(raw_portfolio, list):
+            elif not isinstance(raw_portfolio, (list, collections.abc.Sequence)) or isinstance(raw_portfolio, (str, bytes)):
                 raise PersistenceValidationError(
                     f"Authoritative portfolio_snapshot must be a list, got {type(raw_portfolio).__name__}"
                 )
             else:
                 for idx, p in enumerate(raw_portfolio):
-                    if not isinstance(p, dict):
+                    if not isinstance(p, (dict, collections.abc.Mapping)):
                         raise PersistenceValidationError(
                             f"Authoritative portfolio entry {idx} must be a dict, got {type(p).__name__}"
                         )
@@ -666,30 +667,30 @@ def chat_endpoint(req: ChatRequest):
             raw_state_ctx = ms.get("state_context")
             if raw_state_ctx is None and "state_context" in ssot:
                 raw_state_ctx = ssot.get("state_context")
-            if raw_state_ctx is not None and not isinstance(raw_state_ctx, dict):
+            if raw_state_ctx is not None and not isinstance(raw_state_ctx, (dict, collections.abc.Mapping)):
                 raise PersistenceValidationError(
                     f"Authoritative state_context must be a dict, got {type(raw_state_ctx).__name__}"
                 )
-            state_ctx = raw_state_ctx if isinstance(raw_state_ctx, dict) else {}
+            state_ctx = raw_state_ctx if isinstance(raw_state_ctx, (dict, collections.abc.Mapping)) else {}
 
             # Validate watched_tickers & scout_categories if present
             raw_watched = ms.get("watched_tickers")
             if raw_watched is None and "watched_tickers" in ssot:
                 raw_watched = ssot.get("watched_tickers")
-            if raw_watched is not None and not isinstance(raw_watched, list):
+            if raw_watched is not None and (not isinstance(raw_watched, (list, collections.abc.Sequence)) or isinstance(raw_watched, (str, bytes))):
                 raise PersistenceValidationError(
                     f"Authoritative watched_tickers must be a list, got {type(raw_watched).__name__}"
                 )
-            watched = raw_watched if isinstance(raw_watched, list) else []
+            watched = list(raw_watched) if raw_watched is not None else []
 
             raw_scouts = ms.get("scout_categories")
             if raw_scouts is None and "scout_categories" in ssot:
                 raw_scouts = ssot.get("scout_categories")
-            if raw_scouts is not None and not isinstance(raw_scouts, list):
+            if raw_scouts is not None and (not isinstance(raw_scouts, (list, collections.abc.Sequence)) or isinstance(raw_scouts, (str, bytes))):
                 raise PersistenceValidationError(
                     f"Authoritative scout_categories must be a list, got {type(raw_scouts).__name__}"
                 )
-            scouts = raw_scouts if isinstance(raw_scouts, list) else []
+            scouts = list(raw_scouts) if raw_scouts is not None else []
 
             # Slim portfolio
             slim_portfolio = [

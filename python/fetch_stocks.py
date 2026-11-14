@@ -33,6 +33,7 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 import base64
 import os
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 import time as t_time
 import sys
 import json
@@ -43,6 +44,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from scipy.stats import norm
 from yfinance.data import YfData
 import threading
+import collections.abc
 from atomic_io import atomic_write_json, atomic_read_json, atomic_update_json
 from tool_registry import authorize_financial_mutation
 from background_intelligence import (
@@ -485,8 +487,6 @@ def enqueue_scout_discovery(category: str, obs_time: Optional[str] = None) -> Tu
     if not category:
         return False, None
     category_clean = category.strip().upper()
-    if not obs_time:
-        obs_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return BACKGROUND_COORDINATOR.enqueue(
         work_type=WorkType.SCOUT.value,
         target=category_clean,
@@ -607,40 +607,109 @@ MACRO_LABELS = config.get("MACRO_LABELS", {
 REFRESH_RATE_SECONDS = config.get("REFRESH_RATE_SECONDS", 30)
 HISTORY_REFRESH_CYCLES = config.get("HISTORY_REFRESH_CYCLES", 10)
 
-class ImmutableDict(dict):
-    """Read-only dict proxy ensuring deep immutability for published snapshots."""
+class ImmutableDict(collections.abc.Mapping):
+    """
+    Read-only dict proxy ensuring deep immutability for published snapshots.
+    Inherits from collections.abc.Mapping so that:
+    1. Standard mapping reads (.get(), in, keys(), values(), items(), len, iter) work seamlessly.
+    2. Overridden mutators (__setitem__, __delitem__, clear, update, pop, popitem, setdefault, __ior__)
+       unconditionally raise TypeError with zero production test seams or call-stack inspection.
+    3. Base-class dict operations (dict.__setitem__, dict.clear, dict.update) fail-closed because
+       this is not a PyDictObject subtype.
+    """
+    def __init__(self, data=None, **kwargs):
+        self._data = dict(data or {}, **kwargs)
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self):
+        return len(self._data)
+
+    def __repr__(self):
+        return f"ImmutableDict({self._data!r})"
+
+    def __eq__(self, other):
+        if isinstance(other, collections.abc.Mapping):
+            return self._data == dict(other)
+        return False
+
+    def copy(self):
+        return dict(self._data)
+
+    def __or__(self, other):
+        if isinstance(other, collections.abc.Mapping):
+            res = dict(self._data)
+            res.update(other)
+            return res
+        return NotImplemented
+
+    def __ror__(self, other):
+        if isinstance(other, collections.abc.Mapping):
+            res = dict(other)
+            res.update(self._data)
+            return res
+        return NotImplemented
+
     def _readonly(self, *args, **kwargs):
         raise TypeError("Immutable snapshot dictionary cannot be modified")
+
     __setitem__ = _readonly
     __delitem__ = _readonly
+    clear = _readonly
+    update = _readonly
     pop = _readonly
     popitem = _readonly
     setdefault = _readonly
     __ior__ = _readonly
 
-    def clear(self):
-        import inspect
-        frame = inspect.currentframe().f_back
-        while frame:
-            if "unittest" in frame.f_code.co_filename and "mock" in frame.f_code.co_filename:
-                return super().clear()
-            frame = frame.f_back
-        raise TypeError("Immutable snapshot dictionary cannot be modified")
 
-    def update(self, *args, **kwargs):
-        import inspect
-        frame = inspect.currentframe().f_back
-        while frame:
-            if "unittest" in frame.f_code.co_filename and "mock" in frame.f_code.co_filename:
-                return super().update(*args, **kwargs)
-            frame = frame.f_back
-        raise TypeError("Immutable snapshot dictionary cannot be modified")
+class ImmutableList(collections.abc.Sequence):
+    """
+    Read-only sequence proxy ensuring deep immutability for published snapshots.
+    Inherits from collections.abc.Sequence so that:
+    1. Standard sequence reads (__getitem__, len, iter, in, index, count) work seamlessly.
+    2. Mutators (__setitem__, __delitem__, append, extend, insert, remove, pop, clear, sort, reverse)
+       unconditionally raise TypeError.
+    3. Base-class list operations (list.append, list.__setitem__, list.extend) fail-closed because
+       this is not a PyListObject subtype.
+    """
+    def __init__(self, items=()):
+        self._items = list(items)
 
+    def __getitem__(self, idx):
+        return self._items[idx]
 
-class ImmutableList(list):
-    """Read-only list proxy ensuring deep immutability for published snapshots."""
+    def __len__(self):
+        return len(self._items)
+
+    def __repr__(self):
+        return f"ImmutableList({self._items!r})"
+
+    def __eq__(self, other):
+        if isinstance(other, collections.abc.Sequence):
+            return list(self._items) == list(other)
+        return False
+
+    def copy(self):
+        return list(self._items)
+
+    def __add__(self, other):
+        if isinstance(other, (list, tuple, collections.abc.Sequence)):
+            return list(self._items) + list(other)
+        return NotImplemented
+
+    def __radd__(self, other):
+        if isinstance(other, (list, tuple, collections.abc.Sequence)):
+            return list(other) + list(self._items)
+        return NotImplemented
+
     def _readonly(self, *args, **kwargs):
         raise TypeError("Immutable snapshot list cannot be modified")
+
     __setitem__ = _readonly
     __delitem__ = _readonly
     append = _readonly
@@ -657,13 +726,13 @@ class ImmutableList(list):
 
 def freeze_snapshot(obj: Any) -> Any:
     """
-    Recursively converts dicts to ImmutableDict and lists to ImmutableList,
+    Recursively converts mappings to ImmutableDict and sequences to ImmutableList,
     creating a detached, deeply immutable structure that does not share mutable
     nested references with the caller or background workers.
     """
-    if isinstance(obj, dict):
+    if isinstance(obj, collections.abc.Mapping):
         return ImmutableDict({k: freeze_snapshot(v) for k, v in obj.items()})
-    elif isinstance(obj, (list, tuple)):
+    elif isinstance(obj, (list, tuple, collections.abc.Sequence)) and not isinstance(obj, (str, bytes)):
         return ImmutableList([freeze_snapshot(x) for x in obj])
     elif isinstance(obj, (set, frozenset)):
         return frozenset(freeze_snapshot(x) for x in obj)
@@ -681,7 +750,7 @@ GLOBAL_STATE = freeze_snapshot({
 
 _SNAPSHOT_LOCK = threading.Lock()
 
-def get_global_state_snapshot() -> dict:
+def get_global_state_snapshot() -> ImmutableDict:
     """
     Returns the current immutable/read-only snapshot reference of GLOBAL_STATE.
     Readers capture this reference once and use it consistently throughout their operation.
@@ -689,21 +758,21 @@ def get_global_state_snapshot() -> dict:
     global GLOBAL_STATE
     return GLOBAL_STATE
 
-def publish_global_state_snapshot(new_snapshot: dict) -> dict:
+def publish_global_state_snapshot(new_snapshot: Any) -> ImmutableDict:
     """
     Publishes a replacement GLOBAL_STATE snapshot via an atomic reference swap.
     The caller must construct replacement snapshots separately.
     Published snapshots must not subsequently be mutated in place.
     """
     global GLOBAL_STATE
-    if not isinstance(new_snapshot, dict):
-        raise TypeError(f"Snapshot must be a dict, got {type(new_snapshot).__name__}")
+    if not isinstance(new_snapshot, collections.abc.Mapping):
+        raise TypeError(f"Snapshot must be a mapping, got {type(new_snapshot).__name__}")
     frozen = freeze_snapshot(new_snapshot)
     with _SNAPSHOT_LOCK:
         GLOBAL_STATE = frozen
     return frozen
 
-def update_global_state_snapshot(updater_fn: Callable[[dict], dict]) -> dict:
+def update_global_state_snapshot(updater_fn: Callable[[Any], Any]) -> ImmutableDict:
     """
     Atomically updates the snapshot by applying updater_fn(current_snapshot) -> new_snapshot
     and publishing through atomic reference swap.
@@ -713,8 +782,8 @@ def update_global_state_snapshot(updater_fn: Callable[[dict], dict]) -> dict:
     with _SNAPSHOT_LOCK:
         current = GLOBAL_STATE
         new_snapshot = updater_fn(current)
-        if not isinstance(new_snapshot, dict):
-            raise TypeError(f"Updater must return a dict, got {type(new_snapshot).__name__}")
+        if not isinstance(new_snapshot, collections.abc.Mapping):
+            raise TypeError(f"Updater must return a mapping, got {type(new_snapshot).__name__}")
         frozen = freeze_snapshot(new_snapshot)
         GLOBAL_STATE = frozen
         return frozen
@@ -788,8 +857,6 @@ def enqueue_news_grounding(symbol: str, obs_time: Optional[str] = None) -> Tuple
     if not symbol:
         return False, None
     symbol_clean = symbol.strip().upper()
-    if not obs_time:
-        obs_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return BACKGROUND_COORDINATOR.enqueue(
         work_type=WorkType.GROUNDING.value,
         target=symbol_clean,
@@ -913,9 +980,9 @@ async def save_watch_list(req: Request):
     return JSONResponse({"status": "error"})
 
 def sanitize_json_payload(obj):
-    if isinstance(obj, dict):
+    if isinstance(obj, collections.abc.Mapping):
         return {k: sanitize_json_payload(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
+    elif isinstance(obj, collections.abc.Sequence) and not isinstance(obj, (str, bytes)):
         return [sanitize_json_payload(x) for x in obj]
     elif isinstance(obj, float):
         if math.isnan(obj) or math.isinf(obj):

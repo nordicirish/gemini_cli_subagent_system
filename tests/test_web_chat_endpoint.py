@@ -14,12 +14,24 @@ Covers:
 import os
 import sys
 import unittest
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 
 import web_server
 import fetch_stocks
+
+
+@contextmanager
+def patch_global_state(state):
+    """Legitimate external test fixture for temporarily swapping the published snapshot."""
+    orig = fetch_stocks.get_global_state_snapshot()
+    fetch_stocks.publish_global_state_snapshot(state)
+    try:
+        yield
+    finally:
+        fetch_stocks.publish_global_state_snapshot(orig)
 from persistence import (
     get_persistence_service,
     reset_persistence_service,
@@ -113,7 +125,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, degraded_state, clear=True):
+        with patch_global_state(degraded_state):
             req = web_server.ChatRequest(message="Execute rebalance")
             res = web_server.chat_endpoint(req)
 
@@ -136,7 +148,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
     @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
     def test_chat_endpoint_halts_dispatch_when_local_storage_state_is_none(self, mock_dispatch, mock_charts):
         """When local_storage_state is explicitly None, chat endpoint halts dispatch."""
-        with patch.dict(fetch_stocks.GLOBAL_STATE, {"local_storage_state": None}, clear=True):
+        with patch_global_state({"local_storage_state": None}):
             req = web_server.ChatRequest(message="What is the current regime?")
             res = web_server.chat_endpoint(req)
 
@@ -160,7 +172,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, valid_empty_state, clear=True):
+        with patch_global_state(valid_empty_state):
             req = web_server.ChatRequest(message="What is the portfolio status?")
             res = web_server.chat_endpoint(req)
 
@@ -188,7 +200,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, valid_populated_state, clear=True):
+        with patch_global_state(valid_populated_state):
             req = web_server.ChatRequest(message="What is our AAPL position?")
             res = web_server.chat_endpoint(req)
 
@@ -208,7 +220,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, malformed_state, clear=True):
+        with patch_global_state(malformed_state):
             req = web_server.ChatRequest(message="Execute order")
             res = web_server.chat_endpoint(req)
 
@@ -228,7 +240,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, malformed_state, clear=True):
+        with patch_global_state(malformed_state):
             req = web_server.ChatRequest(message="Execute order")
             res = web_server.chat_endpoint(req)
 
@@ -250,7 +262,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, malformed_state, clear=True):
+        with patch_global_state(malformed_state):
             req = web_server.ChatRequest(message="Portfolio overview")
             res = web_server.chat_endpoint(req)
 
@@ -272,7 +284,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, malformed_state, clear=True):
+        with patch_global_state(malformed_state):
             req = web_server.ChatRequest(message="Portfolio overview")
             res = web_server.chat_endpoint(req)
 
@@ -296,7 +308,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, malformed_state, clear=True):
+        with patch_global_state(malformed_state):
             req = web_server.ChatRequest(message="Status")
             res = web_server.chat_endpoint(req)
 
@@ -326,7 +338,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, valid_state, clear=True):
+        with patch_global_state(valid_state):
             # Simulate failure during prompt template formatting of optional telemetry
             with patch("web_server.load_data_packet_injection_prompt", side_effect=RuntimeError("Template load failure")):
                 req = web_server.ChatRequest(message="What is the current position?")
@@ -348,7 +360,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, uninitialized_state, clear=True):
+        with patch_global_state(uninitialized_state):
             with patch("web_server.get_persistence_service", return_value=mock_service):
                 req = web_server.ChatRequest(message="Hello")
                 res = web_server.chat_endpoint(req)
@@ -381,7 +393,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, uninitialized_state, clear=True):
+        with patch_global_state(uninitialized_state):
             with patch("web_server.get_persistence_service", return_value=mock_service):
                 req = web_server.ChatRequest(message="Hello")
                 res = web_server.chat_endpoint(req)
@@ -403,7 +415,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, uninitialized_state, clear=True):
+        with patch_global_state(uninitialized_state):
             with patch("web_server.get_persistence_service", return_value=mock_service):
                 req = web_server.ChatRequest(message="Execute buy")
                 res = web_server.chat_endpoint(req)
@@ -426,7 +438,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
         mock_service_cash.get_portfolio_basket.side_effect = PersistenceValidationError(
             "Non-finite numeric value not allowed for unallocated_cash_eur: inf"
         )
-        with patch.dict(fetch_stocks.GLOBAL_STATE, uninitialized_state, clear=True):
+        with patch_global_state(uninitialized_state):
             with patch("web_server.get_persistence_service", return_value=mock_service_cash):
                 res = web_server.chat_endpoint(web_server.ChatRequest(message="Status"))
                 self.assertEqual(res["status"], "error")
@@ -438,7 +450,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
         mock_service_rate.get_portfolio_basket.side_effect = PersistenceValidationError(
             "Zero value not allowed for exchange_rate"
         )
-        with patch.dict(fetch_stocks.GLOBAL_STATE, uninitialized_state, clear=True):
+        with patch_global_state(uninitialized_state):
             with patch("web_server.get_persistence_service", return_value=mock_service_rate):
                 res = web_server.chat_endpoint(web_server.ChatRequest(message="Status"))
                 self.assertEqual(res["status"], "error")
@@ -458,7 +470,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, degraded_state, clear=True):
+        with patch_global_state(degraded_state):
             req = web_server.ChatRequest(message="Rebalance")
             res = web_server.chat_endpoint(req)
 
@@ -482,7 +494,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, degraded_state, clear=True):
+        with patch_global_state(degraded_state):
             req = web_server.ChatRequest(message="Rebalance")
             res = web_server.chat_endpoint(req)
 
@@ -505,7 +517,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
             "tickers": [],
         }
 
-        with patch.dict(fetch_stocks.GLOBAL_STATE, degraded_state, clear=True):
+        with patch_global_state(degraded_state):
             req = web_server.ChatRequest(message="Halt check")
             res = web_server.chat_endpoint(req)
 
@@ -527,7 +539,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
                 "tickers": [],
             }
 
-            with patch.dict(fetch_stocks.GLOBAL_STATE, degraded_state, clear=True):
+            with patch_global_state(degraded_state):
                 req = web_server.ChatRequest(message="Usage check")
                 res = web_server.chat_endpoint(req)
 
@@ -555,7 +567,7 @@ class TestWebChatEndpointModelAndSessionIntegrity(unittest.TestCase):
         }
 
         with patch.object(web_server.framework, "reset_turn_usage") as mock_reset:
-            with patch.dict(fetch_stocks.GLOBAL_STATE, valid_state, clear=True):
+            with patch_global_state(valid_state):
                 req = web_server.ChatRequest(message="Valid dispatch check")
                 res = web_server.chat_endpoint(req)
 

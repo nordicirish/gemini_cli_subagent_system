@@ -9,7 +9,7 @@ import signal
 import sys
 import threading
 from types import SimpleNamespace
-from typing import Optional, Callable, List
+from typing import Optional, Callable, List, Tuple
 import concurrent.futures
 import logging
 from logging.handlers import TimedRotatingFileHandler
@@ -62,10 +62,15 @@ class SubprocessCleanupError(RuntimeError):
     pass
 
 
-def _get_windows_descendant_pids(parent_pid: int) -> List[int]:
-    """Finds all descendant PIDs for parent_pid on Windows using Toolhelp snapshot."""
+def _get_windows_descendant_pids(parent_pid: int) -> Tuple[List[int], bool]:
+    """
+    Finds all descendant PIDs for parent_pid on Windows using Toolhelp snapshot.
+    Returns (descendant_pids, success).
+    Explicitly declares ctypes argtypes and restype for pointer-sized 64-bit/32-bit Windows integrity.
+    If snapshot creation or enumeration fails, returns ([], False).
+    """
     if sys.platform != "win32" or not parent_pid:
-        return []
+        return [], True
     descendants: List[int] = []
     try:
         import ctypes
@@ -86,35 +91,74 @@ def _get_windows_descendant_pids(parent_pid: int) -> List[int]:
             ]
 
         kernel32 = ctypes.windll.kernel32
+
+        # Explicitly declare ctypes argtypes and restype for pointer-sized HANDLE definitions
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+
+        kernel32.Process32First.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32)]
+        kernel32.Process32First.restype = wintypes.BOOL
+
+        kernel32.Process32Next.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32)]
+        kernel32.Process32Next.restype = wintypes.BOOL
+
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        # INVALID_HANDLE_VALUE is pointer-sized ((HANDLE)(LONG_PTR)-1)
+        invalid_handle_val = wintypes.HANDLE(-1).value
+
+        # TH32CS_SNAPPROCESS = 0x00000002
         h_snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
-        if h_snapshot == -1 or not h_snapshot:
-            return []
+        h_val = getattr(h_snapshot, "value", h_snapshot)
+        if h_val is None or h_val == 0 or h_val == invalid_handle_val or h_snapshot == -1:
+            logging.getLogger("agent_framework").error(
+                f"[WindowsToolhelp] Failed to create Toolhelp snapshot for PID {parent_pid}"
+            )
+            return [], False
+
         try:
             pe = PROCESSENTRY32()
             pe.dwSize = ctypes.sizeof(PROCESSENTRY32)
             tree: Dict[int, List[int]] = {}
-            success = kernel32.Process32First(h_snapshot, ctypes.byref(pe))
-            while success:
+
+            if not kernel32.Process32First(h_snapshot, ctypes.byref(pe)):
+                logging.getLogger("agent_framework").error(
+                    f"[WindowsToolhelp] Process32First failed during descendant enumeration for PID {parent_pid}"
+                )
+                return [], False
+
+            while True:
                 c_pid = int(pe.th32ProcessID)
                 p_pid = int(pe.th32ParentProcessID)
-                tree.setdefault(p_pid, []).append(c_pid)
-                success = kernel32.Process32Next(h_snapshot, ctypes.byref(pe))
+                if c_pid != 0:
+                    tree.setdefault(p_pid, []).append(c_pid)
+                if not kernel32.Process32Next(h_snapshot, ctypes.byref(pe)):
+                    break
 
+            # Safe parent-to-child breadth-first traversal
             queue = list(tree.get(parent_pid, []))
+            visited = set()
             while queue:
                 curr = queue.pop(0)
-                descendants.append(curr)
-                queue.extend(tree.get(curr, []))
+                if curr not in visited and curr != parent_pid:
+                    visited.add(curr)
+                    descendants.append(curr)
+                    queue.extend(tree.get(curr, []))
+
+            return descendants, True
         finally:
             kernel32.CloseHandle(h_snapshot)
-    except Exception:
-        pass
-    return descendants
+    except Exception as ex:
+        logging.getLogger("agent_framework").error(
+            f"[WindowsToolhelp] Exception during descendant enumeration for PID {parent_pid}: {ex}"
+        )
+        return [], False
 
 
 def _cleanup_subprocess(
     proc: subprocess.Popen,
-    graceful_timeout: float = 0.5,
+    graceful_timeout: float = 0.2,
     raise_on_error: bool = False
 ) -> bool:
     """
@@ -133,10 +177,13 @@ def _cleanup_subprocess(
     if proc is None or getattr(proc, "_cleaned_up", False) is True:
         return True
 
+    caller_exc = sys.exc_info()[1]
     pid = getattr(proc, "pid", None)
     dedicated_pgid = getattr(proc, "_dedicated_pgid", None)
     reaped = False
+    descendants_cleaned = True
     cleanup_success = True
+    cleanup_errors: List[str] = []
 
     try:
         poll_fn = getattr(proc, "poll", None)
@@ -167,15 +214,15 @@ def _cleanup_subprocess(
                     os.killpg(dedicated_pgid, sig_term)
                 except (ProcessLookupError, PermissionError):
                     pass
-                except Exception:
-                    pass
+                except Exception as ex:
+                    cleanup_errors.append(f"killpg SIGTERM failed: {ex}")
 
             try:
                 proc.terminate()
             except (ProcessLookupError, PermissionError):
                 pass
-            except Exception:
-                pass
+            except Exception as ex:
+                cleanup_errors.append(f"proc.terminate failed: {ex}")
 
             # 2. Wait bounded graceful period
             try:
@@ -189,28 +236,33 @@ def _cleanup_subprocess(
         if not reaped and is_alive:
             if pid and sys.platform == "win32":
                 try:
-                    subprocess.run(
+                    res = subprocess.run(
                         ["taskkill", "/F", "/T", "/PID", str(pid)],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         timeout=5.0
                     )
-                except Exception:
-                    pass
+                    if res.returncode not in (0, 128):
+                        cleanup_success = False
+                        cleanup_errors.append(f"taskkill /T failed on PID {pid} (exit {res.returncode})")
+                except Exception as ex:
+                    cleanup_success = False
+                    cleanup_errors.append(f"taskkill exception on PID {pid}: {ex}")
             elif safe_to_killpg:
                 try:
                     os.killpg(dedicated_pgid, sig_kill)
                 except (ProcessLookupError, PermissionError):
                     pass
-                except Exception:
-                    pass
+                except Exception as ex:
+                    cleanup_success = False
+                    cleanup_errors.append(f"killpg SIGKILL failed: {ex}")
 
             try:
                 proc.kill()
             except (ProcessLookupError, PermissionError):
                 pass
-            except Exception:
-                pass
+            except Exception as ex:
+                cleanup_errors.append(f"proc.kill failed: {ex}")
 
         # 3b. Ensure descendants are terminated even when the direct child exits before them:
         if safe_to_killpg:
@@ -218,57 +270,98 @@ def _cleanup_subprocess(
                 os.killpg(dedicated_pgid, sig_kill)
             except (ProcessLookupError, PermissionError):
                 pass
-            except Exception:
+            except Exception as ex:
+                descendants_cleaned = False
+                cleanup_success = False
+                cleanup_errors.append(f"killpg SIGKILL to descendants failed: {ex}")
+
+            # Verify process group is confirmed absent
+            try:
+                os.killpg(dedicated_pgid, 0)
+                # If call succeeds, processes still exist in the group!
+                descendants_cleaned = False
+                cleanup_success = False
+                cleanup_errors.append(f"Process group {dedicated_pgid} still contains active processes")
+                logging.getLogger("agent_framework").error(
+                    f"[SubprocessCleanup] POSIX process group {dedicated_pgid} still active after termination"
+                )
+            except ProcessLookupError:
+                # Confirmed absent
                 pass
+            except Exception as ex:
+                descendants_cleaned = False
+                cleanup_success = False
+                cleanup_errors.append(f"os.killpg(pgid, 0) check failed: {ex}")
+
         elif pid and sys.platform == "win32":
-            descendants = _get_windows_descendant_pids(pid)
+            descendants, enum_ok = _get_windows_descendant_pids(pid)
+            if not enum_ok:
+                descendants_cleaned = False
+                cleanup_success = False
+                cleanup_errors.append(f"Descendant check failed for PID {pid}")
             for d_pid in descendants:
                 try:
-                    subprocess.run(
+                    res = subprocess.run(
                         ["taskkill", "/F", "/PID", str(d_pid)],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         timeout=2.0
                     )
-                except Exception:
-                    pass
+                    if res.returncode not in (0, 128):
+                        descendants_cleaned = False
+                        cleanup_success = False
+                        cleanup_errors.append(f"taskkill failed on PID {d_pid} (exit {res.returncode})")
+                except Exception as ex:
+                    descendants_cleaned = False
+                    cleanup_success = False
+                    cleanup_errors.append(f"taskkill exception on PID {d_pid}: {ex}")
 
         # 4. Explicitly wait/reap the direct child
         if not reaped:
             try:
-                proc.wait(timeout=0.5)
+                proc.wait(timeout=0.2)
                 reaped = True
             except Exception:
                 reaped = (proc.poll() is not None) if callable(getattr(proc, "poll", None)) else False
 
         if not reaped:
             cleanup_success = False
+            cleanup_errors.append(f"Direct child PID {pid} could not be reaped")
 
     except Exception as ex:
         cleanup_success = False
-        if sys.exc_info()[1] is None and raise_on_error:
-            raise SubprocessCleanupError(f"Subprocess cleanup failed: {ex}") from ex
+        cleanup_errors.append(f"Subprocess cleanup exception: {ex}")
     finally:
         # 5. Close/release associated pipes and streams
-        for stream in (getattr(proc, "stdin", None), getattr(proc, "stdout", None), getattr(proc, "stderr", None)):
+        stream_names = [("stdin", getattr(proc, "stdin", None)),
+                        ("stdout", getattr(proc, "stdout", None)),
+                        ("stderr", getattr(proc, "stderr", None))]
+        for name, stream in stream_names:
             if stream is not None:
                 try:
                     stream.close()
-                except Exception:
-                    pass
+                except Exception as ex:
+                    cleanup_success = False
+                    cleanup_errors.append(f"Failed to close {name}: {ex}")
+                    logging.getLogger("agent_framework").error(f"[SubprocessCleanup] Stream closure failed: {ex}")
 
-    if cleanup_success:
+    # _cleaned_up may ONLY be set after all required cleanup conditions have been established
+    if cleanup_success and reaped and descendants_cleaned:
         try:
             proc._cleaned_up = True
         except Exception:
             pass
-    elif not cleanup_success:
-        if sys.exc_info()[1] is not None:
+    else:
+        cleanup_success = False
+        err_detail = f": {'; '.join(cleanup_errors)}" if cleanup_errors else ""
+        if caller_exc is not None:
             logging.getLogger("agent_framework").error(
-                f"[SubprocessCleanup] Process PID {pid} could not be cleanly terminated/reaped; primary exception preserved."
+                f"[SubprocessCleanup] Process PID {pid} could not be cleanly terminated/reaped{err_detail}; primary exception preserved."
             )
         elif raise_on_error:
-            raise SubprocessCleanupError(f"Subprocess PID {pid} could not be cleanly terminated or reaped")
+            raise SubprocessCleanupError(f"Subprocess PID {pid} could not be cleanly terminated or reaped{err_detail}")
+
+    return cleanup_success
 
     return cleanup_success
 

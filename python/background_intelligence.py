@@ -99,8 +99,8 @@ class WorkKey:
 class WorkItem:
     key: WorkKey
     sequence: int
-    obs_time: str
-    fn: Callable[..., Any]
+    obs_time: Optional[str] = None
+    fn: Callable[..., Any] = None
     args: tuple = field(default_factory=tuple)
     kwargs: dict = field(default_factory=dict)
     status: WorkStatus = WorkStatus.QUEUED
@@ -115,8 +115,8 @@ class WorkItem:
 class WorkResult:
     key: WorkKey
     sequence: int
-    obs_time: str
-    data: Any
+    obs_time: Optional[str] = None
+    data: Any = None
     error: Optional[str] = None
     completed_time: float = field(default_factory=time.monotonic)
     enqueued_time: Optional[float] = None
@@ -211,11 +211,19 @@ class BackgroundIntelligenceCoordinator:
         self._in_flight_keys: Dict[WorkKey, WorkItem] = {}
         self._sequences: Dict[WorkKey, int] = {}
         self._latest_issued_sequence: Dict[WorkKey, int] = {}
+        self._key_locks: Dict[WorkKey, threading.RLock] = {}
 
         self._shutdown_event = threading.Event()
         self._workers: List[threading.Thread] = []
 
         self._start_workers()
+
+    def get_key_lock(self, key: WorkKey) -> threading.RLock:
+        """Returns per-key reentrant lock ensuring atomicity of sequence issuance and publication."""
+        with self._lock:
+            if key not in self._key_locks:
+                self._key_locks[key] = threading.RLock()
+            return self._key_locks[key]
 
     def _start_workers(self) -> None:
         with self._lock:
@@ -247,40 +255,45 @@ class BackgroundIntelligenceCoordinator:
         Propagates cancellation into running workers.
         Returns True if work was found and cancellation was requested, False otherwise.
         """
-        with self._lock:
-            if key in self._pending_keys:
-                item = self._pending_keys.pop(key)
-                item.cancel_event.set()
-                item.status = WorkStatus.CANCELLED
-                item.error = "Work cancelled while queued"
-                item.event.set()
-                return True
-            if key in self._in_flight_keys:
-                item = self._in_flight_keys[key]
-                item.cancel_event.set()
-                # Worker remains registered in _in_flight_keys until thread actually exits
-                return True
-            return False
+        key_lock = self.get_key_lock(key)
+        with key_lock:
+            with self._lock:
+                if key in self._pending_keys:
+                    item = self._pending_keys.pop(key)
+                    item.cancel_event.set()
+                    item.status = WorkStatus.CANCELLED
+                    item.error = "Work cancelled while queued"
+                    item.event.set()
+                    return True
+                if key in self._in_flight_keys:
+                    item = self._in_flight_keys[key]
+                    item.cancel_event.set()
+                    return True
+                return False
 
     def enqueue(
         self,
         work_type: str,
         target: str,
-        obs_time: str,
-        fn: Callable[..., Any],
+        obs_time: Optional[str] = None,
+        fn: Callable[..., Any] = None,
         args: tuple = (),
         kwargs: Optional[dict] = None,
         force: bool = False
     ) -> Tuple[bool, Optional[WorkItem]]:
         """
         Enqueues work if not already queued, in-flight, or in cooldown.
+        Atomically assigns sequence under per-key lock.
+        Separates source observation timestamp from monotonic enqueue time.
         Returns (accepted, work_item).
         """
         if self._shutdown_event.is_set():
             return False, None
 
         key = WorkKey(work_type, target)
-        validated_obs_time = validate_utc_iso8601_timestamp(obs_time)
+        validated_obs_time = None
+        if obs_time is not None:
+            validated_obs_time = validate_utc_iso8601_timestamp(obs_time)
         kwargs = kwargs or {}
 
         # 1. Cooldown check (before touching queue)
@@ -289,61 +302,66 @@ class BackgroundIntelligenceCoordinator:
             logger.info(f"[BackgroundIntelligence] {key} skipped: in cooldown for {remaining:.1f}s")
             return False, None
 
-        with self._lock:
-            if self._shutdown_event.is_set():
-                return False, None
+        key_lock = self.get_key_lock(key)
+        with key_lock:
+            with self._lock:
+                if self._shutdown_event.is_set():
+                    return False, None
 
-            # 2. Deduplication check (queued)
-            if key in self._pending_keys:
-                existing = self._pending_keys[key]
-                # Chronological instant comparison (Requirement E)
-                incoming_dt = parse_utc_iso8601_timestamp(validated_obs_time)
-                existing_dt = parse_utc_iso8601_timestamp(existing.obs_time)
-                if incoming_dt > existing_dt:
-                    existing.obs_time = validated_obs_time
-                logger.debug(f"[BackgroundIntelligence] {key} coalesced with already QUEUED work")
-                return True, existing
+                # 2. Deduplication check (queued)
+                if key in self._pending_keys:
+                    existing = self._pending_keys[key]
+                    # Chronological instant comparison when timestamps are present
+                    if validated_obs_time is not None and existing.obs_time is not None:
+                        incoming_dt = parse_utc_iso8601_timestamp(validated_obs_time)
+                        existing_dt = parse_utc_iso8601_timestamp(existing.obs_time)
+                        if incoming_dt > existing_dt:
+                            existing.obs_time = validated_obs_time
+                    elif validated_obs_time is not None and existing.obs_time is None:
+                        existing.obs_time = validated_obs_time
+                    logger.debug(f"[BackgroundIntelligence] {key} coalesced with already QUEUED work")
+                    return True, existing
 
-            # 3. Deduplication check (in-flight)
-            if key in self._in_flight_keys:
-                existing = self._in_flight_keys[key]
-                logger.debug(f"[BackgroundIntelligence] {key} coalesced with IN_FLIGHT work")
-                return True, existing
+                # 3. Deduplication check (in-flight)
+                if key in self._in_flight_keys:
+                    existing = self._in_flight_keys[key]
+                    logger.debug(f"[BackgroundIntelligence] {key} coalesced with IN_FLIGHT work")
+                    return True, existing
 
-            # 4. Total capacity check (Requirement D)
-            total_active = len(self._pending_keys) + len(self._in_flight_keys) + self._results_queue.qsize() + len(self._overflow_results)
-            if total_active >= (self.max_queue_size + self.max_results_size) or self._queue.full():
-                logger.warning(
-                    f"[BackgroundIntelligence] Queue or capacity saturated ({total_active}/{self.max_queue_size + self.max_results_size}). "
-                    f"Rejecting work for {key} without blocking coordinator."
+                # 4. Total capacity check
+                total_active = len(self._pending_keys) + len(self._in_flight_keys) + self._results_queue.qsize() + len(self._overflow_results)
+                if total_active >= (self.max_queue_size + self.max_results_size) or self._queue.full():
+                    logger.warning(
+                        f"[BackgroundIntelligence] Queue or capacity saturated ({total_active}/{self.max_queue_size + self.max_results_size}). "
+                        f"Rejecting work for {key} without blocking coordinator."
+                    )
+                    return False, None
+
+                # 5. Monotonic sequence assignment
+                seq = self._sequences.get(key, 0) + 1
+                self._sequences[key] = seq
+                self._latest_issued_sequence[key] = seq
+
+                item = WorkItem(
+                    key=key,
+                    sequence=seq,
+                    obs_time=validated_obs_time,
+                    fn=fn,
+                    args=args,
+                    kwargs=kwargs,
+                    status=WorkStatus.QUEUED,
+                    enqueued_time=self.clock_fn()
                 )
-                return False, None
+                self._pending_keys[key] = item
 
-            # 5. Monotonic sequence assignment
-            seq = self._sequences.get(key, 0) + 1
-            self._sequences[key] = seq
-            self._latest_issued_sequence[key] = seq
+                try:
+                    self._queue.put_nowait(item)
+                except queue.Full:
+                    self._pending_keys.pop(key, None)
+                    logger.warning(f"[BackgroundIntelligence] Queue full on put_nowait for {key}")
+                    return False, None
 
-            item = WorkItem(
-                key=key,
-                sequence=seq,
-                obs_time=validated_obs_time,
-                fn=fn,
-                args=args,
-                kwargs=kwargs,
-                status=WorkStatus.QUEUED,
-                enqueued_time=self.clock_fn()
-            )
-            self._pending_keys[key] = item
-
-            try:
-                self._queue.put_nowait(item)
-            except queue.Full:
-                self._pending_keys.pop(key, None)
-                logger.warning(f"[BackgroundIntelligence] Queue full on put_nowait for {key}")
-                return False, None
-
-            return True, item
+                return True, item
 
     def _worker_loop(self) -> None:
         while not self._shutdown_event.is_set():
@@ -543,9 +561,18 @@ class BackgroundResultApplicator:
         self._last_applied_obs_dt: Dict[WorkKey, datetime] = {}
         self._last_applied_obs_time: Dict[WorkKey, str] = {}
         self._latest_issued_sequence: Dict[WorkKey, int] = {}
+        self._key_locks: Dict[WorkKey, threading.RLock] = {}
         self._coordinator = coordinator
         self._latest_issued_provider = latest_issued_provider
         self._lock = threading.RLock()
+
+    def get_key_lock(self, key: WorkKey) -> threading.RLock:
+        if self._coordinator is not None and hasattr(self._coordinator, "get_key_lock"):
+            return self._coordinator.get_key_lock(key)
+        with self._lock:
+            if key not in self._key_locks:
+                self._key_locks[key] = threading.RLock()
+            return self._key_locks[key]
 
     def record_issued_sequence(self, key: WorkKey, seq: int) -> None:
         with self._lock:
@@ -576,78 +603,91 @@ class BackgroundResultApplicator:
         scout_cache_target: dict,
         scout_category_map: dict,
         latest_issued_provider: Optional[Callable[[WorkKey], int] | Dict[WorkKey, int]] = None,
+        require_source_time: bool = False,
     ) -> List[Tuple[WorkResult, bool, str]]:
         """
-        Applies results safely to provided targets under lock.
+        Applies results safely to provided targets under per-key lock.
+        Sequence validation and target publication are atomic: a newer sequence
+        cannot be issued between sequence validation and result publication.
         Returns list of (result, applied, reason).
         """
         audit = []
-        with self._lock:
-            for r in results:
-                # If worker errored, do not apply data
-                if r.error is not None or r.data is None:
-                    audit.append((r, False, f"Worker error: {r.error}"))
-                    continue
+        for r in results:
+            key_lock = self.get_key_lock(r.key)
+            with key_lock:
+                with self._lock:
+                    # If worker errored, do not apply data
+                    if r.error is not None or r.data is None:
+                        audit.append((r, False, f"Worker error: {r.error}"))
+                        continue
 
-                # 1. Validate sequence monotonicity against last applied sequence
-                last_seq = self._last_applied_sequence.get(r.key, -1)
-                if r.sequence <= last_seq:
-                    msg = f"Stale sequence: received {r.sequence} <= last applied {last_seq}"
-                    logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
-                    audit.append((r, False, msg))
-                    continue
+                    # 1. Validate sequence monotonicity against last applied sequence
+                    last_seq = self._last_applied_sequence.get(r.key, -1)
+                    if r.sequence <= last_seq:
+                        msg = f"Stale sequence: received {r.sequence} <= last applied {last_seq}"
+                        logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
+                        audit.append((r, False, msg))
+                        continue
 
-                # 2. Validate sequence against latest issued sequence (Requirement F)
-                latest_issued = -1
-                if callable(latest_issued_provider):
-                    latest_issued = latest_issued_provider(r.key)
-                elif isinstance(latest_issued_provider, dict):
-                    latest_issued = latest_issued_provider.get(r.key, -1)
-                else:
-                    latest_issued = self.get_latest_issued_sequence(r.key)
+                    # 2. Validate sequence against latest issued sequence (Atomic with publication)
+                    latest_issued = -1
+                    if callable(latest_issued_provider):
+                        latest_issued = latest_issued_provider(r.key)
+                    elif isinstance(latest_issued_provider, dict):
+                        latest_issued = latest_issued_provider.get(r.key, -1)
+                    else:
+                        latest_issued = self.get_latest_issued_sequence(r.key)
 
-                if latest_issued > 0 and r.sequence < latest_issued:
-                    msg = f"Stale sequence: received {r.sequence} is older than latest issued {latest_issued}"
-                    logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
-                    audit.append((r, False, msg))
-                    continue
+                    if latest_issued > 0 and r.sequence < latest_issued:
+                        msg = f"Stale sequence: received {r.sequence} is older than latest issued {latest_issued}"
+                        logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
+                        audit.append((r, False, msg))
+                        continue
 
-                # 3. Validate observation timestamp monotonicity (Requirement E)
-                try:
-                    obs_dt = parse_utc_iso8601_timestamp(r.obs_time)
-                except Exception as e:
-                    msg = f"Invalid observation timestamp: {e}"
-                    logger.warning(f"[BackgroundResultApplicator] {r.key} rejected fail-closed: {msg}")
-                    audit.append((r, False, msg))
-                    continue
+                    # 3. Validate observation timestamp monotonicity
+                    obs_dt = None
+                    if r.obs_time is not None and str(r.obs_time).strip() != "":
+                        try:
+                            obs_dt = parse_utc_iso8601_timestamp(r.obs_time)
+                        except Exception as e:
+                            msg = f"Invalid observation timestamp: {e}"
+                            logger.warning(f"[BackgroundResultApplicator] {r.key} rejected fail-closed: {msg}")
+                            audit.append((r, False, msg))
+                            continue
 
-                last_obs_dt = self._last_applied_obs_dt.get(r.key)
-                if last_obs_dt is not None and obs_dt < last_obs_dt:
-                    msg = f"Stale observation: received {r.obs_time} < last applied {self._last_applied_obs_time[r.key]}"
-                    logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
-                    audit.append((r, False, msg))
-                    continue
+                        last_obs_dt = self._last_applied_obs_dt.get(r.key)
+                        if last_obs_dt is not None and obs_dt < last_obs_dt:
+                            msg = f"Stale observation: received {r.obs_time} < last applied {self._last_applied_obs_time.get(r.key)}"
+                            logger.warning(f"[BackgroundResultApplicator] {r.key} rejected: {msg}")
+                            audit.append((r, False, msg))
+                            continue
+                    elif require_source_time or r.key.work_type == "market_data":
+                        msg = "Missing required source observation timestamp"
+                        logger.warning(f"[BackgroundResultApplicator] {r.key} rejected fail-closed: {msg}")
+                        audit.append((r, False, msg))
+                        continue
 
-                # 4. Apply result based on work type
-                if r.key.work_type == WorkType.GROUNDING.value:
-                    grounding_target[r.key.target] = r.data
-                elif r.key.work_type == WorkType.SCOUT.value:
-                    scout_cache_target[r.key.target] = {
-                        "tickers": r.data,
-                        "timestamp": time.time()
-                    }
-                    if isinstance(r.data, list):
-                        for t in r.data:
-                            if isinstance(t, str):
-                                scout_category_map[t.upper()] = r.key.target
-                else:
-                    audit.append((r, False, f"Unknown work type: {r.key.work_type}"))
-                    continue
+                    # 4. Apply result based on work type
+                    if r.key.work_type == WorkType.GROUNDING.value:
+                        grounding_target[r.key.target] = r.data
+                    elif r.key.work_type == WorkType.SCOUT.value:
+                        scout_cache_target[r.key.target] = {
+                            "tickers": r.data,
+                            "timestamp": time.time()
+                        }
+                        if isinstance(r.data, list):
+                            for t in r.data:
+                                if isinstance(t, str):
+                                    scout_category_map[t.upper()] = r.key.target
+                    else:
+                        audit.append((r, False, f"Unknown work type: {r.key.work_type}"))
+                        continue
 
-                self._last_applied_sequence[r.key] = r.sequence
-                self._last_applied_obs_dt[r.key] = obs_dt
-                self._last_applied_obs_time[r.key] = r.obs_time
-                audit.append((r, True, "Applied successfully"))
+                    self._last_applied_sequence[r.key] = r.sequence
+                    if obs_dt is not None:
+                        self._last_applied_obs_dt[r.key] = obs_dt
+                        self._last_applied_obs_time[r.key] = r.obs_time
+                    audit.append((r, True, "Applied successfully"))
 
         return audit
 
