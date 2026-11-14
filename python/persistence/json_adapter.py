@@ -37,6 +37,9 @@ except ImportError:
 
 from .contracts import (
     PersistenceAdapter,
+    PersistenceError,
+    PersistenceIntegrityError,
+    PersistenceNotFoundError,
     PersistenceValidationError,
     CANONICAL_SSOT_KEYS,
 )
@@ -63,19 +66,60 @@ class JsonPersistenceAdapter(PersistenceAdapter):
     # Portfolio State & SSoT Operations
     # -----------------------------------------------------------------------
 
-    def get_ssot_data(self) -> Dict[str, Any]:
-        """Reads the raw SSoT document."""
+    def _read_raw_ssot_dict(self) -> Dict[str, Any]:
+        """
+        Reads and parses the raw SSoT document under concurrency protection.
+        - Returns {} if file does not exist (legitimate first-run state).
+        - Raises PersistenceIntegrityError if file exists but is empty or malformed JSON.
+        - Raises PersistenceIntegrityError if root is not a dict.
+        - Raises PersistenceError if I/O or permissions fail.
+        """
         if not os.path.exists(self.ssot_path):
             return {}
+
+        lock_path = self.ssot_path + ".lock"
         try:
-            return atomic_read_json(self.ssot_path, default={})
+            with atomic_io.FileLock(lock_path, timeout=5.0):
+                if not os.path.exists(self.ssot_path):
+                    return {}
+                with open(self.ssot_path, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                if not content:
+                    raise PersistenceIntegrityError(
+                        f"SSoT file exists but is empty or whitespace-only: '{self.ssot_path}'"
+                    )
+                try:
+                    data = json.loads(content)
+                except json.JSONDecodeError as jde:
+                    raise PersistenceIntegrityError(
+                        f"SSoT file contains malformed JSON: '{self.ssot_path}': {jde}"
+                    ) from jde
+                if not isinstance(data, dict):
+                    raise PersistenceIntegrityError(
+                        f"SSoT file root must be a JSON object (dict), got {type(data).__name__}"
+                    )
+                return data
+        except (PersistenceIntegrityError, PersistenceValidationError):
+            raise
+        except (IOError, OSError) as e:
+            raise PersistenceError(f"I/O failure reading SSoT file '{self.ssot_path}': {e}") from e
         except Exception as e:
-            return {"error": f"Error reading SSoT: {str(e)}"}
+            raise PersistenceError(f"Unexpected error reading SSoT file '{self.ssot_path}': {e}") from e
+
+    def get_ssot_data(self) -> Dict[str, Any]:
+        """
+        Reads the raw SSoT document.
+        Returns {} if file does not exist.
+        Raises PersistenceIntegrityError or PersistenceError if file exists but cannot be read/parsed.
+        """
+        return self._read_raw_ssot_dict()
 
     def get_portfolio_basket(self) -> Dict[str, Any]:
         """
         Extracts structured portfolio basket holdings, unallocated cash,
         and fallback EUR/USD rate from ssot.json.
+        Returns default empty basket if file does not exist.
+        Raises PersistenceIntegrityError, PersistenceValidationError, or PersistenceError on failure.
         """
         if not os.path.exists(self.ssot_path):
             return {
@@ -85,56 +129,93 @@ class JsonPersistenceAdapter(PersistenceAdapter):
                 "eurusd_rate": 1.08,
             }
 
-        try:
-            data = atomic_read_json(self.ssot_path, default={})
-            ms = data.get("mutable_state", {}) if isinstance(data.get("mutable_state"), dict) else {}
-            ep = data.get("EXECUTION_PAYLOAD", {}) if isinstance(data.get("EXECUTION_PAYLOAD"), dict) else {}
-            state_ctx = data.get("state_context", {}) if isinstance(data.get("state_context"), dict) else {}
-
-            raw_portfolio = (
-                ms.get("portfolio_snapshot") or
-                data.get("portfolio_snapshot") or
-                ep.get("portfolio_snapshot") or
-                []
-            )
-
-            portfolio = []
-            for item in raw_portfolio:
-                if isinstance(item, dict) and item.get("ticker"):
-                    portfolio.append({
-                        "ticker": str(item["ticker"]).strip().upper(),
-                        "shares": float(item.get("shares", 0.0)),
-                        "wac": float(item.get("wac", 0.0)),
-                    })
-
-            cash_eur = (
-                ms.get("unallocated_cash_eur") if ms.get("unallocated_cash_eur") is not None else
-                data.get("unallocated_cash_eur") if data.get("unallocated_cash_eur") is not None else
-                ep.get("unallocated_cash_eur") if ep.get("unallocated_cash_eur") is not None else
-                state_ctx.get("unallocated_cash_eur", 0.0)
-            )
-            cash_usd = (
-                ms.get("unallocated_cash_usd") if ms.get("unallocated_cash_usd") is not None else
-                data.get("unallocated_cash_usd") if data.get("unallocated_cash_usd") is not None else
-                ep.get("unallocated_cash_usd") if ep.get("unallocated_cash_usd") is not None else
-                state_ctx.get("unallocated_cash_usd", 0.0)
-            )
-
-            rate = float(data.get("exchange_rate", 1.08)) if data.get("exchange_rate") else 1.08
-
-            return {
-                "portfolio": portfolio,
-                "unallocated_cash_eur": float(cash_eur or 0.0),
-                "unallocated_cash_usd": float(cash_usd or 0.0),
-                "eurusd_rate": rate,
-            }
-        except Exception:
+        data = self._read_raw_ssot_dict()
+        if not data:
             return {
                 "portfolio": [],
                 "unallocated_cash_eur": 0.0,
                 "unallocated_cash_usd": 0.0,
                 "eurusd_rate": 1.08,
             }
+
+        ms = data.get("mutable_state", {})
+        if ms is not None and not isinstance(ms, dict):
+            raise PersistenceIntegrityError("mutable_state in SSoT must be a dictionary")
+        ms = ms or {}
+
+        ep = data.get("EXECUTION_PAYLOAD", {})
+        if ep is not None and not isinstance(ep, dict):
+            raise PersistenceIntegrityError("EXECUTION_PAYLOAD in SSoT must be a dictionary")
+        ep = ep or {}
+
+        state_ctx = data.get("state_context", {})
+        if state_ctx is not None and not isinstance(state_ctx, dict):
+            raise PersistenceIntegrityError("state_context in SSoT must be a dictionary")
+        state_ctx = state_ctx or {}
+
+        raw_portfolio = (
+            ms.get("portfolio_snapshot")
+            if ms.get("portfolio_snapshot") is not None
+            else data.get("portfolio_snapshot")
+            if data.get("portfolio_snapshot") is not None
+            else ep.get("portfolio_snapshot")
+            if ep.get("portfolio_snapshot") is not None
+            else []
+        )
+
+        if not isinstance(raw_portfolio, list):
+            raise PersistenceValidationError(
+                f"portfolio_snapshot must be a list, got {type(raw_portfolio).__name__}"
+            )
+
+        portfolio = []
+        for i, item in enumerate(raw_portfolio):
+            if not isinstance(item, dict):
+                raise PersistenceValidationError(f"Portfolio position item {i} must be a dictionary")
+            ticker = item.get("ticker")
+            if not ticker or not isinstance(ticker, str) or not ticker.strip():
+                raise PersistenceValidationError(f"Portfolio position item {i} missing valid ticker")
+            try:
+                shares = float(item.get("shares", 0.0))
+                if shares < 0:
+                    raise PersistenceValidationError(f"Negative shares for position {ticker}: {shares}")
+                wac = float(item.get("wac", 0.0))
+                if wac < 0:
+                    raise PersistenceValidationError(f"Negative wac for position {ticker}: {wac}")
+            except (ValueError, TypeError) as e:
+                raise PersistenceValidationError(f"Invalid numeric values in position {ticker}: {e}") from e
+
+            portfolio.append({
+                "ticker": str(ticker).strip().upper(),
+                "shares": shares,
+                "wac": wac,
+            })
+
+        try:
+            raw_cash_eur = (
+                ms.get("unallocated_cash_eur") if ms.get("unallocated_cash_eur") is not None else
+                data.get("unallocated_cash_eur") if data.get("unallocated_cash_eur") is not None else
+                ep.get("unallocated_cash_eur") if ep.get("unallocated_cash_eur") is not None else
+                state_ctx.get("unallocated_cash_eur", 0.0)
+            )
+            raw_cash_usd = (
+                ms.get("unallocated_cash_usd") if ms.get("unallocated_cash_usd") is not None else
+                data.get("unallocated_cash_usd") if data.get("unallocated_cash_usd") is not None else
+                ep.get("unallocated_cash_usd") if ep.get("unallocated_cash_usd") is not None else
+                state_ctx.get("unallocated_cash_usd", 0.0)
+            )
+            cash_eur = float(raw_cash_eur if raw_cash_eur is not None else 0.0)
+            cash_usd = float(raw_cash_usd if raw_cash_usd is not None else 0.0)
+            rate = float(data.get("exchange_rate", 1.08)) if data.get("exchange_rate") is not None else 1.08
+        except (ValueError, TypeError) as e:
+            raise PersistenceValidationError(f"Invalid cash or exchange rate values in SSoT: {e}") from e
+
+        return {
+            "portfolio": portfolio,
+            "unallocated_cash_eur": cash_eur,
+            "unallocated_cash_usd": cash_usd,
+            "eurusd_rate": rate,
+        }
 
     def save_portfolio_basket(
         self,
@@ -475,8 +556,8 @@ class JsonPersistenceAdapter(PersistenceAdapter):
             elif isinstance(data, list):
                 return list(data)
             return []
-        except Exception:
-            return []
+        except Exception as e:
+            raise PersistenceError(f"Failed to read trade lessons from JSON: {e}") from e
 
     def save_trade_lessons(
         self,
@@ -547,8 +628,8 @@ class JsonPersistenceAdapter(PersistenceAdapter):
             elif isinstance(data, list):
                 return list(data)
             return []
-        except Exception:
-            return []
+        except Exception as e:
+            raise PersistenceError(f"Failed to read decision log from JSON: {e}") from e
 
     def append_decision_log(
         self,

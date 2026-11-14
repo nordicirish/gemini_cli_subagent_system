@@ -345,12 +345,12 @@ def _get_dynamic_scout_tickers(category: str) -> list:
         # Load SSOT and rules dynamically to satisfy MANDATE_11 and Anti-Hallucination Core
         ssot_content = "{}"
         try:
-            ssot_path = "context/ssot.json"
-            if os.path.exists(ssot_path):
-                with open(ssot_path, "r", encoding="utf-8") as sf:
-                    ssot_content = json.dumps(json.load(sf), indent=2)
+            service = get_persistence_service()
+            ssot_data = service.get_ssot_data()
+            if ssot_data:
+                ssot_content = json.dumps(ssot_data, indent=2)
         except Exception as e:
-            print(f"[Warning] Failed to load SSoT for scout prompt: {e}")
+            print(f"[Warning] Failed to load SSoT for scout prompt via persistence service: {e}")
             
         rules_content = ""
         try:
@@ -478,14 +478,13 @@ def _load_macro_tickers():
 
 # Clear active scout categories on startup to defer yahoo finance queries
 try:
-    if os.path.exists('context/ssot.json'):
-        service = get_persistence_service()
-        scouts = service.get_scout_categories()
-        if scouts:
-            service.save_scout_categories([])
-            print("[SSOT] Active scout categories cleared on startup to defer loading.")
+    service = get_persistence_service()
+    scouts = service.get_scout_categories()
+    if scouts:
+        service.save_scout_categories([])
+        print("[SSOT] Active scout categories cleared on startup to defer loading.")
 except Exception as e:
-    print(f"[SSOT] Clear scout categories failed: {e}")
+    print(f"[SSOT] Clear scout categories failed via persistence service: {e}")
 
 TICKERS = _load_ssot_tickers()
 MACRO_TICKERS = _load_macro_tickers()
@@ -2970,15 +2969,18 @@ def run_daemon():
             # Calculate held and watched tickers to identify scouts inline
             held_and_watched = set()
             try:
-                if os.path.exists('context/ssot.json'):
-                    with open('context/ssot.json', 'r', encoding='utf-8') as f:
-                        ss_data = json.load(f)
-                        ms = ss_data.get('mutable_state', ss_data)
-                        for p in ms.get('portfolio_snapshot', []):
-                            held_and_watched.add(p['ticker'].upper())
-                        for w in ms.get('watched_tickers', []):
-                            held_and_watched.add(w.upper())
-            except: pass
+                service = get_persistence_service()
+                basket = service.get_portfolio_basket()
+                for p in basket.get("portfolio", []):
+                    ticker = p.get("ticker")
+                    if ticker:
+                        held_and_watched.add(str(ticker).upper())
+                watchlist = service.get_watchlist()
+                for w in watchlist:
+                    if w:
+                        held_and_watched.add(str(w).upper())
+            except Exception as e:
+                print(f"[Warning] Failed to load portfolio/watchlist for scout indicator via persistence service: {e}")
 
             data = []
 
@@ -3321,35 +3323,34 @@ def run_daemon():
 
             # Build final_output for web dashboard
             supplemental_lessons = []
-            if os.path.exists('context/trade_lessons.json'):
-                try:
-                    with open('context/trade_lessons.json', 'r') as f:
-                        lessons_data = json.load(f)
-                        if isinstance(lessons_data, dict) and "trade_lessons" in lessons_data:
-                            supplemental_lessons = lessons_data["trade_lessons"]
-                        elif isinstance(lessons_data, list):
-                            supplemental_lessons = lessons_data
-                except: pass
+            try:
+                service = get_persistence_service()
+                supplemental_lessons = service.get_trade_lessons()
+            except Exception as e:
+                print(f"[Warning] Failed to load trade lessons via persistence service: {e}")
 
             supplemental_ssot = {}
-            if os.path.exists('context/ssot.json'):
-                try:
-                    with open('context/ssot.json', 'r') as f:
-                        supplemental_ssot = json.load(f)
-                except: pass
+            try:
+                service = get_persistence_service()
+                supplemental_ssot = service.get_ssot_data()
+            except Exception as e:
+                print(f"[Warning] Failed to load SSoT data via persistence service: {e}")
 
             # Filter and sort scout tickers: keep at most 6, sorted by score in descending order, excluding held/watched assets
             held_and_watched = set()
             try:
-                if os.path.exists('context/ssot.json'):
-                    with open('context/ssot.json', 'r', encoding='utf-8') as f:
-                        ss_data = json.load(f)
-                        ms = ss_data.get('mutable_state', ss_data)
-                        for p in ms.get('portfolio_snapshot', []):
-                            held_and_watched.add(p['ticker'].upper())
-                        for w in ms.get('watched_tickers', []):
-                            held_and_watched.add(w.upper())
-            except: pass
+                service = get_persistence_service()
+                basket = service.get_portfolio_basket()
+                for p in basket.get("portfolio", []):
+                    ticker = p.get("ticker")
+                    if ticker:
+                        held_and_watched.add(str(ticker).upper())
+                watchlist = service.get_watchlist()
+                for w in watchlist:
+                    if w:
+                        held_and_watched.add(str(w).upper())
+            except Exception as e:
+                print(f"[Warning] Failed to load portfolio/watchlist for scout indicator via persistence service: {e}")
 
             non_scout_data = []
             scout_data = []

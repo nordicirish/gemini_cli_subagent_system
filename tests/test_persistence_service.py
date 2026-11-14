@@ -37,6 +37,7 @@ from persistence import (
     reset_persistence_service,
     PersistenceError,
     PersistenceIntegrityError,
+    PersistenceValidationError,
 )
 try:
     from python.tool_registry import execution_role_context, authorize_financial_mutation
@@ -199,6 +200,63 @@ class TestJsonPersistenceAdapter(unittest.TestCase):
             log_cleared = self.adapter.get_decision_log()
             self.assertEqual(len(log_cleared), 0)
 
+    def test_missing_ssot_returns_first_run_defaults(self):
+        """Missing SSoT file returns {} from get_ssot_data and default empty basket."""
+        if os.path.exists(self.adapter.ssot_path):
+            os.remove(self.adapter.ssot_path)
+        self.assertEqual(self.adapter.get_ssot_data(), {})
+        basket = self.adapter.get_portfolio_basket()
+        self.assertEqual(basket["portfolio"], [])
+        self.assertEqual(basket["unallocated_cash_eur"], 0.0)
+        self.assertEqual(basket["unallocated_cash_usd"], 0.0)
+        self.assertEqual(basket["eurusd_rate"], 1.08)
+
+    def test_empty_ssot_file_fails_closed_with_integrity_error(self):
+        """Existing but empty or whitespace SSoT file must raise PersistenceIntegrityError."""
+        with open(self.adapter.ssot_path, "w", encoding="utf-8") as f:
+            f.write("   \n  ")
+        with self.assertRaises(PersistenceIntegrityError):
+            self.adapter.get_ssot_data()
+        with self.assertRaises(PersistenceIntegrityError):
+            self.adapter.get_portfolio_basket()
+
+    def test_malformed_json_ssot_file_fails_closed_with_integrity_error(self):
+        """Existing but malformed JSON SSoT file must raise PersistenceIntegrityError."""
+        with open(self.adapter.ssot_path, "w", encoding="utf-8") as f:
+            f.write("{invalid_json: true, broken")
+        with self.assertRaises(PersistenceIntegrityError):
+            self.adapter.get_ssot_data()
+        with self.assertRaises(PersistenceIntegrityError):
+            self.adapter.get_portfolio_basket()
+
+    def test_non_dict_root_ssot_file_fails_closed_with_integrity_error(self):
+        """SSoT file whose JSON root is not a dict must raise PersistenceIntegrityError."""
+        with open(self.adapter.ssot_path, "w", encoding="utf-8") as f:
+            f.write('["item1", "item2"]')
+        with self.assertRaises(PersistenceIntegrityError):
+            self.adapter.get_ssot_data()
+        with self.assertRaises(PersistenceIntegrityError):
+            self.adapter.get_portfolio_basket()
+
+    def test_corrupted_portfolio_structure_fails_closed_with_validation_error(self):
+        """SSoT with non-list portfolio_snapshot or invalid positions must raise PersistenceValidationError."""
+        with open(self.adapter.ssot_path, "w", encoding="utf-8") as f:
+            json.dump({"portfolio_snapshot": "not_a_list"}, f)
+        with self.assertRaises(PersistenceValidationError):
+            self.adapter.get_portfolio_basket()
+
+        # Test negative shares
+        with open(self.adapter.ssot_path, "w", encoding="utf-8") as f:
+            json.dump({"portfolio_snapshot": [{"ticker": "SPY", "shares": -10.0, "wac": 500.0}]}, f)
+        with self.assertRaises(PersistenceValidationError):
+            self.adapter.get_portfolio_basket()
+
+        # Test non-numeric cash
+        with open(self.adapter.ssot_path, "w", encoding="utf-8") as f:
+            json.dump({"portfolio_snapshot": [], "unallocated_cash_eur": "invalid_number"}, f)
+        with self.assertRaises(PersistenceValidationError):
+            self.adapter.get_portfolio_basket()
+
 
 class TestSqlitePersistenceAdapter(unittest.TestCase):
     def setUp(self):
@@ -297,6 +355,19 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
             lessons = self.adapter.get_trade_lessons()
             self.assertEqual(len(lessons), 1)
             self.assertEqual(lessons[0]["rule_code"], "L-101")
+
+    def test_sqlite_empty_first_run_basket_parity(self):
+        """Empty SQLite database returns valid empty basket contract matching JSON first-run."""
+        basket = self.adapter.get_portfolio_basket()
+        self.assertEqual(basket["portfolio"], [])
+        self.assertEqual(basket["unallocated_cash_eur"], 0.0)
+        self.assertEqual(basket["unallocated_cash_usd"], 0.0)
+        self.assertEqual(basket["eurusd_rate"], 1.08)
+
+        ssot = self.adapter.get_ssot_data()
+        self.assertIsInstance(ssot, dict)
+        self.assertEqual(ssot["portfolio_snapshot"], [])
+        self.assertEqual(ssot["unallocated_cash_eur"], 0.0)
 
 
 if __name__ == "__main__":

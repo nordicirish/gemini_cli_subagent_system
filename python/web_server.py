@@ -4,7 +4,7 @@ import sys
 import uvicorn
 import asyncio
 import json
-from typing import List
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -371,10 +371,11 @@ if active_model_warning:
 
 
 # Initialize the global Chat object
-def create_new_session():
+def create_new_session(model_name: Optional[str] = None):
     global ORCHESTRATOR_MODEL
+    target_model = model_name or ORCHESTRATOR_MODEL
     sys_instruction = framework._get_sys_instruction(terminal_instruction)
-    return framework.create_chat_session(sys_instruction, terminal_tools, ORCHESTRATOR_MODEL)
+    return framework.create_chat_session(sys_instruction, terminal_tools, target_model)
 
 global_chat_session = create_new_session()
 _session_hydrated = False # Global flag for tracking memory hydration
@@ -654,14 +655,38 @@ def chat_endpoint(req: ChatRequest):
         from tool_dispatcher import GLOBAL_TOOL_DISPATCHER
         payload_to_send = [*chart_parts, current_message] if chart_parts else current_message
 
-        dispatch_res = GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session(
-            session=session,
-            initial_message=payload_to_send,
-            part_factory=agent_framework.types.Part,
-            agent_role="Terminal Orchestrator",
-            cancel_check=lambda: cancel_event.is_set(),
-            log_callback=framework.log,
-        )
+        fallback_occurred = False
+        try:
+            dispatch_res = GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session(
+                session=session,
+                initial_message=payload_to_send,
+                part_factory=agent_framework.types.Part,
+                agent_role="Terminal Orchestrator",
+                cancel_check=lambda: cancel_event.is_set(),
+                log_callback=framework.log,
+            )
+        except Exception as exc:
+            if cancel_event.is_set() or "cancelled" in str(exc).lower():
+                raise exc
+            fallback_model = "gemini-3.8-flash-low" if ORCHESTRATOR_MODEL != "gemini-3.8-flash-low" else "gemini-3.8-flash-high"
+            framework.log(f"[Fallback] Primary dispatch on {ORCHESTRATOR_MODEL} failed ({exc}). Retrying with fallback model {fallback_model}...")
+            try:
+                fallback_session = create_new_session(model_name=fallback_model)
+                dispatch_res = GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session(
+                    session=fallback_session,
+                    initial_message=payload_to_send,
+                    part_factory=agent_framework.types.Part,
+                    agent_role="Terminal Orchestrator",
+                    cancel_check=lambda: cancel_event.is_set(),
+                    log_callback=framework.log,
+                )
+                fallback_occurred = True
+                ORCHESTRATOR_MODEL = fallback_model
+                global_chat_session = fallback_session
+                framework.log(f"[Fallback] Successfully recovered on {ORCHESTRATOR_MODEL}.")
+            except Exception as fb_exc:
+                framework.log(f"[Fallback] Fallback model {fallback_model} also failed: {fb_exc}")
+                raise exc
 
         if dispatch_res.get("status") == "cancelled":
             return {"status": "success", "response": dispatch_res["response"]}
