@@ -679,6 +679,11 @@ def chat_endpoint(req: ChatRequest):
                         slim_tickers.append({
                             "ticker": t.get("ticker"),
                             "price": t.get("price"),
+                            "price_validity": t.get("price_validity", "VALID" if t.get("price") is not None else "UNAVAILABLE"),
+                            "freshness": t.get("freshness", "CURRENT" if t.get("status") == "ACTIVE" else "UNAVAILABLE"),
+                            "price_source": t.get("price_source"),
+                            "observation_time": t.get("observation_time"),
+                            "retrieval_time": t.get("retrieval_time"),
                             "session_change_pct": t.get("session_change_pct"),
                             "gap_percent": t.get("gap_percent"),
                             "rsi": t.get("rsi"),

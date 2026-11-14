@@ -686,12 +686,12 @@ def sanitize_json_payload(obj):
         return [sanitize_json_payload(x) for x in obj]
     elif isinstance(obj, float):
         if math.isnan(obj) or math.isinf(obj):
-            return 0.0
+            return None
         return obj
     elif isinstance(obj, (np.floating, np.float32, np.float64)):
         val = float(obj)
         if math.isnan(val) or math.isinf(val):
-            return 0.0
+            return None
         return val
     elif isinstance(obj, (np.integer, np.int32, np.int64)):
         return int(obj)
@@ -1033,6 +1033,13 @@ class MarketDataCache:
         self.day_open: dict[str, float] = {}
         self.day_high: dict[str, float] = {}
         self.day_low: dict[str, float] = {}
+        # Market Data Provenance & Freshness metadata (GEM Stage 1)
+        self.observation_times: dict[str, str | None] = {}
+        self.retrieval_times: dict[str, str | None] = {}
+        self.price_sources: dict[str, str | None] = {}
+        self.price_validity: dict[str, str] = {}
+        self.freshness: dict[str, str] = {}
+        self.chart_obs_time: dict[str, datetime | None] = {}
 
     def clear(self):
         self.__init__()
@@ -1114,8 +1121,14 @@ def safe_yf_get(url, timeout=3):
     # Fallback to standard requests.Session if curl_cffi fails internally
     return session.get(url, timeout=timeout)
 
-def get_market_status():
-    ny_now = datetime.now(ZoneInfo("America/New_York"))
+def get_market_status(ny_dt=None):
+    ny_tz = ZoneInfo("America/New_York")
+    if ny_dt is None:
+        ny_now = datetime.now(ny_tz)
+    elif ny_dt.tzinfo is None:
+        ny_now = ny_dt.replace(tzinfo=ny_tz)
+    else:
+        ny_now = ny_dt.astimezone(ny_tz)
     t = ny_now.time()
     if ny_now.weekday() >= 5:
         return "CLOSED"
@@ -1127,17 +1140,131 @@ def get_market_status():
         return "AFTER-HOURS"
     return "CLOSED"
 
-def to_float(val):
+def classify_market_numeric(val):
+    """
+    Classifies a market numeric value into:
+    ("VALID", float_value)
+    ("MISSING", None)
+    ("INVALID", None)
+    ("NON_FINITE", None)
+    """
+    if val is None:
+        return ("MISSING", None)
+    if isinstance(val, bool):
+        return ("INVALID", None)
+    if isinstance(val, (pd.Series, pd.DataFrame)):
+        if val.empty:
+            return ("MISSING", None)
+        try:
+            val = val.iloc[-1]
+        except Exception:
+            return ("INVALID", None)
+        if val is None or isinstance(val, bool):
+            return ("MISSING" if val is None else "INVALID", None)
     try:
-        if isinstance(val, (pd.Series, pd.DataFrame)):
-            v = float(val.iloc[-1])
+        v = float(val)
+    except (ValueError, TypeError, OverflowError):
+        return ("INVALID", None)
+    if math.isnan(v) or math.isinf(v):
+        return ("NON_FINITE", None)
+    return ("VALID", v)
+
+def to_float(val, default=None):
+    """
+    Safely converts input to a finite float.
+    Distinguishes valid numerics (including 0.0) from missing, invalid, or non-finite values.
+    Returns:
+        float if val is a valid finite numeric.
+        default (default: None) if val is None, invalid, non-finite (NaN, +/-inf), or on failure.
+    """
+    status, num = classify_market_numeric(val)
+    return num if status == "VALID" else default
+
+def determine_market_freshness(price, obs_time, current_ny=None, session_status=None, max_stale_seconds=1200, source=None):
+    """
+    Evaluates market data freshness and validity for a given price observation.
+    
+    Parameters:
+        price: The numeric price observation or None.
+        obs_time: datetime of observation (in NY timezone or UTC) or None.
+        current_ny: datetime representing current time in NY timezone (defaults to now).
+        session_status: Market session ("OPEN", "PRE-MARKET", "AFTER-HOURS", "CLOSED"). Defaults to get_market_status(current_ny).
+        max_stale_seconds: Maximum age in seconds before an observation in an active session is marked STALE (default: 1200s / 20 mins).
+        
+    Returns:
+        (price_validity, freshness)
+        price_validity in ("VALID", "STALE", "INVALID", "UNAVAILABLE")
+        freshness in ("CURRENT", "DELAYED", "HISTORICAL", "STALE", "UNAVAILABLE")
+    """
+    validity_type, num_price = classify_market_numeric(price)
+    if validity_type != "VALID" or num_price is None or num_price <= 0:
+        return ("UNAVAILABLE" if validity_type == "MISSING" else "INVALID", "UNAVAILABLE")
+
+    ny_tz = ZoneInfo("America/New_York")
+    if current_ny is None:
+        current_ny = datetime.now(ny_tz)
+    elif current_ny.tzinfo is None:
+        current_ny = current_ny.replace(tzinfo=ny_tz)
+    else:
+        current_ny = current_ny.astimezone(ny_tz)
+
+    if session_status is None:
+        session_status = get_market_status(current_ny)
+
+    if obs_time is None:
+        # Source did not provide observation timestamp: do not invent one
+        return ("VALID", "UNAVAILABLE")
+
+    if obs_time.tzinfo is None:
+        obs_dt = obs_time.replace(tzinfo=ny_tz)
+    else:
+        obs_dt = obs_time.astimezone(ny_tz)
+
+    # Market Closure (Weekends, Holidays, or Overnight 20:00 - 04:00):
+    # A previous-session close observation is valid historical data, NOT an error,
+    # and MUST NOT be marked as current live price.
+    if session_status == "CLOSED":
+        return ("VALID", "HISTORICAL")
+
+    # In active market sessions (OPEN, PRE-MARKET, AFTER-HOURS):
+    # If observation is from a previous calendar day:
+    if obs_dt.date() < current_ny.date():
+        # Previous-session close cannot masquerade as current live price during an active session
+        return ("STALE", "STALE")
+
+    # Future timestamps are invalid
+    age_seconds = (current_ny - obs_dt).total_seconds()
+    if age_seconds < -60: # Allow slight clock drift (up to 1 min)
+        return ("INVALID", "UNAVAILABLE")
+
+    if session_status == "OPEN":
+        # During regular hours (09:30 - 16:00)
+        if obs_dt.time() < time(9, 30):
+            return ("STALE", "STALE")
+        if age_seconds > max_stale_seconds:
+            return ("STALE", "STALE")
+        elif age_seconds > 900: # 15 minutes
+            return ("VALID", "DELAYED")
         else:
-            v = float(val)
-        if math.isnan(v) or math.isinf(v):
-            return 0.0
-        return v
-    except:
-        return 0.0
+            return ("VALID", "CURRENT")
+
+    elif session_status == "PRE-MARKET":
+        # During pre-market hours (04:00 - 09:30)
+        if obs_dt.time() < time(4, 0):
+            return ("VALID", "HISTORICAL")
+        if age_seconds > max_stale_seconds:
+            return ("STALE", "STALE")
+        return ("VALID", "CURRENT")
+
+    elif session_status == "AFTER-HOURS":
+        # During after-hours (16:00 - 20:00)
+        if obs_dt.time() < time(16, 0):
+            return ("VALID", "HISTORICAL")
+        if age_seconds > max_stale_seconds:
+            return ("STALE", "STALE")
+        return ("VALID", "CURRENT")
+
+    return ("VALID", "CURRENT")
 
 def format_volume(vol, symbol):
     try:
@@ -1247,11 +1374,18 @@ def get_live_chart_data(symbol, status):
         closes = quote.get('close', [])
         volumes = quote.get('volume', [])
 
-        live_price = 0.0
+        live_price = None
         if closes:
-            valid_closes = [c for c in closes if c is not None]
+            valid_closes = [(i, c) for i, c in enumerate(closes) if c is not None and to_float(c) is not None]
             if valid_closes:
-                live_price = float(valid_closes[-1])
+                last_idx, last_c = valid_closes[-1]
+                live_price = float(last_c)
+                if timestamps and last_idx < len(timestamps):
+                    ts = timestamps[last_idx]
+                    try:
+                        cache.chart_obs_time[symbol] = datetime.fromtimestamp(ts, ZoneInfo("UTC")).astimezone(ny_tz)
+                    except Exception:
+                        pass
 
         ny_tz = ZoneInfo("America/New_York")
         now = datetime.now(ny_tz)
@@ -1318,8 +1452,8 @@ def get_live_chart_data(symbol, status):
                     total_session_vol += v
 
         return live_price, total_session_vol, pre_vol, post_vol
-    except:
-        return 0.0, 0, 0, 0
+    except Exception:
+        return None, 0, 0, 0
 
 def get_true_intraday_vwap(symbol, status):
     try:
@@ -1749,43 +1883,73 @@ def get_today_str():
 def update_history_and_technicals(symbol, t_obj):
     today_str = get_today_str()
     if (symbol in cache.history 
+            and cache.history[symbol] is not None
             and not cache.history[symbol].empty 
             and cache.last_history_fetch_date.get(symbol) == today_str):
         # Already updated today! Skip download.
         return
 
+    hist = None
     try:
         hist = t_obj.history(period="2y", interval="1d")
-        if hist.empty:
+        if hist is None or hist.empty:
             hist = t_obj.history(period="1y", interval="1d")
-        if hist.empty:
+        if hist is None or hist.empty:
             hist = t_obj.history(period="3mo", interval="1d")
-        if hist.empty:
+        if hist is None or hist.empty:
             raise ValueError("Empty YF")
     except:
-        hist = get_polygon_history_df(symbol)
+        try:
+            hist = get_polygon_history_df(symbol)
+        except:
+            hist = None
 
-    if hist.empty:
-        # Create a dummy row to prevent repeated slow refetches
-        hist = pd.DataFrame([{
-            'Open': 0.0, 'High': 0.0, 'Low': 0.0, 'Close': 0.0, 'Volume': 0
-        }], index=[pd.Timestamp.now()])
-        cache.history[symbol] = hist
-        cache.last_history_fetch_date[symbol] = today_str
+    # Validate hist
+    is_valid_hist = False
+    if hist is not None and not hist.empty and 'Close' in hist.columns:
+        close_col = hist['Close']
+        if isinstance(close_col, pd.DataFrame):
+            close_col = close_col.iloc[:, 0]
+        valid_closes = [c_val for c in close_col if (c_val := to_float(c)) is not None and c_val > 0]
+        if len(valid_closes) > 0:
+            is_valid_hist = True
+
+    # Partial response handling:
+    # If existing cache has >= 20 bars and new hist has < 20 bars, do not contaminate valid history
+    if is_valid_hist and symbol in cache.history and cache.history[symbol] is not None and not cache.history[symbol].empty:
+        existing_len = len(cache.history[symbol])
+        new_len = len(hist)
+        if existing_len >= 20 and new_len < 20:
+            print(f"[Warning] Partial history for {symbol} ({new_len} vs {existing_len}); preserving existing.")
+            return
+
+    if not is_valid_hist:
+        # If existing valid history exists: PRESERVE IT! Do not contaminate or overwrite!
+        if symbol in cache.history and cache.history[symbol] is not None and not cache.history[symbol].empty:
+            return
+
+        # If no prior history existed: do NOT fabricate dummy 0.0 row!
+        cache.history[symbol] = pd.DataFrame()
+        cache.last_history_fetch_date[symbol] = None
         cache.technicals[symbol] = {
             "SMA_20": None,
             "SMA_50": None,
             "SMA_200": None,
-            "RSI": 50.0,
-            "MACD": 0.0,
-            "MACD_Signal": 0.0,
-            "MACD_Hist": 0.0,
-            "MACD_Slope": "EXPANDING_POSITIVE",
+            "RSI": None,
+            "MACD": None,
+            "MACD_Signal": None,
+            "MACD_Hist": None,
+            "MACD_Slope": "UNKNOWN",
             "MACD_Status": "NEUTRAL",
-            "ATR_Pct": 0.0,
-            "ATR": 0.0,
+            "BB_Upper": None,
+            "BB_Lower": None,
+            "BB_Pct": None,
+            "MFI": None,
+            "ATR_Pct": None,
+            "ATR": None,
             "Trend_Score": 0,
-            "Last_Reg_Close": 0.0
+            "Last_Reg_Close": None,
+            "status": "UNAVAILABLE"
         }
         return
 
@@ -1805,13 +1969,8 @@ def update_history_and_technicals(symbol, t_obj):
 
             # --- Helper to safely get the last value from a Series or scalar ---
             def _last(val):
-                if isinstance(val, (int, float, np.floating, np.integer)):
-                    v = float(val)
-                else:
-                    v = float(val.iloc[-1])
-                if math.isnan(v) or math.isinf(v):
-                    return 0.0
-                return v
+                status, num = classify_market_numeric(val)
+                return num if status == "VALID" else None
 
             # --- RSI (Wilder 9-day) ---
             delta = close.diff()
@@ -1831,16 +1990,16 @@ def update_history_and_technicals(symbol, t_obj):
             macd_hist_val = _last(macd_hist)
 
             # Compute 4-State Histogram Slope (macd_slope)
-            if len(macd_hist) >= 2:
-                prev_hist = float(macd_hist.iloc[-2]) if not (math.isnan(float(macd_hist.iloc[-2])) or math.isinf(float(macd_hist.iloc[-2]))) else 0.0
+            if macd_hist_val is not None and len(macd_hist) >= 2:
+                prev_hist = to_float(macd_hist.iloc[-2], default=0.0)
                 if macd_hist_val >= 0:
                     macd_slope_val = "EXPANDING_POSITIVE" if macd_hist_val >= prev_hist else "CONTRACTING_POSITIVE"
                 else:
                     macd_slope_val = "EXPANDING_NEGATIVE" if macd_hist_val <= prev_hist else "CONTRACTING_NEGATIVE"
+                macd_status_val = "BULLISH" if macd_hist_val > 0.001 else ("BEARISH" if macd_hist_val < -0.001 else "NEUTRAL")
             else:
-                macd_slope_val = "EXPANDING_POSITIVE" if macd_hist_val >= 0 else "EXPANDING_NEGATIVE"
-
-            macd_status_val = "BULLISH" if macd_hist_val > 0.001 else ("BEARISH" if macd_hist_val < -0.001 else "NEUTRAL")
+                macd_slope_val = "UNKNOWN"
+                macd_status_val = "NEUTRAL"
 
             # --- Bollinger Bands (20-day, 2 std) ---
             if len(close) >= 20:
@@ -1851,14 +2010,14 @@ def update_history_and_technicals(symbol, t_obj):
                 bb_upper_val = _last(upper_bb)
                 bb_lower_val = _last(lower_bb)
                 last_c = _last(close)
-                if bb_upper_val != bb_lower_val:
+                if bb_upper_val is not None and bb_lower_val is not None and last_c is not None and bb_upper_val != bb_lower_val:
                     bb_pct_val = (last_c - bb_lower_val) / (bb_upper_val - bb_lower_val)
                 else:
                     bb_pct_val = 0.5
             else:
-                bb_upper_val = 0.0
-                bb_lower_val = 0.0
-                bb_pct_val = 0.5
+                bb_upper_val = None
+                bb_lower_val = None
+                bb_pct_val = None
 
             # --- MFI (Money Flow Index 14-day) ---
             if 'Volume' in hist.columns and 'High' in hist.columns and 'Low' in hist.columns:
@@ -1873,7 +2032,7 @@ def update_history_and_technicals(symbol, t_obj):
                 mfi_series = 100 - (100 / (1 + money_ratio))
                 mfi_val = _last(mfi_series)
             else:
-                mfi_val = 50.0
+                mfi_val = None
 
             # --- ATR (Wilder) ---
             tr = pd.concat([
@@ -1884,10 +2043,10 @@ def update_history_and_technicals(symbol, t_obj):
 
             atr = _last(tr.ewm(alpha=1/14, adjust=False).mean())
             last_close = _last(close)
-            atr_pct = (atr / last_close) * 100 if last_close != 0 else 0
+            atr_pct = (atr / last_close) * 100 if (atr is not None and last_close is not None and last_close != 0) else None
 
             # --- Previous Regular Close ---
-            last_reg_close = 0.0
+            last_reg_close = None
             ny_tz = ZoneInfo("America/New_York")
             now_ny = datetime.now(ny_tz)
             today_date = now_ny.date()
@@ -1895,25 +2054,26 @@ def update_history_and_technicals(symbol, t_obj):
 
             if is_pre_market:
                 if len(close) >= 1:
-                    valid_closes = [to_float(c) for c in close if c is not None and to_float(c) > 0]
+                    valid_closes = [c_val for c in close if (c_val := to_float(c)) is not None and c_val > 0]
                     if valid_closes:
                         last_reg_close = valid_closes[-1]
-                if last_reg_close == 0.0 and hasattr(t_obj, 'fast_info'):
+                if last_reg_close is None and hasattr(t_obj, 'fast_info'):
                     try:
-                        fi_last = float(getattr(t_obj.fast_info, 'last_price', 0.0) or 0.0)
-                        if fi_last > 0:
+                        fi_last = to_float(getattr(t_obj.fast_info, 'last_price', None))
+                        if fi_last is not None and fi_last > 0:
                             last_reg_close = fi_last
                     except:
                         pass
             else:
                 if hasattr(t_obj, 'fast_info'):
                     try:
-                        last_reg_close = float(getattr(t_obj.fast_info, 'regular_market_previous_close', None) or getattr(t_obj.fast_info, 'previous_close', 0.0))
+                        fi_close = getattr(t_obj.fast_info, 'regular_market_previous_close', None) or getattr(t_obj.fast_info, 'previous_close', None)
+                        last_reg_close = to_float(fi_close)
                     except:
                         pass
 
-                if last_reg_close == 0.0 and len(close) >= 1:
-                    valid_closes = [to_float(c) for c in close if c is not None and to_float(c) > 0]
+                if last_reg_close is None and len(close) >= 1:
+                    valid_closes = [c_val for c in close if (c_val := to_float(c)) is not None and c_val > 0]
                     if valid_closes:
                         last_bar_date = hist.index[-1].date()
                         if last_bar_date == today_date and len(valid_closes) >= 2:
@@ -1921,10 +2081,10 @@ def update_history_and_technicals(symbol, t_obj):
                         else:
                             last_reg_close = valid_closes[-1]
 
-            if last_reg_close == 0.0:
+            if last_reg_close is None:
                 alt_pc = get_previous_close(symbol)
                 if alt_pc:
-                    last_reg_close = float(alt_pc)
+                    last_reg_close = to_float(alt_pc)
 
             # --- Trend Score (Weighted — SMA200 cross is ±2) ---
             trend_score = 0
@@ -1932,7 +2092,7 @@ def update_history_and_technicals(symbol, t_obj):
                 trend_score += 1 if sma_20 > sma_50 else -1
             if sma_50 is not None and sma_200 is not None:
                 trend_score += 2 if sma_50 > sma_200 else -2  # Golden/Death cross weighted 2x
-            if sma_20 is not None:
+            if sma_20 is not None and last_close is not None:
                 trend_score += 1 if last_close > sma_20 else -1
 
             cache.technicals[symbol] = {
@@ -1944,7 +2104,7 @@ def update_history_and_technicals(symbol, t_obj):
                 "MACD_Signal": to_float(macd_signal_val),
                 "MACD_Hist": to_float(macd_hist_val),
                 "MACD_Slope": macd_slope_val,
-                "MACD_Status": ("BULLISH" if macd_hist_val > 0.001 else "BEARISH" if macd_hist_val < -0.001 else "NEUTRAL"),
+                "MACD_Status": macd_status_val,
                 "BB_Upper": to_float(bb_upper_val),
                 "BB_Lower": to_float(bb_lower_val),
                 "BB_Pct": to_float(bb_pct_val),
@@ -1954,7 +2114,7 @@ def update_history_and_technicals(symbol, t_obj):
                 "Trend_Score": int(trend_score),
                 "Last_Reg_Close": last_reg_close
             }
-            if last_reg_close > 0:
+            if last_reg_close is not None and last_reg_close > 0:
                 cache.regular_close[symbol] = last_reg_close
 
         except Exception as e:
@@ -1963,9 +2123,11 @@ def update_history_and_technicals(symbol, t_obj):
 
 
 def update_price_tick(symbol, t_obj, status, quote_data=None):
-    price = 0.0
+    price = None
     vol = 0
     used_batch = False
+    obs_time = None
+    price_source = None
 
     # --- SESSION TAG ---
     cache.session[symbol] = status
@@ -1987,69 +2149,91 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
 
     if quote_data:
         try:
-            pre_price = quote_data.get('preMarketPrice')
-            post_price = quote_data.get('postMarketPrice')
-            reg_price = quote_data.get('regularMarketPrice')
-            reg_open = quote_data.get('regularMarketOpen')
-            reg_high = quote_data.get('regularMarketDayHigh')
-            reg_low = quote_data.get('regularMarketDayLow') # For SSR trigger check
-            batch_prev_close = quote_data.get('regularMarketPreviousClose')
+            pre_price = to_float(quote_data.get('preMarketPrice'))
+            post_price = to_float(quote_data.get('postMarketPrice'))
+            reg_price = to_float(quote_data.get('regularMarketPrice'))
+            reg_open = to_float(quote_data.get('regularMarketOpen'))
+            reg_high = to_float(quote_data.get('regularMarketDayHigh'))
+            reg_low = to_float(quote_data.get('regularMarketDayLow')) # For SSR trigger check
+            batch_prev_close = to_float(quote_data.get('regularMarketPreviousClose'))
             vol = int(quote_data.get('regularMarketVolume', 0) or 0)
             pre_vol = int(quote_data.get('preMarketVolume', 0) or 0)
             post_vol = int(quote_data.get('postMarketVolume', 0) or 0)
             used_batch = True
-            if reg_open and float(reg_open) > 0:
-                cache.day_open[symbol] = float(reg_open)
-            if reg_high and float(reg_high) > 0:
-                cache.day_high[symbol] = float(reg_high)
-            if reg_low and float(reg_low) > 0:
-                cache.day_low[symbol] = float(reg_low)
-        except:
+
+            # Observation timestamp from batch quote:
+            raw_ts = None
+            if status == "PRE-MARKET":
+                raw_ts = quote_data.get('preMarketTime') or quote_data.get('regularMarketTime')
+            elif status in ("AFTER-HOURS", "CLOSED"):
+                raw_ts = quote_data.get('postMarketTime') or quote_data.get('regularMarketTime')
+            else:
+                raw_ts = quote_data.get('regularMarketTime')
+
+            if raw_ts is not None:
+                try:
+                    ny_tz = ZoneInfo("America/New_York")
+                    obs_time = datetime.fromtimestamp(int(raw_ts), ZoneInfo("UTC")).astimezone(ny_tz)
+                except Exception:
+                    obs_time = None
+
+            if reg_open and reg_open > 0:
+                cache.day_open[symbol] = reg_open
+            if reg_high and reg_high > 0:
+                cache.day_high[symbol] = reg_high
+            if reg_low and reg_low > 0:
+                cache.day_low[symbol] = reg_low
+        except Exception:
             pass
 
     # Attempt to fetch missing pre/post prices and day high/low from fast_info as a first-line fallback
     try:
         fi = t_obj.fast_info
         if not pre_price and getattr(fi, 'pre_market_price', None):
-            pre_price = float(fi.pre_market_price)
+            pre_price = to_float(getattr(fi, 'pre_market_price', None))
         if not post_price and getattr(fi, 'post_market_price', None):
-            post_price = float(fi.post_market_price)
+            post_price = to_float(getattr(fi, 'post_market_price', None))
         fi_open = getattr(fi, 'open', None) or getattr(fi, 'regular_market_open', None)
         fi_high = getattr(fi, 'day_high', None) or getattr(fi, 'regular_market_day_high', None)
         fi_low = getattr(fi, 'day_low', None) or getattr(fi, 'regular_market_day_low', None)
-        if fi_open and float(fi_open) > 0 and symbol not in cache.day_open:
-            cache.day_open[symbol] = float(fi_open)
-        if fi_high and float(fi_high) > 0 and symbol not in cache.day_high:
-            cache.day_high[symbol] = float(fi_high)
-        if fi_low and float(fi_low) > 0 and symbol not in cache.day_low:
-            cache.day_low[symbol] = float(fi_low)
-    except:
+        if fi_open and to_float(fi_open) is not None and to_float(fi_open) > 0 and symbol not in cache.day_open:
+            cache.day_open[symbol] = to_float(fi_open)
+        if fi_high and to_float(fi_high) is not None and to_float(fi_high) > 0 and symbol not in cache.day_high:
+            cache.day_high[symbol] = to_float(fi_high)
+        if fi_low and to_float(fi_low) is not None and to_float(fi_low) > 0 and symbol not in cache.day_low:
+            cache.day_low[symbol] = to_float(fi_low)
+    except Exception:
         pass
 
     # --- Session-aware price selection ---
-    if status == "PRE-MARKET" and pre_price:
-        price = float(pre_price)
-    elif status in ("AFTER-HOURS", "CLOSED") and post_price:
-        price = float(post_price)
-    elif reg_price:
-        price = float(reg_price)
+    if status == "PRE-MARKET" and pre_price and pre_price > 0:
+        price = pre_price
+        price_source = "BATCH_QUOTE"
+    elif status in ("AFTER-HOURS", "CLOSED") and post_price and post_price > 0:
+        price = post_price
+        price_source = "BATCH_QUOTE"
+    elif reg_price and reg_price > 0:
+        price = reg_price
+        price_source = "BATCH_QUOTE"
 
     # --- Fallbacks ---
     needs_pre_vol = (pre_vol == 0 and cache.pre_market_volume.get(symbol, 0) == 0)
     needs_post_vol = (status in ("AFTER-HOURS", "CLOSED") and post_vol == 0)
 
-    if price == 0 or needs_post_vol:
+    if (price is None or price <= 0) or needs_post_vol:
         now_ts = t_time.time()
         if symbol in cache.last_chart_fetch and (now_ts - cache.last_chart_fetch[symbol]) < 60:
             api_price, api_vol, api_pre_vol, api_post_vol = cache.chart_cache[symbol]
         else:
             api_price, api_vol, api_pre_vol, api_post_vol = get_live_chart_data(symbol, status)
-            if api_price > 0 or api_vol > 0 or api_pre_vol > 0 or api_post_vol > 0:
+            if (api_price is not None and api_price > 0) or api_vol > 0 or api_pre_vol > 0 or api_post_vol > 0:
                 cache.last_chart_fetch[symbol] = now_ts
                 cache.chart_cache[symbol] = (api_price, api_vol, api_pre_vol, api_post_vol)
 
-        if price == 0 and api_price > 0:
+        if (price is None or price <= 0) and api_price is not None and api_price > 0:
             price = api_price
+            price_source = "INTRADAY_CHART"
+            obs_time = cache.chart_obs_time.get(symbol)
         if vol == 0 and api_vol > 0:
             vol = api_vol
         
@@ -2072,10 +2256,11 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         if chart_pre_vol > 0:
             pre_vol = chart_pre_vol
 
-    if price == 0 and USE_FINNHUB:
+    if (price is None or price <= 0) and USE_FINNHUB:
         fh_c, fh_pc = get_finnhub_quote(symbol)
-        if fh_c:
+        if fh_c and fh_c > 0:
             price = fh_c
+            price_source = "FINNHUB"
 
     # --- Final fallback to fast_info ---
     try:
@@ -2084,14 +2269,23 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
             v_last = getattr(fi, 'last_volume', 0)
             v_avg = getattr(fi, 'three_month_average_volume', 0)
             vol = (v_last if v_last is not None else 0) or (v_avg if v_avg is not None else 0) or 0
-        if price == 0:
+        if price is None or price <= 0:
             if status == "PRE-MARKET" and getattr(fi, 'pre_market_price', None):
-                price = float(fi.pre_market_price)
-            elif status in ("AFTER-HOURS", "CLOSED" ) and getattr(fi, 'post_market_price', None):
-                price = float(fi.post_market_price)
+                fi_p = to_float(getattr(fi, 'pre_market_price', None))
+                if fi_p and fi_p > 0:
+                    price = fi_p
+                    price_source = "FAST_INFO"
+            elif status in ("AFTER-HOURS", "CLOSED") and getattr(fi, 'post_market_price', None):
+                fi_p = to_float(getattr(fi, 'post_market_price', None))
+                if fi_p and fi_p > 0:
+                    price = fi_p
+                    price_source = "FAST_INFO"
             elif getattr(fi, 'last_price', None):
-                price = float(fi.last_price)
-    except:
+                fi_p = to_float(getattr(fi, 'last_price', None))
+                if fi_p and fi_p > 0:
+                    price = fi_p
+                    price_source = "FAST_INFO"
+    except Exception:
         pass
 
     # --- Volume fallback ---
@@ -2106,8 +2300,35 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
     else:
         try:
             vol = int(vol)
-        except:
+        except Exception:
             vol = 0
+
+    # If all live fetch paths failed, preserve previously valid observation from cache without masquerading as current
+    if (price is None or price <= 0) and symbol in cache.prices and cache.prices[symbol] > 0:
+        price = cache.prices[symbol]
+        price_source = "CACHE_PREVIOUS"
+        prev_obs_str = cache.observation_times.get(symbol)
+        if prev_obs_str:
+            try:
+                obs_time = datetime.fromisoformat(prev_obs_str)
+            except Exception:
+                obs_time = None
+
+    # --- Freshness & Provenance Evaluation ---
+    ny_tz = ZoneInfo("America/New_York")
+    now_ny = datetime.now(ny_tz)
+    validity, freshness = determine_market_freshness(
+        price=price,
+        obs_time=obs_time,
+        current_ny=now_ny,
+        session_status=status,
+        source=price_source
+    )
+    cache.price_sources[symbol] = price_source
+    cache.observation_times[symbol] = obs_time.isoformat() if obs_time else None
+    cache.retrieval_times[symbol] = now_ny.isoformat()
+    cache.price_validity[symbol] = validity
+    cache.freshness[symbol] = freshness
 
     # --- Cache updates ---
     if vol > 0:
@@ -2118,7 +2339,7 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
     if post_vol > 0:
         cache.after_hours_volume[symbol] = post_vol
 
-    if price > 0:
+    if price is not None and price > 0:
         cache.prices[symbol] = price
 
         if status == "PRE-MARKET" and (pre_price is None or pre_price == 0):
@@ -2126,55 +2347,48 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
         elif status in ("AFTER-HOURS", "CLOSED") and (post_price is None or post_price == 0):
             post_price = price
 
-        # Fallback to Finnhub quote only if price is missing
-        if price == 0 and USE_FINNHUB and FINNHUB_API_KEY and status != 'PRE-MARKET':
-            fh_c, fh_pc = get_finnhub_quote(symbol)
-            if fh_c and fh_c > 0:
-                price = fh_c
-
-        reg_close = 0.0
+        reg_close = None
+        techs = cache.technicals.get(symbol, {})
         if status == "PRE-MARKET":
-            # In PRE-MARKET, quote_data['regularMarketPrice'] is the prior session's official close (yesterday).
-            # quote_data['regularMarketPreviousClose'] is the session BEFORE that (2 days ago).
-            if reg_price and float(reg_price) > 0:
-                reg_close = float(reg_price)
-            elif techs.get("Last_Reg_Close", 0.0) > 0:
-                reg_close = float(techs.get("Last_Reg_Close", 0.0))
+            if reg_price and reg_price > 0:
+                reg_close = reg_price
+            elif to_float(techs.get("Last_Reg_Close")) is not None and to_float(techs.get("Last_Reg_Close")) > 0:
+                reg_close = to_float(techs.get("Last_Reg_Close"))
             elif hasattr(t_obj, 'fast_info') and getattr(t_obj.fast_info, 'last_price', None):
                 try:
-                    fi_last = float(t_obj.fast_info.last_price)
-                    if fi_last > 0:
+                    fi_last = to_float(t_obj.fast_info.last_price)
+                    if fi_last is not None and fi_last > 0:
                         reg_close = fi_last
-                except:
+                except Exception:
                     pass
-            elif batch_prev_close and float(batch_prev_close) > 0:
-                reg_close = float(batch_prev_close)
+            elif batch_prev_close and batch_prev_close > 0:
+                reg_close = batch_prev_close
         else:
-            if batch_prev_close and float(batch_prev_close) > 0:
-                reg_close = float(batch_prev_close)
+            if batch_prev_close and batch_prev_close > 0:
+                reg_close = batch_prev_close
             elif hasattr(t_obj, 'fast_info'):
                 try:
-                    reg_close = float(getattr(t_obj.fast_info, 'regular_market_previous_close', None) or getattr(t_obj.fast_info, 'previous_close', 0.0))
-                except:
+                    reg_close = to_float(getattr(t_obj.fast_info, 'regular_market_previous_close', None) or getattr(t_obj.fast_info, 'previous_close', None))
+                except Exception:
                     pass
-            elif techs.get("Last_Reg_Close", 0.0) > 0:
-                reg_close = float(techs.get("Last_Reg_Close", 0.0))
+            elif to_float(techs.get("Last_Reg_Close")) is not None and to_float(techs.get("Last_Reg_Close")) > 0:
+                reg_close = to_float(techs.get("Last_Reg_Close"))
             else:
                 alt_pc = get_previous_close(symbol)
-                if alt_pc and float(alt_pc) > 0:
-                    reg_close = float(alt_pc)
+                if alt_pc and to_float(alt_pc) is not None and to_float(alt_pc) > 0:
+                    reg_close = to_float(alt_pc)
 
-        if reg_close > 0:
+        if reg_close is not None and reg_close > 0:
             cache.regular_close[symbol] = reg_close
 
         # --- Pre-Market Price Resolution ---
-        if pre_price is not None and float(pre_price) > 0:
-            cache.pre_market_price[symbol] = float(pre_price)
+        if pre_price is not None and pre_price > 0:
+            cache.pre_market_price[symbol] = pre_price
         elif status == "PRE-MARKET":
-            cache.pre_market_price[symbol] = reg_close if reg_close > 0 else price
+            cache.pre_market_price[symbol] = reg_close if (reg_close and reg_close > 0) else price
 
         # --- Session-aware returns ---
-        if reg_close > 0:
+        if reg_close is not None and reg_close > 0:
             if status == "PRE-MARKET":
                 effective_pre = float(cache.pre_market_price.get(symbol, price))
                 pre_chg_pct_feed = quote_data.get('preMarketChangePercent') if quote_data else None
@@ -2214,13 +2428,11 @@ def update_price_tick(symbol, t_obj, status, quote_data=None):
                 if drop_from_close <= -10.0:
                     cache.ssr_active[symbol] = True
                 else:
-                    # Note: Once triggered, SSR usually lasts today + tomorrow.
-                    # For this real-time tracker, we flag if the day's low hit the threshold.
                     cache.ssr_active[symbol] = cache.ssr_active.get(symbol, False)
 
         if post_price is not None:
             cache.after_hours_price[symbol] = post_price
-            if reg_close > 0:
+            if reg_close and reg_close > 0:
                 cache.after_hours_change[symbol] = ((post_price - reg_close) / reg_close) * 100
 
         # --- Overnight return (non-compounded) ---
@@ -2277,29 +2489,32 @@ def calculate_rvol(symbol):
 
 
 def distance_from_vwap(symbol):
-    p = cache.prices.get(symbol, 0)
-    v = cache.vwaps.get(symbol, 0)
+    p = cache.prices.get(symbol)
+    v = cache.vwaps.get(symbol)
 
-    if p == 0 or v == 0:
+    if p is None or v is None or p <= 0 or v <= 0:
         return 0.0
 
     return ((p - v) / v) * 100.0
 
 
 def classify_signal(symbol):
+    p = cache.prices.get(symbol)
+    if p is None or p <= 0 or cache.price_validity.get(symbol) in ("INVALID", "UNAVAILABLE"):
+        return "NEUTRAL"
     t = cache.technicals.get(symbol, {})
-    rsi = t.get("RSI", 50)
-    atr = t.get("ATR_Pct", 0)
+    rsi = t.get("RSI")
+    atr = t.get("ATR_Pct") or 0.0
     rvol = calculate_rvol(symbol)
     dist_vwap = distance_from_vwap(symbol)
 
-    if rvol > 2 and dist_vwap > atr:
+    if rvol > 2 and atr > 0 and dist_vwap > atr:
         return "BREAKOUT"
-    if rvol > 2 and dist_vwap < -atr:
+    if rvol > 2 and atr > 0 and dist_vwap < -atr:
         return "BREAKDOWN"
-    if rsi < 30:
+    if rsi is not None and rsi < 30:
         return "OVERSOLD"
-    if rsi > 70:
+    if rsi is not None and rsi > 70:
         return "OVERBOUGHT"
     if abs(dist_vwap) < 0.2:
         return "VWAP PIN"
@@ -2308,10 +2523,10 @@ def classify_signal(symbol):
 
 def calculate_score(symbol):
     t = cache.technicals.get(symbol, {})
-    p = cache.prices.get(symbol, 0)
+    p = cache.prices.get(symbol)
     v = cache.vwaps.get(symbol, 0)
 
-    if p == 0 or not t:
+    if p is None or p <= 0 or not t or cache.price_validity.get(symbol) in ("INVALID", "UNAVAILABLE"):
         return 0, ""
 
     score = 0
@@ -3136,15 +3351,15 @@ def run_daemon():
                             'strike_oi_magnet': 0.0
                         }
 
-                p = float(cache.prices.get(sym, 0))
-                gap = float(cache.gaps.get(sym, 0))
-                session_change = float(cache.session_change.get(sym, 0))
+                p = cache.prices.get(sym)
+                gap = float(cache.gaps.get(sym, 0.0))
+                session_change = float(cache.session_change.get(sym, 0.0))
                 vol = cache.volumes.get(sym, 0)
-                vwap = cache.vwaps.get(sym, 0)
+                vwap = cache.vwaps.get(sym, 0.0)
                 techs = cache.technicals.get(sym, {})
                 score, note = calculate_score(sym)
 
-                if p == 0:
+                if p is None or p <= 0 or cache.price_validity.get(sym) in ("INVALID", "UNAVAILABLE"):
                     print(f"{sym:<8} {RED}NO DATA{RESET}")
                     data.append({
                         "ticker": sym,
@@ -3152,10 +3367,15 @@ def run_daemon():
                         "session_liquidity": "LOW",
                         "status": "NO_DATA",
                         "ssr_active": False,
-                        "price": 0.0,
-                        "regular_close": 0.0,
-                        "pre_market_price": 0.0,
-                        "after_hours_price": 0.0,
+                        "price": None,
+                        "price_validity": cache.price_validity.get(sym, "UNAVAILABLE"),
+                        "freshness": cache.freshness.get(sym, "UNAVAILABLE"),
+                        "price_source": cache.price_sources.get(sym),
+                        "observation_time": cache.observation_times.get(sym),
+                        "retrieval_time": cache.retrieval_times.get(sym),
+                        "regular_close": cache.regular_close.get(sym),
+                        "pre_market_price": None,
+                        "after_hours_price": None,
                         "session_change_pct": 0.0,
                         "gap_percent": 0.0,
                         "pre_market_change_percent": 0.0,
@@ -3317,8 +3537,8 @@ def run_daemon():
                     is_scout = False
                 else:
                     is_scout = sym in ACTIVE_SCOUT_TICKERS and sym not in held_and_watched
-                effective_reg_close = float(cache.regular_close.get(sym) or techs.get("Last_Reg_Close", 0.0))
-                effective_pre_price = float(cache.pre_market_price.get(sym, 0.0))
+                effective_reg_close = to_float(cache.regular_close.get(sym) or techs.get("Last_Reg_Close"))
+                effective_pre_price = to_float(cache.pre_market_price.get(sym))
                 item_dict = {
                     "ticker": sym,
                     "session": cache.session.get(sym),
@@ -3328,15 +3548,20 @@ def run_daemon():
                     
                     # Prices
                     "price": float(p),
+                    "price_validity": cache.price_validity.get(sym, "VALID"),
+                    "freshness": cache.freshness.get(sym, "CURRENT"),
+                    "price_source": cache.price_sources.get(sym, "UNKNOWN"),
+                    "observation_time": cache.observation_times.get(sym),
+                    "retrieval_time": cache.retrieval_times.get(sym),
                     "regular_close": effective_reg_close,
                     "pre_market_price": effective_pre_price,
-                    "after_hours_price": float(cache.after_hours_price.get(sym, 0.0)),
+                    "after_hours_price": to_float(cache.after_hours_price.get(sym)),
 
                     # Returns
                     # session_change_pct: required by ENH_FIN_02 Protective Exit Override logic
-                    "session_change_pct": round(((float(p) - effective_reg_close) / effective_reg_close) * 100, 2) if effective_reg_close > 0 else float(cache.session_change.get(sym, 0.0)),
-                    "gap_percent": round(((effective_pre_price - effective_reg_close) / effective_reg_close) * 100, 2) if (status == "PRE-MARKET" and effective_reg_close > 0 and effective_pre_price > 0) else float(gap),
-                    "pre_market_change_percent": round(((effective_pre_price - effective_reg_close) / effective_reg_close) * 100, 2) if (effective_reg_close > 0 and effective_pre_price > 0) else float(cache.pre_market_change.get(sym, 0.0)),
+                    "session_change_pct": round(((float(p) - effective_reg_close) / effective_reg_close) * 100, 2) if (effective_reg_close and effective_reg_close > 0) else float(cache.session_change.get(sym, 0.0)),
+                    "gap_percent": round(((effective_pre_price - effective_reg_close) / effective_reg_close) * 100, 2) if (status == "PRE-MARKET" and effective_reg_close and effective_reg_close > 0 and effective_pre_price and effective_pre_price > 0) else float(gap),
+                    "pre_market_change_percent": round(((effective_pre_price - effective_reg_close) / effective_reg_close) * 100, 2) if (effective_reg_close and effective_reg_close > 0 and effective_pre_price and effective_pre_price > 0) else float(cache.pre_market_change.get(sym, 0.0)),
                     "after_hours_change_percent": float(cache.after_hours_change.get(sym, 0.0)),
                     "overnight_return_percent": float(cache.overnight_return.get(sym, 0.0)),
 
