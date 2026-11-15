@@ -41,6 +41,10 @@ The governance hierarchy is structured into three strictly isolated tiers:
    - `.agents/AGENTS.md` and remaining engineering protocols (`.agents/protocols/01-agent-orchestration.md`, `02`, `04`, `05`).
    - Domain-specific role definitions (`.agents/agents/` for engineering, `engine_instructions/` for trading).
    - [`INSTRUCTIONS.md`](../INSTRUCTIONS.md) (subordinate engineering execution guide; zero trading or financial authority) and approved session task prompts.
+3. **Operating Model (Native Orchestrator):**
+   - **Gemini 4 Argon (Lead Architect, Planner & Independent Reviewer):** Performs read-only baseline inspection (`git rev-parse HEAD`, `git status --short`, `git diff`), authors compact delta-only stage prompts referencing `@INSTRUCTIONS.md`, independently audits Hydrogen's `git diff` and test results, and issues formal acceptance verdicts under the **Two-Pass Acceptance Cap** (maximum one independent Argon audit and at most one `.1` remediation pass per stage/sub-stage for concrete runtime, security, or data-integrity defects).
+   - **Gemini 4 Hydrogen (Bounded Implementation & Testing Worker):** Modifies ONLY explicitly authorised files, executes scope-proportional `unittest` suites (`Protocol 05`), delivers completion reports in chat only (zero report bloat in `docs/engineering/`), never expands scope, never self-approves work, and never executes Git write commands.
+   - **Human Owner:** Holds exclusive authority over stage authorisations, Protected Financial Assets (`Protocol 06`), and all Git write operations.
 
 ---
 
@@ -68,24 +72,24 @@ All engineering agent definitions are codified under `.agents/agents/`:
 
 ---
 
-## 4. Development & Review Lifecycle
+## 4. Development & Review Lifecycle (Two-Pass Acceptance Cap)
 
 Every code change must traverse the fail-closed lifecycle:
 
 ```
-[Approved Task / Scope]
+[Approved Delta-Only Stage Scope]
           │
           ▼
-   [Implementation] ◄─── Restricted to approved scope; automated tests written concurrently
+   [Hydrogen Implementation] ◄─── Restricted to approved scope under @INSTRUCTIONS.md; tests written concurrently
           │
           ▼
- [Automated Verification] ◄─── Satisfies risk-based test plan (Protocol 05); zero regressions; pip check; py_compile
+ [Scope-Proportional Verification] ◄─── Satisfies Protocol 05 (targeted gates, compileall, pip check; full discover at closeout)
           │
           ▼
- [Independent Code Review] ◄─── Designated read-only reviewer (never the implementer) audits diff & evidence (Protocol 04)
+ [Argon Independent Review] ◄─── Read-only diff & evidence audit (Protocol 04); max 1 remediation pass (.1) for concrete defects
           │
           ▼
-   [Human Sign-Off] ◄─── Final inspection; human performs git commit & push and authorises next stage
+   [Human Sign-Off] ◄─── Reports delivered in chat only; human performs git commit & push and authorises next stage
 ```
 
-**Fail-Closed Rule:** If required automated tests fail, if unresolved relevant defects remain, if review evidence is incomplete, if unapproved files or Protected Financial Assets (`Protocol 06`) are touched, if permitted blockers or deferrals lack explicit documentation and justification under Protocol 05, or if an agent attempts to self-approve or auto-advance stages, the task is marked `REJECTED` and execution terminates immediately.
+**Fail-Closed Rule:** If required automated tests fail, if unresolved relevant defects remain, if review evidence is incomplete, if unapproved files or Protected Financial Assets (`Protocol 06`) are touched, if permitted blockers or deferrals lack explicit documentation and justification under Protocol 05, if stage reports are written to `docs/engineering/` without explicit authorisation, or if an agent attempts to self-approve or auto-advance stages, the task is marked `REJECTED` and execution terminates immediately.

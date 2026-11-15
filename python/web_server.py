@@ -294,25 +294,25 @@ neutral_structuralist = framework.create_agent_tool(
     agent_tools=[tools.perform_web_forensic_search]
 )
 
-# 2. Create the Council Dispatcher
+# 2. Create the Council Dispatcher (Strictly Read-Only Deliberative Agents; Stage 3.3.1)
+# Mutating / state-routing agents (State Validation Router, Context Engine, Post-Trade Review)
+# remain available strictly via sequential delegation in terminal_tools below.
 council_members = {
     "ask_macro_sentinel": macro_sentinel,
     "ask_research_engine": research_engine,
     "ask_macro_narrative_engine": macro_narrative_engine,
     "ask_data_analyst": data_analyst,
-    "ask_state_validation_router": state_validation_router,
     "ask_rule_enforcer_engine": rule_enforcer_engine,
     "ask_execution_engine": execution,
     "ask_gex_engine": gex_engine,
     "ask_sentiment_engine": sentiment_engine,
     "ask_structural_engine": structural_engine,
-    "ask_context_engine": context_engine,
     "ask_bullish_advocate": bullish_advocate,
     "ask_red_team_pessimist": red_team_pessimist,
     "ask_neutral_structuralist": neutral_structuralist,
     "ask_technical_validator": technical_validator,
     "ask_regime_engine": regime_engine,
-    "ask_strategy_engine": strategy_engine
+    "ask_strategy_engine": strategy_engine,
 }
 ask_council = framework.create_parallel_council_tool(council_members)
 

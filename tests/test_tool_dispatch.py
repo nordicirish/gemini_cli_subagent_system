@@ -4,6 +4,7 @@ and Bounded Multi-Turn Subagent Tool Execution (R7).
 Governed by Stage 1.1 (R1, R7), Stage 1 Section 6.2, Section 3.4, and Protocol 03.
 """
 
+import json
 import os
 import sys
 import tempfile
@@ -14,7 +15,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 
 from tool_dispatcher import ToolDispatcher, MAX_TOOL_TURNS, GLOBAL_TOOL_DISPATCHER
-from tool_registry import ToolRegistry
+from tool_registry import ToolRegistry, GLOBAL_TOOL_REGISTRY, execution_role_context, get_active_caller_role
 from audit_logger import AuditLogger
 from agent_framework import (
     AntigravityAgentRunner,
@@ -33,6 +34,7 @@ class MockPartFactory:
 
 class TestToolDispatcher(unittest.TestCase):
     def setUp(self):
+        self._saved_global_registry_tools = dict(GLOBAL_TOOL_REGISTRY._tools)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.audit_log = AuditLogger(log_path=os.path.join(self.temp_dir.name, "test_audit.jsonl"))
         self._orig_global_audit = GLOBAL_TOOL_DISPATCHER.audit_logger
@@ -65,6 +67,8 @@ class TestToolDispatcher(unittest.TestCase):
         )
 
     def tearDown(self):
+        GLOBAL_TOOL_REGISTRY._tools.clear()
+        GLOBAL_TOOL_REGISTRY._tools.update(self._saved_global_registry_tools)
         GLOBAL_TOOL_DISPATCHER.audit_logger = self._orig_global_audit
         self.temp_dir.cleanup()
 
@@ -243,6 +247,96 @@ class TestToolDispatcher(unittest.TestCase):
         self.assertEqual(len(received_prompts), 2)
         self.assertIn("not in the assigned toolset", received_prompts[1])
         self.assertIn("Handled tool denial cleanly.", result)
+
+    # --- Stage 3.3.1: Parallel Council & Sequential Specialist Dispatch Parity ---
+
+    def test_stage_331_ask_council_dispatch_and_mutating_agent_rejection(self):
+        """GLOBAL_TOOL_DISPATCHER dispatches read-only ask_council batches and rejects mutating parallel agents while preserving sequential router delegation."""
+        framework = AgentFramework()
+        calls = {"bull": 0, "red": 0, "router": 0}
+
+        def mock_bull(query: str) -> str:
+            calls["bull"] += 1
+            return f"BULL[{get_active_caller_role()}]: {query}"
+
+        mock_bull._agent_role = "Bullish Advocate"
+
+        def mock_red(query: str) -> str:
+            calls["red"] += 1
+            return f"RED[{get_active_caller_role()}]: {query}"
+
+        mock_red._agent_role = "Red Team Pessimist"
+
+        with patch.object(framework, "load_system_instruction", return_value="Router instruction"):
+            seq_router = framework.create_agent_tool(
+                name="State Validation Router",
+                file_path="engine_instructions/state_validation_router.md",
+                mode="PRO",
+                agent_tools=[tools.read_ssot, tools.update_ssot, tools.get_market_data],
+            )
+
+        framework.create_parallel_council_tool({
+            "ask_bullish_advocate": mock_bull,
+            "ask_red_team_pessimist": mock_red,
+            "ask_state_validation_router": seq_router,
+        })
+
+        # 1. Valid parallel read-only dispatch via GLOBAL_TOOL_DISPATCHER
+        ok_res = GLOBAL_TOOL_DISPATCHER.dispatch_single_tool(
+            tool_name="ask_council",
+            args={
+                "queries_json": json.dumps({
+                    "bullish_advocate": "Bull case SPY",
+                    "red_team_pessimist": "Bear case SPY",
+                })
+            },
+            agent_role="Terminal Orchestrator",
+        )
+        self.assertTrue(ok_res.success, f"ask_council dispatch failed: {ok_res.error}")
+        ok_payload = json.loads(ok_res.result)
+        self.assertIn("BULL[Bullish Advocate]", ok_payload["bullish_advocate"])
+        self.assertIn("RED[Red Team Pessimist]", ok_payload["red_team_pessimist"])
+        self.assertEqual(calls["bull"], 1)
+        self.assertEqual(calls["red"], 1)
+
+        # 2. Batch containing mutating agent is rejected fail-closed before running siblings
+        bad_res = GLOBAL_TOOL_DISPATCHER.dispatch_single_tool(
+            tool_name="ask_council",
+            args={
+                "queries_json": json.dumps({
+                    "bullish_advocate": "Bull case SPY",
+                    "state_validation_router": "Update SSoT",
+                })
+            },
+            agent_role="Terminal Orchestrator",
+        )
+        self.assertTrue(bad_res.success)
+        bad_payload = json.loads(bad_res.result)
+        self.assertIn("error", bad_payload)
+        self.assertEqual(calls["bull"], 1)
+
+        # 3. Non-orchestrator role is denied calling ask_council
+        denied = GLOBAL_TOOL_DISPATCHER.dispatch_single_tool(
+            tool_name="ask_council",
+            args={"queries_json": json.dumps({"bullish_advocate": "Test"})},
+            agent_role="Data Analyst",
+        )
+        self.assertFalse(denied.success)
+        self.assertIn("not authorized", denied.error.lower())
+
+        # 4. Sequential specialist invocation of ask_state_validation_router remains functional for Terminal Orchestrator
+        with patch.object(
+            framework,
+            "generate_response_with_fallback",
+            return_value=AntigravityResponse("Sequential router output"),
+        ):
+            seq_res = GLOBAL_TOOL_DISPATCHER.dispatch_single_tool(
+                tool_name="ask_state_validation_router",
+                args={"query": "Compile final EXECUTION_PAYLOAD"},
+                agent_role="Terminal Orchestrator",
+            )
+        self.assertTrue(seq_res.success, f"Sequential router dispatch failed: {seq_res.error}")
+        self.assertIn("Sequential router output", seq_res.result)
 
 
 if __name__ == "__main__":

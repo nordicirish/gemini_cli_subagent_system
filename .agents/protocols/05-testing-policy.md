@@ -88,26 +88,23 @@ Verification is partitioned into two distinct execution tiers:
 Every implementation task must follow a test execution plan proportionate to its scope and risk tier:
 
 1. **Baseline Gate (Pre-Edit):**
-   - Run only the targeted test module(s) relevant to files in the authorised scope.
+   - Verify `git rev-parse HEAD` and `git status --short`, and run only the targeted `unittest` module(s) relevant to files in the authorised scope before editing.
    - Do not mandate running `python -m unittest discover tests` as a routine pre-edit baseline.
    - Do not run repository-wide discovery twice per stage.
    - Do not execute unrelated extended suites as a routine baseline.
-   - Record exact commands, test counts, durations, and outcomes.
+   - Record exact commands, test counts, durations, and outcomes in the chat report.
    - If a targeted baseline reveals a relevant failure, capture diagnostic evidence, classify the failure, and halt immediately if safe progress is blocked.
-2. **Post-Edit Gate (Scope-Based Selection):**
-   - Run `tests/test_database_*.py` only when `python/database/**` is in the authorised implementation scope.
-   - Run `tests/test_market_data_*.py` and `tests/test_heavy_market_data_separation.py` only when `python/fetch_stocks.py` is in the authorised implementation scope.
-   - Run `RUN_EXTENDED_TESTS=1` only when backup concurrency, offline migration, database projections, or subprocess lifecycle code is explicitly modified.
-   - Otherwise run only targeted unit and regression tests relevant to authorised changes.
-   - Compilation checks (`python -m compileall -q python tests`) and dependency integrity checks (`python -m pip check`) remain applicable where relevant.
+2. **Post-Edit Gate (Scope-Proportional Selection):**
+   - Run modified-module test suites plus the fast core gate: `python -m unittest tests.test_investment_regression tests.test_permissions tests.test_tool_dispatch`.
+   - Run `tests.test_database_*` only when `python/database/**` is in the authorised implementation scope.
+   - Run `tests.test_market_data_*` and `tests.test_heavy_market_data_separation` only when `python/fetch_stocks.py` or `python/background_intelligence.py` is in the authorised implementation scope.
+   - Heavy stress/timing suites (`test_database_backup_concurrency`, `test_database_migration`, `test_database_projections`, and `TestSubprocessLifecycleAndHardening`) remain opt-in via `RUN_EXTENDED_TESTS=1`, executed only when backup concurrency, offline migration, database projections, or subprocess lifecycle code is explicitly modified.
+   - Preserve the owner-authorised intermittent classification for `tests.test_background_intelligence.TestSubprocessLifecycleAndHardening.test_run_prompt_timeout_triggers_cleanup_and_preserves_exception` (*Intermittent Contention / Timing*) without weakening or deleting the test.
+   - Compilation checks (`python -m compileall -q python tests`) and dependency integrity checks (`python -m pip check`) remain mandatory post-edit gates.
    - Never treat an omitted test as passed. Always report why it was not run.
-3. **Full-Suite Testing:** Mandatory for:
-   - Cross-cutting architectural refactoring.
-   - Financial state, trading logic, or indicator calculation changes.
-   - Security, permission, and authorization boundary changes.
-   - Concurrency, locking, or background coordinator modifications.
-   - Final remediation turns prior to stage sign-off.
-   - Standard full-suite testing executes ordinary discovery with `RUN_EXTENDED_TESTS` unset, invoking the extended tier only if extended functionality is within the authorised scope.
+3. **Final Stage Closeout & Full-Suite Testing:**
+   - Standard full-suite execution (`python -m unittest discover tests` with `RUN_EXTENDED_TESTS` unset, plus `python -m compileall -q python tests` and `python -m pip check`) is reserved for the final acceptance gate of a major stage closeout (invoking `RUN_EXTENDED_TESTS=1` only if extended domains were modified).
+   - Incremental sub-stages rely on Scope-Proportional Testing (Items 1 and 2) to eliminate redundant repository-wide test runs.
 4. **Isolated Low-Risk Changes:** Isolated documentation, UI formatting, or leaf-node bug fixes do not require full-suite execution unless specified by repository instructions or the authorized task prompt.
 5. **Transparency:** Never silently skip a required test. Always report exact test commands, tests executed, tests omitted, and the reasons.
 6. **Limits of Testing:** A passing test suite is necessary but never sufficient; it does not replace independent source-code review or governance compliance verification.
