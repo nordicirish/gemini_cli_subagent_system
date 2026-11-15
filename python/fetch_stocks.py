@@ -2122,8 +2122,7 @@ def _acquire_live_chart_observations_raw(symbol: str, status: str) -> dict:
         def _make_vol_obs(has_bar: bool, total_val: int, pos_ts: Any, valid_ts: Any) -> Optional[TimestampedValue]:
             if not has_bar:
                 return None
-            chosen_ts = pos_ts if pos_ts is not None else valid_ts
-            chosen_iso = _epoch_to_utc_iso8601(chosen_ts)
+            chosen_iso = _epoch_to_utc_iso8601(valid_ts)
             if chosen_iso is None:
                 return None
             return TimestampedValue(value=int(total_val), obs_time=chosen_iso, source="INTRADAY_CHART")
@@ -3391,15 +3390,19 @@ def _acquire_symbol_fallback_raw(
         "chart_obs_utc_iso": None,
         "legacy_tuple": (None, 0, 0, 0, None),
     }
+    chart_retrieval_time: Optional[float] = None
     if fetch_chart:
+        chart_retrieval_time = t_time.time()
         chart_obs = _acquire_live_chart_observations_raw(sym_clean, clean_status)
 
     if cancel_check and cancel_check():
         raise RuntimeError("Operation cancelled during fallback acquisition")
 
     premarket_vol_obs: Optional[PremarketVolumeObservation] = None
+    premarket_retrieval_time: Optional[float] = None
     if fetch_premarket_vol or MARKET_METRIC_PREMARKET_VOLUME in target_metrics:
         if fetch_premarket_vol:
+            premarket_retrieval_time = t_time.time()
             pm_res = get_premarket_volume_chart(sym_clean)
             if isinstance(pm_res, PremarketVolumeObservation):
                 premarket_vol_obs = pm_res
@@ -3432,13 +3435,24 @@ def _acquire_symbol_fallback_raw(
 
     child_items: List[ChildObservedResult] = []
     chart_cache_meta = None
-    if fetch_chart and any(
-        chart_obs.get(k) is not None
-        for k in ("price", "session_volume", "premarket_volume", "after_hours_volume")
+    if (
+        fetch_chart
+        and chart_retrieval_time is not None
+        and any(
+            chart_obs.get(k) is not None
+            for k in ("price", "session_volume", "premarket_volume", "after_hours_volume")
+        )
     ):
         chart_cache_meta = {
-            "legacy_tuple": chart_obs.get("legacy_tuple"),
-            "chart_obs_utc_iso": chart_obs.get("chart_obs_utc_iso"),
+            "tuple": chart_obs.get("legacy_tuple"),
+            "ts": float(chart_retrieval_time),
+        }
+
+    premarket_vol_cache_meta = None
+    if premarket_vol_obs is not None and premarket_retrieval_time is not None:
+        premarket_vol_cache_meta = {
+            "value": int(premarket_vol_obs.value),
+            "ts": float(premarket_retrieval_time),
         }
 
     if MARKET_METRIC_QUOTE in target_metrics:
@@ -3457,7 +3471,7 @@ def _acquire_symbol_fallback_raw(
                 q_payload["pre_market_price"] = float(chosen_price_obs.value)
             elif clean_status in ("AFTER-HOURS", "CLOSED"):
                 q_payload["after_hours_price"] = float(chosen_price_obs.value)
-            if chart_cache_meta is not None:
+            if chart_cache_meta is not None and chosen_price_obs is chart_price_obs:
                 q_payload["chart_cache_meta"] = chart_cache_meta
             child_items.append(
                 ChildObservedResult(
@@ -3483,15 +3497,18 @@ def _acquire_symbol_fallback_raw(
         sv_key = _metric_work_key(MARKET_METRIC_SESSION_VOLUME, sym_clean)
         sv_obs: Optional[TimestampedValue] = chart_obs.get("session_volume")
         if sv_obs is not None:
+            sv_payload: Dict[str, Any] = {
+                "kind": "metric",
+                "metric": MARKET_METRIC_SESSION_VOLUME,
+                "symbol": sym_clean,
+                "value": int(sv_obs.value),
+            }
+            if chart_cache_meta is not None:
+                sv_payload["chart_cache_meta"] = chart_cache_meta
             child_items.append(
                 ChildObservedResult(
                     key=sv_key,
-                    data={
-                        "kind": "metric",
-                        "metric": MARKET_METRIC_SESSION_VOLUME,
-                        "symbol": sym_clean,
-                        "value": int(sv_obs.value),
-                    },
+                    data=sv_payload,
                     obs_time=sv_obs.obs_time,
                     error=None,
                     provenance=MarketDataProvenance(ObservationKind.INSTANT, sv_obs.source),
@@ -3511,16 +3528,19 @@ def _acquire_symbol_fallback_raw(
     if MARKET_METRIC_PREMARKET_VOLUME in target_metrics:
         pv_key = _metric_work_key(MARKET_METRIC_PREMARKET_VOLUME, sym_clean)
         if premarket_vol_obs is not None:
+            pv_payload: Dict[str, Any] = {
+                "kind": "metric",
+                "metric": MARKET_METRIC_PREMARKET_VOLUME,
+                "symbol": sym_clean,
+                "value": int(premarket_vol_obs.value),
+                "effective_session_date": premarket_vol_obs.effective_session_date,
+            }
+            if premarket_vol_cache_meta is not None:
+                pv_payload["premarket_vol_cache_meta"] = premarket_vol_cache_meta
             child_items.append(
                 ChildObservedResult(
                     key=pv_key,
-                    data={
-                        "kind": "metric",
-                        "metric": MARKET_METRIC_PREMARKET_VOLUME,
-                        "symbol": sym_clean,
-                        "value": int(premarket_vol_obs.value),
-                        "effective_session_date": premarket_vol_obs.effective_session_date,
-                    },
+                    data=pv_payload,
                     obs_time=premarket_vol_obs.obs_time,
                     error=None,
                     provenance=MarketDataProvenance(ObservationKind.INSTANT, premarket_vol_obs.source),
@@ -3529,15 +3549,18 @@ def _acquire_symbol_fallback_raw(
         else:
             chart_pre_obs: Optional[TimestampedValue] = chart_obs.get("premarket_volume")
             if chart_pre_obs is not None:
+                cpv_payload: Dict[str, Any] = {
+                    "kind": "metric",
+                    "metric": MARKET_METRIC_PREMARKET_VOLUME,
+                    "symbol": sym_clean,
+                    "value": int(chart_pre_obs.value),
+                }
+                if chart_cache_meta is not None:
+                    cpv_payload["chart_cache_meta"] = chart_cache_meta
                 child_items.append(
                     ChildObservedResult(
                         key=pv_key,
-                        data={
-                            "kind": "metric",
-                            "metric": MARKET_METRIC_PREMARKET_VOLUME,
-                            "symbol": sym_clean,
-                            "value": int(chart_pre_obs.value),
-                        },
+                        data=cpv_payload,
                         obs_time=chart_pre_obs.obs_time,
                         error=None,
                         provenance=MarketDataProvenance(ObservationKind.INSTANT, chart_pre_obs.source),
@@ -4163,21 +4186,129 @@ def _build_quote_cache_candidate(
     return updates, meta
 
 
-def _publish_quote_cache_candidate(symbol: str, candidate: Dict[str, Any]) -> None:
+def _publish_market_data_candidate(
+    symbol: str,
+    candidate: Dict[str, Any],
+    provenance: Optional[Tuple[str, Dict[str, Any]]] = None,
+) -> None:
     """
-    Commits a fully validated per-symbol candidate dictionary to MarketDataCache in one step.
-    Executed only on the coordinating thread.
+    Commits a fully validated per-symbol candidate dictionary and optional provenance entry
+    to MarketDataCache as an all-or-nothing transaction on the coordinating thread.
+    If any assignment fails, all mutations are rolled back to their exact prior state.
     """
     if not isinstance(candidate, dict):
-        raise ValueError(f"Invalid quote cache candidate for {symbol}")
-    target_dicts = {}
-    for attr in candidate:
+        raise ValueError(f"Invalid cache candidate for {symbol}: {type(candidate)}")
+    if not isinstance(symbol, str) or not symbol.strip():
+        raise ValueError(f"Invalid symbol for cache publication: {symbol!r}")
+
+    sym = symbol.strip().upper()
+
+    # 1. Validate every target mapping before beginning publication
+    target_mappings: List[Tuple[str, dict, Any]] = []
+    for attr, val in candidate.items():
         mapping = getattr(cache, attr, None)
         if not isinstance(mapping, dict):
-            raise ValueError(f"Invalid cache field in candidate for {symbol}: {attr}")
-        target_dicts[attr] = mapping
-    for attr, val in candidate.items():
-        target_dicts[attr][symbol] = val
+            raise ValueError(f"Invalid cache field in candidate for {sym}: {attr}")
+        target_mappings.append((attr, mapping, val))
+
+    prov_mapping: Optional[dict] = None
+    metric_name: Optional[str] = None
+    prov_entry: Optional[Dict[str, Any]] = None
+    if provenance is not None:
+        if not (isinstance(provenance, tuple) and len(provenance) == 2):
+            raise ValueError(f"Invalid provenance specification for {sym}: {provenance!r}")
+        metric_name, prov_entry = provenance
+        if not isinstance(metric_name, str) or not metric_name.strip():
+            raise ValueError(f"Invalid provenance metric name for {sym}: {metric_name!r}")
+        if not isinstance(prov_entry, dict):
+            raise ValueError(f"Invalid provenance entry for {sym} {metric_name}: {type(prov_entry)}")
+        prov_mapping = getattr(cache, "metric_provenance", None)
+        if not isinstance(prov_mapping, dict):
+            raise ValueError(f"Invalid metric_provenance mapping on cache for {sym}")
+        nested_prov = prov_mapping.get(sym)
+        if nested_prov is not None and not isinstance(nested_prov, dict):
+            raise ValueError(f"Invalid nested metric_provenance mapping for {sym}: {type(nested_prov)}")
+
+    # 2. Capture prior state of every affected (mapping, symbol) entry
+    cache_snapshots: List[Tuple[str, dict, str, bool, Any, Any]] = []
+    for attr, mapping, new_val in target_mappings:
+        existed = sym in mapping
+        old_val = mapping.get(sym)
+        cache_snapshots.append((attr, mapping, sym, existed, old_val, new_val))
+
+    # 3. Capture prior state of provenance entry
+    prov_snapshot = None
+    if provenance is not None and prov_mapping is not None and metric_name is not None and prov_entry is not None:
+        sym_in_prov = sym in prov_mapping
+        nested = prov_mapping.get(sym)
+        metric_in_prov = False
+        old_prov_val = None
+        if sym_in_prov and isinstance(nested, dict):
+            metric_in_prov = metric_name in nested
+            old_prov_val = nested.get(metric_name)
+        prov_snapshot = (prov_mapping, sym, metric_name, sym_in_prov, metric_in_prov, old_prov_val, prov_entry)
+
+    # 4. Apply all candidate cache values and provenance as one logical publication operation
+    applied_cache_snapshots: List[Tuple[str, dict, str, bool, Any]] = []
+    prov_applied = False
+    prov_created_sym = False
+    try:
+        for attr, mapping, key, existed, old_val, new_val in cache_snapshots:
+            mapping[key] = new_val
+            applied_cache_snapshots.append((attr, mapping, key, existed, old_val))
+
+        if prov_snapshot is not None:
+            p_map, p_sym, p_metric, p_sym_in, p_metric_in, p_old_val, p_new_val = prov_snapshot
+            if not p_sym_in:
+                p_map[p_sym] = {}
+                prov_created_sym = True
+            p_map[p_sym][p_metric] = p_new_val
+            prov_applied = True
+
+    except BaseException as primary_error:
+        # 5-7. Rollback every mutation in reverse order of mutation
+        rollback_errors: List[Tuple[str, BaseException]] = []
+
+        if prov_snapshot is not None:
+            p_map, p_sym, p_metric, p_sym_in, p_metric_in, p_old_val, p_new_val = prov_snapshot
+            try:
+                if prov_created_sym or (not p_sym_in and p_sym in p_map):
+                    p_map.pop(p_sym, None)
+                elif prov_applied:
+                    if p_metric_in:
+                        p_map[p_sym][p_metric] = p_old_val
+                    else:
+                        p_map[p_sym].pop(p_metric, None)
+            except BaseException as rb_err:
+                rollback_errors.append((f"metric_provenance[{p_sym}][{p_metric}]", rb_err))
+
+        for attr, mapping, key, existed, old_val in reversed(applied_cache_snapshots):
+            try:
+                if existed:
+                    mapping[key] = old_val
+                else:
+                    mapping.pop(key, None)
+            except BaseException as rb_err:
+                rollback_errors.append((f"{attr}[{key}]", rb_err))
+
+        # 8. Preserve and re-raise original publication exception.
+        # Retain diagnostic evidence of both primary and rollback errors.
+        if rollback_errors:
+            for target_desc, rb_err in rollback_errors:
+                msg = f"Rollback failure for {target_desc}: {rb_err!r}"
+                if hasattr(primary_error, "add_note"):
+                    primary_error.add_note(msg)
+                else:
+                    print(f"[MarketDataCache Warning] {msg}")
+        raise
+
+
+def _publish_quote_cache_candidate(symbol: str, candidate: Dict[str, Any]) -> None:
+    """
+    Commits a fully validated per-symbol candidate dictionary to MarketDataCache in one step
+    with atomic all-or-nothing rollback on the coordinating thread.
+    """
+    _publish_market_data_candidate(symbol=symbol, candidate=candidate, provenance=None)
 
 
 def _apply_quote_and_fallback_to_cache(
@@ -4411,7 +4542,7 @@ def _build_metric_cache_candidate(
 
     def _stage_chart_meta() -> None:
         meta = res.data.get("chart_cache_meta")
-        if isinstance(meta, dict) and isinstance(meta.get("tuple"), tuple):
+        if isinstance(meta, dict) and isinstance(meta.get("tuple"), tuple) and len(meta["tuple"]) >= 4:
             ts_val = to_float(meta.get("ts"))
             if ts_val is not None and math.isfinite(ts_val) and ts_val > 0:
                 updates["last_chart_fetch"] = float(ts_val)
@@ -4419,7 +4550,7 @@ def _build_metric_cache_candidate(
 
     def _stage_premarket_meta() -> None:
         meta = res.data.get("premarket_vol_cache_meta")
-        if isinstance(meta, dict) and meta.get("value") is not None:
+        if isinstance(meta, dict) and meta.get("value") is not None and not isinstance(meta.get("value"), bool):
             ts_val = to_float(meta.get("ts"))
             val_num = to_float(meta.get("value"))
             if (
@@ -4608,10 +4739,13 @@ def _publish_metric_cache_candidate(
 ) -> None:
     """
     Commits a validated single-metric candidate and its provenance record to MarketDataCache
-    on the coordinating thread without altering unrelated metric fields.
+    as a single atomic all-or-nothing transaction on the coordinating thread.
     """
-    _publish_quote_cache_candidate(symbol, candidate)
-    cache.metric_provenance.setdefault(symbol, {})[metric_name] = prov_entry
+    _publish_market_data_candidate(
+        symbol=symbol,
+        candidate=candidate,
+        provenance=(metric_name, prov_entry),
+    )
 
 
 def refresh_cached_symbol_state(symbol: str, status: str, now_ny: Optional[datetime] = None) -> None:
