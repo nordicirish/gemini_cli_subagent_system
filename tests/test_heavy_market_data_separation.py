@@ -14,7 +14,7 @@ import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -290,7 +290,7 @@ class TestStage223CoordinatorIsolation(_HeavyMarketDataTestBase):
         fs.cache.observation_times["AAPL"] = "2026-04-20T15:00:00Z"
         fs.cache.retrieval_times["AAPL"] = "2026-04-20T15:00:01Z"
         fs.cache.price_validity["AAPL"] = "VALID"
-        fs.cache.freshness["AAPL"] = "LIVE"
+        fs.cache.freshness["AAPL"] = "CURRENT"
         fs.cache.metric_provenance["QUOTE:AAPL"] = bi.MarketDataProvenance(
             kind=bi.ObservationKind.INSTANT,
             source="YAHOO_BATCH_LIVE",
@@ -332,7 +332,7 @@ class TestStage223CoordinatorIsolation(_HeavyMarketDataTestBase):
         self.assertEqual(fs.cache.observation_times["AAPL"], "2026-04-20T15:00:00Z")
         self.assertEqual(fs.cache.retrieval_times["AAPL"], "2026-04-20T15:00:01Z")
         self.assertEqual(fs.cache.price_validity["AAPL"], "VALID")
-        self.assertEqual(fs.cache.freshness["AAPL"], "LIVE")
+        self.assertEqual(fs.cache.freshness["AAPL"], "CURRENT")
         self.assertEqual(fs.cache.metric_provenance["QUOTE:AAPL"].source, "YAHOO_BATCH_LIVE")
 
     def test_06_heavy_coordinator_deterministic_shutdown(self):
@@ -646,6 +646,12 @@ class TestStage223OptionsGexAcquisition(_HeavyMarketDataTestBase):
         call_threads = []
         cache_during_worker = {}
 
+        fs.cache.prices["SPY"] = 500.0
+        fs.cache.price_validity["SPY"] = "VALID"
+        fs.cache.freshness["SPY"] = "CURRENT"
+        fs.cache.observation_times["SPY"] = "2026-04-20T11:00:00Z"
+        fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:01Z"
+
         class _GexTicker:
             ticker = "SPY"
 
@@ -692,6 +698,12 @@ class TestStage223OptionsGexAcquisition(_HeavyMarketDataTestBase):
 
     def test_15_gex_1800_second_ttl_and_no_premature_timestamp_advance(self):
         chain_calls = 0
+
+        fs.cache.prices["IWM"] = 200.0
+        fs.cache.price_validity["IWM"] = "VALID"
+        fs.cache.freshness["IWM"] = "CURRENT"
+        fs.cache.observation_times["IWM"] = "2026-04-20T11:00:00Z"
+        fs.cache.retrieval_times["IWM"] = "2026-04-20T11:00:01Z"
 
         class _GexTicker:
             ticker = "IWM"
@@ -785,11 +797,22 @@ class TestStage223OptionsGexAcquisition(_HeavyMarketDataTestBase):
 
             # Malformed publication candidates (NaN, missing key, stale fetched_at, contract_count=0)
             now_ts = time.time()
+            fs.cache.prices["QQQ"] = 500.0
+            fs.cache.price_validity["QQQ"] = "VALID"
+            fs.cache.freshness["QQQ"] = "CURRENT"
+            fs.cache.observation_times["QQQ"] = "2026-04-20T11:00:00Z"
+            fs.cache.retrieval_times["QQQ"] = "2026-04-20T11:00:01Z"
+            qqq_snapshot = {
+                "price": 500.0,
+                "observation_time": "2026-04-20T11:00:00Z",
+                "retrieval_time": "2026-04-20T11:00:01Z",
+            }
             bad_payloads = [
                 {
                     "kind": "options_gex",
                     "symbol": "QQQ",
                     "spot_price": 500.0,
+                    "spot_snapshot": dict(qqq_snapshot),
                     "gex_profile": {**prior_profile, "net_gex": float("nan")},
                     "fetched_at": now_ts,
                     "source": "YAHOO_OPTIONS",
@@ -799,6 +822,7 @@ class TestStage223OptionsGexAcquisition(_HeavyMarketDataTestBase):
                     "kind": "options_gex",
                     "symbol": "QQQ",
                     "spot_price": 500.0,
+                    "spot_snapshot": dict(qqq_snapshot),
                     "gex_profile": {"net_gex": 1.0},
                     "fetched_at": now_ts,
                     "source": "YAHOO_OPTIONS",
@@ -808,6 +832,7 @@ class TestStage223OptionsGexAcquisition(_HeavyMarketDataTestBase):
                     "kind": "options_gex",
                     "symbol": "QQQ",
                     "spot_price": 500.0,
+                    "spot_snapshot": dict(qqq_snapshot),
                     "gex_profile": dict(prior_profile),
                     "fetched_at": now_ts - 2500.0,
                     "source": "YAHOO_OPTIONS",
@@ -817,6 +842,7 @@ class TestStage223OptionsGexAcquisition(_HeavyMarketDataTestBase):
                     "kind": "options_gex",
                     "symbol": "QQQ",
                     "spot_price": 500.0,
+                    "spot_snapshot": dict(qqq_snapshot),
                     "gex_profile": dict(prior_profile),
                     "fetched_at": now_ts,
                     "source": "YAHOO_OPTIONS",
@@ -976,6 +1002,12 @@ class TestStage223LifecycleAtomicityAndDaemonIntegration(_HeavyMarketDataTestBas
         self.assertEqual(fs.cache.regular_close["AMZN"], 69.5)
 
         # Now test atomic rollback on GEX publication (fail on last_gex_fetch after gex & gex_cache written)
+        fs.cache.prices["AMZN"] = 175.0
+        fs.cache.price_validity["AMZN"] = "VALID"
+        fs.cache.freshness["AMZN"] = "CURRENT"
+        fs.cache.observation_times["AMZN"] = "2026-04-20T11:00:00Z"
+        fs.cache.retrieval_times["AMZN"] = "2026-04-20T11:00:01Z"
+
         old_gex = {k: float(idx + 1) for idx, k in enumerate(fs._GEX_REQUIRED_KEYS)}
         fs.cache.gex["AMZN"] = dict(old_gex)
         fs.cache.gex_cache["AMZN"] = dict(old_gex)
@@ -991,6 +1023,11 @@ class TestStage223LifecycleAtomicityAndDaemonIntegration(_HeavyMarketDataTestBas
                     "kind": "options_gex",
                     "symbol": "AMZN",
                     "spot_price": 175.0,
+                    "spot_snapshot": {
+                        "price": 175.0,
+                        "observation_time": "2026-04-20T11:00:00Z",
+                        "retrieval_time": "2026-04-20T11:00:01Z",
+                    },
                     "gex_profile": new_gex,
                     "fetched_at": now_ts,
                     "source": "YAHOO_OPTIONS",
@@ -1015,6 +1052,7 @@ class TestStage223LifecycleAtomicityAndDaemonIntegration(_HeavyMarketDataTestBas
             sleep_calls.append(secs)
             # Abort after first monitoring iteration's final refresh sleep
             if secs == fs.REFRESH_RATE_SECONDS or len(sleep_calls) >= 2:
+                blocked_provider.set()
                 raise _StopLoop()
 
         sync_calls = []
@@ -1082,6 +1120,439 @@ class TestStage223LifecycleAtomicityAndDaemonIntegration(_HeavyMarketDataTestBas
         self.assertNotIn(5, sleep_calls)
         self.assertNotIn(0.2, sleep_calls)
         self.assertNotIn(0.5, sleep_calls)
+
+
+class TestStage223Finding1GexCalculationIntegrity(_HeavyMarketDataTestBase):
+    def test_f1_01_valid_mathematical_zero_remains_valid_zero(self):
+        # Balanced option inventory where calls and puts cancel exactly
+        inv = [
+            {"K": 100.0, "T": 0.1, "sigma": 0.20, "oi": 100.0, "type": "call"},
+            {"K": 100.0, "T": 0.1, "sigma": 0.20, "oi": 100.0, "type": "put"},
+        ]
+        strike_map = {100.0: 200.0}
+        profile = fs._compute_gex_profile_from_inventory(
+            symbol="SPY",
+            spot_price=100.0,
+            option_inventory=inv,
+            strike_oi_map=strike_map,
+            avg_vol=1_000_000,
+        )
+        self.assertIsInstance(profile["net_gex"], float)
+        self.assertEqual(profile["net_gex"], 0.0)
+        self.assertTrue(math.isfinite(profile["net_gex"]))
+        for k in fs._GEX_REQUIRED_KEYS:
+            self.assertIn(k, profile)
+            self.assertTrue(math.isfinite(profile[k]))
+
+    def test_f1_02_nan_in_calculated_output_raises_value_error(self):
+        inv = [{"K": 100.0, "T": 0.1, "sigma": 0.20, "oi": 100.0, "type": "call"}]
+        with patch.object(fs, "calculate_gamma", return_value=float("nan")):
+            with self.assertRaises(ValueError) as cm:
+                fs._compute_gex_profile_from_inventory(
+                    symbol="SPY",
+                    spot_price=100.0,
+                    option_inventory=inv,
+                    strike_oi_map={100.0: 100.0},
+                    avg_vol=1_000_000,
+                )
+            self.assertIn("Non-finite GEX calculation result", str(cm.exception))
+
+    def test_f1_03_positive_or_negative_infinity_raises_value_error(self):
+        inv = [{"K": 100.0, "T": 0.1, "sigma": 0.20, "oi": 100.0, "type": "call"}]
+        with patch.object(fs, "calculate_gamma", return_value=float("inf")):
+            with self.assertRaises(ValueError) as cm_pos:
+                fs._compute_gex_profile_from_inventory(
+                    symbol="SPY",
+                    spot_price=100.0,
+                    option_inventory=inv,
+                    strike_oi_map={100.0: 100.0},
+                    avg_vol=1_000_000,
+                )
+            self.assertIn("Non-finite GEX calculation result", str(cm_pos.exception))
+
+        with patch.object(fs, "calculate_gamma", return_value=float("-inf")):
+            with self.assertRaises(ValueError) as cm_neg:
+                fs._compute_gex_profile_from_inventory(
+                    symbol="SPY",
+                    spot_price=100.0,
+                    option_inventory=inv,
+                    strike_oi_map={100.0: 100.0},
+                    avg_vol=1_000_000,
+                )
+            self.assertIn("Non-finite GEX calculation result", str(cm_neg.exception))
+
+    def test_f1_04_unconvertible_or_boolean_output_raises_value_error(self):
+        inv = [{"K": 100.0, "T": 0.1, "sigma": 0.20, "oi": 100.0, "type": "call"}]
+        with self.assertRaises(ValueError) as cm_str:
+            fs._compute_gex_profile_from_inventory(
+                symbol="SPY",
+                spot_price=100.0,
+                option_inventory=inv,
+                strike_oi_map={"unconvertible_string": 100.0},
+                avg_vol=1_000_000,
+            )
+        self.assertIn("Invalid GEX calculation result", str(cm_str.exception))
+
+        with self.assertRaises(ValueError) as cm_bool:
+            fs._compute_gex_profile_from_inventory(
+                symbol="SPY",
+                spot_price=100.0,
+                option_inventory=inv,
+                strike_oi_map={True: 100.0},
+                avg_vol=1_000_000,
+            )
+        self.assertIn("Invalid boolean GEX result", str(cm_bool.exception))
+
+    def test_f1_05_failed_gex_calculation_recorded_unsuccessful_by_coordinator_and_preserves_cache(self):
+        prior_profile = {k: 55.5 for k in fs._GEX_REQUIRED_KEYS}
+        prior_ts = 1_700_000_000.0
+        fs.cache.prices["AAPL"] = 150.0
+        fs.cache.price_validity["AAPL"] = "VALID"
+        fs.cache.freshness["AAPL"] = "CURRENT"
+        fs.cache.observation_times["AAPL"] = "2026-04-20T11:00:00Z"
+        fs.cache.retrieval_times["AAPL"] = "2026-04-20T11:00:01Z"
+
+        fs.cache.gex["AAPL"] = dict(prior_profile)
+        fs.cache.gex_cache["AAPL"] = dict(prior_profile)
+        fs.cache.last_gex_fetch["AAPL"] = prior_ts
+
+        class _Ticker:
+            ticker = "AAPL"
+            options = ["2026-06-19"]
+            fast_info = SimpleNamespace(three_month_average_volume=40_000_000)
+
+            def option_chain(self, exp):
+                return _make_option_chain_pair(150.0)
+
+        with _isolated_all_coordinators() as (heavy_coord, _, _, _, _, _):
+            with patch.object(fs, "_compute_gex_profile_from_inventory", side_effect=ValueError("Non-finite GEX calculation result for net_gex: nan")):
+                acc, _ = fs.enqueue_options_gex("AAPL", ticker_obj=_Ticker(), spot_price=150.0, force=True)
+                self.assertTrue(acc)
+                self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+
+                audit = fs.apply_background_heavy_market_data_results()
+                self.assertEqual(len(audit), 1)
+                self.assertFalse(audit[0][1])
+                self.assertIn("Worker error", audit[0][2])
+
+        # Cache remains completely untouched
+        self.assertEqual(fs.cache.gex["AAPL"], prior_profile)
+        self.assertEqual(fs.cache.gex_cache["AAPL"], prior_profile)
+        self.assertEqual(fs.cache.last_gex_fetch["AAPL"], prior_ts)
+
+
+class TestStage223Finding2GexSpotFreshnessAndPublicationBoundary(_HeavyMarketDataTestBase):
+    def test_f2_01_matching_spot_and_timestamp_publishes_correctly(self):
+        fs.cache.prices["SPY"] = 500.0
+        fs.cache.price_validity["SPY"] = "VALID"
+        fs.cache.freshness["SPY"] = "CURRENT"
+        fs.cache.observation_times["SPY"] = "2026-04-20T11:00:00Z"
+        fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:01Z"
+
+        class _Ticker:
+            ticker = "SPY"
+            options = ["2026-06-19"]
+            fast_info = SimpleNamespace(three_month_average_volume=50_000_000)
+
+            def option_chain(self, exp):
+                return _make_option_chain_pair(500.0)
+
+        with _isolated_all_coordinators() as (heavy_coord, _, _, _, _, _):
+            acc, _ = fs.enqueue_options_gex("SPY", ticker_obj=_Ticker(), spot_price=500.0)
+            self.assertTrue(acc)
+            self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+
+            audit = fs.apply_background_heavy_market_data_results()
+            self.assertEqual(len(audit), 1)
+            self.assertTrue(audit[0][1])
+
+        self.assertIn("SPY", fs.cache.gex)
+        self.assertIn("SPY", fs.cache.gex_cache)
+        self.assertGreater(fs.cache.last_gex_fetch["SPY"], 0)
+
+    def test_f2_02_newer_observation_timestamp_rejects_delayed_gex_and_preserves_cache(self):
+        fs.cache.prices["SPY"] = 500.0
+        fs.cache.price_validity["SPY"] = "VALID"
+        fs.cache.freshness["SPY"] = "CURRENT"
+        fs.cache.observation_times["SPY"] = "2026-04-20T11:00:00Z"
+        fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:01Z"
+
+        prior_profile = {k: 99.0 for k in fs._GEX_REQUIRED_KEYS}
+        fs.cache.gex["SPY"] = dict(prior_profile)
+        fs.cache.gex_cache["SPY"] = dict(prior_profile)
+        fs.cache.last_gex_fetch["SPY"] = 1_700_000_000.0
+
+        class _Ticker:
+            ticker = "SPY"
+            options = ["2026-06-19"]
+            fast_info = SimpleNamespace(three_month_average_volume=50_000_000)
+
+            def option_chain(self, exp):
+                return _make_option_chain_pair(500.0)
+
+        with _isolated_all_coordinators() as (heavy_coord, _, _, _, _, _):
+            acc, _ = fs.enqueue_options_gex("SPY", ticker_obj=_Ticker(), spot_price=500.0, force=True)
+            self.assertTrue(acc)
+            self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+
+            # Newer live tick arrives before publication!
+            fs.cache.observation_times["SPY"] = "2026-04-20T11:00:15Z"
+            fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:16Z"
+
+            audit = fs.apply_background_heavy_market_data_results()
+            self.assertEqual(len(audit), 1)
+            self.assertFalse(audit[0][1])
+            self.assertIn("superseded", audit[0][2].lower())
+
+        self.assertEqual(fs.cache.gex["SPY"], prior_profile)
+        self.assertEqual(fs.cache.gex_cache["SPY"], prior_profile)
+        self.assertEqual(fs.cache.last_gex_fetch["SPY"], 1_700_000_000.0)
+
+    def test_f2_03_changed_spot_price_rejects_delayed_gex_and_preserves_cache(self):
+        fs.cache.prices["SPY"] = 500.0
+        fs.cache.price_validity["SPY"] = "VALID"
+        fs.cache.freshness["SPY"] = "CURRENT"
+        fs.cache.observation_times["SPY"] = "2026-04-20T11:00:00Z"
+        fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:01Z"
+
+        prior_profile = {k: 99.0 for k in fs._GEX_REQUIRED_KEYS}
+        fs.cache.gex["SPY"] = dict(prior_profile)
+        fs.cache.gex_cache["SPY"] = dict(prior_profile)
+        fs.cache.last_gex_fetch["SPY"] = 1_700_000_000.0
+
+        class _Ticker:
+            ticker = "SPY"
+            options = ["2026-06-19"]
+            fast_info = SimpleNamespace(three_month_average_volume=50_000_000)
+
+            def option_chain(self, exp):
+                return _make_option_chain_pair(500.0)
+
+        with _isolated_all_coordinators() as (heavy_coord, _, _, _, _, _):
+            acc, _ = fs.enqueue_options_gex("SPY", ticker_obj=_Ticker(), spot_price=500.0, force=True)
+            self.assertTrue(acc)
+            self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+
+            # Spot price moves before publication!
+            fs.cache.prices["SPY"] = 502.50
+
+            audit = fs.apply_background_heavy_market_data_results()
+            self.assertEqual(len(audit), 1)
+            self.assertFalse(audit[0][1])
+            self.assertIn("changed", audit[0][2].lower())
+
+        self.assertEqual(fs.cache.gex["SPY"], prior_profile)
+        self.assertEqual(fs.cache.gex_cache["SPY"], prior_profile)
+        self.assertEqual(fs.cache.last_gex_fetch["SPY"], 1_700_000_000.0)
+
+    def test_f2_04_non_actionable_spot_state_rejects_gex_publication(self):
+        prior_profile = {k: 99.0 for k in fs._GEX_REQUIRED_KEYS}
+        non_actionable_states = [
+            ("VALID", "STALE"),
+            ("INVALID", "CURRENT"),
+            ("UNAVAILABLE", "UNAVAILABLE"),
+            ("STALE", "STALE"),
+        ]
+
+        class _Ticker:
+            ticker = "SPY"
+            options = ["2026-06-19"]
+            fast_info = SimpleNamespace(three_month_average_volume=50_000_000)
+
+            def option_chain(self, exp):
+                return _make_option_chain_pair(500.0)
+
+        for validity, freshness in non_actionable_states:
+            fs.cache.clear()
+            fs.cache.prices["SPY"] = 500.0
+            fs.cache.price_validity["SPY"] = "VALID"
+            fs.cache.freshness["SPY"] = "CURRENT"
+            fs.cache.observation_times["SPY"] = "2026-04-20T11:00:00Z"
+            fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:01Z"
+            fs.cache.gex["SPY"] = dict(prior_profile)
+            fs.cache.gex_cache["SPY"] = dict(prior_profile)
+            fs.cache.last_gex_fetch["SPY"] = 1_700_000_000.0
+
+            with _isolated_all_coordinators() as (heavy_coord, _, _, _, _, _):
+                acc, _ = fs.enqueue_options_gex("SPY", ticker_obj=_Ticker(), spot_price=500.0, force=True)
+                self.assertTrue(acc)
+                self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+
+                # Transition to non-actionable state before publication
+                fs.cache.price_validity["SPY"] = validity
+                fs.cache.freshness["SPY"] = freshness
+
+                audit = fs.apply_background_heavy_market_data_results()
+                self.assertEqual(len(audit), 1)
+                self.assertFalse(audit[0][1])
+                self.assertIn("non-actionable", audit[0][2].lower())
+
+            self.assertEqual(fs.cache.gex["SPY"], prior_profile)
+            self.assertEqual(fs.cache.gex_cache["SPY"], prior_profile)
+            self.assertEqual(fs.cache.last_gex_fetch["SPY"], 1_700_000_000.0)
+
+    def test_f2_05_rejected_candidate_does_not_advance_sequence_and_subsequent_valid_result_applies(self):
+        fs.cache.prices["SPY"] = 500.0
+        fs.cache.price_validity["SPY"] = "VALID"
+        fs.cache.freshness["SPY"] = "CURRENT"
+        fs.cache.observation_times["SPY"] = "2026-04-20T11:00:00Z"
+        fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:01Z"
+
+        coord = bi.BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=8, max_results_size=8)
+        app = bi.BackgroundResultApplicator(coordinator=coord)
+        key = bi.WorkKey(bi.WorkType.OPTIONS_GEX.value, "SPY")
+
+        try:
+            # Result 1: stale observation time (T0) vs current cache (T1)
+            res1 = bi.WorkResult(
+                key=key,
+                sequence=1,
+                data={
+                    "kind": "options_gex",
+                    "symbol": "SPY",
+                    "spot_price": 500.0,
+                    "spot_snapshot": {
+                        "price": 500.0,
+                        "observation_time": "2026-04-20T10:59:00Z",  # older than cache T0
+                        "retrieval_time": "2026-04-20T10:59:01Z",
+                    },
+                    "gex_profile": {k: 1.0 for k in fs._GEX_REQUIRED_KEYS},
+                    "fetched_at": time.time(),
+                    "source": "YAHOO_OPTIONS",
+                    "contract_count": 4,
+                },
+            )
+            audit1 = app.apply_results(
+                results=[res1],
+                on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+            )
+            self.assertFalse(audit1[0][1])
+            # Sequence NOT advanced!
+            self.assertEqual(app.get_last_applied(key), (-1, ""))
+
+            # Result 2: matches current cache T0 exactly
+            res2 = bi.WorkResult(
+                key=key,
+                sequence=2,
+                data={
+                    "kind": "options_gex",
+                    "symbol": "SPY",
+                    "spot_price": 500.0,
+                    "spot_snapshot": {
+                        "price": 500.0,
+                        "observation_time": "2026-04-20T11:00:00Z",
+                        "retrieval_time": "2026-04-20T11:00:01Z",
+                    },
+                    "gex_profile": {k: 2.0 for k in fs._GEX_REQUIRED_KEYS},
+                    "fetched_at": time.time(),
+                    "source": "YAHOO_OPTIONS",
+                    "contract_count": 4,
+                },
+            )
+            audit2 = app.apply_results(
+                results=[res2],
+                on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+            )
+            self.assertTrue(audit2[0][1])
+            self.assertEqual(app.get_last_applied(key)[0], 2)
+            self.assertEqual(fs.cache.gex["SPY"]["net_gex"], 2.0)
+        finally:
+            coord.shutdown(timeout=2.0)
+
+
+class TestStage223Finding3DaemonCoordinatorShutdown(_HeavyMarketDataTestBase):
+    class _StopLoop(BaseException):
+        pass
+
+    def _setup_daemon_mocks(self, stack, mock_heavy):
+        stack.enter_context(patch.object(fs, "HEAVY_MARKET_DATA_COORDINATOR", mock_heavy))
+        stack.enter_context(patch.object(fs, "ALL_TICKERS", ["AAPL"]))
+        stack.enter_context(patch.object(fs, "TICKERS", ["AAPL"]))
+        stack.enter_context(patch.object(fs, "MACRO_TICKERS", []))
+        stack.enter_context(patch.object(fs, "_load_ssot_tickers", return_value=["AAPL"]))
+        stack.enter_context(patch.object(fs, "_load_macro_tickers", return_value=[]))
+        stack.enter_context(patch.object(fs.yf, "Ticker", return_value=SimpleNamespace(ticker="AAPL", options=[])))
+        stack.enter_context(patch.object(fs, "get_market_status", return_value="OPEN"))
+        stack.enter_context(patch.object(fs, "resolve_held_and_watched", return_value=(set(), None)))
+        stack.enter_context(patch.object(fs, "get_macro_telemetry_context", return_value=(18.0, "NORMAL", 0.0)))
+        stack.enter_context(patch.object(fs, "coordinate_market_data_cycle", return_value={"applied_count": 0}))
+        stack.enter_context(patch.object(fs, "coordinate_heavy_market_data_cycle", return_value={"applied_count": 0}))
+        stack.enter_context(patch.object(fs, "apply_background_intelligence_results"))
+        stack.enter_context(patch.object(fs, "build_daemon_final_output", return_value={"tickers": []}))
+        stack.enter_context(patch.object(fs, "update_global_state_snapshot"))
+        stack.enter_context(patch.object(fs, "publish_global_state_snapshot"))
+        stack.enter_context(patch.object(fs, "get_global_state_snapshot", return_value={}))
+        stack.enter_context(patch.object(fs.cache, "save_to_disk"))
+
+    def test_f3_01_exiting_run_daemon_invokes_shutdown_with_5s_timeout(self):
+        mock_heavy = MagicMock()
+        mock_heavy.shutdown.return_value = True
+
+        with contextlib.ExitStack() as stack:
+            self._setup_daemon_mocks(stack, mock_heavy)
+            stack.enter_context(patch.object(fs.t_time, "sleep", side_effect=self._StopLoop()))
+            try:
+                fs.run_daemon()
+            except self._StopLoop:
+                pass
+
+        mock_heavy.shutdown.assert_called_once_with(timeout=5.0)
+
+    def test_f3_02_keyboard_interrupt_triggers_shutdown_cleanly(self):
+        mock_heavy = MagicMock()
+        mock_heavy.shutdown.return_value = True
+
+        with contextlib.ExitStack() as stack:
+            self._setup_daemon_mocks(stack, mock_heavy)
+            stack.enter_context(patch.object(fs.t_time, "sleep", side_effect=KeyboardInterrupt()))
+            # Must exit cleanly without re-raising KeyboardInterrupt
+            fs.run_daemon()
+
+        mock_heavy.shutdown.assert_called_once_with(timeout=5.0)
+
+    def test_f3_03_unhandled_exception_triggers_shutdown_and_preserves_exception(self):
+        mock_heavy = MagicMock()
+        mock_heavy.shutdown.return_value = True
+
+        with contextlib.ExitStack() as stack:
+            self._setup_daemon_mocks(stack, mock_heavy)
+            stack.enter_context(patch.object(fs, "coordinate_heavy_market_data_cycle", side_effect=ZeroDivisionError("simulated crash")))
+            with self.assertRaises(ZeroDivisionError) as cm:
+                fs.run_daemon()
+            self.assertEqual(str(cm.exception), "simulated crash")
+
+        mock_heavy.shutdown.assert_called_once_with(timeout=5.0)
+
+    def test_f3_04_shutdown_returning_false_logs_warning_without_raising(self):
+        mock_heavy = MagicMock()
+        mock_heavy.shutdown.return_value = False
+
+        with contextlib.ExitStack() as stack:
+            self._setup_daemon_mocks(stack, mock_heavy)
+            stack.enter_context(patch.object(fs.t_time, "sleep", side_effect=self._StopLoop()))
+            with self.assertLogs(fs.logger, level="WARNING") as cm:
+                try:
+                    fs.run_daemon()
+                except self._StopLoop:
+                    pass
+
+        mock_heavy.shutdown.assert_called_once_with(timeout=5.0)
+        self.assertTrue(any("Shutdown timed out after 5.0s during daemon exit" in msg for msg in cm.output))
+
+    def test_f3_05_shutdown_raising_exception_logs_error_and_preserves_primary_exception(self):
+        mock_heavy = MagicMock()
+        mock_heavy.shutdown.side_effect = RuntimeError("shutdown failure")
+
+        with contextlib.ExitStack() as stack:
+            self._setup_daemon_mocks(stack, mock_heavy)
+            stack.enter_context(patch.object(fs.t_time, "sleep", side_effect=ValueError("primary loop error")))
+            with self.assertLogs(fs.logger, level="ERROR") as cm:
+                with self.assertRaises(ValueError) as err_cm:
+                    fs.run_daemon()
+            self.assertEqual(str(err_cm.exception), "primary loop error")
+
+        mock_heavy.shutdown.assert_called_once_with(timeout=5.0)
+        self.assertTrue(any("Error shutting down coordinator during daemon exit: shutdown failure" in msg for msg in cm.output))
 
 
 if __name__ == "__main__":

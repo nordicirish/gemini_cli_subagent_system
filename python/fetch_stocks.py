@@ -45,7 +45,10 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from scipy.stats import norm
 from yfinance.data import YfData
 import threading
+import logging
 import collections.abc
+
+logger = logging.getLogger(__name__)
 from types import MappingProxyType
 from atomic_io import atomic_write_json, atomic_read_json, atomic_update_json
 from tool_registry import authorize_financial_mutation
@@ -2740,15 +2743,24 @@ def _compute_gex_profile_from_inventory(
         'strike_oi_magnet': magnet_price
     }
     sanitized = {}
-    for k, v in res.items():
+    for key, value in res.items():
+        if isinstance(value, bool):
+            raise ValueError(f"Invalid boolean GEX result for {key}")
+
         try:
-            fv = float(v)
-            if math.isnan(fv) or math.isinf(fv):
-                sanitized[k] = 0.0
-            else:
-                sanitized[k] = fv
-        except Exception:
-            sanitized[k] = v
+            numeric_value = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(
+                f"Invalid GEX calculation result for {key}: {value!r}"
+            ) from exc
+
+        if not math.isfinite(numeric_value):
+            raise ValueError(
+                f"Non-finite GEX calculation result for {key}: {value!r}"
+            )
+
+        sanitized[key] = numeric_value
+
     return sanitized
 
 
@@ -2757,6 +2769,7 @@ def _acquire_options_gex_raw(
     ticker_obj: Any = None,
     spot_price: Optional[float] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
+    spot_snapshot: Optional[Dict[str, Any]] = None,
 ) -> ObservedResult:
     """
     Worker-safe options/GEX acquisition and calculation.
@@ -2871,6 +2884,14 @@ def _acquire_options_gex_raw(
     )
     fetched_at = t_time.time()
 
+    eff_snapshot = dict(spot_snapshot) if isinstance(spot_snapshot, dict) else {}
+    if "price" not in eff_snapshot or eff_snapshot["price"] is None:
+        eff_snapshot["price"] = float(spot_num)
+    if "observation_time" not in eff_snapshot:
+        eff_snapshot["observation_time"] = None
+    if "retrieval_time" not in eff_snapshot:
+        eff_snapshot["retrieval_time"] = None
+
     return ObservedResult(
         data={
             "kind": "options_gex",
@@ -2881,6 +2902,7 @@ def _acquire_options_gex_raw(
             "source": "YAHOO_OPTIONS",
             "expirations_used": target_exps,
             "contract_count": len(option_inventory),
+            "spot_snapshot": eff_snapshot,
         },
         obs_time=None,
         provenance=None,
@@ -5591,6 +5613,38 @@ def _build_gex_cache_candidate(
     if isinstance(spot_raw, bool) or spot_status != "VALID" or spot_num is None or spot_num <= 0:
         raise ValueError(f"GEX candidate invalid spot_price: {spot_raw!r}")
 
+    # Spot freshness & actionability validation against current coordinating-thread cache state
+    spot_snapshot = res.data.get("spot_snapshot")
+    expected_spot = float(spot_num)
+    expected_obs_time = None
+    if isinstance(spot_snapshot, dict):
+        if "price" in spot_snapshot and spot_snapshot["price"] is not None:
+            expected_spot = float(spot_snapshot["price"])
+        expected_obs_time = spot_snapshot.get("observation_time")
+
+    if not is_price_actionable(target_sym):
+        msg = f"Spot price is non-actionable for GEX candidate on {target_sym}"
+        logger.warning(f"[HeavyMarketData] {msg}")
+        raise ValueError(msg)
+
+    current_spot = cache.prices.get(target_sym)
+    if current_spot is None or float(current_spot) != expected_spot:
+        msg = (
+            f"Spot price changed for GEX candidate on {target_sym}: "
+            f"computed against {expected_spot}, current cache has {current_spot}"
+        )
+        logger.warning(f"[HeavyMarketData] {msg}")
+        raise ValueError(msg)
+
+    current_obs_time = cache.observation_times.get(target_sym)
+    if current_obs_time != expected_obs_time:
+        msg = (
+            f"Spot observation timestamp superseded for GEX candidate on {target_sym}: "
+            f"computed against {expected_obs_time!r}, current cache has {current_obs_time!r}"
+        )
+        logger.warning(f"[HeavyMarketData] {msg}")
+        raise ValueError(msg)
+
     contract_count = res.data.get("contract_count")
     if isinstance(contract_count, bool) or not isinstance(contract_count, int) or contract_count <= 0:
         raise ValueError(f"GEX candidate invalid contract_count: {contract_count!r}")
@@ -5682,11 +5736,15 @@ def enqueue_options_gex(
     force: bool = False,
     now_ts: Optional[float] = None,
     coordinator: Optional[BackgroundIntelligenceCoordinator] = None,
+    spot_obs_time: Optional[str] = None,
+    spot_retrieval_time: Optional[str] = None,
 ) -> Tuple[bool, Optional[WorkKey]]:
     """
     Non-blocking options/GEX enqueue onto HEAVY_MARKET_DATA_COORDINATOR.
     Enforces valid positive spot price and the 1,800-second GEX refresh TTL without
     advancing cache.last_gex_fetch before worker completion and coordinating-thread publication.
+    Captures canonical spot observation identity (price, observation_time, retrieval_time)
+    to enforce spot freshness validation at the publication boundary.
     """
     if not symbol or not str(symbol).strip():
         return False, None
@@ -5712,6 +5770,15 @@ def enqueue_options_gex(
             cache.gex[sym_clean] = dict(cached_gex)
         return False, None
 
+    eff_obs_time = cache.observation_times.get(sym_clean) if spot_obs_time is None else spot_obs_time
+    eff_retrieval_time = cache.retrieval_times.get(sym_clean) if spot_retrieval_time is None else spot_retrieval_time
+
+    spot_snapshot = {
+        "price": float(spot_num),
+        "observation_time": eff_obs_time,
+        "retrieval_time": eff_retrieval_time,
+    }
+
     return eff_coord.enqueue(
         work_type=WorkType.OPTIONS_GEX.value,
         target=sym_clean,
@@ -5721,6 +5788,7 @@ def enqueue_options_gex(
             "symbol": sym_clean,
             "ticker_obj": ticker_obj,
             "spot_price": float(spot_num),
+            "spot_snapshot": spot_snapshot,
         },
     )
 
@@ -6575,67 +6643,67 @@ def run_daemon():
     daemon_bg_coord = BACKGROUND_COORDINATOR
     daemon_bg_app = BACKGROUND_RESULT_APPLICATOR
     daemon_fallback_requests: Dict[str, dict] = {}
-    print(f"{CYAN}Initializing GEM Dashboard v16.0 (Data Hardened + Trend)...{RESET}")
-    tickers_obj = {sym: yf.Ticker(sym) for sym in ALL_TICKERS}
-
-    print(f"{YELLOW}Scheduling initial heavy fetch (non-blocking)...{RESET}")
-    def _set_boot(phase, progress, total, sym, status_msg=None):
-        def _updater(current):
-            s = dict(current)
-            s["boot_phase"] = phase
-            s["boot_progress"] = progress
-            s["boot_total"] = total
-            s["boot_ticker"] = sym
-            if status_msg:
-                s["status"] = status_msg
-            return s
-        update_global_state_snapshot(_updater)
-
-    def _clear_boot():
-        def _updater(current):
-            s = dict(current)
-            s.pop("boot_phase", None)
-            s.pop("boot_progress", None)
-            s.pop("boot_total", None)
-            s.pop("boot_ticker", None)
-            return s
-        update_global_state_snapshot(_updater)
-
-    status = get_market_status()
-    startup_ny_now = datetime.now(ZoneInfo("America/New_York"))
-    total_tickers = len(ALL_TICKERS)
-    _set_boot(
-        "TECHNICAL_ANALYSIS",
-        total_tickers,
-        total_tickers,
-        "SCHEDULED",
-        "INITIALIZING - SCHEDULING NON-BLOCKING MARKET & HEAVY DATA..."
-    )
-    coordinate_market_data_cycle(
-        ALL_TICKERS,
-        status,
-        [],
-        now_ny=startup_ny_now,
-        coordinator=daemon_mkt_coord,
-        applicator=daemon_mkt_app,
-        fallback_requests=daemon_fallback_requests,
-    )
-    coordinate_heavy_market_data_cycle(
-        ALL_TICKERS,
-        tickers_obj=tickers_obj,
-        is_heavy=True,
-        include_historical=True,
-        include_gex=True,
-        now_ny=startup_ny_now,
-        coordinator=daemon_heavy_coord,
-        applicator=daemon_heavy_app,
-    )
-    print(f"{GREEN}Initial live and heavy market-data workloads queued.{RESET}")
-
-    # Clear boot progress keys so startup completes cleanly without blocking monitoring
-    _clear_boot()
-
     try:
+        print(f"{CYAN}Initializing GEM Dashboard v16.0 (Data Hardened + Trend)...{RESET}")
+        tickers_obj = {sym: yf.Ticker(sym) for sym in ALL_TICKERS}
+
+        print(f"{YELLOW}Scheduling initial heavy fetch (non-blocking)...{RESET}")
+        def _set_boot(phase, progress, total, sym, status_msg=None):
+            def _updater(current):
+                s = dict(current)
+                s["boot_phase"] = phase
+                s["boot_progress"] = progress
+                s["boot_total"] = total
+                s["boot_ticker"] = sym
+                if status_msg:
+                    s["status"] = status_msg
+                return s
+            update_global_state_snapshot(_updater)
+
+        def _clear_boot():
+            def _updater(current):
+                s = dict(current)
+                s.pop("boot_phase", None)
+                s.pop("boot_progress", None)
+                s.pop("boot_total", None)
+                s.pop("boot_ticker", None)
+                return s
+            update_global_state_snapshot(_updater)
+
+        status = get_market_status()
+        startup_ny_now = datetime.now(ZoneInfo("America/New_York"))
+        total_tickers = len(ALL_TICKERS)
+        _set_boot(
+            "TECHNICAL_ANALYSIS",
+            total_tickers,
+            total_tickers,
+            "SCHEDULED",
+            "INITIALIZING - SCHEDULING NON-BLOCKING MARKET & HEAVY DATA..."
+        )
+        coordinate_market_data_cycle(
+            ALL_TICKERS,
+            status,
+            [],
+            now_ny=startup_ny_now,
+            coordinator=daemon_mkt_coord,
+            applicator=daemon_mkt_app,
+            fallback_requests=daemon_fallback_requests,
+        )
+        coordinate_heavy_market_data_cycle(
+            ALL_TICKERS,
+            tickers_obj=tickers_obj,
+            is_heavy=True,
+            include_historical=True,
+            include_gex=True,
+            now_ny=startup_ny_now,
+            coordinator=daemon_heavy_coord,
+            applicator=daemon_heavy_app,
+        )
+        print(f"{GREEN}Initial live and heavy market-data workloads queued.{RESET}")
+
+        # Clear boot progress keys so startup completes cleanly without blocking monitoring
+        _clear_boot()
+
         while True:
             # 1. Apply any completed background intelligence results under monotonic ordering
             apply_background_intelligence_results(
@@ -7136,6 +7204,17 @@ def run_daemon():
     except KeyboardInterrupt:
         print(f"\033[?25h", end="")
         print(f"\n{YELLOW}Daemon Shutdown.{RESET}")
+    finally:
+        try:
+            shutdown_ok = daemon_heavy_coord.shutdown(timeout=5.0)
+            if not shutdown_ok:
+                logger.warning(
+                    "[HeavyMarketDataCoordinator] Shutdown timed out after 5.0s during daemon exit"
+                )
+        except Exception as exc:
+            logger.error(
+                f"[HeavyMarketDataCoordinator] Error shutting down coordinator during daemon exit: {exc}"
+            )
 
 if __name__ == "__main__":
     if not os.path.exists("static"):
