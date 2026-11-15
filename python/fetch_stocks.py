@@ -5464,18 +5464,21 @@ def coordinate_market_data_cycle(
 
     fallback_enqueued = 0
     for sym in symbols:
-        sym_clean = str(sym).strip().upper()
-        refresh_cached_symbol_state(sym_clean, status, now_ny=now_ny)
-        req = fallback_queue.pop(sym_clean, None)
-        if req is not None:
-            acc, _ = enqueue_market_symbol_fallback(
-                sym_clean,
-                status=status,
-                coordinator=coordinator,
-                **req,
-            )
-            if acc:
-                fallback_enqueued += 1
+        try:
+            sym_clean = str(sym).strip().upper()
+            refresh_cached_symbol_state(sym_clean, status, now_ny=now_ny)
+            req = fallback_queue.pop(sym_clean, None)
+            if req is not None:
+                acc, _ = enqueue_market_symbol_fallback(
+                    sym_clean,
+                    status=status,
+                    coordinator=coordinator,
+                    **req,
+                )
+                if acc:
+                    fallback_enqueued += 1
+        except Exception as sym_err:
+            logger.warning(f"[MarketData] Error scheduling fallback for {sym!r}: {sym_err}")
 
     return {
         "applied_count": sum(1 for _, ok, _ in applied_audit if ok),
@@ -5593,6 +5596,61 @@ def _validate_utc_timestamp(value: Any, field_name: str) -> str:
     return valid_utc
 
 
+def _canonical_spot_timestamp(value: Any, field_name: str) -> str:
+    """
+    Validates and resolves a spot observation/retrieval timestamp for snapshot capture.
+    Accepts:
+    1. Strict UTC ISO-8601 with explicit 'Z' or zero offset (+00:00).
+    2. Valid New York session timezone (-04:00 or -05:00) from live quote cache,
+       which is converted to strict canonical UTC ISO-8601 with 'Z'.
+    Fails closed: rejects naive, missing, non-string, malformed, or foreign-offset timestamps.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Missing {field_name}")
+
+    raw = value.strip()
+    if "-00:00" in raw:
+        raise ValueError(f"Ambiguous timestamp offset '-00:00' in '{value}'")
+
+    try:
+        return validate_utc_iso8601_timestamp(raw)
+    except Exception:
+        pass
+
+    try:
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            raise ValueError(f"Naive timestamp without tzinfo: {value!r}")
+        offset = dt.utcoffset()
+        offset_secs = offset.total_seconds() if offset is not None else None
+        if offset_secs not in (-14400, -18000):
+            raise ValueError(f"Non-UTC, non-NY offset in {field_name}: {value!r}")
+        dt_utc = dt.astimezone(timezone.utc)
+        return validate_utc_iso8601_timestamp(dt_utc.isoformat().replace("+00:00", "Z"))
+    except Exception as exc:
+        raise ValueError(f"Invalid {field_name}: {exc}") from exc
+
+
+def _matches_canonical_timestamp(cached_ts: Any, canonical_utc: str) -> bool:
+    """
+    Verifies that cached_ts matches canonical_utc.
+    Matches if equal as strings, or if both represent the exact same UTC instant.
+    Rejects naive, missing, malformed, or unequal timestamps fail-closed.
+    """
+    if cached_ts == canonical_utc:
+        return True
+    if not isinstance(cached_ts, str) or not isinstance(canonical_utc, str):
+        return False
+    try:
+        dt_cached = datetime.fromisoformat(cached_ts.strip())
+        dt_canon = datetime.fromisoformat(canonical_utc.strip())
+        if dt_cached.tzinfo is None or dt_canon.tzinfo is None:
+            return False
+        return dt_cached.astimezone(timezone.utc) == dt_canon.astimezone(timezone.utc)
+    except Exception:
+        return False
+
+
 def _build_gex_cache_candidate(
     res: WorkResult,
     now_ts: Optional[float] = None,
@@ -5668,10 +5726,10 @@ def _build_gex_cache_candidate(
     ):
         raise ValueError("GEX spot price has changed")
 
-    if cache.observation_times.get(target_sym) != observation_time:
+    if not _matches_canonical_timestamp(cache.observation_times.get(target_sym), observation_time):
         raise ValueError("GEX spot observation has been superseded")
 
-    if cache.retrieval_times.get(target_sym) != retrieval_time:
+    if not _matches_canonical_timestamp(cache.retrieval_times.get(target_sym), retrieval_time):
         raise ValueError("GEX spot retrieval identity has changed")
 
     contract_count = res.data.get("contract_count")
@@ -5802,16 +5860,16 @@ def enqueue_options_gex(
     raw_obs_time = cache.observation_times.get(sym_clean) if spot_obs_time is None else spot_obs_time
     raw_retrieval_time = cache.retrieval_times.get(sym_clean) if spot_retrieval_time is None else spot_retrieval_time
 
-    # Validate both timestamps are present, non-empty, strict UTC ISO-8601 with explicit Z or +00:00
+    # Validate both timestamps are present, non-empty, and resolve to strict canonical UTC ISO-8601
     try:
-        valid_obs_time = _validate_utc_timestamp(raw_obs_time, "spot observation_time")
-        valid_retrieval_time = _validate_utc_timestamp(raw_retrieval_time, "spot retrieval_time")
+        valid_obs_time = _canonical_spot_timestamp(raw_obs_time, "spot observation_time")
+        valid_retrieval_time = _canonical_spot_timestamp(raw_retrieval_time, "spot retrieval_time")
     except Exception:
         return False, None
 
-    if cache.observation_times.get(sym_clean) != valid_obs_time:
+    if not _matches_canonical_timestamp(cache.observation_times.get(sym_clean), valid_obs_time):
         return False, None
-    if cache.retrieval_times.get(sym_clean) != valid_retrieval_time:
+    if not _matches_canonical_timestamp(cache.retrieval_times.get(sym_clean), valid_retrieval_time):
         return False, None
 
     eff_now = float(t_time.time() if now_ts is None else now_ts)
@@ -5921,41 +5979,46 @@ def coordinate_heavy_market_data_cycle(
     gex_enqueued = 0
 
     for sym in symbols:
-        sym_clean = str(sym or "").strip().upper()
-        if not sym_clean:
-            continue
-        t_obj = ticker_map.get(sym_clean) if sym_clean in ticker_map else ticker_map.get(sym)
+        try:
+            sym_clean = str(sym or "").strip().upper()
+            if not sym_clean:
+                continue
+            t_obj = ticker_map.get(sym_clean) if sym_clean in ticker_map else ticker_map.get(sym)
 
-        if include_historical:
-            cur_hist = cache.history.get(sym_clean)
-            need_hist = (
-                is_heavy
-                or cur_hist is None
-                or (isinstance(cur_hist, pd.DataFrame) and cur_hist.empty)
-                or cache.last_history_fetch_date.get(sym_clean) != eff_today
-            )
-            if need_hist:
-                acc, _ = enqueue_historical_data(
-                    sym_clean,
-                    t_obj=t_obj,
-                    today_str=eff_today,
-                    now_ny=now_ny,
-                    coordinator=coordinator,
+            if include_historical:
+                cur_hist = cache.history.get(sym_clean)
+                need_hist = (
+                    is_heavy
+                    or cur_hist is None
+                    or (isinstance(cur_hist, pd.DataFrame) and cur_hist.empty)
+                    or cache.last_history_fetch_date.get(sym_clean) != eff_today
                 )
-                if acc:
-                    historical_enqueued += 1
+                if need_hist:
+                    acc, _ = enqueue_historical_data(
+                        sym_clean,
+                        t_obj=t_obj,
+                        today_str=eff_today,
+                        now_ny=now_ny,
+                        force=is_heavy,
+                        coordinator=coordinator,
+                    )
+                    if acc:
+                        historical_enqueued += 1
 
-        if include_gex:
-            if is_heavy or sym_clean not in cache.last_gex_fetch:
-                acc, _ = enqueue_options_gex(
-                    sym_clean,
-                    ticker_obj=t_obj,
-                    spot_price=cache.prices.get(sym_clean),
-                    now_ts=eff_now,
-                    coordinator=coordinator,
-                )
-                if acc:
-                    gex_enqueued += 1
+            if include_gex:
+                if is_heavy or sym_clean not in cache.last_gex_fetch:
+                    acc, _ = enqueue_options_gex(
+                        sym_clean,
+                        ticker_obj=t_obj,
+                        spot_price=cache.prices.get(sym_clean),
+                        now_ts=eff_now,
+                        force=is_heavy,
+                        coordinator=coordinator,
+                    )
+                    if acc:
+                        gex_enqueued += 1
+        except Exception as sym_err:
+            logger.warning(f"[HeavyMarketData] Error scheduling heavy workloads for {sym!r}: {sym_err}")
 
     return {
         "applied_count": historical_applied + gex_applied,
@@ -6692,6 +6755,7 @@ def get_macro_telemetry_context():
 # -----------------------------
 def run_daemon():
     global GLOBAL_STATE, FORCE_REFRESH, ALL_TICKERS, TICKERS, MACRO_TICKERS
+    FORCE_REFRESH = False
     daemon_mkt_coord = MARKET_DATA_COORDINATOR
     daemon_mkt_app = MARKET_DATA_RESULT_APPLICATOR
     daemon_heavy_coord = HEAVY_MARKET_DATA_COORDINATOR
