@@ -1,5 +1,6 @@
 import os
 import collections
+import contextlib
 from fastapi import BackgroundTasks, Body, HTTPException, Request
 import sys
 import uvicorn
@@ -81,14 +82,45 @@ def log_to_queue(message: str):
         except:
             pass
 
+_MAX_TRACKED_TURN_IDS = 256
 cancel_event = threading.Event()
 _chat_execution_lock = threading.RLock()
 _turn_registry_lock = threading.Lock()
 _active_turn_id: Optional[str] = None
 _active_turn_event: Optional[threading.Event] = None
 _turn_events: Dict[str, threading.Event] = {}
-_completed_turn_ids: collections.deque = collections.deque(maxlen=256)
+_completed_turn_ids: collections.deque = collections.deque(maxlen=_MAX_TRACKED_TURN_IDS)
 _precancelled_turn_ids: collections.OrderedDict = collections.OrderedDict()
+
+
+def _record_bounded_precancelled_turn(turn_id: str) -> None:
+    """Record pre-arrival cancellation up to _MAX_TRACKED_TURN_IDS while holding _turn_registry_lock."""
+    _precancelled_turn_ids[turn_id] = True
+    _precancelled_turn_ids.move_to_end(turn_id)
+    while len(_precancelled_turn_ids) > _MAX_TRACKED_TURN_IDS:
+        _precancelled_turn_ids.popitem(last=False)
+
+
+def _consume_precancelled_turn(turn_id: str) -> bool:
+    """Atomically consume a pre-arrival cancellation marker while holding _turn_registry_lock."""
+    return _precancelled_turn_ids.pop(turn_id, None) is not None
+
+
+@contextlib.contextmanager
+def _registered_turn(turn_id: str):
+    """Register an active-turn cancellation event and guarantee cleanup on exit."""
+    with _turn_registry_lock:
+        turn_event = _turn_events.get(turn_id)
+        if turn_event is None:
+            turn_event = threading.Event()
+            _turn_events[turn_id] = turn_event
+        if _consume_precancelled_turn(turn_id):
+            turn_event.set()
+    try:
+        yield turn_event
+    finally:
+        with _turn_registry_lock:
+            _turn_events.pop(turn_id, None)
 
 
 def check_cancelled():
@@ -443,14 +475,10 @@ def cancel_chat(req: Optional[Any] = Body(default=None)):
                     "active_turn_id": _active_turn_id,
                 }
             evt = _turn_events.get(requested_turn_id)
-            if evt is None:
-                evt = threading.Event()
-                _turn_events[requested_turn_id] = evt
-            evt.set()
-            _precancelled_turn_ids[requested_turn_id] = True
-            _precancelled_turn_ids.move_to_end(requested_turn_id)
-            while len(_precancelled_turn_ids) > 256:
-                _precancelled_turn_ids.popitem(last=False)
+            if evt is not None:
+                evt.set()
+            else:
+                _record_bounded_precancelled_turn(requested_turn_id)
             framework.log(f"[System] Pre-execution cancellation recorded for turn {requested_turn_id}.")
             return {"status": "cancelled", "turn_id": requested_turn_id}
 
@@ -536,49 +564,61 @@ def set_cache_policy(data: Optional[dict] = None):
 
 @app.post("/api/set_model")
 def set_model(data: dict):
-    global ORCHESTRATOR_MODEL, global_chat_session, _session_hydrated
-    # Fallback to current model if none provided
-    new_model = data.get("model", ORCHESTRATOR_MODEL)
-    include_paid = data.get("include_paid", True)
-    gemini_linked = data.get("gemini_subscription_linked", False)
+    global ORCHESTRATOR_MODEL, global_chat_session, _session_hydrated, active_model_warning
+    with _chat_execution_lock:
+        prev_model = ORCHESTRATOR_MODEL
+        prev_free = getattr(framework, "free_tier_only", True)
+        prev_linked = getattr(framework, "gemini_subscription_linked", False)
+        prev_session = global_chat_session
+        prev_hydrated = _session_hydrated
+        prev_warning = active_model_warning
 
-    # Update config.json
-    try:
-        config_path = "context/config.json"
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-            
-            if config_data.get("GEMINI_SUBSCRIPTION_LINKED") != gemini_linked:
-                config_data["GEMINI_SUBSCRIPTION_LINKED"] = gemini_linked
-                with open(config_path, "w", encoding="utf-8") as f:
-                    json.dump(config_data, f, indent=2)
-    except Exception as ce:
-        framework.log(f"[System Error] Failed to write subscription policy to config.json: {ce}")
+        # Fallback to current model if none provided
+        new_model = data.get("model", prev_model)
+        include_paid = data.get("include_paid", True)
+        gemini_linked = data.get("gemini_subscription_linked", False)
+        new_free = not include_paid
+        needs_recalibration = (new_model != prev_model) or (prev_free != new_free)
 
-    framework.gemini_subscription_linked = gemini_linked
+        try:
+            framework.gemini_subscription_linked = gemini_linked
+            framework.free_tier_only = new_free
+            if prev_free != new_free:
+                framework.log(f"[System] Paid Tiers Policy toggled. Free Tier Only: {framework.free_tier_only}")
 
-    # Dynamically toggle free_tier_only in the framework
-    old_free = getattr(framework, "free_tier_only", True)
-    framework.free_tier_only = not include_paid
-    if old_free != framework.free_tier_only:
-        framework.log(f"[System] Paid Tiers Policy toggled. Free Tier Only: {framework.free_tier_only}")
+            if needs_recalibration:
+                framework.log(f"[System] Switching Reasoning Tier to {new_model}...")
+                ORCHESTRATOR_MODEL = new_model
+                new_session = create_new_session()
+                global_chat_session = new_session
+                _session_hydrated = False
+                framework.log(f"[System] Council re-calibrated on {new_model}.")
 
-    if new_model != ORCHESTRATOR_MODEL or old_free != framework.free_tier_only:
-        framework.log(f"[System] Switching Reasoning Tier to {new_model}...")
-        with _chat_execution_lock:
-            ORCHESTRATOR_MODEL = new_model
-            
-            # Force a fresh session on next chat
-            global_chat_session = None 
-            _session_hydrated = False
-            
-            # Re-create session
-            global_chat_session = create_new_session()
-        framework.log(f"[System] Council re-calibrated on {new_model}.")
-    global active_model_warning
-    active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
-    return {"status": "success", "current_model": ORCHESTRATOR_MODEL, "warning": active_model_warning}
+            active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
+        except Exception:
+            ORCHESTRATOR_MODEL = prev_model
+            framework.free_tier_only = prev_free
+            framework.gemini_subscription_linked = prev_linked
+            global_chat_session = prev_session
+            _session_hydrated = prev_hydrated
+            active_model_warning = prev_warning
+            raise
+
+        # Update config.json only after in-memory policy/session transition succeeds
+        try:
+            config_path = "context/config.json"
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+
+                if config_data.get("GEMINI_SUBSCRIPTION_LINKED") != gemini_linked:
+                    config_data["GEMINI_SUBSCRIPTION_LINKED"] = gemini_linked
+                    with open(config_path, "w", encoding="utf-8") as f:
+                        json.dump(config_data, f, indent=2)
+        except Exception as ce:
+            framework.log(f"[System Error] Failed to write subscription policy to config.json: {ce}")
+
+        return {"status": "success", "current_model": ORCHESTRATOR_MODEL, "warning": active_model_warning}
 
 def _normalize_for_json(obj: Any) -> Any:
     """Recursively converts read-only Mapping/Sequence views into plain JSON-serializable structures."""
@@ -640,15 +680,7 @@ def chat_endpoint(req: ChatRequest):
     raw_tid = getattr(req, "turn_id", None)
     turn_id = (raw_tid.strip() if isinstance(raw_tid, str) and raw_tid.strip() else None) or f"turn-{uuid.uuid4().hex}"
 
-    with _turn_registry_lock:
-        turn_event = _turn_events.get(turn_id)
-        if turn_event is None:
-            turn_event = threading.Event()
-            _turn_events[turn_id] = turn_event
-        if turn_id in _precancelled_turn_ids:
-            turn_event.set()
-
-    with _chat_execution_lock:
+    with _registered_turn(turn_id) as turn_event, _chat_execution_lock:
         activated = False
         orig_framework_cancel_check = getattr(framework, "cancel_check", check_cancelled)
         try:

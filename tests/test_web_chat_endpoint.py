@@ -18,7 +18,6 @@ import shutil
 import subprocess
 import sys
 import threading
-import time
 import unittest
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
@@ -879,12 +878,35 @@ class TestStage332ContextAndTokenEfficiency(unittest.TestCase):
         self.assertTrue(web_server._session_hydrated)
 
 
+class _ObservedRLock:
+    """Deterministic RLock wrapper signaling when a second thread blocks acquiring the lock."""
+
+    def __init__(self, inner, on_contended_enter=None):
+        self._inner = inner
+        self._on_contended_enter = on_contended_enter
+
+    def __enter__(self):
+        acquired_immediately = self._inner.acquire(blocking=False)
+        if not acquired_immediately:
+            if self._on_contended_enter is not None:
+                self._on_contended_enter()
+            self._inner.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._inner.release()
+        return False
+
+
 class TestStage333ChatLatencyAndUxCleanup(unittest.TestCase):
     def setUp(self):
         self._orig_model = web_server.ORCHESTRATOR_MODEL
         self._orig_session = web_server.global_chat_session
         self._orig_hydrated = web_server._session_hydrated
         self._orig_cancel_check = web_server.framework.cancel_check
+        self._orig_free_tier_only = getattr(web_server.framework, "free_tier_only", True)
+        self._orig_sub_linked = getattr(web_server.framework, "gemini_subscription_linked", False)
+        self._orig_warning = web_server.active_model_warning
         self._reset_turn_registry()
 
     def tearDown(self):
@@ -892,6 +914,9 @@ class TestStage333ChatLatencyAndUxCleanup(unittest.TestCase):
         web_server.global_chat_session = self._orig_session
         web_server._session_hydrated = self._orig_hydrated
         web_server.framework.cancel_check = self._orig_cancel_check
+        web_server.framework.free_tier_only = self._orig_free_tier_only
+        web_server.framework.gemini_subscription_linked = self._orig_sub_linked
+        web_server.active_model_warning = self._orig_warning
         self._reset_turn_registry()
 
     def _reset_turn_registry(self):
@@ -1112,6 +1137,7 @@ class TestStage333ChatLatencyAndUxCleanup(unittest.TestCase):
 
         probe_lock = threading.Lock()
         first_entered = threading.Event()
+        second_waiting_on_lock = threading.Event()
         metrics = {"inflight": 0, "max_inflight": 0, "sessions": []}
 
         def simulate_turn(**kwargs):
@@ -1123,13 +1149,11 @@ class TestStage333ChatLatencyAndUxCleanup(unittest.TestCase):
                 is_first = "[USER_QUERY]: First request" in kwargs["initial_message"]
                 if is_first:
                     first_entered.set()
-                    time.sleep(0.08)
+                    self.assertTrue(second_waiting_on_lock.wait(timeout=3.0))
                 tokens = 111 if is_first else 222
                 with web_server.framework._usage_lock:
                     web_server.framework.turn_usage["actual_prompt_tokens"] = tokens
                     web_server.framework.turn_usage["prompt_tokens"] = tokens
-                if is_first:
-                    time.sleep(0.03)
                 return {"status": "completed", "response": f"Done {tokens}", "turn_count": 1}
             finally:
                 with probe_lock:
@@ -1141,7 +1165,11 @@ class TestStage333ChatLatencyAndUxCleanup(unittest.TestCase):
         def invoke(key, msg, tid):
             results[key] = web_server.chat_endpoint(web_server.ChatRequest(message=msg, turn_id=tid))
 
-        with patch_global_state(live_state):
+        observed_lock = _ObservedRLock(
+            web_server._chat_execution_lock,
+            on_contended_enter=second_waiting_on_lock.set,
+        )
+        with patch.object(web_server, "_chat_execution_lock", observed_lock), patch_global_state(live_state):
             t1 = threading.Thread(target=invoke, args=("first", "First request", "turn-1"))
             t2 = threading.Thread(target=invoke, args=("second", "Second request", "turn-2"))
             t1.start()
@@ -1174,13 +1202,10 @@ class TestStage333ChatLatencyAndUxCleanup(unittest.TestCase):
             turn_check = kwargs["cancel_check"]
             self.assertFalse(turn_check())
             self.assertFalse(web_server.framework.cancel_check())
+            active_evt = web_server._active_turn_event
+            self.assertIsNotNone(active_evt)
             entered.set()
-
-            deadline = time.monotonic() + 3.0
-            while time.monotonic() < deadline:
-                if web_server.framework.cancel_check() and turn_check():
-                    break
-                time.sleep(0.01)
+            self.assertTrue(active_evt.wait(timeout=3.0))
 
             cancelled_observed["framework_cancelled"] = web_server.framework.cancel_check()
             cancelled_observed["dispatch_cancelled"] = turn_check()
@@ -1474,6 +1499,245 @@ assert(estBadgeHtml.includes('~120 est. in / ~40 est. out'), estBadgeHtml);
             0,
             f"Node UI runtime check failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}",
         )
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_set_model_serializes_with_active_chat_and_applies_to_next_chat(self, mock_dispatch, mock_charts):
+        """set_model waits for an active chat turn before changing policy/model/session cleanly for the next turn."""
+        live_state = self._make_valid_live_state()
+        initial_session = MagicMock(name="InitialSession")
+        recalibrated_session = MagicMock(name="RecalibratedSession")
+
+        web_server.ORCHESTRATOR_MODEL = "gemini-3.8-flash-high"
+        web_server.framework.free_tier_only = True
+        web_server.framework.gemini_subscription_linked = False
+        web_server.global_chat_session = initial_session
+        web_server._session_hydrated = True
+
+        turn1_entered = threading.Event()
+        set_model_waiting_on_lock = threading.Event()
+        set_model_done = threading.Event()
+        turn1_observations = {}
+        turn2_observations = {}
+
+        def simulate_turn(**kwargs):
+            msg = kwargs["initial_message"]
+            if "[USER_QUERY]: First active turn" in msg:
+                turn1_entered.set()
+                self.assertTrue(set_model_waiting_on_lock.wait(timeout=3.0))
+                turn1_observations["model"] = web_server.ORCHESTRATOR_MODEL
+                turn1_observations["free_tier_only"] = web_server.framework.free_tier_only
+                turn1_observations["sub_linked"] = web_server.framework.gemini_subscription_linked
+                turn1_observations["session"] = kwargs["session"]
+                turn1_observations["hydrated"] = web_server._session_hydrated
+                turn1_observations["set_model_finished_early"] = set_model_done.is_set()
+                return {"status": "completed", "response": "Turn 1 ok", "turn_count": 1}
+
+            turn2_observations["model"] = web_server.ORCHESTRATOR_MODEL
+            turn2_observations["free_tier_only"] = web_server.framework.free_tier_only
+            turn2_observations["sub_linked"] = web_server.framework.gemini_subscription_linked
+            turn2_observations["session"] = kwargs["session"]
+            turn2_observations["hydrated"] = web_server._session_hydrated
+            turn2_observations["initial_message"] = msg
+            return {"status": "completed", "response": "Turn 2 ok", "turn_count": 1}
+
+        mock_dispatch.side_effect = simulate_turn
+
+        set_model_out = {}
+        turn1_out = {}
+
+        def run_turn1():
+            turn1_out["res"] = web_server.chat_endpoint(
+                web_server.ChatRequest(message="First active turn", turn_id="turn-model-1")
+            )
+
+        def run_set_model():
+            set_model_out["res"] = web_server.set_model(
+                {
+                    "model": "gemini-4-argon-high",
+                    "include_paid": True,
+                    "gemini_subscription_linked": True,
+                }
+            )
+            set_model_done.set()
+
+        orig_exists = os.path.exists
+        observed_lock = _ObservedRLock(
+            web_server._chat_execution_lock,
+            on_contended_enter=set_model_waiting_on_lock.set,
+        )
+
+        with (
+            patch.object(web_server, "_chat_execution_lock", observed_lock),
+            patch("web_server.create_new_session", return_value=recalibrated_session) as mock_create_session,
+            patch(
+                "web_server.os.path.exists",
+                side_effect=lambda p: False if "config.json" in str(p) else orig_exists(p),
+            ),
+            patch_global_state(live_state),
+        ):
+            t_chat = threading.Thread(target=run_turn1)
+            t_model = threading.Thread(target=run_set_model)
+            t_chat.start()
+            self.assertTrue(turn1_entered.wait(timeout=3.0))
+            t_model.start()
+            t_chat.join(timeout=5.0)
+            t_model.join(timeout=5.0)
+            self.assertFalse(t_chat.is_alive())
+            self.assertFalse(t_model.is_alive())
+
+            self.assertTrue(set_model_done.is_set())
+            self.assertEqual(mock_create_session.call_count, 1)
+
+            res_turn2 = web_server.chat_endpoint(
+                web_server.ChatRequest(message="Next turn", turn_id="turn-model-2")
+            )
+
+        self.assertEqual(turn1_out["res"]["status"], "success")
+        self.assertEqual(turn1_observations["model"], "gemini-3.8-flash-high")
+        self.assertTrue(turn1_observations["free_tier_only"])
+        self.assertFalse(turn1_observations["sub_linked"])
+        self.assertIs(turn1_observations["session"], initial_session)
+        self.assertTrue(turn1_observations["hydrated"])
+        self.assertFalse(turn1_observations["set_model_finished_early"])
+
+        self.assertEqual(set_model_out["res"]["status"], "success")
+        self.assertEqual(set_model_out["res"]["current_model"], "gemini-4-argon-high")
+
+        self.assertEqual(res_turn2["status"], "success")
+        self.assertEqual(res_turn2["model"], "gemini-4-argon-high")
+        self.assertEqual(turn2_observations["model"], "gemini-4-argon-high")
+        self.assertFalse(turn2_observations["free_tier_only"])
+        self.assertTrue(turn2_observations["sub_linked"])
+        self.assertIs(turn2_observations["session"], recalibrated_session)
+        self.assertFalse(turn2_observations["hydrated"])
+        self.assertIn("[ACTIVE_MODEL]: gemini-4-argon-high", turn2_observations["initial_message"])
+
+    def test_set_model_rolls_back_policy_and_session_when_session_creation_fails(self):
+        """Session creation failure inside set_model rolls back model, flags, hydration, warning, and session."""
+        initial_session = MagicMock(name="IntactSession")
+        web_server.ORCHESTRATOR_MODEL = "gemini-3.8-flash-high"
+        web_server.framework.free_tier_only = True
+        web_server.framework.gemini_subscription_linked = False
+        web_server.global_chat_session = initial_session
+        web_server._session_hydrated = True
+        web_server.active_model_warning = "existing-warning"
+
+        orig_exists = os.path.exists
+        with (
+            patch("web_server.create_new_session", side_effect=RuntimeError("Session init failure")),
+            patch(
+                "web_server.os.path.exists",
+                side_effect=lambda p: False if "config.json" in str(p) else orig_exists(p),
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                web_server.set_model(
+                    {
+                        "model": "gemini-4-argon-high",
+                        "include_paid": True,
+                        "gemini_subscription_linked": True,
+                    }
+                )
+
+        self.assertEqual(web_server.ORCHESTRATOR_MODEL, "gemini-3.8-flash-high")
+        self.assertTrue(web_server.framework.free_tier_only)
+        self.assertFalse(web_server.framework.gemini_subscription_linked)
+        self.assertIs(web_server.global_chat_session, initial_session)
+        self.assertTrue(web_server._session_hydrated)
+        self.assertEqual(web_server.active_model_warning, "existing-warning")
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_abandoned_precancellation_does_not_retain_event_and_bounds_registry(self, mock_dispatch, mock_charts):
+        """Abandoned pre-arrival cancellations never retain events in _turn_events and stay bounded."""
+        live_state = self._make_valid_live_state()
+        mock_dispatch.return_value = {"status": "completed", "response": "Fresh ok", "turn_count": 1}
+
+        res0 = web_server.cancel_chat({"turn_id": "turn-abandoned-0"})
+        self.assertEqual(res0, {"status": "cancelled", "turn_id": "turn-abandoned-0"})
+        self.assertEqual(len(web_server._turn_events), 0)
+        self.assertIn("turn-abandoned-0", web_server._precancelled_turn_ids)
+
+        for idx in range(1, 300):
+            res_i = web_server.cancel_chat({"turn_id": f"turn-abandoned-{idx}"})
+            self.assertEqual(res_i["status"], "cancelled")
+
+        self.assertEqual(len(web_server._turn_events), 0)
+        self.assertEqual(len(web_server._precancelled_turn_ids), web_server._MAX_TRACKED_TURN_IDS)
+        self.assertNotIn("turn-abandoned-0", web_server._precancelled_turn_ids)
+        self.assertNotIn("turn-abandoned-43", web_server._precancelled_turn_ids)
+        self.assertIn("turn-abandoned-44", web_server._precancelled_turn_ids)
+        self.assertIn("turn-abandoned-299", web_server._precancelled_turn_ids)
+
+        # Latest bounded pre-arrival cancellation is still honoured without leaking events
+        with patch_global_state(live_state):
+            aborted = web_server.chat_endpoint(
+                web_server.ChatRequest(message="Should abort", turn_id="turn-abandoned-299")
+            )
+            fresh = web_server.chat_endpoint(
+                web_server.ChatRequest(message="Fresh unaffected turn", turn_id="turn-fresh")
+            )
+
+        self.assertTrue(aborted.get("cancelled"))
+        self.assertEqual(aborted["turn_id"], "turn-abandoned-299")
+        mock_dispatch.assert_called_once()
+        self.assertNotIn("cancelled", fresh)
+        self.assertEqual(fresh["turn_id"], "turn-fresh")
+        self.assertEqual(len(web_server._turn_events), 0)
+        self.assertNotIn("turn-abandoned-299", web_server._precancelled_turn_ids)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_concurrent_registration_and_cancellation_never_loses_cancellation_or_leaks_events(
+        self, mock_dispatch, mock_charts
+    ):
+        """Racing cancel_chat against chat_endpoint registration never drops cancellation or retains events."""
+        live_state = self._make_valid_live_state()
+
+        def wait_if_dispatched(**kwargs):
+            evt = web_server._active_turn_event
+            self.assertIsNotNone(evt)
+            self.assertTrue(evt.wait(timeout=3.0))
+            self.assertTrue(kwargs["cancel_check"]())
+            return {"status": "cancelled", "response": "[OFFLINE] Session terminated by user interrupt."}
+
+        mock_dispatch.side_effect = wait_if_dispatched
+
+        with patch_global_state(live_state):
+            for idx in range(10):
+                tid = f"turn-race-{idx}"
+                barrier = threading.Barrier(2)
+                outcomes = {}
+
+                def run_chat():
+                    barrier.wait(timeout=3.0)
+                    outcomes["chat"] = web_server.chat_endpoint(
+                        web_server.ChatRequest(message=f"Race {idx}", turn_id=tid)
+                    )
+
+                def run_cancel():
+                    barrier.wait(timeout=3.0)
+                    outcomes["cancel"] = web_server.cancel_chat({"turn_id": tid})
+
+                t_chat = threading.Thread(target=run_chat)
+                t_cancel = threading.Thread(target=run_cancel)
+                t_chat.start()
+                t_cancel.start()
+                t_chat.join(timeout=5.0)
+                t_cancel.join(timeout=5.0)
+                self.assertFalse(t_chat.is_alive())
+                self.assertFalse(t_cancel.is_alive())
+
+                self.assertEqual(outcomes["cancel"], {"status": "cancelled", "turn_id": tid})
+                self.assertEqual(outcomes["chat"]["status"], "success")
+                self.assertTrue(outcomes["chat"].get("cancelled"))
+                self.assertEqual(outcomes["chat"]["turn_id"], tid)
+                self.assertEqual(len(web_server._turn_events), 0)
+                self.assertNotIn(tid, web_server._precancelled_turn_ids)
+                self.assertIn(tid, web_server._completed_turn_ids)
+                self.assertIsNone(web_server._active_turn_id)
+                self.assertIsNone(web_server._active_turn_event)
 
 
 if __name__ == "__main__":
