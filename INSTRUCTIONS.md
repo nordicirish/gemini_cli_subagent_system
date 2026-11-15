@@ -60,6 +60,8 @@ Engineering workers MUST NOT:
 
 ## 5. Mandatory Baseline Gate & Verification Testing
 
+All testing execution, failure classification, and acceptance evidence are governed by [`.agents/protocols/05-testing-policy.md`](.agents/protocols/05-testing-policy.md), which serves as the authoritative detailed testing policy.
+
 Before editing any file in any stage:
 1. Verify and record `git branch --show-current`, `git rev-parse HEAD`, and `git status --short`.
 2. When modifying code or test paths, execute the repository-standard baseline test suite:
@@ -67,8 +69,14 @@ Before editing any file in any stage:
    python -m unittest discover tests
    ```
    Do not require installing `pytest` or adding external test dependencies.
-3. If baseline tests fail prior to your edits, STOP immediately and report the exact failure output. Baseline failures must be preserved and reported transparently; never silently modify tests or production code to make the baseline pass.
-4. Execute appropriate targeted tests for authorised changes during implementation and verification.
+3. **Baseline Failure Protocol:**
+   - If baseline tests fail prior to your edits, capture the full diagnostic evidence: exact test name, command, stdout, stderr, process exit code, and execution environment.
+   - Investigate the root cause and failure mechanism, and classify the failure under Protocol 05 (reproducible defect, intermittent contention/timing, external dependency failure, environmental failure, or deferred verification).
+   - STOP immediately and report the discrepancy if the failure blocks safe progress, introduces ambiguity into authorised functionality, or affects required stage acceptance.
+   - Permit continuation only when the failure is demonstrably unrelated to the authorised task, and both the authorised specification and repository governance permit it under an explicit documented limitation.
+   - Never silently modify tests or production code to make the baseline pass; never suppress, delete, or bypass test assertions.
+   - A passing rerun does not erase an intermittent failure; repeated reruns merely to obtain a passing result are prohibited.
+4. Execute appropriate targeted unit, regression, and integration tests for authorised changes in proportion to risk, adhering to Protocol 05.
 5. Execute compilation (`python -m compileall -q python tests`) and dependency integrity checks (`python -m pip check`) where relevant.
 
 ---

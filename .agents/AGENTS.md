@@ -79,13 +79,13 @@ Every code change must traverse the fail-closed lifecycle:
    [Implementation] ◄─── Restricted to approved scope; automated tests written concurrently
           │
           ▼
- [Automated Verification] ◄─── Full test suite pass; zero regressions; pip check; py_compile
+ [Automated Verification] ◄─── Satisfies risk-based test plan (Protocol 05); zero regressions; pip check; py_compile
           │
           ▼
- [Independent Code Review] ◄─── Designated read-only reviewer (never the implementer) audits diff & evidence
+ [Independent Code Review] ◄─── Designated read-only reviewer (never the implementer) audits diff & evidence (Protocol 04)
           │
           ▼
    [Human Sign-Off] ◄─── Final inspection; human performs git commit & push and authorises next stage
 ```
 
-**Fail-Closed Rule:** If required tests fail, if review evidence is incomplete, if unapproved files or Protected Financial Assets (`Protocol 06`) are touched, or if an agent attempts to self-approve or auto-advance stages, the task is marked `REJECTED` and execution terminates immediately.
+**Fail-Closed Rule:** If required automated tests fail, if unresolved relevant defects remain, if review evidence is incomplete, if unapproved files or Protected Financial Assets (`Protocol 06`) are touched, if permitted blockers or deferrals lack explicit documentation and justification under Protocol 05, or if an agent attempts to self-approve or auto-advance stages, the task is marked `REJECTED` and execution terminates immediately.
