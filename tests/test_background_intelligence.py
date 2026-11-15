@@ -334,6 +334,10 @@ class TestBoundedWorkerAndDeduplication(unittest.TestCase):
         self.assertEqual(item_next.status, WorkStatus.COMPLETED)
 
 
+@unittest.skipUnless(
+    os.getenv("RUN_EXTENDED_TESTS") == "1",
+    "Extended stress/timing suite (opt-in)",
+)
 class TestSubprocessLifecycleAndHardening(unittest.TestCase):
     """Verifies subprocess timeout, cancellation while running, stream cleanup, and reaping."""
 

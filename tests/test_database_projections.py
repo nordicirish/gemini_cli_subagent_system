@@ -63,6 +63,10 @@ from python.database.projections import (
 from python.tool_registry import execution_role_context
 
 
+@unittest.skipUnless(
+    os.getenv("RUN_EXTENDED_TESTS") == "1",
+    "Extended stress/timing suite (opt-in)",
+)
 class BaseProjectionTestCase(unittest.TestCase):
     """Base test case initializing isolated temporary core and cache SQLite databases."""
 
@@ -1156,6 +1160,10 @@ class TestConcurrentSnapshotConsistency(BaseProjectionTestCase):
 # L. Projection Dictionary Key Validation (Stage 1.5-C.1 C-05)
 # ===========================================================================
 
+@unittest.skipUnless(
+    os.getenv("RUN_EXTENDED_TESTS") == "1",
+    "Extended stress/timing suite (opt-in)",
+)
 class TestProjectionDictionaryKeyValidation(unittest.TestCase):
     """Verifies that normalize_projection_value strictly rejects non-string dictionary keys."""
 

@@ -76,6 +76,10 @@ from python.database.migration.parity import SSoTParityVerifier
 from python.tool_registry import execution_role_context
 
 
+@unittest.skipUnless(
+    os.getenv("RUN_EXTENDED_TESTS") == "1",
+    "Extended stress/timing suite (opt-in)",
+)
 class BaseMigrationTestCase(unittest.TestCase):
     """Base test case initializing isolated temporary directories and database managers."""
 

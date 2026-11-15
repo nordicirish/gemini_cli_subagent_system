@@ -50,4 +50,7 @@ cache/
 *.log
 *.lock
 
+# VS Code Workspaces
+*.code-workspace
+
 cache/daily_history_cache.json

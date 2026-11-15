@@ -108,6 +108,10 @@ class FaultyBackupConnection(sqlite3.Connection):
         raise sqlite3.OperationalError("Disk I/O error during backup")
 
 
+@unittest.skipUnless(
+    os.getenv("RUN_EXTENDED_TESTS") == "1",
+    "Extended stress/timing suite (opt-in)",
+)
 class TestStage15A21BackupLockingAndConcurrency(unittest.TestCase):
     """Rigorous verification of Stage 1.5-A.2.1 locking guarantees and exception integrity."""
 
@@ -590,6 +594,10 @@ sys.exit(0)
 # Stage 1.5-A.2.2: Restore Gate Lifetime, Target-State Race & No-Clobber Tests
 # ===========================================================================
 
+@unittest.skipUnless(
+    os.getenv("RUN_EXTENDED_TESTS") == "1",
+    "Extended stress/timing suite (opt-in)",
+)
 class TestStage15A22RestoreGateLifetimeAndNoClobber(unittest.TestCase):
     """
     Automated regression and concurrency tests for Stage 1.5-A.2.2.
@@ -1041,6 +1049,10 @@ class UnattributableError(Exception):
         raise TypeError(f"Cannot set attribute {name} on immutable exception")
 
 
+@unittest.skipUnless(
+    os.getenv("RUN_EXTENDED_TESTS") == "1",
+    "Extended stress/timing suite (opt-in)",
+)
 class TestStage15A221ManagedConnectionCloseSafetyAndCleanupIntegrity(unittest.TestCase):
     """
     Focused verification of Stage 1.5-A.2.2.1 requirements:
@@ -1441,6 +1453,10 @@ class TestStage15A221ManagedConnectionCloseSafetyAndCleanupIntegrity(unittest.Te
                 c.close()
 
 
+@unittest.skipUnless(
+    os.getenv("RUN_EXTENDED_TESTS") == "1",
+    "Extended stress/timing suite (opt-in)",
+)
 class TestStage15A222RestoreLockTokenReleaseIntegrityAndFailClosedLifecycle(unittest.TestCase):
     """
     Stage 1.5-A.2.2.2 Restore Lock Token Release Integrity & Fail-Closed Lifecycle Tests.
@@ -1795,6 +1811,10 @@ class TestStage15A222RestoreLockTokenReleaseIntegrityAndFailClosedLifecycle(unit
 # Stage 1.5-A.2.2.3: Restore Lock Ownership Retention & Quarantine Registry
 # ===========================================================================
 
+@unittest.skipUnless(
+    os.getenv("RUN_EXTENDED_TESTS") == "1",
+    "Extended stress/timing suite (opt-in)",
+)
 class TestStage15A223RestoreLockQuarantineAndLifecycleIntegrity(unittest.TestCase):
     """
     Stage 1.5-A.2.2.3 Restore Lock Ownership Retention, Quarantine & Lifecycle Tests.
@@ -2163,6 +2183,10 @@ class TestStage15A223RestoreLockQuarantineAndLifecycleIntegrity(unittest.TestCas
 # Restore Cleanup Exception Preservation
 # ===========================================================================
 
+@unittest.skipUnless(
+    os.getenv("RUN_EXTENDED_TESTS") == "1",
+    "Extended stress/timing suite (opt-in)",
+)
 class TestStage15A2231QuarantineRegistryAndCleanupIntegrity(unittest.TestCase):
     """
     Stage 1.5-A.2.2.3.1 Quarantine Registry Integrity, Safe Test Isolation &

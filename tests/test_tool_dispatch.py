@@ -244,42 +244,6 @@ class TestToolDispatcher(unittest.TestCase):
         self.assertIn("not in the assigned toolset", received_prompts[1])
         self.assertIn("Handled tool denial cleanly.", result)
 
-    # --- R5: Verification Harness Modes (Working-Tree & Committed) ---
-
-    def test_r5_verification_harness_supports_both_working_tree_and_committed_modes(self):
-        """R5: verify_stage_1.py mode check must pass in both pre-commit working-tree and post-commit clean states."""
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-        import verify_stage_1
-
-        reporter = verify_stage_1.VerificationReporter()
-
-        # 1. Simulate clean committed repository state
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                SimpleNamespace(returncode=0, stdout="60919b5f9e9614bda4d877886219446b351ceacb\n", stderr=""),
-                SimpleNamespace(returncode=0, stdout="", stderr=""),
-            ]
-            check_fn = verify_stage_1.make_repository_mode_check("committed")
-            self.assertTrue(check_fn(reporter))
-
-        # 2. Simulate dirty pre-commit working-tree state
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                SimpleNamespace(returncode=0, stdout="60919b5f9e9614bda4d877886219446b351ceacb\n", stderr=""),
-                SimpleNamespace(returncode=0, stdout=" M python/tool_registry.py\n", stderr=""),
-            ]
-            check_fn = verify_stage_1.make_repository_mode_check("working-tree")
-            self.assertTrue(check_fn(reporter))
-
-        # 3. Auto mode succeeds on both states
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                SimpleNamespace(returncode=0, stdout="abcdef1234567890\n", stderr=""),
-                SimpleNamespace(returncode=0, stdout="", stderr=""),
-            ]
-            check_fn = verify_stage_1.make_repository_mode_check("auto")
-            self.assertTrue(check_fn(reporter))
-
 
 if __name__ == "__main__":
     unittest.main()

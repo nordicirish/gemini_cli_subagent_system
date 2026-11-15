@@ -25,7 +25,7 @@ This protocol mandates independent verification and fail-closed quality gates be
    - Execution of automated verification satisfying the risk-proportionate test plan defined in Protocol 05:
      - Relevant targeted and regression tests for every implementation change.
      - Relevant integration tests where changes affect component interfaces, state boundaries, concurrency, persistence, or queues.
-     - Full test suite execution (`python -m unittest discover tests`) for cross-cutting architectural refactoring, financial-integrity, security-sensitive, background coordinator, and final stage remediation changes.
+     - Standard full test suite execution (`python -m unittest discover tests` with `RUN_EXTENDED_TESTS` unset) for cross-cutting architectural refactoring, financial-integrity, security-sensitive, background coordinator, and final stage remediation changes, invoking the extended tier (`RUN_EXTENDED_TESTS=1`) only when backup concurrency, offline migration, database projections, or subprocess lifecycle code is in scope, adhering to Protocol 05.
    - Zero regressions on required tests; explicit diagnostic documentation for any permitted blocker, intermittent failure, or deferred item.
    - Python syntax check: `python -m py_compile` (or `python -m compileall -q python tests`) passes cleanly with zero errors.
    - Dependency check: `pip check` reports zero broken requirements.

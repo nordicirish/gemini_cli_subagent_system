@@ -58,17 +58,17 @@ Engineering workers MUST NOT:
 
 ---
 
-## 5. Mandatory Baseline Gate & Verification Testing
+## 5. Mandatory Baseline Gate & Scope-Proportional Verification Testing
 
-All testing execution, failure classification, and acceptance evidence are governed by [`.agents/protocols/05-testing-policy.md`](.agents/protocols/05-testing-policy.md), which serves as the authoritative detailed testing policy.
+All testing execution, test-tier definitions, failure classification, and acceptance evidence are governed by [`.agents/protocols/05-testing-policy.md`](.agents/protocols/05-testing-policy.md), which serves as the authoritative detailed testing policy.
 
 Before editing any file in any stage:
 1. Verify and record `git branch --show-current`, `git rev-parse HEAD`, and `git status --short`.
-2. When modifying code or test paths, execute the repository-standard baseline test suite:
-   ```bash
-   python -m unittest discover tests
-   ```
-   Do not require installing `pytest` or adding external test dependencies.
+2. **Baseline Gate (Targeted Scope):** Execute only the targeted test module(s) relevant to files in the authorised stage scope, adhering to Protocol 05:
+   - Do not mandate running `python -m unittest discover tests` as a routine full-suite baseline.
+   - Do not run repository-wide discovery twice per stage.
+   - Do not execute unrelated extended suites as a routine baseline.
+   - Use Python's standard library `unittest` runner without requiring `pytest` or external test dependencies.
 3. **Baseline Failure Protocol:**
    - If baseline tests fail prior to your edits, capture the full diagnostic evidence: exact test name, command, stdout, stderr, process exit code, and execution environment.
    - Investigate the root cause and failure mechanism, and classify the failure under Protocol 05 (reproducible defect, intermittent contention/timing, external dependency failure, or environmental failure). Verification outcomes are reported separately under Protocol 05 (Passed, Failed, Intermittent, Blocked, or Deferred).
@@ -76,7 +76,12 @@ Before editing any file in any stage:
    - Permit continuation only when the failure is demonstrably unrelated to the authorised task, and both the authorised specification and repository governance permit it under an explicit documented limitation authorised by the Human Owner.
    - Never silently modify tests or production code to make the baseline pass; never suppress, delete, or bypass test assertions.
    - A passing rerun does not erase an intermittent failure; repeated reruns merely to obtain a passing result are prohibited.
-4. Execute appropriate targeted unit, regression, and integration tests for authorised changes in proportion to risk, adhering to Protocol 05.
+4. **Post-Edit Verification Gate:** Execute scope-proportional unit, regression, and integration tests for authorised changes in proportion to risk, adhering strictly to Protocol 05:
+   - Run `tests/test_database_*.py` only when `python/database/**` is in the authorised implementation scope.
+   - Run `tests/test_market_data_*.py` and `tests/test_heavy_market_data_separation.py` only when `python/fetch_stocks.py` is in the authorised implementation scope.
+   - Run the extended tier (`RUN_EXTENDED_TESTS=1`) only when backup concurrency, offline migration, or subprocess lifecycle code is explicitly modified.
+   - Otherwise execute only the targeted and regression tests relevant to the authorised changes.
+   - Never treat an omitted test as passed; report why it was not run.
 5. Execute compilation (`python -m compileall -q python tests`) and dependency integrity checks (`python -m pip check`) where relevant.
 
 ---

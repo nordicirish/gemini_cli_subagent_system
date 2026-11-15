@@ -67,18 +67,47 @@ All verification must be classified into one of four distinct categories:
   - A deferral must never waive mandatory financial-integrity, security, authorization, or deterministic correctness requirements.
   - All deferred verification items relevant to a release must be validated prior to the associated production release.
 
-## 4. Risk-Proportionate Test Execution
+## 4. Test Suite Tiers & Risk-Proportionate Test Execution
+
+Verification is partitioned into two distinct execution tiers:
+
+1. **Standard Test Tier (Default):**
+   - Deterministic, relevant unit and integration tests executed during ordinary development, targeted verification, and standard full-suite acceptance (`python -m unittest discover tests` with `RUN_EXTENDED_TESTS` unset).
+   - All tests in this tier must pass cleanly for relevant stage acceptance.
+2. **Extended Test Tier (Opt-In via `RUN_EXTENDED_TESTS=1`):**
+   - High-overhead stress, real-timeout concurrency, timing-contention, and offline migration suites:
+     - `tests/test_database_backup_concurrency.py`
+     - `tests/test_database_migration.py`
+     - `tests/test_database_projections.py`
+     - `tests/test_background_intelligence.py` (`TestSubprocessLifecycleAndHardening`)
+   - Skipped by default in standard discovery using `@unittest.skipUnless(os.getenv("RUN_EXTENDED_TESTS") == "1", "Extended stress/timing suite (opt-in)")`.
+   - Executed only when backup concurrency, offline migration, database projections, or subprocess lifecycle code is explicitly in the authorised implementation scope.
+
+### Scope-Proportional Verification Execution
 
 Every implementation task must follow a test execution plan proportionate to its scope and risk tier:
 
-1. **Targeted & Regression Tests:** Every code change requires executing all relevant targeted unit and regression tests.
-2. **Integration Tests:** Required whenever changes affect component interfaces, concurrency, persistence, queues, or state handoffs.
+1. **Baseline Gate (Pre-Edit):**
+   - Run only the targeted test module(s) relevant to files in the authorised scope.
+   - Do not mandate running `python -m unittest discover tests` as a routine pre-edit baseline.
+   - Do not run repository-wide discovery twice per stage.
+   - Do not execute unrelated extended suites as a routine baseline.
+   - Record exact commands, test counts, durations, and outcomes.
+   - If a targeted baseline reveals a relevant failure, capture diagnostic evidence, classify the failure, and halt immediately if safe progress is blocked.
+2. **Post-Edit Gate (Scope-Based Selection):**
+   - Run `tests/test_database_*.py` only when `python/database/**` is in the authorised implementation scope.
+   - Run `tests/test_market_data_*.py` and `tests/test_heavy_market_data_separation.py` only when `python/fetch_stocks.py` is in the authorised implementation scope.
+   - Run `RUN_EXTENDED_TESTS=1` only when backup concurrency, offline migration, database projections, or subprocess lifecycle code is explicitly modified.
+   - Otherwise run only targeted unit and regression tests relevant to authorised changes.
+   - Compilation checks (`python -m compileall -q python tests`) and dependency integrity checks (`python -m pip check`) remain applicable where relevant.
+   - Never treat an omitted test as passed. Always report why it was not run.
 3. **Full-Suite Testing:** Mandatory for:
    - Cross-cutting architectural refactoring.
    - Financial state, trading logic, or indicator calculation changes.
    - Security, permission, and authorization boundary changes.
    - Concurrency, locking, or background coordinator modifications.
    - Final remediation turns prior to stage sign-off.
+   - Standard full-suite testing executes ordinary discovery with `RUN_EXTENDED_TESTS` unset, invoking the extended tier only if extended functionality is within the authorised scope.
 4. **Isolated Low-Risk Changes:** Isolated documentation, UI formatting, or leaf-node bug fixes do not require full-suite execution unless specified by repository instructions or the authorized task prompt.
 5. **Transparency:** Never silently skip a required test. Always report exact test commands, tests executed, tests omitted, and the reasons.
 6. **Limits of Testing:** A passing test suite is necessary but never sufficient; it does not replace independent source-code review or governance compliance verification.
