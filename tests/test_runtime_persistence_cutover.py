@@ -19,14 +19,18 @@ from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 
+from python.atomic_io import FileLock
 from python.database.manager import DatabaseManager, PRIMARY_FINANCIAL_PROFILE
 from python.database.schema import SchemaMigrator
 from python.database.projections import SSoTProjectionGenerator
+from python.database.migration.models import ParityResult, ParitySummary
+from python.database.migration.parity import SSoTParityVerifier
 from python.database.repositories.base import utc_now_iso
 from python.persistence.contracts import (
     PersistenceError,
@@ -58,6 +62,11 @@ try:
     import tools
 except ImportError:
     import python.tools as tools
+
+try:
+    import tool_dispatcher
+except ImportError:
+    import python.tool_dispatcher as tool_dispatcher
 
 
 @contextmanager
@@ -100,14 +109,15 @@ class TestRuntimePersistenceCutoverAndInvariance(unittest.TestCase):
         self.assertEqual(actual_decisions_hash, expected_decisions_hash, "context/decision_log.json hash mismatch!")
 
     def test_active_production_database_exists_and_healthy(self):
-        """Verify context/gem.db exists, has valid schema, and passes integrity checks."""
+        """Verify context/gem.db exists, has valid schema, and passes integrity checks without mutating it."""
         self.assertTrue(self.db_path.exists(), "context/gem.db must exist after Stage 3.2 cutover")
-        mgr = DatabaseManager(str(self.db_path), profile=PRIMARY_FINANCIAL_PROFILE)
-        self.assertEqual(mgr.verify_integrity(), ["ok"])
-
-        # Check records imported
-        with mgr.connection() as conn:
+        p = self.db_path.resolve().as_posix()
+        with sqlite3.connect(f"file:{p}?mode=ro", uri=True) as conn:
             cur = conn.cursor()
+            cur.execute("PRAGMA integrity_check;")
+            self.assertEqual(cur.fetchall(), [("ok",)])
+
+            # Check records imported
             cur.execute("SELECT count(*) FROM portfolio_positions;")
             pos_count = cur.fetchone()[0]
             self.assertGreaterEqual(pos_count, 1)
@@ -124,18 +134,105 @@ class TestRuntimePersistenceCutoverAndInvariance(unittest.TestCase):
             dec_count = cur.fetchone()[0]
             self.assertGreaterEqual(dec_count, 1)
 
+    def _prepare_clean_temp_workspace(self, td: str):
+        temp_root = Path(td)
+        temp_context = temp_root / "context"
+        temp_context.mkdir(parents=True)
+        (temp_context / "ssot.json").write_bytes(self.ssot_path.read_bytes())
+        (temp_context / "decision_log.json").write_bytes(self.decisions_path.read_bytes())
+
+        # For temporary workspace testing of cutover operations that should reach promotion:
+        # Codify the 2 legacy lessons that lack 'L-xxx' prefix (ids 16 and 17)
+        lessons_data = json.loads(self.lessons_path.read_text(encoding="utf-8"))
+        for item in lessons_data.get("trade_lessons", []):
+            if item.get("id") == 16 and not str(item.get("rule", "")).startswith("L-"):
+                item["rule"] = "L-116: " + item["rule"]
+            elif item.get("id") == 17 and not str(item.get("rule", "")).startswith("L-"):
+                item["rule"] = "L-117: " + item["rule"]
+        (temp_context / "trade_lessons.json").write_text(json.dumps(lessons_data, indent=2), encoding="utf-8")
+        return temp_root, temp_context
+
+    def test_cutover_refuses_when_destination_already_exists(self):
+        """perform_sqlite_cutover refuses execution when target context/gem.db already exists."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            target_db = temp_context / "gem.db"
+            target_db.write_text("PRE_EXISTING_DB", encoding="utf-8")
+
+            with self.assertRaises(PersistenceIntegrityError) as ctx:
+                perform_sqlite_cutover(repo_root=temp_root)
+            self.assertIn("destination already exists", str(ctx.exception))
+
+    def test_destination_content_and_sha256_invariant_after_rejection(self):
+        """Pre-existing destination content and SHA-256 hash remain invariant after cutover rejection."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            target_db = temp_context / "gem.db"
+            target_content = b"EXISTING_DATABASE_STATE_12345"
+            target_db.write_bytes(target_content)
+            expected_hash = hashlib.sha256(target_content).hexdigest()
+
+            with self.assertRaises(PersistenceIntegrityError):
+                perform_sqlite_cutover(repo_root=temp_root)
+
+            self.assertEqual(target_db.read_bytes(), target_content)
+            self.assertEqual(hashlib.sha256(target_db.read_bytes()).hexdigest(), expected_hash)
+
+    def test_concurrent_cutover_attempts_blocked_by_exclusive_guard(self):
+        """Concurrent cutover attempt fails with PersistenceIntegrityError when exclusive lock held."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            lock_path = str(temp_context / "gem.db.cutover_lock")
+            held_event = threading.Event()
+            stop_event = threading.Event()
+
+            def hold_cutover_lock():
+                with FileLock(lock_path, timeout=1.0):
+                    held_event.set()
+                    stop_event.wait(timeout=5.0)
+
+            t = threading.Thread(target=hold_cutover_lock)
+            t.start()
+            try:
+                held_event.wait(timeout=2.0)
+                with self.assertRaises(PersistenceIntegrityError) as ctx:
+                    perform_sqlite_cutover(repo_root=temp_root)
+                self.assertIn("exclusive destination cutover lock could not be acquired", str(ctx.exception))
+            finally:
+                stop_event.set()
+                t.join()
+
+    def test_promotion_failure_cleans_staging_and_leaves_no_partial_destination(self):
+        """Failure during atomic promotion cleans staging files and leaves no destination database."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            from python.persistence import service as svc_mod
+            with patch.object(svc_mod, "_atomic_no_overwrite_promote", side_effect=OSError("Simulated promotion failure")):
+                with self.assertRaises(OSError):
+                    perform_sqlite_cutover(repo_root=temp_root)
+
+            self.assertFalse((temp_context / "gem.db").exists())
+            staging_files = list(temp_context.glob("staging_gem_*"))
+            self.assertEqual(staging_files, [])
+
+    def test_post_promotion_verification_failure_cleans_target_database(self):
+        """Failed post-promotion verification cleans target database preventing partial production state."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            with patch.object(DatabaseManager, "verify_integrity", return_value=["database disk image is malformed"]):
+                with self.assertRaises(PersistenceIntegrityError) as ctx:
+                    perform_sqlite_cutover(repo_root=temp_root)
+                self.assertIn("integrity check failed after promotion", str(ctx.exception))
+
+            # Database must NOT be left behind as an apparently authoritative database
+            self.assertFalse((temp_context / "gem.db").exists())
+            staging_files = list(temp_context.glob("staging_gem_*"))
+            self.assertEqual(staging_files, [])
+
     def test_cutover_in_isolated_temporary_workspace(self):
         """Tests that perform_sqlite_cutover runs cleanly and atomicity holds in an isolated workspace."""
         with tempfile.TemporaryDirectory() as td:
-            temp_root = Path(td)
-            temp_context = temp_root / "context"
-            temp_context.mkdir(parents=True)
-
-            # Copy current protected sources into temporary context
-            (temp_context / "ssot.json").write_bytes(self.ssot_path.read_bytes())
-            (temp_context / "trade_lessons.json").write_bytes(self.lessons_path.read_bytes())
-            (temp_context / "decision_log.json").write_bytes(self.decisions_path.read_bytes())
-
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
             before_hash = hashlib.sha256((temp_context / "ssot.json").read_bytes()).hexdigest()
 
             cutover_res = perform_sqlite_cutover(repo_root=temp_root)
@@ -143,6 +240,7 @@ class TestRuntimePersistenceCutoverAndInvariance(unittest.TestCase):
             self.assertTrue(cutover_res["protected_hashes_verified"])
             self.assertEqual(cutover_res["parity_summary"]["financial_mismatches"], 0)
             self.assertEqual(cutover_res["parity_summary"]["missing_records"], 0)
+            self.assertEqual(cutover_res["parity_summary"]["unresolved"], 0)
 
             # Assert target exists
             self.assertTrue((temp_context / "gem.db").exists())
@@ -154,6 +252,131 @@ class TestRuntimePersistenceCutoverAndInvariance(unittest.TestCase):
             # Assert hash invariance
             after_hash = hashlib.sha256((temp_context / "ssot.json").read_bytes()).hexdigest()
             self.assertEqual(before_hash, after_hash)
+
+
+class TestMigrationParityAndDiscrepancyGates(unittest.TestCase):
+    """Verifies that perform_sqlite_cutover enforces complete migration parity and classifies discrepancies."""
+
+    def setUp(self):
+        reset_persistence_service()
+        self.repo_root = Path(__file__).resolve().parent.parent
+        self.ssot_path = self.repo_root / "context" / "ssot.json"
+        self.lessons_path = self.repo_root / "context" / "trade_lessons.json"
+        self.decisions_path = self.repo_root / "context" / "decision_log.json"
+
+    def tearDown(self):
+        reset_persistence_service()
+
+    def _prepare_clean_temp_workspace(self, td: str):
+        temp_root = Path(td)
+        temp_context = temp_root / "context"
+        temp_context.mkdir(parents=True)
+        (temp_context / "ssot.json").write_bytes(self.ssot_path.read_bytes())
+        (temp_context / "decision_log.json").write_bytes(self.decisions_path.read_bytes())
+
+        lessons_data = json.loads(self.lessons_path.read_text(encoding="utf-8"))
+        for item in lessons_data.get("trade_lessons", []):
+            if item.get("id") == 16 and not str(item.get("rule", "")).startswith("L-"):
+                item["rule"] = "L-116: " + item["rule"]
+            elif item.get("id") == 17 and not str(item.get("rule", "")).startswith("L-"):
+                item["rule"] = "L-117: " + item["rule"]
+        (temp_context / "trade_lessons.json").write_text(json.dumps(lessons_data, indent=2), encoding="utf-8")
+        return temp_root, temp_context
+
+    def test_cutover_blocked_on_unexpected_records(self):
+        """Parity summary with unexpected_records > 0 blocks cutover with PersistenceIntegrityError."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            mock_summary = ParitySummary(unexpected_records=1)
+            mock_res = ParityResult(is_parity=False, summary=mock_summary)
+
+            with patch.object(SSoTParityVerifier, "compare", return_value=mock_res):
+                with self.assertRaises(PersistenceIntegrityError) as ctx:
+                    perform_sqlite_cutover(repo_root=temp_root)
+                self.assertIn("unexpected_records=1", str(ctx.exception))
+            self.assertFalse((temp_context / "gem.db").exists())
+
+    def test_cutover_blocked_on_timestamp_mismatches(self):
+        """Parity summary with timestamp_mismatches > 0 blocks cutover with PersistenceIntegrityError."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            mock_summary = ParitySummary(timestamp_mismatches=1)
+            mock_res = ParityResult(is_parity=False, summary=mock_summary)
+
+            with patch.object(SSoTParityVerifier, "compare", return_value=mock_res):
+                with self.assertRaises(PersistenceIntegrityError) as ctx:
+                    perform_sqlite_cutover(repo_root=temp_root)
+                self.assertIn("timestamp_mismatches=1", str(ctx.exception))
+            self.assertFalse((temp_context / "gem.db").exists())
+
+    def test_cutover_blocked_on_identity_mismatches(self):
+        """Parity summary with identity_mismatches > 0 blocks cutover with PersistenceIntegrityError."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            mock_summary = ParitySummary(identity_mismatches=1)
+            mock_res = ParityResult(is_parity=False, summary=mock_summary)
+
+            with patch.object(SSoTParityVerifier, "compare", return_value=mock_res):
+                with self.assertRaises(PersistenceIntegrityError) as ctx:
+                    perform_sqlite_cutover(repo_root=temp_root)
+                self.assertIn("identity_mismatches=1", str(ctx.exception))
+            self.assertFalse((temp_context / "gem.db").exists())
+
+    def test_cutover_blocked_on_unresolved_discrepancies(self):
+        """Parity summary with unresolved > 0 blocks cutover with PersistenceIntegrityError."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            mock_summary = ParitySummary(unresolved=1)
+            mock_res = ParityResult(is_parity=False, summary=mock_summary)
+
+            with patch.object(SSoTParityVerifier, "compare", return_value=mock_res):
+                with self.assertRaises(PersistenceIntegrityError) as ctx:
+                    perform_sqlite_cutover(repo_root=temp_root)
+                self.assertIn("unresolved=1", str(ctx.exception))
+            self.assertFalse((temp_context / "gem.db").exists())
+
+    def test_cutover_blocked_on_skipped_uncodified_trade_lessons(self):
+        """Uncodified trade lessons without 'L-xxx' prefix block cutover with PersistenceIntegrityError."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            lessons = json.loads((temp_context / "trade_lessons.json").read_text(encoding="utf-8"))
+            lessons.setdefault("trade_lessons", []).append({"id": 9999, "rule": "Mandate without code prefix"})
+            (temp_context / "trade_lessons.json").write_text(json.dumps(lessons, indent=2), encoding="utf-8")
+
+            with self.assertRaises(PersistenceIntegrityError) as ctx:
+                perform_sqlite_cutover(repo_root=temp_root)
+            self.assertIn("uncodified trade lesson without 'L-xxx' prefix", str(ctx.exception))
+            self.assertFalse((temp_context / "gem.db").exists())
+
+    def test_cutover_blocked_on_skipped_unsupported_decision_log_entries(self):
+        """Unsupported decision log entries block cutover with PersistenceIntegrityError."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            decisions = json.loads((temp_context / "decision_log.json").read_text(encoding="utf-8"))
+            decisions.setdefault("decision_log", []).append({"arbitrary_unsupported_structure": "non_tabular_entry"})
+            (temp_context / "decision_log.json").write_text(json.dumps(decisions, indent=2), encoding="utf-8")
+
+            with self.assertRaises(PersistenceIntegrityError) as ctx:
+                perform_sqlite_cutover(repo_root=temp_root)
+            self.assertIn("unsupported decision-log entry detected", str(ctx.exception))
+            self.assertFalse((temp_context / "gem.db").exists())
+
+    def test_cutover_reports_discrepancy_classifications_and_counts(self):
+        """Cutover returns structured discrepancy classifications and counts without exposing financial contents."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            # Add an exact duplicate record to exercise non-lossy deduplication classification
+            lessons = json.loads((temp_context / "trade_lessons.json").read_text(encoding="utf-8"))
+            dup_lesson = dict(lessons["trade_lessons"][0])
+            lessons["trade_lessons"].append(dup_lesson)
+            (temp_context / "trade_lessons.json").write_text(json.dumps(lessons, indent=2), encoding="utf-8")
+
+            res = perform_sqlite_cutover(repo_root=temp_root)
+            self.assertEqual(res["status"], "success")
+            self.assertIn("discrepancy_classifications", res)
+            self.assertIn("discrepancies_total", res)
+            self.assertIsInstance(res["discrepancy_classifications"], dict)
+            self.assertEqual(res["discrepancy_classifications"].get("EXACT_DUPLICATE_DEDUPLICATED"), 1)
 
 
 class TestSqlitePersistenceAdapterCanonicalProjection(unittest.TestCase):
@@ -268,46 +491,104 @@ class TestConsumerParity(unittest.TestCase):
     def tearDown(self):
         reset_persistence_service()
 
-    def test_consumer_parity_holdings_cash_watchlist(self):
-        """Authoritative holdings, cash, and watchlist are strictly identical across consumers."""
+    def test_consumer_parity_across_actual_endpoints(self):
+        """Authoritative holdings, cash, and watchlist are strictly identical across /api/data, /api/chat, and tools."""
         # 1. Direct persistence service
         canonical_ssot = self.service.get_ssot_data()
-        canonical_basket = self.service.get_portfolio_basket()
-        canonical_watchlist = self.service.get_watchlist()
 
-        # 2. /api/data via fetch_stocks.build_daemon_final_output
+        # Build daemon output
         mock_feed = [
             {"ticker": "SPY", "price": 500.0, "status": "ACTIVE", "price_validity": "VALID", "freshness": "CURRENT"},
         ]
         daemon_output = fetch_stocks.build_daemon_final_output(mock_feed, status="HEALTHY", service=self.service)
         self.assertTrue(daemon_output["financial_state_valid"])
-        api_data_ssot = daemon_output["local_storage_state"]
 
-        # Assert /api/data reflects canonical SSoT projection
-        self.assertEqual(api_data_ssot["portfolio_snapshot"], canonical_ssot["portfolio_snapshot"])
-        self.assertEqual(api_data_ssot["unallocated_cash_eur"], canonical_ssot["unallocated_cash_eur"])
-        self.assertEqual(api_data_ssot["watched_tickers"], canonical_ssot["watched_tickers"])
-        self.assertEqual(
-            api_data_ssot["_projection_metadata"]["db_revision"],
-            canonical_ssot["_projection_metadata"]["db_revision"],
-        )
-
-        # 3. tools.get_market_data()
         with patch_global_state(daemon_output):
+            # 2. Exercise actual /api/data endpoint: fetch_stocks.get_data()
+            api_data_response = fetch_stocks.get_data()
+            self.assertEqual(api_data_response.status_code, 200)
+            api_data_payload = json.loads(api_data_response.body)
+            self.assertTrue(api_data_payload.get("financial_state_valid"))
+            api_ssot = api_data_payload.get("local_storage_state", {})
+
+            # Verify holdings, cash, watchlist, scout categories and projection revision
+            self.assertEqual(api_ssot["portfolio_snapshot"], canonical_ssot["portfolio_snapshot"])
+            self.assertEqual(api_ssot["unallocated_cash_eur"], canonical_ssot["unallocated_cash_eur"])
+            self.assertEqual(api_ssot["unallocated_cash_usd"], canonical_ssot["unallocated_cash_usd"])
+            self.assertEqual(api_ssot["watched_tickers"], canonical_ssot["watched_tickers"])
+            self.assertEqual(api_ssot["scout_categories"], canonical_ssot["scout_categories"])
+            self.assertEqual(
+                api_ssot["_projection_metadata"]["db_revision"],
+                canonical_ssot["_projection_metadata"]["db_revision"],
+            )
+
+            # 3. Exercise actual tools.get_market_data()
             raw_tools_data = tools.get_market_data()
             tools_payload = json.loads(raw_tools_data)
-
             self.assertTrue(tools_payload.get("financial_state_valid"))
             tools_ssot = tools_payload.get("ssot", {})
+
+            # Verify agreement with /api/data and canonical SSoT
             self.assertEqual(tools_ssot["portfolio_snapshot"], canonical_ssot["portfolio_snapshot"])
             self.assertEqual(tools_ssot["unallocated_cash_eur"], canonical_ssot["unallocated_cash_eur"])
             self.assertEqual(tools_ssot["watched_tickers"], canonical_ssot["watched_tickers"])
+            self.assertEqual(tools_ssot["scout_categories"], canonical_ssot["scout_categories"])
 
-        # 4. /api/chat context validation
-        with patch_global_state(daemon_output):
-            chat_ssot = web_server.get_persistence_service().get_ssot_data()
-            self.assertEqual(chat_ssot["portfolio_snapshot"], canonical_ssot["portfolio_snapshot"])
-            self.assertEqual(chat_ssot["unallocated_cash_eur"], canonical_ssot["unallocated_cash_eur"])
+            # 4. Exercise actual /api/chat endpoint: web_server.chat_endpoint()
+            with patch.object(tool_dispatcher.GLOBAL_TOOL_DISPATCHER, "execute_multi_turn_session") as mock_dispatch:
+                mock_dispatch.return_value = {"status": "success", "response": "Market analysis complete."}
+                chat_req = web_server.ChatRequest(message="Confirm current portfolio cash balance and holdings.")
+                chat_res = web_server.chat_endpoint(chat_req)
+
+                self.assertEqual(chat_res.get("status"), "success")
+                mock_dispatch.assert_called_once()
+                dispatched_message = mock_dispatch.call_args.kwargs.get("initial_message")
+                text_content = dispatched_message[-1] if isinstance(dispatched_message, list) else dispatched_message
+                self.assertIsInstance(text_content, str)
+
+                # Verify actual endpoint hydrates and validates the same canonical authoritative financial state
+                self.assertIn("portfolio_snapshot", text_content)
+                self.assertIn("unallocated_cash_eur", text_content)
+                self.assertIn(str(canonical_ssot["unallocated_cash_eur"]), text_content)
+
+    def test_actual_api_chat_endpoint_halts_on_degraded_persistence(self):
+        """When persistence is degraded, /api/chat halts before any model or tool dispatch."""
+        degraded_state = {
+            "status": "DEGRADED - PERSISTENCE FAILURE: Corrupt SQLite state",
+            "financial_state_valid": False,
+            "persistence_error": "Corrupt SQLite state",
+            "local_storage_state": None,
+            "tickers": [],
+        }
+
+        with patch_global_state(degraded_state):
+            with patch.object(tool_dispatcher.GLOBAL_TOOL_DISPATCHER, "execute_multi_turn_session") as mock_dispatch:
+                chat_req = web_server.ChatRequest(message="Execute position rebalance")
+                res = web_server.chat_endpoint(chat_req)
+
+                self.assertEqual(res["status"], "error")
+                self.assertEqual(res["code"], "financial_state_degraded")
+                self.assertIn("Authoritative financial state is currently unavailable", res["message"])
+                mock_dispatch.assert_not_called()
+
+    def test_tools_get_market_data_surfaces_degradation_without_substitution(self):
+        """tools.get_market_data surfaces degraded state without substituting stale or empty portfolio."""
+        degraded_state = {
+            "status": "DEGRADED - PERSISTENCE FAILURE: Disk I/O error",
+            "financial_state_valid": False,
+            "persistence_error": "Disk I/O error",
+            "local_storage_state": None,
+            "tickers": [],
+        }
+
+        with patch_global_state(degraded_state):
+            raw = tools.get_market_data()
+            data = json.loads(raw)
+
+            self.assertFalse(data.get("financial_state_valid"))
+            self.assertIn("DEGRADED", data.get("status"))
+            self.assertEqual(data.get("persistence_error"), "Disk I/O error")
+            self.assertNotIn("ssot", data)
 
 
 class TestFailClosedDegradation(unittest.TestCase):

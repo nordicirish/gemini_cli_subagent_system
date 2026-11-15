@@ -489,6 +489,75 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
             with self.assertRaises(PersistenceValidationError):
                 self.adapter.get_portfolio_basket()
 
+    def test_sqlite_get_ssot_data_missing_base_file_raises_integrity_error(self):
+        """Missing configured base SSoT document raises PersistenceIntegrityError with chained cause."""
+        missing_path = os.path.join(self.temp_dir.name, "nonexistent_ssot.json")
+        adapter = SqlitePersistenceAdapter(self.mgr, base_ssot_path=missing_path)
+        with self.assertRaises(PersistenceIntegrityError) as ctx:
+            adapter.get_ssot_data()
+        self.assertIn("unavailable or invalid", str(ctx.exception))
+        self.assertIsInstance(ctx.exception.__cause__, (OSError, FileNotFoundError))
+
+    def test_sqlite_get_ssot_data_malformed_json_raises_integrity_error(self):
+        """Malformed JSON in configured base SSoT document raises PersistenceIntegrityError."""
+        bad_json_path = os.path.join(self.temp_dir.name, "bad_ssot.json")
+        with open(bad_json_path, "w", encoding="utf-8") as f:
+            f.write("{invalid_json: true,")
+        adapter = SqlitePersistenceAdapter(self.mgr, base_ssot_path=bad_json_path)
+        with self.assertRaises(PersistenceIntegrityError) as ctx:
+            adapter.get_ssot_data()
+        self.assertIn("unavailable or invalid", str(ctx.exception))
+        self.assertIsInstance(ctx.exception.__cause__, json.JSONDecodeError)
+
+    def test_sqlite_get_ssot_data_invalid_root_type_raises_integrity_error(self):
+        """Non-dictionary root in configured base SSoT document raises PersistenceIntegrityError."""
+        list_root_path = os.path.join(self.temp_dir.name, "list_root.json")
+        with open(list_root_path, "w", encoding="utf-8") as f:
+            json.dump(["not", "a", "dictionary"], f)
+        adapter = SqlitePersistenceAdapter(self.mgr, base_ssot_path=list_root_path)
+        with self.assertRaises(PersistenceIntegrityError) as ctx:
+            adapter.get_ssot_data()
+        self.assertIn("unavailable or invalid", str(ctx.exception))
+        self.assertIsInstance(ctx.exception.__cause__, PersistenceValidationError)
+
+    def test_sqlite_get_ssot_data_read_failure_raises_integrity_error(self):
+        """Read failure / permission denial on base SSoT document raises PersistenceIntegrityError."""
+        read_fail_path = os.path.join(self.temp_dir.name, "denied_ssot.json")
+        with open(read_fail_path, "w", encoding="utf-8") as f:
+            json.dump({"test": "data"}, f)
+        adapter = SqlitePersistenceAdapter(self.mgr, base_ssot_path=read_fail_path)
+        with patch("builtins.open", side_effect=PermissionError("Access denied")):
+            with self.assertRaises(PersistenceIntegrityError) as ctx:
+                adapter.get_ssot_data()
+            self.assertIn("unavailable or invalid", str(ctx.exception))
+            self.assertIsInstance(ctx.exception.__cause__, PermissionError)
+
+    def test_sqlite_get_ssot_data_preserves_external_sections_when_valid(self):
+        """Valid configured base SSoT document preserves externally managed non-tabular sections."""
+        valid_base_path = os.path.join(self.temp_dir.name, "valid_base.json")
+        base_content = {
+            "portfolio_notes": "Preserve long-term risk mandate",
+            "rebalancing_schedule": {"cadence": "weekly", "day": "Friday"},
+            "custom_metadata": {"author": "Investment Council"},
+        }
+        with open(valid_base_path, "w", encoding="utf-8") as f:
+            json.dump(base_content, f)
+        adapter = SqlitePersistenceAdapter(self.mgr, base_ssot_path=valid_base_path)
+        ssot = adapter.get_ssot_data()
+        self.assertEqual(ssot.get("portfolio_notes"), "Preserve long-term risk mandate")
+        self.assertEqual(ssot.get("rebalancing_schedule"), {"cadence": "weekly", "day": "Friday"})
+        self.assertEqual(ssot.get("custom_metadata"), {"author": "Investment Council"})
+        self.assertIn("_projection_metadata", ssot)
+        self.assertIn("portfolio_snapshot", ssot)
+
+    def test_sqlite_get_ssot_data_none_base_path_succeeds_without_external_sections(self):
+        """Explicitly unconfigured base document (None) succeeds without external sections."""
+        adapter = SqlitePersistenceAdapter(self.mgr, base_ssot_path=None)
+        ssot = adapter.get_ssot_data()
+        self.assertIn("_projection_metadata", ssot)
+        self.assertIn("portfolio_snapshot", ssot)
+        self.assertIn("unallocated_cash_eur", ssot)
+
 
 class TestValidateFiniteFloatHardening(unittest.TestCase):
     """Direct unit tests for validate_finite_float hardening (Scope C)."""

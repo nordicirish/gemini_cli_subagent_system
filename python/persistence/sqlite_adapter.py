@@ -54,17 +54,25 @@ from .contracts import (
 )
 
 
+_UNSET = object()
+
+
 class SqlitePersistenceAdapter(PersistenceAdapter):
     """
     SQLite persistence adapter utilizing existing UnitOfWork and repository infrastructure.
     Used in controlled integration and automated testing environments.
     """
 
-    def __init__(self, db_manager: DatabaseManager, base_ssot_path: Optional[str] = None):
+    def __init__(self, db_manager: DatabaseManager, base_ssot_path: Union[str, None, object] = _UNSET):
         if db_manager is None:
             raise ValueError("db_manager cannot be None")
         self._db_manager = db_manager
-        self._base_ssot_path = base_ssot_path if base_ssot_path is not None else "context/ssot.json"
+        if base_ssot_path is _UNSET:
+            self._base_ssot_path = "context/ssot.json"
+        elif base_ssot_path is None:
+            self._base_ssot_path = None
+        else:
+            self._base_ssot_path = str(base_ssot_path)
 
     @property
     def backend_name(self) -> str:
@@ -81,12 +89,19 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
     def get_ssot_data(self) -> Dict[str, Any]:
         """Projects current SQLite state into a canonical SSoT dictionary using SSoTProjectionGenerator."""
         base_doc = None
-        if self._base_ssot_path and os.path.exists(self._base_ssot_path):
+        if self._base_ssot_path is not None:
             try:
-                with open(self._base_ssot_path, "r", encoding="utf-8") as f:
-                    base_doc = json.load(f)
-            except Exception:
-                base_doc = None
+                with open(self._base_ssot_path, "r", encoding="utf-8") as source:
+                    base_doc = json.load(source)
+
+                if not isinstance(base_doc, dict):
+                    raise PersistenceValidationError(
+                        f"Base SSoT document at '{self._base_ssot_path}' must have a dictionary root."
+                    )
+            except (OSError, json.JSONDecodeError, PersistenceValidationError) as exc:
+                raise PersistenceIntegrityError(
+                    f"Cannot generate canonical SSoT projection: base document at '{self._base_ssot_path}' is unavailable or invalid: {exc}"
+                ) from exc
 
         try:
             with self._db_manager.connection() as conn:

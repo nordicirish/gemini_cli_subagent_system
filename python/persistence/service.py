@@ -17,6 +17,11 @@ from typing import Any, Dict, List, Optional, Union
 import uuid
 
 try:
+    from python.atomic_io import FileLock, FileLockTimeoutError
+except ImportError:
+    from atomic_io import FileLock, FileLockTimeoutError
+
+try:
     from python.database.manager import DatabaseManager, PRIMARY_FINANCIAL_PROFILE
     from python.database.schema import SchemaMigrator
     from python.database.projections import SSoTProjectionGenerator
@@ -254,6 +259,44 @@ def reset_persistence_service() -> None:
             _ACTIVE_PERSISTENCE_SERVICE = None
 
 
+def _atomic_no_overwrite_promote(staging_path: Path, target_path: Path) -> None:
+    """
+    Promote staging database to target database using same-filesystem atomic no-overwrite strategy.
+    Guarantees:
+    - Never overwrites an existing destination file.
+    - If destination exists, raises PersistenceIntegrityError.
+    - Uses os.link (or Windows os.rename) which atomically fails if destination exists.
+    """
+    if target_path.exists():
+        raise PersistenceIntegrityError(
+            f"Refusing SQLite cutover: destination already exists: {target_path}"
+        )
+    try:
+        os.link(staging_path, target_path)
+    except FileExistsError as exc:
+        raise PersistenceIntegrityError(
+            f"Refusing SQLite cutover: destination already exists: {target_path}"
+        ) from exc
+    except OSError:
+        # Fallback if hard links are restricted or unsupported on filesystem
+        if target_path.exists():
+            raise PersistenceIntegrityError(
+                f"Refusing SQLite cutover: destination already exists: {target_path}"
+            )
+        try:
+            os.rename(staging_path, target_path)
+        except FileExistsError as exc:
+            raise PersistenceIntegrityError(
+                f"Refusing SQLite cutover: destination already exists: {target_path}"
+            ) from exc
+        return
+
+    try:
+        staging_path.unlink()
+    except OSError:
+        pass
+
+
 def perform_sqlite_cutover(
     repo_root: Optional[Union[str, Path]] = None,
     default_timestamp: Optional[str] = None,
@@ -261,19 +304,31 @@ def perform_sqlite_cutover(
     """
     Performs atomic initialisation and cutover to SQLite persistence at context/gem.db.
     Guarantees:
+    - Pre-check destination absence before staging work begins.
+    - Exclusive destination cutover lock.
     - Disposable staging database on the same filesystem (context/staging_gem_<uuid>.db).
     - Validation of destination isolation rules.
     - Full schema initialisation using PRIMARY_FINANCIAL_PROFILE.
     - Ingestion of legacy JSON sources (context/ssot.json, trade_lessons.json, decision_log.json).
     - Zero floating-point conversions and full SSoT canonical projection parity validation.
+    - Migration discrepancy and skipped record gate: blocks uncodified trade lessons,
+      unsupported decision entries, and unrecognised discrepancy classifications.
     - PRAGMA integrity_check and foreign_key_check on staging database.
     - Zero modification to protected JSON assets (SHA-256 byte-for-byte invariance verified).
-    - Hardened WAL truncation and atomic file replacement via os.replace.
-    - Post-promotion verification on context/gem.db.
+    - Hardened WAL truncation.
+    - Recheck destination absence immediately before promotion.
+    - Same-filesystem atomic no-overwrite promotion via os.link (never os.replace).
+    - Post-promotion verification on context/gem.db with failure cleanup.
     """
     root_dir = Path(repo_root).resolve() if repo_root else Path(__file__).resolve().parent.parent.parent
     context_dir = root_dir / "context"
     target_db = context_dir / "gem.db"
+
+    # Pre-check destination before staging work begins
+    if target_db.exists():
+        raise PersistenceIntegrityError(
+            f"Refusing SQLite cutover: destination already exists: {target_db}"
+        )
 
     ssot_path = context_dir / "ssot.json"
     lessons_path = context_dir / "trade_lessons.json"
@@ -291,143 +346,232 @@ def perform_sqlite_cutover(
 
     staging_name = f"staging_gem_{uuid.uuid4().hex}.db"
     staging_path = context_dir / staging_name
+    cutover_lock_path = context_dir / "gem.db.cutover_lock"
     staging_mgr: Optional[DatabaseManager] = None
+    promoted = False
 
     try:
-        # Validate destination safety
-        validate_migration_destination(staging_path, repository_root=root_dir)
-
-        # 1. Initialize schema
-        staging_mgr = DatabaseManager(str(staging_path), profile=PRIMARY_FINANCIAL_PROFILE)
-        with staging_mgr.connection() as conn:
-            SchemaMigrator.initialize_core_schema(conn)
-
-        # 2. Import legacy JSON financial state
-        cutover_ts = default_timestamp or utc_now_iso()
-        importer = LegacyJsonImporter(repository_root=root_dir)
-        import_result = importer.import_into(
-            sources=[ssot_path, lessons_path, decisions_path],
-            destination=staging_mgr,
-            default_timestamp=cutover_ts,
-            allow_date_only=True,
-            allow_naive_utc=True,
-            initialize_schema=False,
-        )
-
-        # 3. Canonical projection and parity verification
-        generator = SSoTProjectionGenerator(staging_mgr)
-        base_doc, _, _ = load_strict_json_file(ssot_path, repository_root=root_dir)
-        with staging_mgr.connection() as conn:
-            projection = generator.generate(conn, base_document=base_doc)
-
-        verifier = SSoTParityVerifier(
-            generator=generator,
-            default_timestamp=cutover_ts,
-            allow_date_only=True,
-            allow_naive_utc=True,
-        )
-        parity_res = verifier.compare(
-            legacy_sources=[ssot_path, lessons_path, decisions_path],
-            projected_document=projection,
-            base_document=base_doc,
-        )
-
-        if parity_res.summary.financial_mismatches > 0:
+        try:
+            lock_ctx = FileLock(str(cutover_lock_path), timeout=0.2)
+        except Exception as exc:
             raise PersistenceIntegrityError(
-                f"Parity verification detected financial mismatches: {parity_res.summary.financial_mismatches}"
-            )
-        if parity_res.summary.missing_records > 0:
-            raise PersistenceIntegrityError(
-                f"Parity verification detected missing records: {parity_res.summary.missing_records}"
-            )
+                f"Failed to initialize cutover lock at {cutover_lock_path}: {exc}"
+            ) from exc
 
-        # 4. PRAGMA integrity and FK checks
-        with staging_mgr.connection() as conn:
-            cur = conn.cursor()
-            cur.execute("PRAGMA integrity_check;")
-            rows = cur.fetchall()
-            if rows != [("ok",)]:
-                raise PersistenceIntegrityError(f"Staging database integrity_check failed: {rows}")
-
-            cur.execute("PRAGMA foreign_key_check;")
-            fk_rows = cur.fetchall()
-            if fk_rows:
-                raise PersistenceIntegrityError(f"Staging database foreign_key_check failed: {fk_rows}")
-            cur.close()
-
-        # 5. Pre-promotion hash invariance verification
-        for p_str, expected_hash in initial_hashes.items():
-            actual_hash = hashlib.sha256(Path(p_str).read_bytes()).hexdigest()
-            if actual_hash != expected_hash:
+        with lock_ctx:
+            # Recheck destination absence inside exclusive lock
+            if target_db.exists():
                 raise PersistenceIntegrityError(
-                    f"Protected asset '{p_str}' altered during migration staging! "
-                    f"Expected: {expected_hash}, Actual: {actual_hash}"
+                    f"Refusing SQLite cutover: destination already exists: {target_db}"
                 )
 
-        # 6. Checkpoint staging database and release all connection handles before atomic promotion
-        staging_mgr.checkpoint(mode="TRUNCATE")
-        del staging_mgr, conn, cur, generator, verifier, projection
-        staging_mgr = None
-        gc.collect()
+            # Validate destination safety
+            validate_migration_destination(staging_path, repository_root=root_dir)
 
-        # Clean staging sidecars
-        for ext in ("-wal", "-shm", ".lock", ".restore_lock"):
-            sidecar = Path(str(staging_path) + ext)
-            if sidecar.exists():
-                try:
-                    sidecar.unlink()
-                except OSError:
-                    pass
+            # 1. Initialize schema
+            staging_mgr = DatabaseManager(str(staging_path), profile=PRIMARY_FINANCIAL_PROFILE)
+            with staging_mgr.connection() as conn:
+                SchemaMigrator.initialize_core_schema(conn)
 
-        # 7. Atomic promotion via os.replace
-        os.replace(staging_path, target_db)
+            # 2. Import legacy JSON financial state
+            cutover_ts = default_timestamp or utc_now_iso()
+            importer = LegacyJsonImporter(repository_root=root_dir)
+            import_result = importer.import_into(
+                sources=[ssot_path, lessons_path, decisions_path],
+                destination=staging_mgr,
+                default_timestamp=cutover_ts,
+                allow_date_only=True,
+                allow_naive_utc=True,
+                initialize_schema=False,
+            )
 
-        # 8. Post-promotion validation on target database
-        verify_mgr = DatabaseManager(str(target_db), profile=PRIMARY_FINANCIAL_PROFILE)
-        if verify_mgr.verify_integrity() != ["ok"]:
-            raise PersistenceIntegrityError("Target database integrity check failed after promotion.")
-        with verify_mgr.connection() as conn:
-            # Verify projection generation succeeds on promoted database
-            gen = SSoTProjectionGenerator(verify_mgr)
-            promoted_proj = gen.generate(conn, base_document=base_doc)
-            db_revision = promoted_proj.get("_projection_metadata", {}).get("db_revision", 0)
+            # 3. Canonical projection and parity verification
+            generator = SSoTProjectionGenerator(staging_mgr)
+            base_doc, _, _ = load_strict_json_file(ssot_path, repository_root=root_dir)
+            with staging_mgr.connection() as conn:
+                projection = generator.generate(conn, base_document=base_doc)
 
-        # 9. Post-promotion hash invariance verification
-        for p_str, expected_hash in initial_hashes.items():
-            actual_hash = hashlib.sha256(Path(p_str).read_bytes()).hexdigest()
-            if actual_hash != expected_hash:
+            verifier = SSoTParityVerifier(
+                generator=generator,
+                default_timestamp=cutover_ts,
+                allow_date_only=True,
+                allow_naive_utc=True,
+            )
+            parity_res = verifier.compare(
+                legacy_sources=[ssot_path, lessons_path, decisions_path],
+                projected_document=projection,
+                base_document=base_doc,
+            )
+
+            # Inspect import discrepancies and skipped records
+            discrepancy_counts: Dict[str, int] = {}
+            for disc in import_result.discrepancies:
+                disc_type = disc.get("type") or disc.get("reason") or "UNKNOWN"
+                discrepancy_counts[disc_type] = discrepancy_counts.get(disc_type, 0) + 1
+                if disc_type == "EXACT_DUPLICATE_DEDUPLICATED":
+                    continue
+                elif disc_type == "UNCODIFIED_RULE_NO_L_PREFIX":
+                    raise PersistenceIntegrityError(
+                        f"SQLite cutover blocked: uncodified trade lesson without 'L-xxx' prefix detected in migration: {disc.get('message')}"
+                    )
+                elif disc_type == "MISSING_TIMESTAMPS":
+                    raise PersistenceIntegrityError(
+                        f"SQLite cutover blocked: record with missing timestamp detected in migration: {disc.get('message')}"
+                    )
+                elif disc_type == "HETEROGENEOUS_LEGACY_DECISION_SHAPE":
+                    raise PersistenceIntegrityError(
+                        f"SQLite cutover blocked: unsupported decision-log entry detected in migration: {disc.get('message')}"
+                    )
+                else:
+                    raise PersistenceIntegrityError(
+                        f"SQLite cutover blocked: unrecognised migration discrepancy classification '{disc_type}': {disc.get('message')}"
+                    )
+
+            for domain, skipped_count in import_result.skipped_counts.items():
+                if skipped_count > 0:
+                    raise PersistenceIntegrityError(
+                        f"SQLite cutover blocked: {skipped_count} skipped records detected in domain '{domain}'."
+                    )
+
+            # Complete migration parity gate
+            if not parity_res.is_parity:
                 raise PersistenceIntegrityError(
-                    f"Protected asset '{p_str}' altered during atomic promotion! "
-                    f"Expected: {expected_hash}, Actual: {actual_hash}"
+                    f"SQLite cutover blocked: legacy-to-SQLite parity verification failed: "
+                    f"financial_mismatches={parity_res.summary.financial_mismatches}, "
+                    f"missing_records={parity_res.summary.missing_records}, "
+                    f"unexpected_records={parity_res.summary.unexpected_records}, "
+                    f"timestamp_mismatches={parity_res.summary.timestamp_mismatches}, "
+                    f"identity_mismatches={parity_res.summary.identity_mismatches}, "
+                    f"unresolved={parity_res.summary.unresolved}"
                 )
 
-        # 10. Reset active persistence singleton so next access opens promoted database
-        reset_persistence_service()
+            # 4. PRAGMA integrity and FK checks
+            with staging_mgr.connection() as conn:
+                cur = conn.cursor()
+                cur.execute("PRAGMA integrity_check;")
+                rows = cur.fetchall()
+                if rows != [("ok",)]:
+                    raise PersistenceIntegrityError(f"Staging database integrity_check failed: {rows}")
 
-        return {
-            "status": "success",
-            "target_database": str(target_db),
-            "db_revision": db_revision,
-            "imported_counts": import_result.imported_counts,
-            "skipped_counts": import_result.skipped_counts,
-            "parity_summary": {
-                "exact_matches": parity_res.summary.exact_matches,
-                "equivalent_values": parity_res.summary.equivalent_values,
-                "expected_external_sections": parity_res.summary.expected_external_sections,
-                "financial_mismatches": parity_res.summary.financial_mismatches,
-                "missing_records": parity_res.summary.missing_records,
-                "unexpected_records": parity_res.summary.unexpected_records,
-                "unresolved": parity_res.summary.unresolved,
-            },
-            "protected_hashes_verified": True,
-        }
+                cur.execute("PRAGMA foreign_key_check;")
+                fk_rows = cur.fetchall()
+                if fk_rows:
+                    raise PersistenceIntegrityError(f"Staging database foreign_key_check failed: {fk_rows}")
+                cur.close()
+
+            # 5. Pre-promotion hash invariance verification
+            for p_str, expected_hash in initial_hashes.items():
+                actual_hash = hashlib.sha256(Path(p_str).read_bytes()).hexdigest()
+                if actual_hash != expected_hash:
+                    raise PersistenceIntegrityError(
+                        f"Protected asset '{p_str}' altered during migration staging! "
+                        f"Expected: {expected_hash}, Actual: {actual_hash}"
+                    )
+
+            # 6. Checkpoint staging database and release all connection handles before atomic promotion
+            staging_mgr.checkpoint(mode="TRUNCATE")
+            del staging_mgr, conn, cur, generator, verifier, projection
+            staging_mgr = None
+            gc.collect()
+
+            # Clean staging sidecars
+            for ext in ("-wal", "-shm", ".lock", ".restore_lock"):
+                sidecar = Path(str(staging_path) + ext)
+                if sidecar.exists():
+                    try:
+                        sidecar.unlink()
+                    except OSError:
+                        pass
+
+            # 7. Recheck destination absence immediately before promotion
+            if target_db.exists():
+                raise PersistenceIntegrityError(
+                    f"Refusing SQLite cutover: destination already exists: {target_db}"
+                )
+
+            # 8. Same-filesystem atomic no-overwrite promotion
+            _atomic_no_overwrite_promote(staging_path, target_db)
+            promoted = True
+
+            # 9. Post-promotion validation on target database
+            try:
+                verify_mgr = DatabaseManager(str(target_db), profile=PRIMARY_FINANCIAL_PROFILE)
+                if verify_mgr.verify_integrity() != ["ok"]:
+                    raise PersistenceIntegrityError("Target database integrity check failed after promotion.")
+                with verify_mgr.connection() as conn:
+                    # Verify projection generation succeeds on promoted database
+                    gen = SSoTProjectionGenerator(verify_mgr)
+                    promoted_proj = gen.generate(conn, base_document=base_doc)
+                    db_revision = promoted_proj.get("_projection_metadata", {}).get("db_revision", 0)
+
+                # 10. Post-promotion hash invariance verification
+                for p_str, expected_hash in initial_hashes.items():
+                    actual_hash = hashlib.sha256(Path(p_str).read_bytes()).hexdigest()
+                    if actual_hash != expected_hash:
+                        raise PersistenceIntegrityError(
+                            f"Protected asset '{p_str}' altered during atomic promotion! "
+                            f"Expected: {expected_hash}, Actual: {actual_hash}"
+                        )
+            except Exception:
+                # Cleanup promoted target database on post-promotion verification failure
+                if promoted and target_db.exists():
+                    try:
+                        target_db.unlink()
+                    except OSError:
+                        pass
+                    for ext in ("-wal", "-shm", ".lock", ".restore_lock"):
+                        sidecar = Path(str(target_db) + ext)
+                        if sidecar.exists():
+                            try:
+                                sidecar.unlink()
+                            except OSError:
+                                pass
+                raise
+
+            # 11. Reset active persistence singleton so next access opens promoted database
+            reset_persistence_service()
+
+            return {
+                "status": "success",
+                "target_database": str(target_db),
+                "db_revision": db_revision,
+                "imported_counts": import_result.imported_counts,
+                "skipped_counts": import_result.skipped_counts,
+                "discrepancy_classifications": discrepancy_counts,
+                "discrepancies_total": len(import_result.discrepancies),
+                "parity_summary": {
+                    "exact_matches": parity_res.summary.exact_matches,
+                    "equivalent_values": parity_res.summary.equivalent_values,
+                    "expected_external_sections": parity_res.summary.expected_external_sections,
+                    "financial_mismatches": parity_res.summary.financial_mismatches,
+                    "missing_records": parity_res.summary.missing_records,
+                    "unexpected_records": parity_res.summary.unexpected_records,
+                    "timestamp_mismatches": parity_res.summary.timestamp_mismatches,
+                    "identity_mismatches": parity_res.summary.identity_mismatches,
+                    "unresolved": parity_res.summary.unresolved,
+                },
+                "protected_hashes_verified": True,
+            }
+
+    except FileLockTimeoutError as exc:
+        raise PersistenceIntegrityError(
+            "Concurrent SQLite cutover in progress; exclusive destination cutover lock could not be acquired."
+        ) from exc
 
     finally:
+        if staging_mgr is not None:
+            try:
+                del staging_mgr
+            except Exception:
+                pass
+            gc.collect()
+
         if staging_path.exists():
             try:
                 staging_path.unlink()
             except OSError:
                 pass
+
         for ext in ("-wal", "-shm", ".lock", ".restore_lock"):
             sidecar = Path(str(staging_path) + ext)
             if sidecar.exists():
@@ -435,4 +579,10 @@ def perform_sqlite_cutover(
                     sidecar.unlink()
                 except OSError:
                     pass
+
+        if cutover_lock_path.exists():
+            try:
+                cutover_lock_path.unlink()
+            except OSError:
+                pass
 
