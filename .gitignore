@@ -49,6 +49,13 @@ cache/
 # Logs
 *.log
 *.lock
+*.restore_lock
+*.cutover_lock
+
+# SQLite runtime database & WAL sidecars
+context/gem.db
+context/gem.db-shm
+context/gem.db-wal
 
 # VS Code Workspaces
 *.code-workspace

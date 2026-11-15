@@ -1,4 +1,4 @@
-# GEM Trading Agent Framework - Dependency Installer Script
+﻿# GEM Trading Agent Framework - Dependency Installer Script
 # Installs verified python dependencies inside .venv or globally on Windows.
 
 Write-Host "==========================================================" -ForegroundColor Cyan
@@ -65,7 +65,38 @@ foreach ($dir in $requiredDirs) {
     }
 }
 
-# 6. Register Antigravity Sidecar UI configuration
+# 6. Initialize SQLite Persistence Database (context/gem.db)
+$contextDir = Join-Path $PSScriptRoot "context"
+$gemDbPath = Join-Path $contextDir "gem.db"
+if (Test-Path $gemDbPath) {
+    Write-Host "Existing SQLite persistence database (context/gem.db) detected; skipping cutover initialization." -ForegroundColor Green
+}
+else {
+    Write-Host "Initializing SQLite persistence database (context/gem.db) via perform_sqlite_cutover()..." -ForegroundColor Yellow
+    $seedDefaults = @{
+        "ssot.json" = '{"mutable_state":{"portfolio_snapshot":[],"watched_tickers":[],"unallocated_cash_eur":0.0,"unallocated_cash_usd":0.0}}'
+        "trade_lessons.json" = '{"trade_lessons":[]}'
+        "decision_log.json" = '{"decision_log":[]}'
+    }
+    foreach ($seedName in $seedDefaults.Keys) {
+        $seedPath = Join-Path $contextDir $seedName
+        if (-not (Test-Path $seedPath)) {
+            [System.IO.File]::WriteAllText($seedPath, $seedDefaults[$seedName], (New-Object System.Text.UTF8Encoding($false)))
+            Write-Host "Created default seed file: context/$seedName" -ForegroundColor Yellow
+        }
+    }
+
+    $venvPython = Join-Path $venvPath "Scripts\python.exe"
+    $cutoverScript = "import sys; sys.path.insert(0, sys.argv[1]); from python.persistence.service import perform_sqlite_cutover; res = perform_sqlite_cutover(repo_root=sys.argv[1]); print('SQLite cutover status:', res.get('status'), 'revision:', res.get('db_revision'))"
+    & $venvPython -c $cutoverScript "$PSScriptRoot"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "SQLite persistence cutover failed."
+        Exit 1
+    }
+    Write-Host "SQLite persistence database initialized successfully." -ForegroundColor Green
+}
+
+# 7. Register Antigravity Sidecar UI configuration
 $sidecarDir = Join-Path $HOME ".gemini\config\sidecars\gem-dashboard"
 if (-not (Test-Path $sidecarDir)) {
     New-Item -ItemType Directory -Force -Path $sidecarDir | Out-Null
@@ -92,7 +123,7 @@ $sidecarConfig = @{
 Set-Content -Path (Join-Path $sidecarDir "sidecar.json") -Value $sidecarConfig -Encoding UTF8
 Write-Host "Antigravity Sidecar configuration registered at: $sidecarDir\sidecar.json" -ForegroundColor Green
 
-# 6. Offer to install dependencies globally
+# 8. Offer to install dependencies globally
 $choice = Read-Host "Would you also like to install dependencies globally? (y/N)"
 if ($choice -eq 'y' -or $choice -eq 'Y') {
     Write-Host "Installing dependencies globally..." -ForegroundColor Yellow
