@@ -3392,8 +3392,12 @@ def _acquire_symbol_fallback_raw(
     }
     chart_retrieval_time: Optional[float] = None
     if fetch_chart:
-        chart_retrieval_time = t_time.time()
         chart_obs = _acquire_live_chart_observations_raw(sym_clean, clean_status)
+        if any(
+            chart_obs.get(k) is not None
+            for k in ("price", "session_volume", "premarket_volume", "after_hours_volume")
+        ):
+            chart_retrieval_time = t_time.time()
 
     if cancel_check and cancel_check():
         raise RuntimeError("Operation cancelled during fallback acquisition")
@@ -3402,10 +3406,10 @@ def _acquire_symbol_fallback_raw(
     premarket_retrieval_time: Optional[float] = None
     if fetch_premarket_vol or MARKET_METRIC_PREMARKET_VOLUME in target_metrics:
         if fetch_premarket_vol:
-            premarket_retrieval_time = t_time.time()
             pm_res = get_premarket_volume_chart(sym_clean)
             if isinstance(pm_res, PremarketVolumeObservation):
                 premarket_vol_obs = pm_res
+                premarket_retrieval_time = t_time.time()
 
     if cancel_check and cancel_check():
         raise RuntimeError("Operation cancelled during fallback acquisition")
@@ -3443,8 +3447,18 @@ def _acquire_symbol_fallback_raw(
             for k in ("price", "session_volume", "premarket_volume", "after_hours_volume")
         )
     ):
+        raw_tup = chart_obs.get("legacy_tuple")
+        if isinstance(raw_tup, tuple) and len(raw_tup) >= 4:
+            chart_4_tuple = (raw_tup[0], raw_tup[1], raw_tup[2], raw_tup[3])
+        else:
+            p_val = chart_obs["price"].value if chart_obs.get("price") is not None else None
+            sv_val = int(chart_obs["session_volume"].value) if chart_obs.get("session_volume") is not None else 0
+            pm_val = int(chart_obs["premarket_volume"].value) if chart_obs.get("premarket_volume") is not None else 0
+            ah_val = int(chart_obs["after_hours_volume"].value) if chart_obs.get("after_hours_volume") is not None else 0
+            chart_4_tuple = (p_val, sv_val, pm_val, ah_val)
+
         chart_cache_meta = {
-            "tuple": chart_obs.get("legacy_tuple"),
+            "tuple": chart_4_tuple,
             "ts": float(chart_retrieval_time),
         }
 
@@ -4250,20 +4264,23 @@ def _publish_market_data_candidate(
 
     # 4. Apply all candidate cache values and provenance as one logical publication operation
     applied_cache_snapshots: List[Tuple[str, dict, str, bool, Any]] = []
-    prov_applied = False
+    prov_attempted = False
     prov_created_sym = False
     try:
         for attr, mapping, key, existed, old_val, new_val in cache_snapshots:
-            mapping[key] = new_val
+            # Register the attempted write before invoking potentially failing assignment.
             applied_cache_snapshots.append((attr, mapping, key, existed, old_val))
+            mapping[key] = new_val
 
         if prov_snapshot is not None:
             p_map, p_sym, p_metric, p_sym_in, p_metric_in, p_old_val, p_new_val = prov_snapshot
             if not p_sym_in:
                 p_map[p_sym] = {}
                 prov_created_sym = True
+            # Mark the write as attempted before assignment. An assignment may mutate
+            # the mapping and subsequently raise.
+            prov_attempted = True
             p_map[p_sym][p_metric] = p_new_val
-            prov_applied = True
 
     except BaseException as primary_error:
         # 5-7. Rollback every mutation in reverse order of mutation
@@ -4274,7 +4291,7 @@ def _publish_market_data_candidate(
             try:
                 if prov_created_sym or (not p_sym_in and p_sym in p_map):
                     p_map.pop(p_sym, None)
-                elif prov_applied:
+                elif prov_attempted:
                     if p_metric_in:
                         p_map[p_sym][p_metric] = p_old_val
                     else:
@@ -4542,27 +4559,62 @@ def _build_metric_cache_candidate(
 
     def _stage_chart_meta() -> None:
         meta = res.data.get("chart_cache_meta")
-        if isinstance(meta, dict) and isinstance(meta.get("tuple"), tuple) and len(meta["tuple"]) >= 4:
-            ts_val = to_float(meta.get("ts"))
-            if ts_val is not None and math.isfinite(ts_val) and ts_val > 0:
-                updates["last_chart_fetch"] = float(ts_val)
-                updates["chart_cache"] = meta["tuple"]
+        if not isinstance(meta, dict):
+            return
+        ts_raw = meta.get("ts")
+        if ts_raw is None or isinstance(ts_raw, bool):
+            return
+        ts_val = to_float(ts_raw)
+        if ts_val is None or not math.isfinite(ts_val) or ts_val <= 0:
+            return
+
+        tup = meta.get("tuple")
+        if not isinstance(tup, tuple) or len(tup) != 4:
+            return
+
+        p_elem, sv_elem, pm_elem, ah_elem = tup
+        if p_elem is not None:
+            if isinstance(p_elem, bool):
+                return
+            p_num = to_float(p_elem)
+            if p_num is None or not math.isfinite(p_num) or p_num <= 0:
+                return
+            valid_price = float(p_num)
+        else:
+            valid_price = None
+
+        valid_vols = []
+        for v in (sv_elem, pm_elem, ah_elem):
+            if isinstance(v, bool):
+                return
+            v_num = to_float(v)
+            if v_num is None or not math.isfinite(v_num) or v_num < 0:
+                return
+            valid_vols.append(int(v_num))
+
+        updates["last_chart_fetch"] = float(ts_val)
+        updates["chart_cache"] = (valid_price, valid_vols[0], valid_vols[1], valid_vols[2])
 
     def _stage_premarket_meta() -> None:
         meta = res.data.get("premarket_vol_cache_meta")
-        if isinstance(meta, dict) and meta.get("value") is not None and not isinstance(meta.get("value"), bool):
-            ts_val = to_float(meta.get("ts"))
-            val_num = to_float(meta.get("value"))
-            if (
-                ts_val is not None
-                and math.isfinite(ts_val)
-                and ts_val > 0
-                and val_num is not None
-                and math.isfinite(val_num)
-                and val_num >= 0
-            ):
-                updates["last_premarket_vol_fetch"] = float(ts_val)
-                updates["premarket_vol_cache"] = int(val_num)
+        if not isinstance(meta, dict):
+            return
+        ts_raw = meta.get("ts")
+        if ts_raw is None or isinstance(ts_raw, bool):
+            return
+        ts_val = to_float(ts_raw)
+        if ts_val is None or not math.isfinite(ts_val) or ts_val <= 0:
+            return
+
+        val_raw = meta.get("value")
+        if val_raw is None or isinstance(val_raw, bool):
+            return
+        val_num = to_float(val_raw)
+        if val_num is None or not math.isfinite(val_num) or val_num < 0:
+            return
+
+        updates["last_premarket_vol_fetch"] = float(ts_val)
+        updates["premarket_vol_cache"] = int(val_num)
 
     if metric == MARKET_METRIC_QUOTE:
         if prov.kind != ObservationKind.INSTANT or obs_dt is None:

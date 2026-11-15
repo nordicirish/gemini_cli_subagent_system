@@ -1871,29 +1871,38 @@ class TestStage222ProvenanceAwareContracts(_MarketDataTestBase):
     def test_29_chart_and_premarket_ttl_metadata_propagation_and_boundaries(self):
         """
         Finding 2 Regression:
-        Successful chart and pre-market acquisitions propagate and publish retrieval-time TTL metadata
-        (last_chart_fetch/chart_cache and last_premarket_vol_fetch/premarket_vol_cache).
-        Observation timestamps remain independent of retrieval TTL timestamps.
-        Missing, malformed or failed acquisitions do not update TTL metadata.
-        Subsequent acquisitions respect the 60s chart and 90s pre-market TTL boundaries.
+        - Retrieval timestamps are captured immediately after successful acquisition, not before.
+        - Delayed acquisition does not consume TTL time while the request is running.
+        - Failed, empty or invalid acquisitions do not update TTL metadata.
+        - Provider observation timestamps (obs_time) remain independent of retrieval TTL timestamps.
+        - Existing 60-second chart and 90-second pre-market TTL expiration boundaries remain correct.
+        - Chart cache tuple conforms to the exact 4-tuple structure consumed by existing code
+          (price, session_volume, premarket_volume, after_hours_volume).
+        - Malformed metadata (booleans, non-finite values, malformed tuples, invalid volumes)
+          cannot update TTL state.
         """
         today_ny = datetime.now(NY_TZ).date()
-        ts_now = time.time()
         fake_now = datetime(today_ny.year, today_ny.month, today_ny.day, 10, 0, tzinfo=NY_TZ)
         dt_bar = datetime(today_ny.year, today_ny.month, today_ny.day, 9, 35, tzinfo=NY_TZ)
         obs_iso = _utc_iso(int(dt_bar.timestamp()))
 
-        chart_retrieval_ts = ts_now - 5.0
-        pm_retrieval_ts = ts_now - 10.0
+        # Controlled clock timeline:
+        # T0 = 1000.0: Fallback acquisition starts
+        # T1 = 1015.0: Chart acquisition finishes (15s duration)
+        # T2 = 1025.0: Premarket volume acquisition finishes (10s duration)
+        t_start = 1000.0
+        t_chart_done = 1015.0
+        t_pm_done = 1025.0
 
-        chart_tuple = (185.0, 50000, 2000, 0, obs_iso)
+        chart_legacy_5_tuple = (185.0, 50000, 2000, 0, obs_iso)
+        chart_consumed_4_tuple = (185.0, 50000, 2000, 0)
         chart_ok = {
             "price": bi.TimestampedValue(185.0, obs_iso, "INTRADAY_CHART"),
             "session_volume": bi.TimestampedValue(50000, obs_iso, "INTRADAY_CHART_VOLUME"),
             "premarket_volume": bi.TimestampedValue(2000, obs_iso, "INTRADAY_CHART_PREMARKET_VOLUME"),
             "after_hours_volume": None,
             "chart_obs_utc_iso": obs_iso,
-            "legacy_tuple": chart_tuple,
+            "legacy_tuple": chart_legacy_5_tuple,
         }
         pm_obs = fs.PremarketVolumeObservation(
             value=12500,
@@ -1902,74 +1911,122 @@ class TestStage222ProvenanceAwareContracts(_MarketDataTestBase):
             source="PREMARKET_VOLUME_CHART",
         )
 
-        with patch.object(fs, "_acquire_live_chart_observations_raw", return_value=chart_ok), \
-             patch.object(fs, "get_premarket_volume_chart", return_value=pm_obs), \
-             patch("fetch_stocks.t_time.time", side_effect=[chart_retrieval_ts, pm_retrieval_ts]):
+        def mock_acquire_chart(_sym, _status):
+            return chart_ok
+
+        def mock_acquire_pm(_sym):
+            return pm_obs
+
+        # Clock returns t_chart_done when called after chart acquisition,
+        # then t_pm_done when called after premarket acquisition.
+        with patch.object(fs, "_acquire_live_chart_observations_raw", side_effect=mock_acquire_chart), \
+             patch.object(fs, "get_premarket_volume_chart", side_effect=mock_acquire_pm), \
+             patch("fetch_stocks.t_time.time", side_effect=[t_chart_done, t_pm_done]):
             batch_res = fs._acquire_symbol_fallback_raw(
                 "AAPL", "OPEN", need_price=True, fetch_chart=True, fetch_premarket_vol=True
             )
 
         items_map = {item.key.target: item for item in batch_res.items}
 
-        # 1. Chart metadata contract: carries tuple and retrieval ts
+        # 1. Retrieval timestamp captured after acquisition: matches completion time, not start time
         q_item = items_map["QUOTE:AAPL"]
         self.assertIn("chart_cache_meta", q_item.data)
         chart_meta = q_item.data["chart_cache_meta"]
-        self.assertEqual(chart_meta["tuple"], chart_tuple)
-        self.assertEqual(chart_meta["ts"], chart_retrieval_ts)
-        # Observation time is provider-derived ISO string, NOT retrieval timestamp
+        self.assertEqual(chart_meta["tuple"], chart_consumed_4_tuple)
+        self.assertEqual(chart_meta["ts"], t_chart_done)
+        self.assertNotEqual(chart_meta["ts"], t_start)
+        # Provider observation timestamp is strictly independent of local retrieval timestamp
         self.assertEqual(q_item.obs_time, obs_iso)
-        self.assertNotEqual(q_item.obs_time, chart_retrieval_ts)
+        self.assertNotEqual(q_item.obs_time, t_chart_done)
 
-        # 2. Premarket volume metadata contract: carries value and retrieval ts
         pv_item = items_map["PREMARKET_VOLUME:AAPL"]
         self.assertIn("premarket_vol_cache_meta", pv_item.data)
         pm_meta = pv_item.data["premarket_vol_cache_meta"]
         self.assertEqual(pm_meta["value"], 12500)
-        self.assertEqual(pm_meta["ts"], pm_retrieval_ts)
+        self.assertEqual(pm_meta["ts"], t_pm_done)
+        self.assertNotEqual(pm_meta["ts"], t_start)
         self.assertEqual(pv_item.obs_time, obs_iso)
 
-        # 3. Publication stages and updates cache on coordinating thread
+        # 2. Delayed acquisition does not consume TTL time while running:
+        # At T = 1065.0:
+        # Elapsed since acquisition start = 65s (> 60s chart TTL)
+        # Elapsed since acquisition completion = 1065.0 - 1015.0 = 50s (< 60s chart TTL!)
         sym_q, m_q, updates_q, prov_q = fs._build_metric_cache_candidate(q_item, now_ny=fake_now)
-        self.assertEqual(updates_q["last_chart_fetch"], chart_retrieval_ts)
-        self.assertEqual(updates_q["chart_cache"], chart_tuple)
+        self.assertEqual(updates_q["last_chart_fetch"], t_chart_done)
+        self.assertEqual(updates_q["chart_cache"], chart_consumed_4_tuple)
         fs._publish_metric_cache_candidate(sym_q, m_q, updates_q, prov_q)
-        self.assertEqual(fs.cache.last_chart_fetch["AAPL"], chart_retrieval_ts)
-        self.assertEqual(fs.cache.chart_cache["AAPL"], chart_tuple)
+
+        now_eval = 1065.0
+        self.assertLess(now_eval - fs.cache.last_chart_fetch["AAPL"], 60.0)
 
         sym_pv, m_pv, updates_pv, prov_pv = fs._build_metric_cache_candidate(pv_item, now_ny=fake_now)
-        self.assertEqual(updates_pv["last_premarket_vol_fetch"], pm_retrieval_ts)
+        self.assertEqual(updates_pv["last_premarket_vol_fetch"], t_pm_done)
         self.assertEqual(updates_pv["premarket_vol_cache"], 12500)
         fs._publish_metric_cache_candidate(sym_pv, m_pv, updates_pv, prov_pv)
-        self.assertEqual(fs.cache.last_premarket_vol_fetch["AAPL"], pm_retrieval_ts)
-        self.assertEqual(fs.cache.premarket_vol_cache["AAPL"], 12500)
 
-        # 4. Missing or malformed metadata does NOT create false TTL entries
-        malformed_chart_res = bi.ChildObservedResult(
-            key=bi.WorkKey(bi.WorkType.MARKET_DATA.value, "QUOTE:MSFT"),
-            data={"kind": "metric", "metric": "QUOTE", "symbol": "MSFT", "value": 300.0,
-                  "chart_cache_meta": {"tuple": "not_a_tuple", "ts": -50.0}},
-            obs_time=obs_iso,
-            error=None,
-            provenance=bi.MarketDataProvenance(bi.ObservationKind.INSTANT, "TEST"),
-        )
-        _, _, malformed_updates, _ = fs._build_metric_cache_candidate(malformed_chart_res, now_ny=fake_now)
-        self.assertNotIn("last_chart_fetch", malformed_updates)
-        self.assertNotIn("chart_cache", malformed_updates)
+        # Verify chart cache unpacks cleanly into 4 variables as expected by existing code
+        c_price, c_vol, c_pre, c_post = fs.cache.chart_cache["AAPL"]
+        self.assertEqual(c_price, 185.0)
+        self.assertEqual(c_vol, 50000)
+        self.assertEqual(c_pre, 2000)
+        self.assertEqual(c_post, 0)
 
-        malformed_pm_res = bi.ChildObservedResult(
-            key=bi.WorkKey(bi.WorkType.MARKET_DATA.value, "PREMARKET_VOLUME:MSFT"),
-            data={"kind": "metric", "metric": "PREMARKET_VOLUME", "symbol": "MSFT", "value": 100,
-                  "premarket_vol_cache_meta": {"value": True, "ts": float("nan")}},
-            obs_time=obs_iso,
-            error=None,
-            provenance=bi.MarketDataProvenance(bi.ObservationKind.INSTANT, "TEST"),
-        )
-        _, _, malformed_pm_updates, _ = fs._build_metric_cache_candidate(malformed_pm_res, now_ny=fake_now)
-        self.assertNotIn("last_premarket_vol_fetch", malformed_pm_updates)
-        self.assertNotIn("premarket_vol_cache", malformed_pm_updates)
+        # 3. Malformed metadata validation before staging cache updates:
+        # Must reject: booleans, non-finite floats, non-positive timestamps, malformed tuples, invalid volumes
+        malformed_cases_chart = [
+            {"tuple": "not_a_tuple", "ts": 1000.0},
+            {"tuple": (185.0, 50000, 2000), "ts": 1000.0},  # len 3 != 4
+            {"tuple": (185.0, 50000, 2000, 0, "extra"), "ts": 1000.0},  # len 5 != 4
+            {"tuple": (True, 50000, 2000, 0), "ts": 1000.0},  # boolean price
+            {"tuple": (0.0, 50000, 2000, 0), "ts": 1000.0},  # zero price
+            {"tuple": (-10.0, 50000, 2000, 0), "ts": 1000.0},  # negative price
+            {"tuple": (float("nan"), 50000, 2000, 0), "ts": 1000.0},  # NaN price
+            {"tuple": (185.0, True, 2000, 0), "ts": 1000.0},  # boolean volume
+            {"tuple": (185.0, -100, 2000, 0), "ts": 1000.0},  # negative volume
+            {"tuple": (185.0, 50000, float("inf"), 0), "ts": 1000.0},  # infinite volume
+            {"tuple": (185.0, 50000, 2000, 0), "ts": True},  # boolean timestamp
+            {"tuple": (185.0, 50000, 2000, 0), "ts": -10.0},  # negative timestamp
+            {"tuple": (185.0, 50000, 2000, 0), "ts": 0.0},  # zero timestamp
+            {"tuple": (185.0, 50000, 2000, 0), "ts": float("nan")},  # NaN timestamp
+            {"tuple": (185.0, 50000, 2000, 0), "ts": float("inf")},  # Inf timestamp
+        ]
+        for idx, bad_meta in enumerate(malformed_cases_chart):
+            res = bi.ChildObservedResult(
+                key=bi.WorkKey(bi.WorkType.MARKET_DATA.value, f"QUOTE:BAD_{idx}"),
+                data={"kind": "metric", "metric": "QUOTE", "symbol": f"BAD_{idx}", "value": 100.0,
+                      "chart_cache_meta": bad_meta},
+                obs_time=obs_iso,
+                error=None,
+                provenance=bi.MarketDataProvenance(bi.ObservationKind.INSTANT, "TEST"),
+            )
+            _, _, up, _ = fs._build_metric_cache_candidate(res, now_ny=fake_now)
+            self.assertNotIn("last_chart_fetch", up, f"Case {idx} staged last_chart_fetch")
+            self.assertNotIn("chart_cache", up, f"Case {idx} staged chart_cache")
 
-        # 5. Failed acquisition does NOT refresh TTL metadata
+        malformed_cases_pm = [
+            {"value": True, "ts": 1000.0},  # boolean value
+            {"value": -50, "ts": 1000.0},  # negative value
+            {"value": float("nan"), "ts": 1000.0},  # NaN value
+            {"value": float("inf"), "ts": 1000.0},  # Inf value
+            {"value": 1000, "ts": True},  # boolean timestamp
+            {"value": 1000, "ts": -5.0},  # negative timestamp
+            {"value": 1000, "ts": 0.0},  # zero timestamp
+            {"value": 1000, "ts": float("nan")},  # NaN timestamp
+        ]
+        for idx, bad_pm_meta in enumerate(malformed_cases_pm):
+            res = bi.ChildObservedResult(
+                key=bi.WorkKey(bi.WorkType.MARKET_DATA.value, f"PREMARKET_VOLUME:BAD_{idx}"),
+                data={"kind": "metric", "metric": "PREMARKET_VOLUME", "symbol": f"BAD_{idx}", "value": 100,
+                      "premarket_vol_cache_meta": bad_pm_meta},
+                obs_time=obs_iso,
+                error=None,
+                provenance=bi.MarketDataProvenance(bi.ObservationKind.INSTANT, "TEST"),
+            )
+            _, _, up, _ = fs._build_metric_cache_candidate(res, now_ny=fake_now)
+            self.assertNotIn("last_premarket_vol_fetch", up, f"Case {idx} staged last_premarket_vol_fetch")
+            self.assertNotIn("premarket_vol_cache", up, f"Case {idx} staged premarket_vol_cache")
+
+        # 4. Failed acquisition does NOT refresh TTL metadata
         empty_chart = {
             "price": None, "session_volume": None, "premarket_volume": None,
             "after_hours_volume": None, "chart_obs_utc_iso": None,
@@ -1987,7 +2044,7 @@ class TestStage222ProvenanceAwareContracts(_MarketDataTestBase):
         self.assertNotIn("GOOGL", fs.cache.last_chart_fetch)
         self.assertNotIn("GOOGL", fs.cache.last_premarket_vol_fetch)
 
-        # 6. Subsequent acquisition respects TTL boundaries (60s chart, 90s pre-market)
+        # 5. Subsequent acquisition respects TTL boundaries (60s chart, 90s pre-market)
         with _isolated_market_coordinators(max_workers=1) as (mkt_coord, _, _, _):
             with patch.object(mkt_coord, "enqueue", wraps=mkt_coord.enqueue) as enq_spy, \
                  patch.object(fs, "_acquire_symbol_fallback_raw", return_value=bi.ObservedResult(data=None, obs_time=None)):
@@ -2009,86 +2066,162 @@ class TestStage222ProvenanceAwareContracts(_MarketDataTestBase):
         """
         Finding 3 Regression:
         Publication of market-data cache candidates and provenance records is strictly atomic.
-        If any cache field assignment or provenance write fails, all previously mutated fields
-        are restored to their exact prior state, and newly added keys are removed.
-        Failed publication preserves the primary exception, does not advance sequence or obs_time,
-        and allows subsequent valid publication to succeed.
+        If an assignment mutates its target mapping and then raises an exception, or if an assignment
+        fails before mutating:
+        1. Cache mapping that mutates and then raises: rollback restores exact prior value for existing keys
+           or removes newly introduced keys.
+        2. Nested provenance mapping that mutates and then raises: rollback restores exact prior provenance
+           for existing metrics or removes newly introduced metric entries, preserving the symbol entry.
+        3. Newly created provenance symbol mapping whose nested assignment mutates and raises:
+           rollback completely removes the newly created symbol entry.
+        4. Primary exception is preserved and re-raised with diagnostic notes.
+        5. Applicator sequence, observation timestamp and provenance ordering do NOT advance on failure.
+        6. Subsequent valid publication succeeds.
         """
         today_ny = datetime.now(NY_TZ).date()
         fake_now = datetime(today_ny.year, today_ny.month, today_ny.day, 10, 0, tzinfo=NY_TZ)
         obs_iso = _utc_iso(int(fake_now.timestamp()))
 
-        # 1. Failure during later cache-field assignment restores every earlier field
+        class MutateAndRaiseDict(dict):
+            """Controlled fixture mapping that sets item and then raises on first attempt."""
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.failed_once = False
+
+            def __setitem__(self, key, value):
+                super().__setitem__(key, value)
+                if not self.failed_once:
+                    self.failed_once = True
+                    raise RuntimeError(f"Simulated mutate-then-raise failure for {key!r}")
+
+        # ---------------------------------------------------------------------
+        # 1. Cache mapping mutate-then-raise:
+        #    1a. Key existed prior to mutation: restored to exact previous value
+        #    1b. Key did not exist prior to mutation: removed on rollback
+        # ---------------------------------------------------------------------
         fs.cache.prices["AAPL"] = 150.0
         fs.cache.volumes["AAPL"] = 1_000_000
-        # Ensure day_open does not exist yet
         fs.cache.day_open.pop("AAPL", None)
 
-        class FailingMapping(dict):
-            def __setitem__(self, key, value):
-                raise RuntimeError("Simulated late cache mapping assignment failure")
-
-        failing_map = FailingMapping()
-        with patch.object(fs.cache, "gaps", failing_map):
+        failing_gaps = MutateAndRaiseDict({"AAPL": 2.5})
+        with patch.object(fs.cache, "gaps", failing_gaps):
             candidate = {
                 "prices": 160.0,
                 "volumes": 2_000_000,
                 "day_open": 155.0,
-                "gaps": 5.0,  # Will fail here
+                "gaps": 5.0,  # Will mutate failing_gaps["AAPL"] = 5.0, then raise
             }
             with self.assertRaises(RuntimeError) as cm:
                 fs._publish_quote_cache_candidate("AAPL", candidate)
-            self.assertIn("Simulated late cache mapping assignment failure", str(cm.exception))
+            self.assertIn("Simulated mutate-then-raise failure for 'AAPL'", str(cm.exception))
 
-        # Assert prior values restored exactly
+        # Gaps was mutated to 5.0 before raising, but rollback restored it to 2.5!
+        self.assertEqual(failing_gaps["AAPL"], 2.5)
+        # Earlier mutated fields were also rolled back
         self.assertEqual(fs.cache.prices["AAPL"], 150.0)
         self.assertEqual(fs.cache.volumes["AAPL"], 1_000_000)
-        # Assert newly added key was removed upon rollback
         self.assertNotIn("AAPL", fs.cache.day_open)
 
-        # 2. Failure during provenance publication restores all cache fields and prior provenance
-        class FailingProvMapping(dict):
-            def __setitem__(self, key, value):
-                raise RuntimeError("Simulated provenance assignment failure")
+        # 1b. Key did not exist in failing cache mapping before write
+        failing_after_hours = MutateAndRaiseDict()
+        self.assertNotIn("AAPL", failing_after_hours)
+        with patch.object(fs.cache, "after_hours_price", failing_after_hours):
+            candidate2 = {
+                "prices": 165.0,
+                "after_hours_price": 166.0,  # Will mutate then raise
+            }
+            with self.assertRaises(RuntimeError) as cm2:
+                fs._publish_quote_cache_candidate("AAPL", candidate2)
+            self.assertIn("Simulated mutate-then-raise failure for 'AAPL'", str(cm2.exception))
 
+        # Rollback removed the newly added key from after_hours_price
+        self.assertNotIn("AAPL", failing_after_hours)
+        self.assertEqual(fs.cache.prices["AAPL"], 150.0)
+
+        # ---------------------------------------------------------------------
+        # 2. Existing nested provenance mapping mutate-then-raise:
+        #    2a. Metric already existed: restored to exact previous value
+        #    2b. Metric was newly added: removed, existing symbol mapping preserved
+        # ---------------------------------------------------------------------
         fs.cache.prices["AAPL"] = 150.0
-        orig_prov = {"DAY_OPEN": {"kind": "INSTANT", "source": "YAHOO", "timestamp": obs_iso}}
-        inner_failing = FailingProvMapping(dict(orig_prov))
-        fs.cache.metric_provenance["AAPL"] = inner_failing
+        orig_day_open_prov = {"kind": "INSTANT", "source": "YAHOO", "timestamp": obs_iso}
+        orig_quote_prov = {"kind": "INSTANT", "source": "BATCH_QUOTE", "timestamp": obs_iso}
 
-        with self.assertRaises(RuntimeError) as cm:
+        # 2a. Update existing metric in nested provenance
+        nested_prov_2a = MutateAndRaiseDict({
+            "DAY_OPEN": orig_day_open_prov,
+            "QUOTE": orig_quote_prov,
+        })
+        fs.cache.metric_provenance["AAPL"] = nested_prov_2a
+
+        new_quote_prov = {"kind": "INSTANT", "source": "INTRADAY_CHART", "timestamp": obs_iso}
+        with self.assertRaises(RuntimeError) as cm3:
             fs._publish_metric_cache_candidate(
                 "AAPL",
                 "QUOTE",
                 {"prices": 175.0},
-                {"kind": "INSTANT", "source": "INTRADAY_CHART", "timestamp": obs_iso},
+                new_quote_prov,
             )
-        self.assertIn("Simulated provenance assignment failure", str(cm.exception))
-
-        # Assert cache field rolled back to prior value
+        self.assertIn("Simulated mutate-then-raise failure for 'QUOTE'", str(cm3.exception))
+        # Verify QUOTE provenance was restored to orig_quote_prov
+        self.assertEqual(nested_prov_2a["QUOTE"], orig_quote_prov)
+        self.assertEqual(nested_prov_2a["DAY_OPEN"], orig_day_open_prov)
         self.assertEqual(fs.cache.prices["AAPL"], 150.0)
-        # Assert existing provenance preserved, new metric not added
+
+        # 2b. Add new metric to existing symbol provenance
+        nested_prov_2b = MutateAndRaiseDict({
+            "DAY_OPEN": orig_day_open_prov,
+        })
+        fs.cache.metric_provenance["AAPL"] = nested_prov_2b
+        with self.assertRaises(RuntimeError) as cm4:
+            fs._publish_metric_cache_candidate(
+                "AAPL",
+                "QUOTE",
+                {"prices": 180.0},
+                new_quote_prov,
+            )
+        self.assertIn("Simulated mutate-then-raise failure for 'QUOTE'", str(cm4.exception))
+        # Verify QUOTE metric was removed, but symbol entry and DAY_OPEN remain intact
         self.assertIn("AAPL", fs.cache.metric_provenance)
-        self.assertIn("DAY_OPEN", fs.cache.metric_provenance["AAPL"])
-        self.assertNotIn("QUOTE", fs.cache.metric_provenance["AAPL"])
+        self.assertNotIn("QUOTE", nested_prov_2b)
+        self.assertEqual(nested_prov_2b["DAY_OPEN"], orig_day_open_prov)
+        self.assertEqual(fs.cache.prices["AAPL"], 150.0)
 
-        # Reset metric_provenance["AAPL"] to normal dict
-        fs.cache.metric_provenance["AAPL"] = dict(orig_prov)
-
-        # 3. If symbol was absent from metric_provenance initially, symbol entry is completely removed
+        # ---------------------------------------------------------------------
+        # 3. Newly created provenance symbol mapping whose assignment mutates and raises:
+        #    Verify no symbol entry remains
+        # ---------------------------------------------------------------------
         fs.cache.metric_provenance.pop("NVDA", None)
-        with patch.object(fs.cache, "metric_provenance", FailingProvMapping()):
-            with self.assertRaises(RuntimeError):
+        fs.cache.prices.pop("NVDA", None)
+
+        class MutateAndRaiseOuterDict(dict):
+            """Fails after setting inner dictionary for a new symbol."""
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.failed_once = False
+
+            def __setitem__(self, key, value):
+                super().__setitem__(key, value)
+                if not self.failed_once:
+                    self.failed_once = True
+                    raise RuntimeError(f"Simulated outer mutate-then-raise failure for {key!r}")
+
+        with patch.object(fs.cache, "metric_provenance", MutateAndRaiseOuterDict()):
+            with self.assertRaises(RuntimeError) as cm5:
                 fs._publish_metric_cache_candidate(
                     "NVDA",
                     "QUOTE",
                     {"prices": 500.0},
                     {"kind": "INSTANT", "source": "INTRADAY_CHART", "timestamp": obs_iso},
                 )
-        self.assertNotIn("NVDA", fs.cache.metric_provenance)
-        self.assertNotIn("NVDA", fs.cache.prices)
+            self.assertIn("Simulated outer mutate-then-raise failure for 'NVDA'", str(cm5.exception))
+            # Verify no symbol entry remains in metric_provenance
+            self.assertNotIn("NVDA", fs.cache.metric_provenance)
+            self.assertNotIn("NVDA", fs.cache.prices)
 
-        # 4. Applicator sequence and observation timestamp do NOT advance on failed publication
+        # ---------------------------------------------------------------------
+        # 4. Applicator sequence, obs_time and provenance do NOT advance on failure
+        # ---------------------------------------------------------------------
         with _isolated_market_coordinators(max_workers=1) as (mkt_coord, mkt_app, _, _):
             key = bi.WorkKey(bi.WorkType.MARKET_DATA.value, "QUOTE:AAPL")
             work_res = bi.WorkResult(
@@ -2100,7 +2233,6 @@ class TestStage222ProvenanceAwareContracts(_MarketDataTestBase):
                 provenance=bi.MarketDataProvenance(bi.ObservationKind.INSTANT, "INTRADAY_CHART"),
             )
 
-            # Publication fails
             def _failing_publish(res):
                 raise RuntimeError("Publication failed inside callback")
 
@@ -2115,13 +2247,16 @@ class TestStage222ProvenanceAwareContracts(_MarketDataTestBase):
             self.assertFalse(audit[0][1])  # applied = False
             self.assertIn("Publication failed", audit[0][2])
 
-            # Applied sequence, obs_time, and provenance did NOT advance!
             seq, obs_t = mkt_app.get_last_applied(key)
             self.assertEqual(seq, -1)
             self.assertEqual(obs_t, "")
             self.assertIsNone(mkt_app.get_last_applied_provenance(key))
 
+            # ---------------------------------------------------------------------
             # 5. Subsequent valid publication succeeds after failed attempt
+            # ---------------------------------------------------------------------
+            fs.cache.metric_provenance["AAPL"] = {}
+
             def _working_publish(res):
                 fs._publish_metric_cache_candidate(
                     "AAPL",
