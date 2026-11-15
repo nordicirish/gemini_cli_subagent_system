@@ -55,8 +55,14 @@ class TestPersistenceServiceConfiguration(unittest.TestCase):
         reset_persistence_service()
         self.temp_dir.cleanup()
 
-    def test_default_service_is_json(self):
+    def test_default_service_is_sqlite_when_database_present(self):
         service = get_persistence_service()
+        self.assertIsInstance(service, PersistenceService)
+        self.assertEqual(service.backend_name, "sqlite")
+        self.assertIsInstance(service.adapter, SqlitePersistenceAdapter)
+
+    def test_configure_explicit_json_mode(self):
+        service = configure_persistence(backend="json")
         self.assertIsInstance(service, PersistenceService)
         self.assertEqual(service.backend_name, "json")
         self.assertIsInstance(service.adapter, JsonPersistenceAdapter)
@@ -437,7 +443,7 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
         ssot = self.adapter.get_ssot_data()
         self.assertIsInstance(ssot, dict)
         self.assertEqual(ssot["portfolio_snapshot"], [])
-        self.assertEqual(ssot["unallocated_cash_eur"], 0.0)
+        self.assertEqual(ssot["unallocated_cash_eur"], "0.00")
 
     def test_sqlite_rejects_non_finite_financial_values(self):
         """Reject non-finite shares, wac, and cash on SQLite adapter with PersistenceValidationError."""

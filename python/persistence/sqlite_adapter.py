@@ -15,6 +15,7 @@ and fail-closed authorization boundaries without modifying production databases.
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+import os
 import re
 from typing import Any, Dict, List, Optional, Union
 import uuid
@@ -29,6 +30,7 @@ try:
         decimal_to_canonical_str,
         validate_timestamp_utc,
     )
+    from python.database.projections import SSoTProjectionGenerator
     from python.tool_registry import authorize_financial_mutation, get_active_caller_role
 except ImportError:
     from database.manager import DatabaseManager
@@ -40,6 +42,7 @@ except ImportError:
         decimal_to_canonical_str,
         validate_timestamp_utc,
     )
+    from database.projections import SSoTProjectionGenerator
     from tool_registry import authorize_financial_mutation, get_active_caller_role
 
 from .contracts import (
@@ -57,10 +60,11 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
     Used in controlled integration and automated testing environments.
     """
 
-    def __init__(self, db_manager: DatabaseManager):
+    def __init__(self, db_manager: DatabaseManager, base_ssot_path: Optional[str] = None):
         if db_manager is None:
             raise ValueError("db_manager cannot be None")
         self._db_manager = db_manager
+        self._base_ssot_path = base_ssot_path if base_ssot_path is not None else "context/ssot.json"
 
     @property
     def backend_name(self) -> str:
@@ -75,25 +79,23 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
     # -----------------------------------------------------------------------
 
     def get_ssot_data(self) -> Dict[str, Any]:
-        """Projects current SQLite state into a canonical SSoT dictionary."""
-        basket = self.get_portfolio_basket()
-        watchlist = self.get_watchlist()
-        scouts = self.get_scout_categories()
+        """Projects current SQLite state into a canonical SSoT dictionary using SSoTProjectionGenerator."""
+        base_doc = None
+        if self._base_ssot_path and os.path.exists(self._base_ssot_path):
+            try:
+                with open(self._base_ssot_path, "r", encoding="utf-8") as f:
+                    base_doc = json.load(f)
+            except Exception:
+                base_doc = None
 
-        return {
-            "portfolio_snapshot": basket["portfolio"],
-            "unallocated_cash_eur": basket["unallocated_cash_eur"],
-            "unallocated_cash_usd": basket["unallocated_cash_usd"],
-            "watched_tickers": watchlist,
-            "scout_categories": scouts,
-            "mutable_state": {
-                "portfolio_snapshot": basket["portfolio"],
-                "unallocated_cash_eur": basket["unallocated_cash_eur"],
-                "unallocated_cash_usd": basket["unallocated_cash_usd"],
-                "watched_tickers": watchlist,
-                "scout_categories": scouts,
-            },
-        }
+        try:
+            with self._db_manager.connection() as conn:
+                generator = SSoTProjectionGenerator(self._db_manager)
+                return generator.generate(conn, base_document=base_doc)
+        except (PersistenceValidationError, PersistenceIntegrityError):
+            raise
+        except Exception as e:
+            raise PersistenceError(f"Failed to retrieve canonical SSoT projection from SQLite: {e}") from e
 
     def get_portfolio_basket(self) -> Dict[str, Any]:
         """Retrieves active holdings and cash balances from SQLite."""

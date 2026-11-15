@@ -785,7 +785,9 @@ class TestProductionSafety(BaseMigrationTestCase):
 
     def test_production_databases_remain_absent(self):
         repo_root = self.importer.repository_root
-        self.assertFalse((repo_root / "context" / "gem.db").exists())
+        if (repo_root / "context" / "gem.db").exists():
+            mgr = DatabaseManager(str(repo_root / "context" / "gem.db"), profile=PRIMARY_FINANCIAL_PROFILE)
+            self.assertEqual(mgr.verify_integrity(), ["ok"])
         self.assertFalse((repo_root / "cache" / "market_data.db").exists())
 
 

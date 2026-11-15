@@ -98,7 +98,7 @@ class SSoTParityVerifier:
             p = Path(legacy_sources)
             if p.name not in file_list:
                 file_list.append(p.name)
-            data = load_strict_json_file(p)
+            data, _, _ = load_strict_json_file(p)
             legacy_state.update(data)
         elif isinstance(legacy_sources, dict):
             # Check if dict is { "filename": {data} } or direct data dict
@@ -130,7 +130,7 @@ class SSoTParityVerifier:
                     p = Path(src)
                     if p.name not in file_list:
                         file_list.append(p.name)
-                    data = load_strict_json_file(p)
+                    data, _, _ = load_strict_json_file(p)
                     legacy_state.update(data)
                 elif isinstance(src, dict):
                     legacy_state.update(src)

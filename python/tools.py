@@ -334,6 +334,8 @@ def get_market_data() -> str:
     """
     Returns the latest live market data for all tickers and macro benchmarks.
     This fetches from the background daemon that continuously updates.
+    Integrates authoritative persistence context, surfacing degradation status
+    and SSoT state for parity with /api/data and /api/chat.
     """
     retries = 0
     while not fetch_stocks.GLOBAL_STATE and retries < 15:
@@ -349,9 +351,21 @@ def get_market_data() -> str:
     data_to_return = {
         "status": state.get("status"),
         "timestamp": state.get("timestamp"),
+        "financial_state_valid": state.get("financial_state_valid", True),
         "tickers": state.get("tickers"),
     }
-    return json.dumps(data_to_return)
+    if state.get("persistence_error"):
+        data_to_return["persistence_error"] = state.get("persistence_error")
+    if state.get("local_storage_state") is not None:
+        data_to_return["ssot"] = state.get("local_storage_state")
+
+    sanitizer = getattr(fetch_stocks, "sanitize_json_payload", None)
+    if callable(sanitizer):
+        payload = sanitizer(data_to_return)
+    else:
+        payload = data_to_return
+
+    return json.dumps(payload, default=str)
 
 
 def load_forensic_search_prompt(query: str) -> str:

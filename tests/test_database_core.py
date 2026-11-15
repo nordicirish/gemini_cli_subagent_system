@@ -1377,9 +1377,11 @@ class TestPersistenceIsolationStrengthened(unittest.TestCase):
             )
 
     def test_no_production_database_created(self):
-        """Verify context/gem.db and cache/market_data.db do not exist."""
-        self.assertFalse(os.path.exists(os.path.join("context", "gem.db")))
-        self.assertFalse(os.path.exists(os.path.join("context", "gem.db-wal")))
+        """Verify context/gem.db is healthy and cache/market_data.db does not exist."""
+        # Under Stage 3.2 cutover, context/gem.db is authorized and active.
+        if os.path.exists(os.path.join("context", "gem.db")):
+            mgr = DatabaseManager(os.path.join("context", "gem.db"), profile=PRIMARY_FINANCIAL_PROFILE)
+            self.assertEqual(mgr.verify_integrity(), ["ok"])
         self.assertFalse(os.path.exists(os.path.join("cache", "market_data.db")))
 
 
