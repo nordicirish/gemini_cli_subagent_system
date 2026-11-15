@@ -79,7 +79,7 @@ Before editing any file in any stage:
 4. **Post-Edit Verification Gate:** Execute scope-proportional unit, regression, and integration tests for authorised changes in proportion to risk, adhering strictly to Protocol 05:
    - Run `tests/test_database_*.py` only when `python/database/**` is in the authorised implementation scope.
    - Run `tests/test_market_data_*.py` and `tests/test_heavy_market_data_separation.py` only when `python/fetch_stocks.py` is in the authorised implementation scope.
-   - Run the extended tier (`RUN_EXTENDED_TESTS=1`) only when backup concurrency, offline migration, or subprocess lifecycle code is explicitly modified.
+   - Run the extended tier (`RUN_EXTENDED_TESTS=1`) only when backup concurrency, offline migration, database projections, or subprocess lifecycle code is explicitly modified. Explicitly modifying a designated test suite to introduce or verify its opt-in guard also requires testing that suite in both standard and extended modes.
    - Otherwise execute only the targeted and regression tests relevant to the authorised changes.
    - Never treat an omitted test as passed; report why it was not run.
 5. Execute compilation (`python -m compileall -q python tests`) and dependency integrity checks (`python -m pip check`) where relevant.
