@@ -394,7 +394,7 @@ class TestMarketDataIntegrity(unittest.TestCase):
         mock_ticker.fast_info = MagicMock()
 
         # Batch quote from provider during regular hours
-        now_ny = datetime.now(self.ny_tz)
+        now_ny = datetime(2026, 11, 13, 11, 0, tzinfo=self.ny_tz)
         trade_ts = int(now_ny.timestamp())
 
         quote_data = {
@@ -405,7 +405,10 @@ class TestMarketDataIntegrity(unittest.TestCase):
             "regularMarketTime": trade_ts,
         }
 
-        update_price_tick(sym, mock_ticker, "OPEN", quote_data)
+        with patch("fetch_stocks.datetime") as dt_mock:
+            dt_mock.now.return_value = now_ny
+            dt_mock.fromtimestamp.side_effect = datetime.fromtimestamp
+            update_price_tick(sym, mock_ticker, "OPEN", quote_data)
 
         self.assertEqual(cache.prices.get(sym), 125.50)
         self.assertEqual(cache.regular_close.get(sym), 120.00)
