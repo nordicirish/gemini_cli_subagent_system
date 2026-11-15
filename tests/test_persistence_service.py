@@ -509,6 +509,17 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
         self.assertIn("unavailable or invalid", str(ctx.exception))
         self.assertIsInstance(ctx.exception.__cause__, json.JSONDecodeError)
 
+    def test_sqlite_get_ssot_data_invalid_utf8_raises_integrity_error(self):
+        """Invalid UTF-8 encoding in configured base SSoT document raises PersistenceIntegrityError."""
+        invalid_utf8_path = os.path.join(self.temp_dir.name, "invalid_utf8_ssot.json")
+        with open(invalid_utf8_path, "wb") as f:
+            f.write(b"\x80\x81\xff\xfe\x00\x01not valid utf8")
+        adapter = SqlitePersistenceAdapter(self.mgr, base_ssot_path=invalid_utf8_path)
+        with self.assertRaises(PersistenceIntegrityError) as ctx:
+            adapter.get_ssot_data()
+        self.assertIn("unavailable or invalid", str(ctx.exception))
+        self.assertIsInstance(ctx.exception.__cause__, UnicodeError)
+
     def test_sqlite_get_ssot_data_invalid_root_type_raises_integrity_error(self):
         """Non-dictionary root in configured base SSoT document raises PersistenceIntegrityError."""
         list_root_path = os.path.join(self.temp_dir.name, "list_root.json")

@@ -98,7 +98,7 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
                     raise PersistenceValidationError(
                         f"Base SSoT document at '{self._base_ssot_path}' must have a dictionary root."
                     )
-            except (OSError, json.JSONDecodeError, PersistenceValidationError) as exc:
+            except (OSError, json.JSONDecodeError, UnicodeError, PersistenceValidationError) as exc:
                 raise PersistenceIntegrityError(
                     f"Cannot generate canonical SSoT projection: base document at '{self._base_ssot_path}' is unavailable or invalid: {exc}"
                 ) from exc

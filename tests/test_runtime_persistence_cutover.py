@@ -229,6 +229,82 @@ class TestRuntimePersistenceCutoverAndInvariance(unittest.TestCase):
             staging_files = list(temp_context.glob("staging_gem_*"))
             self.assertEqual(staging_files, [])
 
+    def test_cutover_lock_file_persists_after_success_and_failure(self):
+        """Cutover lock file context/gem.db.cutover_lock persists on disk after success and failure."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            lock_path = temp_context / "gem.db.cutover_lock"
+
+            # 1. Successful cutover
+            res = perform_sqlite_cutover(repo_root=temp_root)
+            self.assertEqual(res["status"], "success")
+            self.assertTrue(lock_path.exists(), "Lock file must persist after successful cutover")
+
+            # 2. Re-cutover fails because target_db exists, lock file must still persist
+            with self.assertRaises(PersistenceIntegrityError):
+                perform_sqlite_cutover(repo_root=temp_root)
+            self.assertTrue(lock_path.exists(), "Lock file must persist after failed cutover")
+
+    def test_sequential_cutover_contention_and_lock_release_after_exception(self):
+        """Sequential cutovers acquire lock cleanly; lock is released immediately after exception."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            lock_path = str(temp_context / "gem.db.cutover_lock")
+
+            # Trigger exception by mocking verify_integrity
+            with patch.object(DatabaseManager, "verify_integrity", return_value=["corrupted"]):
+                with self.assertRaises(PersistenceIntegrityError):
+                    perform_sqlite_cutover(repo_root=temp_root)
+
+            # Immediately verify lock can be acquired sequentially without deadlock
+            acquired = False
+            with FileLock(lock_path, timeout=0.5):
+                acquired = True
+            self.assertTrue(acquired, "Exclusive lock must be released immediately after exception")
+
+    def test_unsupported_hard_link_fails_closed(self):
+        """Unsupported hard-link promotion (os.link raising OSError) fails closed with PersistenceIntegrityError."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            with patch("os.link", side_effect=OSError("Cross-device or filesystem hard link unsupported")):
+                with self.assertRaises(PersistenceIntegrityError) as ctx:
+                    perform_sqlite_cutover(repo_root=temp_root)
+                self.assertIn("Atomic promotion failed: os.link() unavailable", str(ctx.exception))
+                self.assertIsInstance(ctx.exception.__cause__, OSError)
+
+            # Destination must NOT exist and staging files must be cleaned up
+            self.assertFalse((temp_context / "gem.db").exists())
+            self.assertEqual(list(temp_context.glob("staging_gem_*")), [])
+
+    def test_competing_destination_appearing_immediately_before_promotion_rejected_and_preserved(self):
+        """Competing destination appearing immediately before promotion is rejected and preserved unchanged."""
+        with tempfile.TemporaryDirectory() as td:
+            temp_root, temp_context = self._prepare_clean_temp_workspace(td)
+            target_db = temp_context / "gem.db"
+            competing_bytes = b"COMPETING_DATABASE_STATE_CREATED_BY_ANOTHER_PROCESS"
+            competing_hash = hashlib.sha256(competing_bytes).hexdigest()
+
+            from python.persistence import service as svc_mod
+            orig_promote = svc_mod._atomic_no_overwrite_promote
+
+            def race_competing_promote(staging_p, target_p):
+                # Another process writes target immediately before promote
+                target_p.write_bytes(competing_bytes)
+                return orig_promote(staging_p, target_p)
+
+            with patch.object(svc_mod, "_atomic_no_overwrite_promote", side_effect=race_competing_promote):
+                with self.assertRaises(PersistenceIntegrityError) as ctx:
+                    perform_sqlite_cutover(repo_root=temp_root)
+                self.assertIn("destination already exists", str(ctx.exception))
+
+            # Verify competing destination was NEVER deleted or modified
+            self.assertTrue(target_db.exists())
+            self.assertEqual(target_db.read_bytes(), competing_bytes)
+            self.assertEqual(hashlib.sha256(target_db.read_bytes()).hexdigest(), competing_hash)
+
+            # Staging files must be cleaned up
+            self.assertEqual(list(temp_context.glob("staging_gem_*")), [])
+
     def test_cutover_in_isolated_temporary_workspace(self):
         """Tests that perform_sqlite_cutover runs cleanly and atomicity holds in an isolated workspace."""
         with tempfile.TemporaryDirectory() as td:
@@ -547,9 +623,28 @@ class TestConsumerParity(unittest.TestCase):
                 self.assertIsInstance(text_content, str)
 
                 # Verify actual endpoint hydrates and validates the same canonical authoritative financial state
-                self.assertIn("portfolio_snapshot", text_content)
-                self.assertIn("unallocated_cash_eur", text_content)
-                self.assertIn(str(canonical_ssot["unallocated_cash_eur"]), text_content)
+                start_marker = "```json\n"
+                end_marker = "\n```\n[END_DATA_PACKET]"
+                start_idx = text_content.find(start_marker)
+                end_idx = text_content.find(end_marker, start_idx)
+                self.assertNotEqual(start_idx, -1, "Injected DATA_PACKET start marker not found in chat prompt")
+                self.assertNotEqual(end_idx, -1, "Injected DATA_PACKET end marker not found in chat prompt")
+                packet_str = text_content[start_idx + len(start_marker):end_idx]
+                packet_data = json.loads(packet_str)
+                chat_ssot = packet_data["ssot"]
+                if isinstance(chat_ssot, str) and chat_ssot.startswith("ImmutableDict("):
+                    chat_ssot = eval(chat_ssot, {"ImmutableDict": dict, "ImmutableList": list})
+
+                # Assert exact canonical values, not merely field-name presence
+                self.assertEqual(chat_ssot["portfolio_snapshot"], canonical_ssot["portfolio_snapshot"])
+                self.assertEqual(chat_ssot["unallocated_cash_eur"], canonical_ssot["unallocated_cash_eur"])
+                self.assertEqual(chat_ssot["unallocated_cash_usd"], canonical_ssot["unallocated_cash_usd"])
+                self.assertEqual(chat_ssot["watched_tickers"], canonical_ssot["watched_tickers"])
+                self.assertEqual(chat_ssot["scout_categories"], canonical_ssot["scout_categories"])
+                self.assertEqual(
+                    chat_ssot["_projection_metadata"]["db_revision"],
+                    canonical_ssot["_projection_metadata"]["db_revision"],
+                )
 
     def test_actual_api_chat_endpoint_halts_on_degraded_persistence(self):
         """When persistence is degraded, /api/chat halts before any model or tool dispatch."""

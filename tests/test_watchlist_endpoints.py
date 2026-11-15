@@ -16,6 +16,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 import fetch_stocks
 import web_server
 from tool_registry import execution_role_context
+from database.manager import DatabaseManager, PRIMARY_FINANCIAL_PROFILE
+from database.schema import SchemaMigrator
+from persistence.service import (
+    configure_persistence,
+    get_persistence_service,
+    reset_persistence_service,
+)
 
 
 class MockRequest:
@@ -46,6 +53,16 @@ class TestWatchlistEndpoints(unittest.TestCase):
 
         with open(self.temp_ssot_path, "w", encoding="utf-8") as f:
             json.dump(self.initial_ssot, f, indent=2)
+
+        # Configure isolated SQLite persistence backend
+        self.temp_db_path = os.path.join(self.temp_dir.name, "test_gem.db")
+        self.db_manager = DatabaseManager(self.temp_db_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with self.db_manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+        configure_persistence(backend="sqlite", db_manager=self.db_manager)
+        self.service = get_persistence_service()
+        with execution_role_context("Terminal Orchestrator"):
+            self.service.save_watchlist(["AAPL", "MSFT"], caller_role="Terminal Orchestrator")
 
         # Intercept path lookups for context/config.json and context/ssot.json
         import builtins
@@ -106,7 +123,15 @@ class TestWatchlistEndpoints(unittest.TestCase):
         self.patch_update_io.stop()
         self.patch_open.stop()
         self.patch_exists.stop()
-        self.temp_dir.cleanup()
+        reset_persistence_service()
+        self.db_manager = None
+        self.service = None
+        import gc
+        gc.collect()
+        try:
+            self.temp_dir.cleanup()
+        except PermissionError:
+            pass
 
     def _get_file_bytes(self, path):
         with self._orig_open(path, "rb") as f:
@@ -124,6 +149,9 @@ class TestWatchlistEndpoints(unittest.TestCase):
         body = json.loads(response.body.decode("utf-8"))
         self.assertEqual(body, ["AAPL", "MSFT"])
 
+        # Verify persistence service state is unchanged
+        self.assertEqual(self.service.get_watchlist(), ["AAPL", "MSFT"])
+
         # Verify zero disk mutations on authoritative financial files
         self.assertEqual(self._get_file_bytes(self.temp_ssot_path), ssot_before)
         self.assertEqual(self._get_file_bytes(self.temp_config_path), config_before)
@@ -138,45 +166,59 @@ class TestWatchlistEndpoints(unittest.TestCase):
         # Verify response content (FastAPI list serialization)
         self.assertEqual(watchlist, ["AAPL", "MSFT"])
 
+        # Verify persistence service state is unchanged
+        self.assertEqual(self.service.get_watchlist(), ["AAPL", "MSFT"])
+
         # Verify zero disk mutations on authoritative financial files
         self.assertEqual(self._get_file_bytes(self.temp_ssot_path), ssot_before)
         self.assertEqual(self._get_file_bytes(self.temp_config_path), config_before)
 
     def test_f2_watchlist_fallback_to_ssot_when_config_empty(self):
         """F2: If config.json has no watchlist, fall back to ssot.json watched_tickers without mutating either file."""
-        with self._orig_open(self.temp_config_path, "w", encoding="utf-8") as f:
-            json.dump({"WATCHLIST": []}, f)
+        configure_persistence(backend="json")
+        try:
+            with self._orig_open(self.temp_config_path, "w", encoding="utf-8") as f:
+                json.dump({"WATCHLIST": []}, f)
 
-        ssot_before = self._get_file_bytes(self.temp_ssot_path)
-        config_before = self._get_file_bytes(self.temp_config_path)
+            ssot_before = self._get_file_bytes(self.temp_ssot_path)
+            config_before = self._get_file_bytes(self.temp_config_path)
 
-        # Test fetch_stocks GET
-        fs_resp = fetch_stocks.get_watch_list()
-        self.assertEqual(json.loads(fs_resp.body.decode("utf-8")), ["OLD_SYM1", "OLD_SYM2"])
+            # Test fetch_stocks GET
+            fs_resp = fetch_stocks.get_watch_list()
+            self.assertEqual(json.loads(fs_resp.body.decode("utf-8")), ["OLD_SYM1", "OLD_SYM2"])
 
-        # Test web_server GET
-        ws_resp = web_server.get_watch_list()
-        self.assertEqual(ws_resp, ["OLD_SYM1", "OLD_SYM2"])
+            # Test web_server GET
+            ws_resp = web_server.get_watch_list()
+            self.assertEqual(ws_resp, ["OLD_SYM1", "OLD_SYM2"])
 
-        # Neither file was altered
-        self.assertEqual(self._get_file_bytes(self.temp_ssot_path), ssot_before)
-        self.assertEqual(self._get_file_bytes(self.temp_config_path), config_before)
+            # Neither file was altered
+            self.assertEqual(self._get_file_bytes(self.temp_ssot_path), ssot_before)
+            self.assertEqual(self._get_file_bytes(self.temp_config_path), config_before)
+        finally:
+            configure_persistence(backend="sqlite", db_manager=self.db_manager)
+            self.service = get_persistence_service()
 
     def test_f2_symbol_filtering_and_normalization(self):
         """F2: Watchlist GET endpoints normalize symbols (uppercase, stripped) and ignore invalid items."""
-        with self._orig_open(self.temp_config_path, "w", encoding="utf-8") as f:
-            json.dump({"WATCHLIST": ["  tsla ", "NvDa", "", 123, None, "  amd  "]}, f)
+        import asyncio
+        req = MockRequest({"watchlist": ["  tsla ", "NvDa", "", 123, None, "  amd  "]})
+        with execution_role_context("Terminal Orchestrator"):
+            res = asyncio.run(fetch_stocks.save_watch_list(req))
+        self.assertEqual(res.status_code, 200)
 
         # fetch_stocks GET
         fs_resp = fetch_stocks.get_watch_list()
-        self.assertEqual(json.loads(fs_resp.body.decode("utf-8")), ["TSLA", "NVDA", "AMD"])
+        self.assertEqual(json.loads(fs_resp.body.decode("utf-8")), ["AMD", "NVDA", "TSLA"])
 
         # web_server GET
         ws_resp = web_server.get_watch_list()
-        self.assertEqual(ws_resp, ["TSLA", "NVDA", "AMD"])
+        self.assertEqual(ws_resp, ["AMD", "NVDA", "TSLA"])
+
+        # Persistence service state
+        self.assertEqual(self.service.get_watchlist(), ["AMD", "NVDA", "TSLA"])
 
     def test_f2_authorized_watchlist_writes_succeed(self):
-        """F2.3: Authorized POST requests to save_watch_list successfully update both config.json and ssot.json."""
+        """F2.3: Authorized POST requests to save_watch_list successfully update the active persistence backend."""
         import asyncio
 
         # 1. Test fetch_stocks.save_watch_list (POST /api/save_watch_list)
@@ -185,13 +227,7 @@ class TestWatchlistEndpoints(unittest.TestCase):
             res1 = asyncio.run(fetch_stocks.save_watch_list(req1))
         self.assertEqual(res1.status_code, 200)
 
-        with self._orig_open(self.temp_config_path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-            self.assertEqual(cfg.get("WATCHLIST"), ["GOOG", "AMZN"])
-
-        with self._orig_open(self.temp_ssot_path, "r", encoding="utf-8") as f:
-            ssot = json.load(f)
-            self.assertEqual(ssot["mutable_state"].get("watched_tickers"), ["GOOG", "AMZN"])
+        self.assertEqual(self.service.get_watchlist(), ["AMZN", "GOOG"])
 
         # 2. Test web_server.save_watch_list (POST /api/watchlist)
         req2 = MockRequest({"watchlist": ["META", "NFLX"]})
@@ -199,18 +235,13 @@ class TestWatchlistEndpoints(unittest.TestCase):
             res2 = asyncio.run(web_server.save_watch_list(req2))
         self.assertEqual(res2.get("status"), "success")
 
-        with self._orig_open(self.temp_config_path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-            self.assertEqual(cfg.get("WATCHLIST"), ["META", "NFLX"])
-
-        with self._orig_open(self.temp_ssot_path, "r", encoding="utf-8") as f:
-            ssot = json.load(f)
-            self.assertEqual(ssot["mutable_state"].get("watched_tickers"), ["META", "NFLX"])
+        self.assertEqual(self.service.get_watchlist(), ["META", "NFLX"])
 
     def test_f2_unauthorized_watchlist_writes_blocked(self):
         """F2.4: Unauthorized roles attempting POST mutations to watchlist endpoints must be blocked fail-closed."""
         import asyncio
 
+        watchlist_before = self.service.get_watchlist()
         ssot_before = self._get_file_bytes(self.temp_ssot_path)
         config_before = self._get_file_bytes(self.temp_config_path)
 
@@ -227,7 +258,8 @@ class TestWatchlistEndpoints(unittest.TestCase):
                 with self.assertRaises(PermissionError, msg=f"web_server should block {role}"):
                     asyncio.run(web_server.save_watch_list(req2))
 
-        # Files must remain unchanged
+        # Persistence state and files must remain unchanged
+        self.assertEqual(self.service.get_watchlist(), watchlist_before)
         self.assertEqual(self._get_file_bytes(self.temp_ssot_path), ssot_before)
         self.assertEqual(self._get_file_bytes(self.temp_config_path), config_before)
 

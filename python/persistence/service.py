@@ -263,9 +263,12 @@ def _atomic_no_overwrite_promote(staging_path: Path, target_path: Path) -> None:
     """
     Promote staging database to target database using same-filesystem atomic no-overwrite strategy.
     Guarantees:
-    - Never overwrites an existing destination file.
+    - Uses os.link() as the atomic no-overwrite promotion primitive.
     - If destination exists, raises PersistenceIntegrityError.
-    - Uses os.link (or Windows os.rename) which atomically fails if destination exists.
+    - If os.link() is unavailable or fails, fails closed with a controlled PersistenceIntegrityError,
+      preserving the original exception as its cause.
+    - Never uses os.replace() or an overwrite-capable fallback.
+    - Successfully unlinks staging_path after hard-linking target_path.
     """
     if target_path.exists():
         raise PersistenceIntegrityError(
@@ -277,19 +280,10 @@ def _atomic_no_overwrite_promote(staging_path: Path, target_path: Path) -> None:
         raise PersistenceIntegrityError(
             f"Refusing SQLite cutover: destination already exists: {target_path}"
         ) from exc
-    except OSError:
-        # Fallback if hard links are restricted or unsupported on filesystem
-        if target_path.exists():
-            raise PersistenceIntegrityError(
-                f"Refusing SQLite cutover: destination already exists: {target_path}"
-            )
-        try:
-            os.rename(staging_path, target_path)
-        except FileExistsError as exc:
-            raise PersistenceIntegrityError(
-                f"Refusing SQLite cutover: destination already exists: {target_path}"
-            ) from exc
-        return
+    except OSError as exc:
+        raise PersistenceIntegrityError(
+            f"Atomic promotion failed: os.link() unavailable or rejected by filesystem: {exc}"
+        ) from exc
 
     try:
         staging_path.unlink()
@@ -579,10 +573,4 @@ def perform_sqlite_cutover(
                     sidecar.unlink()
                 except OSError:
                     pass
-
-        if cutover_lock_path.exists():
-            try:
-                cutover_lock_path.unlink()
-            except OSError:
-                pass
 
