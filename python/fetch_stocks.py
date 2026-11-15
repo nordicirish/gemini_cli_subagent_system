@@ -2884,26 +2884,21 @@ def _acquire_options_gex_raw(
     )
     fetched_at = t_time.time()
 
-    eff_snapshot = dict(spot_snapshot) if isinstance(spot_snapshot, dict) else {}
-    if "price" not in eff_snapshot or eff_snapshot["price"] is None:
-        eff_snapshot["price"] = float(spot_num)
-    if "observation_time" not in eff_snapshot:
-        eff_snapshot["observation_time"] = None
-    if "retrieval_time" not in eff_snapshot:
-        eff_snapshot["retrieval_time"] = None
+    res_data = {
+        "kind": "options_gex",
+        "symbol": sym_clean,
+        "spot_price": float(spot_num),
+        "gex_profile": gex_profile,
+        "fetched_at": float(fetched_at),
+        "source": "YAHOO_OPTIONS",
+        "expirations_used": target_exps,
+        "contract_count": len(option_inventory),
+    }
+    if spot_snapshot is not None:
+        res_data["spot_snapshot"] = dict(spot_snapshot) if isinstance(spot_snapshot, dict) else spot_snapshot
 
     return ObservedResult(
-        data={
-            "kind": "options_gex",
-            "symbol": sym_clean,
-            "spot_price": float(spot_num),
-            "gex_profile": gex_profile,
-            "fetched_at": float(fetched_at),
-            "source": "YAHOO_OPTIONS",
-            "expirations_used": target_exps,
-            "contract_count": len(option_inventory),
-            "spot_snapshot": eff_snapshot,
-        },
+        data=res_data,
         obs_time=None,
         provenance=None,
     )
@@ -5580,6 +5575,24 @@ def _build_historical_cache_candidate(
     return target_sym, updates
 
 
+def _validate_utc_timestamp(value: Any, field_name: str) -> str:
+    """
+    Validates that value is a present, non-empty string representing a strict UTC
+    ISO-8601 timestamp with explicit 'Z' or zero offset (+00:00).
+    Rejects missing, non-string, empty, naive, non-zero offset, and malformed timestamps fail-closed.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Missing {field_name}")
+
+    raw = value.strip()
+    try:
+        valid_utc = validate_utc_iso8601_timestamp(raw)
+    except Exception as exc:
+        raise ValueError(f"Invalid {field_name}: {exc}") from exc
+
+    return valid_utc
+
+
 def _build_gex_cache_candidate(
     res: WorkResult,
     now_ts: Optional[float] = None,
@@ -5587,6 +5600,8 @@ def _build_gex_cache_candidate(
     """
     Validates a completed OPTIONS_GEX WorkResult on the coordinating thread and returns
     (symbol, cache_updates_dict) ready for atomic publication.
+    Enforces canonical spot observation identity, freshness and actionability against current
+    live market-data cache.
     """
     if not isinstance(res, WorkResult):
         raise ValueError("Options/GEX result must be a WorkResult")
@@ -5613,37 +5628,51 @@ def _build_gex_cache_candidate(
     if isinstance(spot_raw, bool) or spot_status != "VALID" or spot_num is None or spot_num <= 0:
         raise ValueError(f"GEX candidate invalid spot_price: {spot_raw!r}")
 
-    # Spot freshness & actionability validation against current coordinating-thread cache state
-    spot_snapshot = res.data.get("spot_snapshot")
-    expected_spot = float(spot_num)
-    expected_obs_time = None
-    if isinstance(spot_snapshot, dict):
-        if "price" in spot_snapshot and spot_snapshot["price"] is not None:
-            expected_spot = float(spot_snapshot["price"])
-        expected_obs_time = spot_snapshot.get("observation_time")
+    # Canonical spot snapshot validation
+    snapshot = res.data.get("spot_snapshot")
+    if not isinstance(snapshot, dict):
+        raise ValueError("GEX candidate missing canonical spot snapshot")
+
+    snapshot_price = snapshot.get("price")
+    snapshot_status, snapshot_num = classify_market_numeric(snapshot_price)
+    if (
+        isinstance(snapshot_price, bool)
+        or snapshot_status != "VALID"
+        or snapshot_num is None
+        or snapshot_num <= 0
+    ):
+        raise ValueError("GEX candidate has invalid snapshot spot price")
+
+    observation_time = _validate_utc_timestamp(
+        snapshot.get("observation_time"),
+        "spot observation_time",
+    )
+    retrieval_time = _validate_utc_timestamp(
+        snapshot.get("retrieval_time"),
+        "spot retrieval_time",
+    )
+
+    if float(spot_num) != float(snapshot_num):
+        raise ValueError("GEX result spot price does not match its snapshot")
 
     if not is_price_actionable(target_sym):
-        msg = f"Spot price is non-actionable for GEX candidate on {target_sym}"
-        logger.warning(f"[HeavyMarketData] {msg}")
-        raise ValueError(msg)
+        raise ValueError("GEX spot observation is no longer actionable")
 
-    current_spot = cache.prices.get(target_sym)
-    if current_spot is None or float(current_spot) != expected_spot:
-        msg = (
-            f"Spot price changed for GEX candidate on {target_sym}: "
-            f"computed against {expected_spot}, current cache has {current_spot}"
-        )
-        logger.warning(f"[HeavyMarketData] {msg}")
-        raise ValueError(msg)
+    current_price = cache.prices.get(target_sym)
+    current_status, current_num = classify_market_numeric(current_price)
+    if (
+        isinstance(current_price, bool)
+        or current_status != "VALID"
+        or current_num is None
+        or float(current_num) != float(snapshot_num)
+    ):
+        raise ValueError("GEX spot price has changed")
 
-    current_obs_time = cache.observation_times.get(target_sym)
-    if current_obs_time != expected_obs_time:
-        msg = (
-            f"Spot observation timestamp superseded for GEX candidate on {target_sym}: "
-            f"computed against {expected_obs_time!r}, current cache has {current_obs_time!r}"
-        )
-        logger.warning(f"[HeavyMarketData] {msg}")
-        raise ValueError(msg)
+    if cache.observation_times.get(target_sym) != observation_time:
+        raise ValueError("GEX spot observation has been superseded")
+
+    if cache.retrieval_times.get(target_sym) != retrieval_time:
+        raise ValueError("GEX spot retrieval identity has changed")
 
     contract_count = res.data.get("contract_count")
     if isinstance(contract_count, bool) or not isinstance(contract_count, int) or contract_count <= 0:
@@ -5741,8 +5770,9 @@ def enqueue_options_gex(
 ) -> Tuple[bool, Optional[WorkKey]]:
     """
     Non-blocking options/GEX enqueue onto HEAVY_MARKET_DATA_COORDINATOR.
-    Enforces valid positive spot price and the 1,800-second GEX refresh TTL without
-    advancing cache.last_gex_fetch before worker completion and coordinating-thread publication.
+    Enforces valid positive spot price, actionable spot observation identity, and the
+    1,800-second GEX refresh TTL without advancing cache.last_gex_fetch before worker
+    completion and coordinating-thread publication.
     Captures canonical spot observation identity (price, observation_time, retrieval_time)
     to enforce spot freshness validation at the publication boundary.
     """
@@ -5750,9 +5780,38 @@ def enqueue_options_gex(
         return False, None
     eff_coord = HEAVY_MARKET_DATA_COORDINATOR if coordinator is None else coordinator
     sym_clean = str(symbol).strip().upper()
-    eff_spot = cache.prices.get(sym_clean) if spot_price is None else spot_price
+
+    # Require is_price_actionable to be true before enqueue
+    if not is_price_actionable(sym_clean):
+        return False, None
+
+    cached_spot = cache.prices.get(sym_clean)
+    cached_status, cached_num = classify_market_numeric(cached_spot)
+    if isinstance(cached_spot, bool) or cached_status != "VALID" or cached_num is None or cached_num <= 0:
+        return False, None
+
+    eff_spot = cached_spot if spot_price is None else spot_price
     spot_status, spot_num = classify_market_numeric(eff_spot)
     if isinstance(eff_spot, bool) or spot_status != "VALID" or spot_num is None or spot_num <= 0:
+        return False, None
+
+    # Ensure captured spot price corresponds to the canonical cached price
+    if float(spot_num) != float(cached_num):
+        return False, None
+
+    raw_obs_time = cache.observation_times.get(sym_clean) if spot_obs_time is None else spot_obs_time
+    raw_retrieval_time = cache.retrieval_times.get(sym_clean) if spot_retrieval_time is None else spot_retrieval_time
+
+    # Validate both timestamps are present, non-empty, strict UTC ISO-8601 with explicit Z or +00:00
+    try:
+        valid_obs_time = _validate_utc_timestamp(raw_obs_time, "spot observation_time")
+        valid_retrieval_time = _validate_utc_timestamp(raw_retrieval_time, "spot retrieval_time")
+    except Exception:
+        return False, None
+
+    if cache.observation_times.get(sym_clean) != valid_obs_time:
+        return False, None
+    if cache.retrieval_times.get(sym_clean) != valid_retrieval_time:
         return False, None
 
     eff_now = float(t_time.time() if now_ts is None else now_ts)
@@ -5770,13 +5829,10 @@ def enqueue_options_gex(
             cache.gex[sym_clean] = dict(cached_gex)
         return False, None
 
-    eff_obs_time = cache.observation_times.get(sym_clean) if spot_obs_time is None else spot_obs_time
-    eff_retrieval_time = cache.retrieval_times.get(sym_clean) if spot_retrieval_time is None else spot_retrieval_time
-
     spot_snapshot = {
-        "price": float(spot_num),
-        "observation_time": eff_obs_time,
-        "retrieval_time": eff_retrieval_time,
+        "price": float(cached_num),
+        "observation_time": valid_obs_time,
+        "retrieval_time": valid_retrieval_time,
     }
 
     return eff_coord.enqueue(
@@ -5787,7 +5843,7 @@ def enqueue_options_gex(
         kwargs={
             "symbol": sym_clean,
             "ticker_obj": ticker_obj,
-            "spot_price": float(spot_num),
+            "spot_price": float(cached_num),
             "spot_snapshot": spot_snapshot,
         },
     )

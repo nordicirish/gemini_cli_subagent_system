@@ -230,6 +230,10 @@ class TestStage223CoordinatorIsolation(_HeavyMarketDataTestBase):
                 option_chain=lambda exp: _blocked_hist(),
             )
             fs.cache.prices["NVDA"] = 150.0
+            fs.cache.price_validity["NVDA"] = "VALID"
+            fs.cache.freshness["NVDA"] = "CURRENT"
+            fs.cache.observation_times["NVDA"] = "2026-04-20T11:00:00Z"
+            fs.cache.retrieval_times["NVDA"] = "2026-04-20T11:00:01Z"
 
             try:
                 # Saturate both heavy workers with blocked heavy work
@@ -777,6 +781,11 @@ class TestStage223OptionsGexAcquisition(_HeavyMarketDataTestBase):
 
             for idx, bad_ticker in enumerate((no_exp_ticker, empty_chain_ticker, exception_ticker)):
                 sym_i = f"BAD{idx}"
+                fs.cache.prices[sym_i] = 500.0
+                fs.cache.price_validity[sym_i] = "VALID"
+                fs.cache.freshness[sym_i] = "CURRENT"
+                fs.cache.observation_times[sym_i] = "2026-04-20T11:00:00Z"
+                fs.cache.retrieval_times[sym_i] = "2026-04-20T11:00:01Z"
                 fs.cache.gex[sym_i] = dict(prior_profile)
                 fs.cache.gex_cache[sym_i] = dict(prior_profile)
                 fs.cache.last_gex_fetch[sym_i] = prior_ts
@@ -1242,12 +1251,51 @@ class TestStage223Finding1GexCalculationIntegrity(_HeavyMarketDataTestBase):
 
 
 class TestStage223Finding2GexSpotFreshnessAndPublicationBoundary(_HeavyMarketDataTestBase):
-    def test_f2_01_matching_spot_and_timestamp_publishes_correctly(self):
-        fs.cache.prices["SPY"] = 500.0
-        fs.cache.price_validity["SPY"] = "VALID"
-        fs.cache.freshness["SPY"] = "CURRENT"
-        fs.cache.observation_times["SPY"] = "2026-04-20T11:00:00Z"
-        fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:01Z"
+    def _seed_valid_spot_cache(
+        self,
+        symbol="SPY",
+        price=500.0,
+        obs_time="2026-04-20T11:00:00Z",
+        retrieval_time="2026-04-20T11:00:01Z",
+        validity="VALID",
+        freshness="CURRENT",
+    ):
+        fs.cache.prices[symbol] = price
+        fs.cache.price_validity[symbol] = validity
+        fs.cache.freshness[symbol] = freshness
+        fs.cache.observation_times[symbol] = obs_time
+        fs.cache.retrieval_times[symbol] = retrieval_time
+
+    def _make_valid_work_result(
+        self,
+        symbol="SPY",
+        spot_price=500.0,
+        spot_snapshot=None,
+        sequence=1,
+    ):
+        if spot_snapshot is None:
+            spot_snapshot = {
+                "price": spot_price,
+                "observation_time": "2026-04-20T11:00:00Z",
+                "retrieval_time": "2026-04-20T11:00:01Z",
+            }
+        return bi.WorkResult(
+            key=bi.WorkKey(bi.WorkType.OPTIONS_GEX.value, symbol),
+            sequence=sequence,
+            data={
+                "kind": "options_gex",
+                "symbol": symbol,
+                "spot_price": spot_price,
+                "spot_snapshot": spot_snapshot,
+                "gex_profile": {k: 10.0 for k in fs._GEX_REQUIRED_KEYS},
+                "fetched_at": time.time(),
+                "source": "YAHOO_OPTIONS",
+                "contract_count": 10,
+            },
+        )
+
+    def test_f2_01_valid_complete_snapshot_publishes_successfully(self):
+        self._seed_valid_spot_cache()
 
         class _Ticker:
             ticker = "SPY"
@@ -1270,194 +1318,337 @@ class TestStage223Finding2GexSpotFreshnessAndPublicationBoundary(_HeavyMarketDat
         self.assertIn("SPY", fs.cache.gex_cache)
         self.assertGreater(fs.cache.last_gex_fetch["SPY"], 0)
 
-    def test_f2_02_newer_observation_timestamp_rejects_delayed_gex_and_preserves_cache(self):
-        fs.cache.prices["SPY"] = 500.0
-        fs.cache.price_validity["SPY"] = "VALID"
-        fs.cache.freshness["SPY"] = "CURRENT"
-        fs.cache.observation_times["SPY"] = "2026-04-20T11:00:00Z"
-        fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:01Z"
+    def test_f2_02_missing_spot_snapshot_is_rejected(self):
+        self._seed_valid_spot_cache()
+        res = self._make_valid_work_result()
+        res.data.pop("spot_snapshot")
 
-        prior_profile = {k: 99.0 for k in fs._GEX_REQUIRED_KEYS}
-        fs.cache.gex["SPY"] = dict(prior_profile)
-        fs.cache.gex_cache["SPY"] = dict(prior_profile)
-        fs.cache.last_gex_fetch["SPY"] = 1_700_000_000.0
+        with self.assertRaises(ValueError) as cm:
+            fs._build_gex_cache_candidate(res)
+        self.assertIn("missing canonical spot snapshot", str(cm.exception).lower())
 
-        class _Ticker:
-            ticker = "SPY"
-            options = ["2026-06-19"]
-            fast_info = SimpleNamespace(three_month_average_volume=50_000_000)
+        app = bi.BackgroundResultApplicator()
+        audit = app.apply_results(
+            [res],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertFalse(audit[0][1])
+        self.assertNotIn("SPY", fs.cache.gex)
 
-            def option_chain(self, exp):
-                return _make_option_chain_pair(500.0)
+    def test_f2_03_missing_observation_time_is_rejected(self):
+        self._seed_valid_spot_cache()
+        snapshot = {
+            "price": 500.0,
+            "retrieval_time": "2026-04-20T11:00:01Z",
+        }
+        res = self._make_valid_work_result(spot_snapshot=snapshot)
 
-        with _isolated_all_coordinators() as (heavy_coord, _, _, _, _, _):
-            acc, _ = fs.enqueue_options_gex("SPY", ticker_obj=_Ticker(), spot_price=500.0, force=True)
-            self.assertTrue(acc)
-            self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+        with self.assertRaises(ValueError) as cm:
+            fs._build_gex_cache_candidate(res)
+        self.assertIn("spot observation_time", str(cm.exception))
 
-            # Newer live tick arrives before publication!
-            fs.cache.observation_times["SPY"] = "2026-04-20T11:00:15Z"
-            fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:16Z"
+        app = bi.BackgroundResultApplicator()
+        audit = app.apply_results(
+            [res],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertFalse(audit[0][1])
+        self.assertNotIn("SPY", fs.cache.gex)
 
-            audit = fs.apply_background_heavy_market_data_results()
-            self.assertEqual(len(audit), 1)
-            self.assertFalse(audit[0][1])
-            self.assertIn("superseded", audit[0][2].lower())
+    def test_f2_04_missing_retrieval_time_is_rejected(self):
+        self._seed_valid_spot_cache()
+        snapshot = {
+            "price": 500.0,
+            "observation_time": "2026-04-20T11:00:00Z",
+        }
+        res = self._make_valid_work_result(spot_snapshot=snapshot)
 
-        self.assertEqual(fs.cache.gex["SPY"], prior_profile)
-        self.assertEqual(fs.cache.gex_cache["SPY"], prior_profile)
-        self.assertEqual(fs.cache.last_gex_fetch["SPY"], 1_700_000_000.0)
+        with self.assertRaises(ValueError) as cm:
+            fs._build_gex_cache_candidate(res)
+        self.assertIn("spot retrieval_time", str(cm.exception))
 
-    def test_f2_03_changed_spot_price_rejects_delayed_gex_and_preserves_cache(self):
-        fs.cache.prices["SPY"] = 500.0
-        fs.cache.price_validity["SPY"] = "VALID"
-        fs.cache.freshness["SPY"] = "CURRENT"
-        fs.cache.observation_times["SPY"] = "2026-04-20T11:00:00Z"
-        fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:01Z"
+        app = bi.BackgroundResultApplicator()
+        audit = app.apply_results(
+            [res],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertFalse(audit[0][1])
+        self.assertNotIn("SPY", fs.cache.gex)
 
-        prior_profile = {k: 99.0 for k in fs._GEX_REQUIRED_KEYS}
-        fs.cache.gex["SPY"] = dict(prior_profile)
-        fs.cache.gex_cache["SPY"] = dict(prior_profile)
-        fs.cache.last_gex_fetch["SPY"] = 1_700_000_000.0
+    def test_f2_05_invalid_observation_timestamp_is_rejected(self):
+        self._seed_valid_spot_cache()
+        snapshot = {
+            "price": 500.0,
+            "observation_time": "2026-99-99T99:99:99Z",
+            "retrieval_time": "2026-04-20T11:00:01Z",
+        }
+        res = self._make_valid_work_result(spot_snapshot=snapshot)
 
-        class _Ticker:
-            ticker = "SPY"
-            options = ["2026-06-19"]
-            fast_info = SimpleNamespace(three_month_average_volume=50_000_000)
+        with self.assertRaises(ValueError) as cm:
+            fs._build_gex_cache_candidate(res)
+        self.assertIn("spot observation_time", str(cm.exception))
 
-            def option_chain(self, exp):
-                return _make_option_chain_pair(500.0)
+        app = bi.BackgroundResultApplicator()
+        audit = app.apply_results(
+            [res],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertFalse(audit[0][1])
+        self.assertNotIn("SPY", fs.cache.gex)
 
-        with _isolated_all_coordinators() as (heavy_coord, _, _, _, _, _):
-            acc, _ = fs.enqueue_options_gex("SPY", ticker_obj=_Ticker(), spot_price=500.0, force=True)
-            self.assertTrue(acc)
-            self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+    def test_f2_06_invalid_retrieval_timestamp_is_rejected(self):
+        self._seed_valid_spot_cache()
+        snapshot = {
+            "price": 500.0,
+            "observation_time": "2026-04-20T11:00:00Z",
+            "retrieval_time": "not-a-valid-retrieval-time",
+        }
+        res = self._make_valid_work_result(spot_snapshot=snapshot)
 
-            # Spot price moves before publication!
-            fs.cache.prices["SPY"] = 502.50
+        with self.assertRaises(ValueError) as cm:
+            fs._build_gex_cache_candidate(res)
+        self.assertIn("spot retrieval_time", str(cm.exception))
 
-            audit = fs.apply_background_heavy_market_data_results()
-            self.assertEqual(len(audit), 1)
-            self.assertFalse(audit[0][1])
-            self.assertIn("changed", audit[0][2].lower())
+        app = bi.BackgroundResultApplicator()
+        audit = app.apply_results(
+            [res],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertFalse(audit[0][1])
+        self.assertNotIn("SPY", fs.cache.gex)
 
-        self.assertEqual(fs.cache.gex["SPY"], prior_profile)
-        self.assertEqual(fs.cache.gex_cache["SPY"], prior_profile)
-        self.assertEqual(fs.cache.last_gex_fetch["SPY"], 1_700_000_000.0)
+    def test_f2_07_naive_timestamp_is_rejected(self):
+        self._seed_valid_spot_cache()
+        snapshot = {
+            "price": 500.0,
+            "observation_time": "2026-04-20T11:00:00",
+            "retrieval_time": "2026-04-20T11:00:01Z",
+        }
+        res = self._make_valid_work_result(spot_snapshot=snapshot)
 
-    def test_f2_04_non_actionable_spot_state_rejects_gex_publication(self):
-        prior_profile = {k: 99.0 for k in fs._GEX_REQUIRED_KEYS}
+        with self.assertRaises(ValueError) as cm:
+            fs._build_gex_cache_candidate(res)
+        self.assertIn("spot observation_time", str(cm.exception))
+
+        app = bi.BackgroundResultApplicator()
+        audit = app.apply_results(
+            [res],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertFalse(audit[0][1])
+        self.assertNotIn("SPY", fs.cache.gex)
+
+    def test_f2_08_non_zero_offset_timestamp_is_rejected(self):
+        self._seed_valid_spot_cache()
+        snapshot = {
+            "price": 500.0,
+            "observation_time": "2026-04-20T11:00:00+05:00",
+            "retrieval_time": "2026-04-20T11:00:01Z",
+        }
+        res = self._make_valid_work_result(spot_snapshot=snapshot)
+
+        with self.assertRaises(ValueError) as cm:
+            fs._build_gex_cache_candidate(res)
+        self.assertIn("spot observation_time", str(cm.exception))
+
+        app = bi.BackgroundResultApplicator()
+        audit = app.apply_results(
+            [res],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertFalse(audit[0][1])
+        self.assertNotIn("SPY", fs.cache.gex)
+
+    def test_f2_09_changed_current_observation_timestamp_rejects_publication(self):
+        self._seed_valid_spot_cache(obs_time="2026-04-20T11:00:00Z")
+        res = self._make_valid_work_result()
+
+        # Cache observation time updated before publication
+        fs.cache.observation_times["SPY"] = "2026-04-20T11:00:15Z"
+
+        with self.assertRaises(ValueError) as cm:
+            fs._build_gex_cache_candidate(res)
+        self.assertIn("superseded", str(cm.exception).lower())
+
+        app = bi.BackgroundResultApplicator()
+        audit = app.apply_results(
+            [res],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertFalse(audit[0][1])
+        self.assertNotIn("SPY", fs.cache.gex)
+
+    def test_f2_10_changed_current_retrieval_timestamp_rejects_publication(self):
+        self._seed_valid_spot_cache(
+            price=500.0,
+            obs_time="2026-04-20T11:00:00Z",
+            retrieval_time="2026-04-20T11:00:01Z",
+        )
+        res = self._make_valid_work_result()
+
+        # Price and observation_time remain identical, but retrieval_time changed
+        fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:25Z"
+
+        with self.assertRaises(ValueError) as cm:
+            fs._build_gex_cache_candidate(res)
+        self.assertIn("retrieval identity has changed", str(cm.exception).lower())
+
+        app = bi.BackgroundResultApplicator()
+        audit = app.apply_results(
+            [res],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertFalse(audit[0][1])
+        self.assertNotIn("SPY", fs.cache.gex)
+
+    def test_f2_11_changed_current_spot_price_rejects_publication(self):
+        self._seed_valid_spot_cache(price=500.0)
+        res = self._make_valid_work_result(spot_price=500.0)
+
+        # Price moves before publication
+        fs.cache.prices["SPY"] = 502.50
+
+        with self.assertRaises(ValueError) as cm:
+            fs._build_gex_cache_candidate(res)
+        self.assertIn("spot price has changed", str(cm.exception).lower())
+
+        app = bi.BackgroundResultApplicator()
+        audit = app.apply_results(
+            [res],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertFalse(audit[0][1])
+        self.assertNotIn("SPY", fs.cache.gex)
+
+    def test_f2_12_non_actionable_current_price_state_rejects_publication(self):
         non_actionable_states = [
             ("VALID", "STALE"),
             ("INVALID", "CURRENT"),
             ("UNAVAILABLE", "UNAVAILABLE"),
             ("STALE", "STALE"),
         ]
-
-        class _Ticker:
-            ticker = "SPY"
-            options = ["2026-06-19"]
-            fast_info = SimpleNamespace(three_month_average_volume=50_000_000)
-
-            def option_chain(self, exp):
-                return _make_option_chain_pair(500.0)
+        res = self._make_valid_work_result()
 
         for validity, freshness in non_actionable_states:
-            fs.cache.clear()
-            fs.cache.prices["SPY"] = 500.0
-            fs.cache.price_validity["SPY"] = "VALID"
-            fs.cache.freshness["SPY"] = "CURRENT"
-            fs.cache.observation_times["SPY"] = "2026-04-20T11:00:00Z"
-            fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:01Z"
-            fs.cache.gex["SPY"] = dict(prior_profile)
-            fs.cache.gex_cache["SPY"] = dict(prior_profile)
-            fs.cache.last_gex_fetch["SPY"] = 1_700_000_000.0
+            self._seed_valid_spot_cache()
+            fs.cache.price_validity["SPY"] = validity
+            fs.cache.freshness["SPY"] = freshness
 
-            with _isolated_all_coordinators() as (heavy_coord, _, _, _, _, _):
-                acc, _ = fs.enqueue_options_gex("SPY", ticker_obj=_Ticker(), spot_price=500.0, force=True)
-                self.assertTrue(acc)
-                self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+            with self.assertRaises(ValueError) as cm:
+                fs._build_gex_cache_candidate(res)
+            self.assertIn("no longer actionable", str(cm.exception).lower())
 
-                # Transition to non-actionable state before publication
-                fs.cache.price_validity["SPY"] = validity
-                fs.cache.freshness["SPY"] = freshness
+            app = bi.BackgroundResultApplicator()
+            audit = app.apply_results(
+                [res],
+                on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+            )
+            self.assertFalse(audit[0][1])
+            self.assertNotIn("SPY", fs.cache.gex)
 
-                audit = fs.apply_background_heavy_market_data_results()
-                self.assertEqual(len(audit), 1)
-                self.assertFalse(audit[0][1])
-                self.assertIn("non-actionable", audit[0][2].lower())
+    def test_f2_13_missing_canonical_timestamp_prevents_enqueue(self):
+        # Case A: missing observation_time
+        self._seed_valid_spot_cache()
+        fs.cache.observation_times.pop("SPY", None)
+        acc_obs, key_obs = fs.enqueue_options_gex("SPY")
+        self.assertFalse(acc_obs)
+        self.assertIsNone(key_obs)
 
-            self.assertEqual(fs.cache.gex["SPY"], prior_profile)
-            self.assertEqual(fs.cache.gex_cache["SPY"], prior_profile)
-            self.assertEqual(fs.cache.last_gex_fetch["SPY"], 1_700_000_000.0)
+        # Case B: missing retrieval_time
+        self._seed_valid_spot_cache()
+        fs.cache.retrieval_times.pop("SPY", None)
+        acc_ret, key_ret = fs.enqueue_options_gex("SPY")
+        self.assertFalse(acc_ret)
+        self.assertIsNone(key_ret)
 
-    def test_f2_05_rejected_candidate_does_not_advance_sequence_and_subsequent_valid_result_applies(self):
-        fs.cache.prices["SPY"] = 500.0
-        fs.cache.price_validity["SPY"] = "VALID"
-        fs.cache.freshness["SPY"] = "CURRENT"
-        fs.cache.observation_times["SPY"] = "2026-04-20T11:00:00Z"
-        fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:01Z"
+    def test_f2_14_invalid_canonical_timestamp_prevents_enqueue(self):
+        # Case A: naive timestamp in cache
+        self._seed_valid_spot_cache()
+        fs.cache.observation_times["SPY"] = "2026-04-20T11:00:00"
+        acc_naive, key_naive = fs.enqueue_options_gex("SPY")
+        self.assertFalse(acc_naive)
+        self.assertIsNone(key_naive)
 
-        coord = bi.BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=8, max_results_size=8)
-        app = bi.BackgroundResultApplicator(coordinator=coord)
+        # Case B: non-zero offset timestamp in cache
+        self._seed_valid_spot_cache()
+        fs.cache.retrieval_times["SPY"] = "2026-04-20T11:00:01+03:00"
+        acc_offset, key_offset = fs.enqueue_options_gex("SPY")
+        self.assertFalse(acc_offset)
+        self.assertIsNone(key_offset)
+
+        # Case C: malformed timestamp in cache
+        self._seed_valid_spot_cache()
+        fs.cache.observation_times["SPY"] = "invalid-iso-timestamp"
+        acc_malformed, key_malformed = fs.enqueue_options_gex("SPY")
+        self.assertFalse(acc_malformed)
+        self.assertIsNone(key_malformed)
+
+    def test_f2_15_rejected_results_preserve_both_gex_caches_and_last_gex_fetch(self):
+        self._seed_valid_spot_cache()
+        prior_profile = {k: 77.7 for k in fs._GEX_REQUIRED_KEYS}
+        prior_fetch = 1_700_000_000.0
+        fs.cache.gex["SPY"] = dict(prior_profile)
+        fs.cache.gex_cache["SPY"] = dict(prior_profile)
+        fs.cache.last_gex_fetch["SPY"] = prior_fetch
+
+        # Create result with mismatched price
+        res = self._make_valid_work_result(spot_price=480.0)
+
+        app = bi.BackgroundResultApplicator()
+        audit = app.apply_results(
+            [res],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertEqual(len(audit), 1)
+        self.assertFalse(audit[0][1])
+
+        # Both caches and last_gex_fetch remain strictly unchanged
+        self.assertEqual(fs.cache.gex["SPY"], prior_profile)
+        self.assertEqual(fs.cache.gex_cache["SPY"], prior_profile)
+        self.assertEqual(fs.cache.last_gex_fetch["SPY"], prior_fetch)
+
+    def test_f2_16_rejected_results_do_not_advance_applied_sequence(self):
+        self._seed_valid_spot_cache()
         key = bi.WorkKey(bi.WorkType.OPTIONS_GEX.value, "SPY")
+        app = bi.BackgroundResultApplicator()
 
-        try:
-            # Result 1: stale observation time (T0) vs current cache (T1)
-            res1 = bi.WorkResult(
-                key=key,
-                sequence=1,
-                data={
-                    "kind": "options_gex",
-                    "symbol": "SPY",
-                    "spot_price": 500.0,
-                    "spot_snapshot": {
-                        "price": 500.0,
-                        "observation_time": "2026-04-20T10:59:00Z",  # older than cache T0
-                        "retrieval_time": "2026-04-20T10:59:01Z",
-                    },
-                    "gex_profile": {k: 1.0 for k in fs._GEX_REQUIRED_KEYS},
-                    "fetched_at": time.time(),
-                    "source": "YAHOO_OPTIONS",
-                    "contract_count": 4,
-                },
-            )
-            audit1 = app.apply_results(
-                results=[res1],
-                on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
-            )
-            self.assertFalse(audit1[0][1])
-            # Sequence NOT advanced!
-            self.assertEqual(app.get_last_applied(key), (-1, ""))
+        self.assertEqual(app.get_last_applied(key), (-1, ""))
 
-            # Result 2: matches current cache T0 exactly
-            res2 = bi.WorkResult(
-                key=key,
-                sequence=2,
-                data={
-                    "kind": "options_gex",
-                    "symbol": "SPY",
-                    "spot_price": 500.0,
-                    "spot_snapshot": {
-                        "price": 500.0,
-                        "observation_time": "2026-04-20T11:00:00Z",
-                        "retrieval_time": "2026-04-20T11:00:01Z",
-                    },
-                    "gex_profile": {k: 2.0 for k in fs._GEX_REQUIRED_KEYS},
-                    "fetched_at": time.time(),
-                    "source": "YAHOO_OPTIONS",
-                    "contract_count": 4,
-                },
-            )
-            audit2 = app.apply_results(
-                results=[res2],
-                on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
-            )
-            self.assertTrue(audit2[0][1])
-            self.assertEqual(app.get_last_applied(key)[0], 2)
-            self.assertEqual(fs.cache.gex["SPY"]["net_gex"], 2.0)
-        finally:
-            coord.shutdown(timeout=2.0)
+        # Invalid result sequence 1 (mismatched price)
+        res1 = self._make_valid_work_result(spot_price=490.0, sequence=1)
+        audit1 = app.apply_results(
+            [res1],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertFalse(audit1[0][1])
+        # Sequence not advanced
+        self.assertEqual(app.get_last_applied(key), (-1, ""))
+
+    def test_f2_17_subsequent_valid_snapshot_can_still_publish_successfully(self):
+        self._seed_valid_spot_cache()
+        key = bi.WorkKey(bi.WorkType.OPTIONS_GEX.value, "SPY")
+        app = bi.BackgroundResultApplicator()
+
+        # Reject sequence 1
+        res1 = self._make_valid_work_result(spot_price=490.0, sequence=1)
+        audit1 = app.apply_results(
+            [res1],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertFalse(audit1[0][1])
+        self.assertEqual(app.get_last_applied(key), (-1, ""))
+
+        # Sequence 2 is valid and matches cache
+        res2 = self._make_valid_work_result(spot_price=500.0, sequence=2)
+        audit2 = app.apply_results(
+            [res2],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r)),
+        )
+        self.assertTrue(audit2[0][1])
+        self.assertEqual(app.get_last_applied(key)[0], 2)
+        self.assertIn("SPY", fs.cache.gex)
+        self.assertIn("SPY", fs.cache.gex_cache)
+        self.assertEqual(fs.cache.gex["SPY"]["net_gex"], 10.0)
 
 
 class TestStage223Finding3DaemonCoordinatorShutdown(_HeavyMarketDataTestBase):
