@@ -63,6 +63,7 @@ from background_intelligence import (
     WorkResult,
     WorkType,
     WorkStatus,
+    current_market_session_date,
     parse_utc_iso8601_timestamp,
     validate_market_data_observation,
     validate_session_date,
@@ -375,14 +376,19 @@ def get_background_coordinator() -> BackgroundIntelligenceCoordinator:
 def get_background_result_applicator() -> BackgroundResultApplicator:
     return BACKGROUND_RESULT_APPLICATOR
 
-def apply_background_intelligence_results():
+def apply_background_intelligence_results(
+    coordinator: Optional[BackgroundIntelligenceCoordinator] = None,
+    applicator: Optional[BackgroundResultApplicator] = None,
+):
     """
-    Drains results from BACKGROUND_COORDINATOR and applies them under
-    monotonic sequence and observation timestamp validation.
+    Drains results from BACKGROUND_COORDINATOR (or explicit coordinator) and applies them
+    under monotonic sequence and observation timestamp validation.
     Constructs replacement intelligence state and publishes it atomically
     through the immutable snapshot contract while holding the relevant per-key lock.
     """
-    results = BACKGROUND_COORDINATOR.drain_results()
+    eff_coord = BACKGROUND_COORDINATOR if coordinator is None else coordinator
+    eff_app = BACKGROUND_RESULT_APPLICATOR if applicator is None else applicator
+    results = eff_coord.drain_results()
     if results:
         with DYNAMIC_SCOUT_CACHE_LOCK:
             def _publish_result(res: WorkResult):
@@ -405,7 +411,7 @@ def apply_background_intelligence_results():
             temp_scout_cache = dict(DYNAMIC_SCOUT_CACHE)
             temp_scout_map = dict(SCOUTED_TICKER_TO_CATEGORY_MAP)
 
-            BACKGROUND_RESULT_APPLICATOR.apply_results(
+            eff_app.apply_results(
                 results=results,
                 grounding_target=temp_grounding,
                 scout_cache_target=temp_scout_cache,
@@ -432,6 +438,27 @@ def get_market_data_coordinator() -> BackgroundIntelligenceCoordinator:
 
 def get_market_data_result_applicator() -> BackgroundResultApplicator:
     return MARKET_DATA_RESULT_APPLICATOR
+
+
+GEX_REFRESH_TTL_SECONDS = 1800
+
+HEAVY_MARKET_DATA_COORDINATOR = BackgroundIntelligenceCoordinator(
+    max_workers=2,
+    max_queue_size=64,
+    max_results_size=128,
+    worker_name_prefix="HeavyMarketDataWorker",
+)
+HEAVY_MARKET_DATA_RESULT_APPLICATOR = BackgroundResultApplicator(
+    coordinator=HEAVY_MARKET_DATA_COORDINATOR
+)
+
+
+def get_heavy_market_data_coordinator() -> BackgroundIntelligenceCoordinator:
+    return HEAVY_MARKET_DATA_COORDINATOR
+
+
+def get_heavy_market_data_result_applicator() -> BackgroundResultApplicator:
+    return HEAVY_MARKET_DATA_RESULT_APPLICATOR
 
 
 def _epoch_to_utc_iso8601(raw_ts: Any) -> Optional[str]:
@@ -2579,190 +2606,305 @@ def get_batch_quotes(symbols):
 # -----------------------------
 
 
-def get_gex_profile(ticker_obj, spot_price):
-    """
-    Calculates GEX, Gamma Flip, and Inventory Velocity Delta (Net Delta).
-    """
-    default_res = {
-        'net_gex': 0.0, 
-        'flip_price': 0.0, 
+_GEX_REQUIRED_KEYS = (
+    "net_gex",
+    "flip_price",
+    "inventory_velocity_delta",
+    "gex_slope",
+    "flip_proximity_percent",
+    "strike_oi_magnet",
+)
+
+
+def _default_gex_profile() -> dict:
+    return {
+        'net_gex': 0.0,
+        'flip_price': 0.0,
         'inventory_velocity_delta': 0.0,
         'gex_slope': 0.0,
         'flip_proximity_percent': 0.0,
         'strike_oi_magnet': 0.0
     }
+
+
+def _compute_gex_profile_from_inventory(
+    symbol: str,
+    spot_price: float,
+    option_inventory: List[dict],
+    strike_oi_map: Dict[float, float],
+    avg_vol: Any = 0,
+) -> dict:
+    """
+    Pure GEX, Gamma Flip, and Inventory Velocity Delta calculation on detached option inventory.
+    Preserves existing mathematical formulas, thresholds, and output fields identically.
+    """
+    magnet_price = 0.0
+    if strike_oi_map:
+        magnet_price = max(strike_oi_map, key=lambda k: strike_oi_map.get(k, 0.0))
+
+    r = 0.045  # Approx risk-free rate
+
+    # 1. Calc Current GEX and Net Delta (Inventory Velocity Delta)
+    net_gex = 0.0
+    net_delta = 0.0
+
+    for opt in option_inventory:
+        gamma = calculate_gamma(spot_price, opt['K'], opt['T'], r, opt['sigma'])
+        delta = calculate_delta(spot_price, opt['K'], opt['T'], r, opt['sigma'], opt['type'])
+
+        # Standard GEX = Gamma * S^2 * OI (Dollar Gamma per 1% move)
+        # Origin formula had extra * 100 which implied 100% move or share-multiplier duplication
+        # We want "Notional value of delta change for 1% move"
+        term = gamma * opt['oi'] * (spot_price**2)
+        if opt['type'] == 'call':
+            net_gex += term
+            net_delta += (-delta * opt['oi'] * 100)  # Dealer Short Call
+        else:
+            net_gex -= term
+            net_delta += (-delta * opt['oi'] * 100)  # Dealer Short Put
+
+    final_gex = net_gex
+    final_slope = 0.0
+
+    if avg_vol and avg_vol > 0:
+        final_gex = net_gex / (avg_vol * spot_price)
+    else:
+        # Fallback for indices or missing volume: Assume 100M volume to align with UI decimal thresholds (e.g. 0.015)
+        final_gex = net_gex / (100_000_000 * spot_price)
+
+    # 2. Calc Gamma Flip (Scan +/- 50%)
+    flip_price = 0.0
+    low_p = spot_price * 0.50
+    high_p = spot_price * 1.50
+    steps = 100
+    step_size = (high_p - low_p) / steps
+    prices = [low_p + i * step_size for i in range(steps + 1)]
+    gex_values = []
+
+    for p_sim in prices:
+        g_sim = 0.0
+        for opt in option_inventory:
+            val = calculate_gamma(p_sim, opt['K'], opt['T'], r, opt['sigma'])
+            term = val * opt['oi'] * (p_sim**2)  # Removed * 100 scaling
+            if opt['type'] == 'call':
+                g_sim += term
+            else:
+                g_sim -= term
+        gex_values.append(g_sim)
+
+    for i in range(len(gex_values) - 1):
+        if (gex_values[i] > 0 and gex_values[i + 1] < 0) or (gex_values[i] < 0 and gex_values[i + 1] > 0):
+            y1, y2 = gex_values[i], gex_values[i + 1]
+            x1, x2 = prices[i], prices[i + 1]
+            if (y2 - y1) != 0:
+                flip_price = x1 - y1 * (x2 - x1) / (y2 - y1)
+            else:
+                flip_price = x1
+            break
+
+    # 3. Calc GEX Slope (Local derivative at spot)
+    p_up = spot_price * 1.01
+    gex_up = 0.0
+    for opt in option_inventory:
+        val = calculate_gamma(p_up, opt['K'], opt['T'], r, opt['sigma'])
+        term = val * opt['oi'] * (p_up**2)  # Removed * 100 scaling
+        if opt['type'] == 'call':
+            gex_up += term
+        else:
+            gex_up -= term
+
+    raw_slope = (gex_up - net_gex) / (p_up - spot_price)
+    final_slope = raw_slope
+    if avg_vol and avg_vol > 0:
+        final_slope = raw_slope / (avg_vol * spot_price)
+
+    # ENH_262: Mathematical bound check for gamma flip interpolation outliers
+    sym = str(symbol or '').strip().upper()
+    is_index = sym in ['SPY', 'QQQ', 'IWM', 'DIA']
+    bound = 0.05 if is_index else 0.15
+    if flip_price > 0 and spot_price > 0:
+        if abs(flip_price - spot_price) / spot_price > bound:
+            # Quarantined outlier per ENH_262
+            flip_price = 0.0
+
+    flip_prox = 0.0
+    if flip_price > 0:
+        flip_prox = (spot_price - flip_price) / spot_price
+
+    res = {
+        'net_gex': final_gex,
+        'flip_price': flip_price,
+        'inventory_velocity_delta': net_delta,
+        'gex_slope': final_slope,
+        'flip_proximity_percent': flip_prox,
+        'strike_oi_magnet': magnet_price
+    }
+    sanitized = {}
+    for k, v in res.items():
+        try:
+            fv = float(v)
+            if math.isnan(fv) or math.isinf(fv):
+                sanitized[k] = 0.0
+            else:
+                sanitized[k] = fv
+        except Exception:
+            sanitized[k] = v
+    return sanitized
+
+
+def _acquire_options_gex_raw(
+    symbol: str,
+    ticker_obj: Any = None,
+    spot_price: Optional[float] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> ObservedResult:
+    """
+    Worker-safe options/GEX acquisition and calculation.
+    Executes all options provider I/O (expirations, option_chain, fast_info) off the
+    coordinating thread, never mutates shared caches, and raises on failed/empty acquisition
+    so failed jobs do not masquerade as valid zero-valued GEX results.
+    """
+    if cancel_check and cancel_check():
+        raise RuntimeError("Cancelled before options/GEX acquisition")
+
+    sym_clean = str(symbol or "").strip().upper()
+    if not sym_clean:
+        raise ValueError("Empty symbol for options/GEX acquisition")
+
+    spot_num = to_float(spot_price)
+    if spot_num is None or not math.isfinite(spot_num) or spot_num <= 0:
+        raise ValueError(f"Invalid spot price for options/GEX acquisition on {sym_clean}: {spot_price!r}")
+
+    eff_ticker = ticker_obj if ticker_obj is not None else yf.Ticker(sym_clean)
+
+    expirations = eff_ticker.options
+    if not expirations:
+        raise ValueError(f"No options expirations available for {sym_clean}")
+
+    if cancel_check and cancel_check():
+        raise RuntimeError("Cancelled during options/GEX acquisition")
+
+    target_exps = list(expirations[:2])
+    ny_now = datetime.now(ZoneInfo("America/New_York"))
+
+    option_inventory: List[dict] = []
+    strike_oi_map: Dict[float, float] = {}
+    chain_errors: List[str] = []
+
+    for exp_date_str in target_exps:
+        if cancel_check and cancel_check():
+            raise RuntimeError("Cancelled during option-chain retrieval")
+        try:
+            chain = eff_ticker.option_chain(exp_date_str)
+            exp_dt = datetime.strptime(exp_date_str, "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
+            exp_dt = exp_dt.replace(hour=16, minute=0, second=0)
+            T = (exp_dt - ny_now).total_seconds() / (365 * 24 * 3600)
+            if T <= 0.001:
+                T = 0.001
+
+            calls_df = getattr(chain, "calls", None)
+            if calls_df is not None and not calls_df.empty:
+                for _, row in calls_df.iterrows():
+                    oi_val = row.get('openInterest')
+                    if pd.isna(oi_val) or oi_val <= 0:
+                        oi_val = row.get('volume')
+                    if pd.isna(oi_val) or oi_val <= 0:
+                        continue
+                    iv_val = row.get('impliedVolatility')
+                    if pd.isna(iv_val) or iv_val <= 0:
+                        continue
+                    k_num = to_float(row.get('strike'))
+                    oi_num = to_float(oi_val)
+                    iv_num = to_float(iv_val)
+                    if k_num is None or k_num <= 0 or oi_num is None or oi_num <= 0 or iv_num is None or iv_num <= 0:
+                        continue
+                    strike_oi_map[k_num] = strike_oi_map.get(k_num, 0.0) + oi_num
+                    option_inventory.append({
+                        'K': k_num, 'T': T, 'sigma': iv_num,
+                        'oi': oi_num, 'type': 'call'
+                    })
+
+            puts_df = getattr(chain, "puts", None)
+            if puts_df is not None and not puts_df.empty:
+                for _, row in puts_df.iterrows():
+                    oi_val = row.get('openInterest')
+                    if pd.isna(oi_val) or oi_val <= 0:
+                        oi_val = row.get('volume')
+                    if pd.isna(oi_val) or oi_val <= 0:
+                        continue
+                    iv_val = row.get('impliedVolatility')
+                    if pd.isna(iv_val) or iv_val <= 0:
+                        continue
+                    k_num = to_float(row.get('strike'))
+                    oi_num = to_float(oi_val)
+                    iv_num = to_float(iv_val)
+                    if k_num is None or k_num <= 0 or oi_num is None or oi_num <= 0 or iv_num is None or iv_num <= 0:
+                        continue
+                    strike_oi_map[k_num] = strike_oi_map.get(k_num, 0.0) + oi_num
+                    option_inventory.append({
+                        'K': k_num, 'T': T, 'sigma': iv_num,
+                        'oi': oi_num, 'type': 'put'
+                    })
+        except Exception as chain_err:
+            chain_errors.append(f"{exp_date_str}: {chain_err}")
+            continue
+
+    if not option_inventory:
+        detail = "; ".join(chain_errors) if chain_errors else "empty or invalid option chains"
+        raise ValueError(f"No valid option contracts acquired for {sym_clean}: {detail}")
+
+    if cancel_check and cancel_check():
+        raise RuntimeError("Cancelled before GEX average volume retrieval")
+
+    avg_vol = 0
+    try:
+        avg_vol = eff_ticker.fast_info.three_month_average_volume
+    except Exception:
+        avg_vol = 0
+
+    gex_profile = _compute_gex_profile_from_inventory(
+        symbol=sym_clean,
+        spot_price=spot_num,
+        option_inventory=option_inventory,
+        strike_oi_map=strike_oi_map,
+        avg_vol=avg_vol,
+    )
+    fetched_at = t_time.time()
+
+    return ObservedResult(
+        data={
+            "kind": "options_gex",
+            "symbol": sym_clean,
+            "spot_price": float(spot_num),
+            "gex_profile": gex_profile,
+            "fetched_at": float(fetched_at),
+            "source": "YAHOO_OPTIONS",
+            "expirations_used": target_exps,
+            "contract_count": len(option_inventory),
+        },
+        obs_time=None,
+        provenance=None,
+    )
+
+
+def get_gex_profile(ticker_obj, spot_price):
+    """
+    Calculates GEX, Gamma Flip, and Inventory Velocity Delta (Net Delta).
+    Synchronous compatibility entrypoint delegating to _acquire_options_gex_raw.
+    The recurring monitoring and startup paths use HEAVY_MARKET_DATA_COORDINATOR instead.
+    """
+    default_res = _default_gex_profile()
     if spot_price is None or spot_price <= 0:
         return default_res
 
     try:
-        expirations = ticker_obj.options
-        if not expirations:
-            return default_res
-        
-        target_exps = expirations[:2]
-        r = 0.045 # Approx risk-free rate
-        ny_now = datetime.now(ZoneInfo("America/New_York"))
-        
-        option_inventory = []
-        strike_oi_map = {}
-
-        for exp_date_str in target_exps:
-            try:
-                chain = ticker_obj.option_chain(exp_date_str)
-                
-                exp_dt = datetime.strptime(exp_date_str, "%Y-%m-%d").replace(tzinfo=ZoneInfo("America/New_York"))
-                exp_dt = exp_dt.replace(hour=16, minute=0, second=0)
-                T = (exp_dt - ny_now).total_seconds() / (365 * 24 * 3600)
-                if T <= 0.001: T = 0.001
-
-                if chain.calls is not None and not chain.calls.empty:
-                    for _, row in chain.calls.iterrows():
-                        oi_val = row.get('openInterest')
-                        if pd.isna(oi_val) or oi_val <= 0:
-                            oi_val = row.get('volume')
-                        if pd.isna(oi_val) or oi_val <= 0: continue
-                        if pd.isna(row.get('impliedVolatility')) or row.get('impliedVolatility') <= 0: continue
-                        k = float(row['strike'])
-                        oi = float(oi_val)
-                        strike_oi_map[k] = strike_oi_map.get(k, 0.0) + oi
-                        option_inventory.append({
-                            'K': float(row['strike']), 'T': T, 'sigma': float(row['impliedVolatility']),
-                            'oi': oi, 'type': 'call'
-                        })
-
-                if chain.puts is not None and not chain.puts.empty:
-                    for _, row in chain.puts.iterrows():
-                        oi_val = row.get('openInterest')
-                        if pd.isna(oi_val) or oi_val <= 0:
-                            oi_val = row.get('volume')
-                        if pd.isna(oi_val) or oi_val <= 0: continue
-                        if pd.isna(row.get('impliedVolatility')) or row.get('impliedVolatility') <= 0: continue
-                        k = float(row['strike'])
-                        oi = float(oi_val)
-                        strike_oi_map[k] = strike_oi_map.get(k, 0.0) + oi
-                        option_inventory.append({
-                            'K': float(row['strike']), 'T': T, 'sigma': float(row['impliedVolatility']),
-                            'oi': oi, 'type': 'put'
-                        })
-            except:
-                continue
-
-        if not option_inventory:
-            return default_res
-
-        magnet_price = 0.0
-        if strike_oi_map:
-            magnet_price = max(strike_oi_map, key=lambda k: strike_oi_map.get(k, 0.0))
-
-        # 1. Calc Current GEX and Net Delta (Inventory Velocity Delta)
-        net_gex = 0.0
-        net_delta = 0.0
-        
-        for opt in option_inventory:
-            gamma = calculate_gamma(spot_price, opt['K'], opt['T'], r, opt['sigma'])
-            delta = calculate_delta(spot_price, opt['K'], opt['T'], r, opt['sigma'], opt['type'])
-            
-            # Standard GEX = Gamma * S^2 * OI (Dollar Gamma per 1% move)
-            # Origin formula had extra * 100 which implied 100% move or share-multiplier duplication
-            # We want "Notional value of delta change for 1% move"
-            term = gamma * opt['oi'] * (spot_price**2) 
-            if opt['type'] == 'call':
-                net_gex += term
-                net_delta += (-delta * opt['oi'] * 100) # Dealer Short Call
-            else:
-                net_gex -= term
-                net_delta += (-delta * opt['oi'] * 100) # Dealer Short Put
-
-        avg_vol = 0
-        try:
-            avg_vol = ticker_obj.fast_info.three_month_average_volume
-        except:
-            pass
-            
-        final_gex = net_gex
-        final_slope = 0.0
-        
-        if avg_vol and avg_vol > 0:
-            final_gex = net_gex / (avg_vol * spot_price)
-        else:
-            # Fallback for indices or missing volume: Assume 100M volume to align with UI decimal thresholds (e.g. 0.015)
-            final_gex = net_gex / (100_000_000 * spot_price)
-
-        # 2. Calc Gamma Flip (Scan +/- 50%)
-        flip_price = 0.0
-        low_p = spot_price * 0.50
-        high_p = spot_price * 1.50
-        steps = 100
-        step_size = (high_p - low_p) / steps
-        prices = [low_p + i*step_size for i in range(steps+1)]
-        gex_values = []
-        
-        for p_sim in prices:
-            g_sim = 0.0
-            for opt in option_inventory:
-                val = calculate_gamma(p_sim, opt['K'], opt['T'], r, opt['sigma'])
-                term = val * opt['oi'] * (p_sim**2) # Removed * 100 scaling
-                if opt['type'] == 'call': g_sim += term
-                else: g_sim -= term
-            gex_values.append(g_sim)
-            
-        for i in range(len(gex_values)-1):
-            if (gex_values[i] > 0 and gex_values[i+1] < 0) or (gex_values[i] < 0 and gex_values[i+1] > 0):
-                y1, y2 = gex_values[i], gex_values[i+1]
-                x1, x2 = prices[i], prices[i+1]
-                if (y2 - y1) != 0:
-                    flip_price = x1 - y1 * (x2 - x1) / (y2 - y1)
-                else:
-                    flip_price = x1
-                break
-
-        # 3. Calc GEX Slope (Local derivative at spot)
-        p_up = spot_price * 1.01
-        gex_up = 0.0
-        for opt in option_inventory:
-            val = calculate_gamma(p_up, opt['K'], opt['T'], r, opt['sigma'])
-            term = val * opt['oi'] * (p_up**2) # Removed * 100 scaling
-            if opt['type'] == 'call': gex_up += term
-            else: gex_up -= term
-        
-        raw_slope = (gex_up - net_gex) / (p_up - spot_price)
-        final_slope = raw_slope
-        if avg_vol and avg_vol > 0:
-            final_slope = raw_slope / (avg_vol * spot_price)
-
-        # ENH_262: Mathematical bound check for gamma flip interpolation outliers
-        sym = getattr(ticker_obj, 'ticker', '')
-        is_index = sym.upper() in ['SPY', 'QQQ', 'IWM', 'DIA']
-        bound = 0.05 if is_index else 0.15
-        if flip_price > 0 and spot_price > 0:
-            if abs(flip_price - spot_price) / spot_price > bound:
-                # Quarantined outlier per ENH_262
-                flip_price = 0.0
-
-        flip_prox = 0.0
-        if flip_price > 0:
-            flip_prox = (spot_price - flip_price) / spot_price
-
-        res = {
-            'net_gex': final_gex,
-            'flip_price': flip_price,
-            'inventory_velocity_delta': net_delta,
-            'gex_slope': final_slope,
-            'flip_proximity_percent': flip_prox,
-            'strike_oi_magnet': magnet_price
-        }
-        sanitized = {}
-        for k, v in res.items():
-            try:
-                fv = float(v)
-                if math.isnan(fv) or math.isinf(fv):
-                    sanitized[k] = 0.0
-                else:
-                    sanitized[k] = fv
-            except:
-                sanitized[k] = v
-        return sanitized
-
+        sym = getattr(ticker_obj, 'ticker', '') or 'UNKNOWN'
+        observed = _acquire_options_gex_raw(
+            symbol=sym,
+            ticker_obj=ticker_obj,
+            spot_price=spot_price,
+        )
+        return dict(observed.data["gex_profile"])
     except Exception:
         return default_res
 
@@ -2784,231 +2926,385 @@ def get_today_str():
         except: pass
     return datetime.now().strftime("%Y-%m-%d")
 
+_HISTORICAL_REQUIRED_TECH_KEYS = (
+    "SMA_20",
+    "SMA_50",
+    "SMA_200",
+    "RSI",
+    "MACD",
+    "MACD_Signal",
+    "MACD_Hist",
+    "MACD_Slope",
+    "MACD_Status",
+    "BB_Upper",
+    "BB_Lower",
+    "BB_Pct",
+    "MFI",
+    "ATR_Pct",
+    "ATR",
+    "Trend_Score",
+    "Last_Reg_Close",
+)
+
+
+def _unavailable_technicals_dict() -> dict:
+    return {
+        "SMA_20": None,
+        "SMA_50": None,
+        "SMA_200": None,
+        "RSI": None,
+        "MACD": None,
+        "MACD_Signal": None,
+        "MACD_Hist": None,
+        "MACD_Slope": "UNKNOWN",
+        "MACD_Status": "NEUTRAL",
+        "BB_Upper": None,
+        "BB_Lower": None,
+        "BB_Pct": None,
+        "MFI": None,
+        "ATR_Pct": None,
+        "ATR": None,
+        "Trend_Score": 0,
+        "Last_Reg_Close": None,
+        "status": "UNAVAILABLE",
+    }
+
+
+def _extract_last_regular_close_for_history(
+    symbol: str,
+    hist: pd.DataFrame,
+    close: pd.Series,
+    t_obj: Any,
+    now_ny: Optional[datetime] = None,
+) -> Optional[float]:
+    """
+    Worker-safe helper resolving the previous regular close using detached historical
+    bars and provider access (fast_info / get_previous_close) off the coordinating thread.
+    """
+    last_reg_close = None
+    ny_tz_local = ZoneInfo("America/New_York")
+    cur_ny = now_ny if now_ny is not None else datetime.now(ny_tz_local)
+    today_date = cur_ny.date()
+    is_pre_market = (cur_ny.time() < time(9, 30))
+
+    if is_pre_market:
+        if len(close) >= 1:
+            valid_closes = [c_val for c in close if (c_val := to_float(c)) is not None and c_val > 0]
+            if valid_closes:
+                last_reg_close = valid_closes[-1]
+        if last_reg_close is None and t_obj is not None:
+            try:
+                fi = getattr(t_obj, 'fast_info', None)
+                fi_last = to_float(getattr(fi, 'last_price', None)) if fi is not None else None
+                if fi_last is not None and fi_last > 0:
+                    last_reg_close = fi_last
+            except Exception:
+                pass
+    else:
+        if t_obj is not None:
+            try:
+                fi = getattr(t_obj, 'fast_info', None)
+                fi_close = (
+                    (getattr(fi, 'regular_market_previous_close', None) or getattr(fi, 'previous_close', None))
+                    if fi is not None
+                    else None
+                )
+                last_reg_close = to_float(fi_close)
+            except Exception:
+                pass
+
+        if last_reg_close is None and len(close) >= 1:
+            valid_closes = [c_val for c in close if (c_val := to_float(c)) is not None and c_val > 0]
+            if valid_closes:
+                last_bar_date = hist.index[-1].date()
+                if last_bar_date == today_date and len(valid_closes) >= 2:
+                    last_reg_close = valid_closes[-2]
+                else:
+                    last_reg_close = valid_closes[-1]
+
+    if last_reg_close is None:
+        alt_pc = get_previous_close(symbol)
+        if alt_pc:
+            last_reg_close = to_float(alt_pc)
+
+    return last_reg_close
+
+
+def _compute_technicals_from_history(
+    hist: pd.DataFrame,
+    last_reg_close: Optional[float] = None,
+) -> dict:
+    """
+    Pure technical indicator calculation from a validated historical DataFrame.
+    Preserves SMA, RSI, MACD, Bollinger Bands, MFI, ATR, and Trend_Score exactly.
+    """
+    close = hist['Close']
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+
+    # --- SAFER SMA CHECKS ---
+    sma_20 = to_float(close.rolling(20).mean().iloc[-1]) if len(close) >= 20 else None
+    sma_50 = to_float(close.rolling(50).mean().iloc[-1]) if len(close) >= 50 else None
+    sma_200 = to_float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else None
+
+    # --- Helper to safely get the last value from a Series or scalar ---
+    def _last(val):
+        status, num = classify_market_numeric(val)
+        return num if status == "VALID" else None
+
+    # --- RSI (Wilder 9-day) ---
+    delta = close.diff()
+    gain = (delta.where(delta > 0, 0)).ewm(com=8, adjust=False).mean()
+    loss = (-delta.where(delta < 0, 0)).ewm(com=8, adjust=False).mean()
+    rs = gain / (loss + 1e-9)
+    rsi_val = _last(100 - (100 / (1 + rs)))
+
+    # --- MACD ---
+    ema_12 = close.ewm(span=12, adjust=False).mean()
+    ema_26 = close.ewm(span=26, adjust=False).mean()
+    macd_line = ema_12 - ema_26
+    signal_line = macd_line.ewm(span=9, adjust=False).mean()
+    macd_hist = macd_line - signal_line
+    macd_val = _last(macd_line)
+    macd_signal_val = _last(signal_line)
+    macd_hist_val = _last(macd_hist)
+
+    # Compute 4-State Histogram Slope (macd_slope)
+    if macd_hist_val is not None and len(macd_hist) >= 2:
+        prev_hist = to_float(macd_hist.iloc[-2], default=0.0)
+        if macd_hist_val >= 0:
+            macd_slope_val = "EXPANDING_POSITIVE" if macd_hist_val >= prev_hist else "CONTRACTING_POSITIVE"
+        else:
+            macd_slope_val = "EXPANDING_NEGATIVE" if macd_hist_val <= prev_hist else "CONTRACTING_NEGATIVE"
+        macd_status_val = "BULLISH" if macd_hist_val > 0.001 else ("BEARISH" if macd_hist_val < -0.001 else "NEUTRAL")
+    else:
+        macd_slope_val = "UNKNOWN"
+        macd_status_val = "NEUTRAL"
+
+    # --- Bollinger Bands (20-day, 2 std) ---
+    if len(close) >= 20:
+        sma_20_bb = close.rolling(20).mean()
+        std_20_bb = close.rolling(20).std()
+        upper_bb = sma_20_bb + (std_20_bb * 2)
+        lower_bb = sma_20_bb - (std_20_bb * 2)
+        bb_upper_val = _last(upper_bb)
+        bb_lower_val = _last(lower_bb)
+        last_c = _last(close)
+        if bb_upper_val is not None and bb_lower_val is not None and last_c is not None and bb_upper_val != bb_lower_val:
+            bb_pct_val = (last_c - bb_lower_val) / (bb_upper_val - bb_lower_val)
+        else:
+            bb_pct_val = 0.5
+    else:
+        bb_upper_val = None
+        bb_lower_val = None
+        bb_pct_val = None
+
+    # --- MFI (Money Flow Index 14-day) ---
+    if 'Volume' in hist.columns and 'High' in hist.columns and 'Low' in hist.columns:
+        typ_price = (hist['High'] + hist['Low'] + close) / 3
+        raw_money_flow = typ_price * hist['Volume']
+        diff_typ = typ_price.diff()
+        pos_flow = raw_money_flow.where(diff_typ > 0, 0.0)
+        neg_flow = raw_money_flow.where(diff_typ < 0, 0.0)
+        pos_flow_sum = pos_flow.rolling(14).sum()
+        neg_flow_sum = neg_flow.rolling(14).sum()
+        money_ratio = pos_flow_sum / (neg_flow_sum + 1e-9)
+        mfi_series = 100 - (100 / (1 + money_ratio))
+        mfi_val = _last(mfi_series)
+    else:
+        mfi_val = None
+
+    # --- ATR (Wilder) ---
+    tr = pd.concat([
+        hist['High'] - hist['Low'],
+        (hist['High'] - close.shift(1)).abs(),
+        (hist['Low'] - close.shift(1)).abs()
+    ], axis=1).max(axis=1)
+
+    atr = _last(tr.ewm(alpha=1 / 14, adjust=False).mean())
+    last_close = _last(close)
+    atr_pct = (atr / last_close) * 100 if (atr is not None and last_close is not None and last_close != 0) else None
+
+    # --- Trend Score (Weighted — SMA200 cross is ±2) ---
+    trend_score = 0
+    if sma_20 is not None and sma_50 is not None:
+        trend_score += 1 if sma_20 > sma_50 else -1
+    if sma_50 is not None and sma_200 is not None:
+        trend_score += 2 if sma_50 > sma_200 else -2  # Golden/Death cross weighted 2x
+    if sma_20 is not None and last_close is not None:
+        trend_score += 1 if last_close > sma_20 else -1
+
+    return {
+        "SMA_20": sma_20,
+        "SMA_50": sma_50,
+        "SMA_200": sma_200,
+        "RSI": to_float(rsi_val),
+        "MACD": to_float(macd_val),
+        "MACD_Signal": to_float(macd_signal_val),
+        "MACD_Hist": to_float(macd_hist_val),
+        "MACD_Slope": macd_slope_val,
+        "MACD_Status": macd_status_val,
+        "BB_Upper": to_float(bb_upper_val),
+        "BB_Lower": to_float(bb_lower_val),
+        "BB_Pct": to_float(bb_pct_val),
+        "MFI": to_float(mfi_val),
+        "ATR_Pct": to_float(atr_pct),
+        "ATR": to_float(atr),
+        "Trend_Score": int(trend_score),
+        "Last_Reg_Close": last_reg_close,
+    }
+
+
+def _acquire_historical_and_technicals_raw(
+    symbol: str,
+    t_obj: Any = None,
+    existing_hist: Optional[pd.DataFrame] = None,
+    today_str: Optional[str] = None,
+    now_ny: Optional[datetime] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> ObservedResult:
+    """
+    Worker-safe historical OHLCV acquisition and technical-indicator calculation.
+    Executes Yahoo history, Polygon fallback, fast_info, and get_previous_close off the
+    coordinating thread, validates the DataFrame against the detached existing_hist snapshot,
+    never mutates shared caches, and returns a detached ObservedResult candidate.
+    """
+    if cancel_check and cancel_check():
+        raise RuntimeError("Cancelled before historical acquisition")
+
+    sym_clean = str(symbol or "").strip().upper()
+    if not sym_clean:
+        raise ValueError("Empty symbol for historical acquisition")
+
+    eff_today_str = today_str or get_today_str()
+    eff_t_obj = t_obj if t_obj is not None else yf.Ticker(sym_clean)
+
+    hist = None
+    source_name = None
+    try:
+        hist = eff_t_obj.history(period="2y", interval="1d")
+        if hist is None or hist.empty:
+            hist = eff_t_obj.history(period="1y", interval="1d")
+        if hist is None or hist.empty:
+            hist = eff_t_obj.history(period="3mo", interval="1d")
+        if hist is None or hist.empty:
+            raise ValueError("Empty YF")
+        source_name = "YAHOO_HISTORY"
+    except Exception:
+        if cancel_check and cancel_check():
+            raise RuntimeError("Cancelled during historical acquisition")
+        try:
+            hist = get_polygon_history_df(sym_clean)
+            if hist is not None and not hist.empty:
+                source_name = "POLYGON_HISTORY"
+        except Exception:
+            hist = None
+
+    if cancel_check and cancel_check():
+        raise RuntimeError("Cancelled after historical retrieval")
+
+    is_valid, reason = validate_historical_dataframe(hist, existing_hist)
+    if not is_valid:
+        raise ValueError(f"Historical refresh rejected for {sym_clean}: {reason}")
+
+    hist_detached = hist.copy(deep=True)
+    close = hist_detached['Close']
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+
+    last_reg_close = _extract_last_regular_close_for_history(
+        symbol=sym_clean,
+        hist=hist_detached,
+        close=close,
+        t_obj=eff_t_obj,
+        now_ny=now_ny,
+    )
+    if cancel_check and cancel_check():
+        raise RuntimeError("Cancelled during technical calculation")
+
+    technicals = _compute_technicals_from_history(hist_detached, last_reg_close=last_reg_close)
+    latest_bar_date_str = hist_detached.index[-1].date().isoformat()
+
+    return ObservedResult(
+        data={
+            "kind": "historical_data",
+            "symbol": sym_clean,
+            "history": hist_detached,
+            "technicals": technicals,
+            "last_history_fetch_date": eff_today_str,
+            "regular_close": float(last_reg_close) if (last_reg_close is not None and last_reg_close > 0) else None,
+            "source": source_name or "YAHOO_HISTORY",
+            "latest_bar_date": latest_bar_date_str,
+        },
+        obs_time=None,
+        provenance=None,
+    )
+
+
 def update_history_and_technicals(symbol, t_obj):
+    """
+    Synchronous compatibility entrypoint for direct callers/tests.
+    The recurring monitoring and startup paths use HEAVY_MARKET_DATA_COORDINATOR instead.
+    """
     today_str = get_today_str()
     existing_hist = cache.history.get(symbol)
-    if (symbol in cache.history 
-            and existing_hist is not None
-            and not existing_hist.empty 
-            and cache.last_history_fetch_date.get(symbol) == today_str):
+    if (
+        symbol in cache.history
+        and existing_hist is not None
+        and not existing_hist.empty
+        and cache.last_history_fetch_date.get(symbol) == today_str
+    ):
         # Already updated today! Skip download.
         return
 
-    hist = None
-    try:
-        hist = t_obj.history(period="2y", interval="1d")
-        if hist is None or hist.empty:
-            hist = t_obj.history(period="1y", interval="1d")
-        if hist is None or hist.empty:
-            hist = t_obj.history(period="3mo", interval="1d")
-        if hist is None or hist.empty:
-            raise ValueError("Empty YF")
-    except:
-        try:
-            hist = get_polygon_history_df(symbol)
-        except:
-            hist = None
+    existing_hist_copy = (
+        existing_hist.copy(deep=True)
+        if isinstance(existing_hist, pd.DataFrame) and not existing_hist.empty
+        else None
+    )
 
-    # Validate incoming historical DataFrame
-    is_valid, reason = validate_historical_dataframe(hist, existing_hist)
-    if not is_valid:
+    try:
+        observed = _acquire_historical_and_technicals_raw(
+            symbol=symbol,
+            t_obj=t_obj,
+            existing_hist=existing_hist_copy,
+            today_str=today_str,
+        )
+    except ValueError as val_err:
+        reason = str(val_err)
+        prefix = f"Historical refresh rejected for {str(symbol).strip().upper()}: "
+        if reason.startswith(prefix):
+            reason = reason[len(prefix):]
         if existing_hist is not None and not existing_hist.empty:
-            # Preserve existing valid history and technicals
             print(f"[Warning] Historical refresh for {symbol} rejected ({reason}); preserving existing cache.")
             return
 
         # If no prior history existed: do NOT fabricate dummy 0.0 row!
-        cache.history[symbol] = pd.DataFrame()
-        cache.last_history_fetch_date[symbol] = None
-        cache.technicals[symbol] = {
-            "SMA_20": None,
-            "SMA_50": None,
-            "SMA_200": None,
-            "RSI": None,
-            "MACD": None,
-            "MACD_Signal": None,
-            "MACD_Hist": None,
-            "MACD_Slope": "UNKNOWN",
-            "MACD_Status": "NEUTRAL",
-            "BB_Upper": None,
-            "BB_Lower": None,
-            "BB_Pct": None,
-            "MFI": None,
-            "ATR_Pct": None,
-            "ATR": None,
-            "Trend_Score": 0,
-            "Last_Reg_Close": None,
-            "status": "UNAVAILABLE"
-        }
+        _publish_market_data_candidate(
+            symbol,
+            {
+                "history": pd.DataFrame(),
+                "last_history_fetch_date": None,
+                "technicals": _unavailable_technicals_dict(),
+            },
+        )
+        return
+    except Exception as e:
+        print("Tech error:", e)
         return
 
-    cache.history[symbol] = hist
-    cache.last_history_fetch_date[symbol] = today_str
-
-    if not hist.empty:
-        try:
-            close = hist['Close']
-            if isinstance(close, pd.DataFrame):
-                close = close.iloc[:, 0]
-
-            # --- SAFER SMA CHECKS ---
-            sma_20 = to_float(close.rolling(20).mean().iloc[-1]) if len(close) >= 20 else None
-            sma_50 = to_float(close.rolling(50).mean().iloc[-1]) if len(close) >= 50 else None
-            sma_200 = to_float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else None
-
-            # --- Helper to safely get the last value from a Series or scalar ---
-            def _last(val):
-                status, num = classify_market_numeric(val)
-                return num if status == "VALID" else None
-
-            # --- RSI (Wilder 9-day) ---
-            delta = close.diff()
-            gain = (delta.where(delta > 0, 0)).ewm(com=8, adjust=False).mean()
-            loss = (-delta.where(delta < 0, 0)).ewm(com=8, adjust=False).mean()
-            rs = gain / (loss + 1e-9)
-            rsi_val = _last(100 - (100 / (1 + rs)))
-
-            # --- MACD ---
-            ema_12 = close.ewm(span=12, adjust=False).mean()
-            ema_26 = close.ewm(span=26, adjust=False).mean()
-            macd_line = ema_12 - ema_26
-            signal_line = macd_line.ewm(span=9, adjust=False).mean()
-            macd_hist = macd_line - signal_line
-            macd_val = _last(macd_line)
-            macd_signal_val = _last(signal_line)
-            macd_hist_val = _last(macd_hist)
-
-            # Compute 4-State Histogram Slope (macd_slope)
-            if macd_hist_val is not None and len(macd_hist) >= 2:
-                prev_hist = to_float(macd_hist.iloc[-2], default=0.0)
-                if macd_hist_val >= 0:
-                    macd_slope_val = "EXPANDING_POSITIVE" if macd_hist_val >= prev_hist else "CONTRACTING_POSITIVE"
-                else:
-                    macd_slope_val = "EXPANDING_NEGATIVE" if macd_hist_val <= prev_hist else "CONTRACTING_NEGATIVE"
-                macd_status_val = "BULLISH" if macd_hist_val > 0.001 else ("BEARISH" if macd_hist_val < -0.001 else "NEUTRAL")
-            else:
-                macd_slope_val = "UNKNOWN"
-                macd_status_val = "NEUTRAL"
-
-            # --- Bollinger Bands (20-day, 2 std) ---
-            if len(close) >= 20:
-                sma_20_bb = close.rolling(20).mean()
-                std_20_bb = close.rolling(20).std()
-                upper_bb = sma_20_bb + (std_20_bb * 2)
-                lower_bb = sma_20_bb - (std_20_bb * 2)
-                bb_upper_val = _last(upper_bb)
-                bb_lower_val = _last(lower_bb)
-                last_c = _last(close)
-                if bb_upper_val is not None and bb_lower_val is not None and last_c is not None and bb_upper_val != bb_lower_val:
-                    bb_pct_val = (last_c - bb_lower_val) / (bb_upper_val - bb_lower_val)
-                else:
-                    bb_pct_val = 0.5
-            else:
-                bb_upper_val = None
-                bb_lower_val = None
-                bb_pct_val = None
-
-            # --- MFI (Money Flow Index 14-day) ---
-            if 'Volume' in hist.columns and 'High' in hist.columns and 'Low' in hist.columns:
-                typ_price = (hist['High'] + hist['Low'] + close) / 3
-                raw_money_flow = typ_price * hist['Volume']
-                diff_typ = typ_price.diff()
-                pos_flow = raw_money_flow.where(diff_typ > 0, 0.0)
-                neg_flow = raw_money_flow.where(diff_typ < 0, 0.0)
-                pos_flow_sum = pos_flow.rolling(14).sum()
-                neg_flow_sum = neg_flow.rolling(14).sum()
-                money_ratio = pos_flow_sum / (neg_flow_sum + 1e-9)
-                mfi_series = 100 - (100 / (1 + money_ratio))
-                mfi_val = _last(mfi_series)
-            else:
-                mfi_val = None
-
-            # --- ATR (Wilder) ---
-            tr = pd.concat([
-                hist['High'] - hist['Low'],
-                (hist['High'] - close.shift(1)).abs(),
-                (hist['Low'] - close.shift(1)).abs()
-            ], axis=1).max(axis=1)
-
-            atr = _last(tr.ewm(alpha=1/14, adjust=False).mean())
-            last_close = _last(close)
-            atr_pct = (atr / last_close) * 100 if (atr is not None and last_close is not None and last_close != 0) else None
-
-            # --- Previous Regular Close ---
-            last_reg_close = None
-            ny_tz = ZoneInfo("America/New_York")
-            now_ny = datetime.now(ny_tz)
-            today_date = now_ny.date()
-            is_pre_market = (now_ny.time() < time(9, 30))
-
-            if is_pre_market:
-                if len(close) >= 1:
-                    valid_closes = [c_val for c in close if (c_val := to_float(c)) is not None and c_val > 0]
-                    if valid_closes:
-                        last_reg_close = valid_closes[-1]
-                if last_reg_close is None and hasattr(t_obj, 'fast_info'):
-                    try:
-                        fi_last = to_float(getattr(t_obj.fast_info, 'last_price', None))
-                        if fi_last is not None and fi_last > 0:
-                            last_reg_close = fi_last
-                    except:
-                        pass
-            else:
-                if hasattr(t_obj, 'fast_info'):
-                    try:
-                        fi_close = getattr(t_obj.fast_info, 'regular_market_previous_close', None) or getattr(t_obj.fast_info, 'previous_close', None)
-                        last_reg_close = to_float(fi_close)
-                    except:
-                        pass
-
-                if last_reg_close is None and len(close) >= 1:
-                    valid_closes = [c_val for c in close if (c_val := to_float(c)) is not None and c_val > 0]
-                    if valid_closes:
-                        last_bar_date = hist.index[-1].date()
-                        if last_bar_date == today_date and len(valid_closes) >= 2:
-                            last_reg_close = valid_closes[-2]
-                        else:
-                            last_reg_close = valid_closes[-1]
-
-            if last_reg_close is None:
-                alt_pc = get_previous_close(symbol)
-                if alt_pc:
-                    last_reg_close = to_float(alt_pc)
-
-            # --- Trend Score (Weighted — SMA200 cross is ±2) ---
-            trend_score = 0
-            if sma_20 is not None and sma_50 is not None:
-                trend_score += 1 if sma_20 > sma_50 else -1
-            if sma_50 is not None and sma_200 is not None:
-                trend_score += 2 if sma_50 > sma_200 else -2  # Golden/Death cross weighted 2x
-            if sma_20 is not None and last_close is not None:
-                trend_score += 1 if last_close > sma_20 else -1
-
-            cache.technicals[symbol] = {
-                "SMA_20": sma_20,
-                "SMA_50": sma_50,
-                "SMA_200": sma_200,
-                "RSI": to_float(rsi_val),
-                "MACD": to_float(macd_val),
-                "MACD_Signal": to_float(macd_signal_val),
-                "MACD_Hist": to_float(macd_hist_val),
-                "MACD_Slope": macd_slope_val,
-                "MACD_Status": macd_status_val,
-                "BB_Upper": to_float(bb_upper_val),
-                "BB_Lower": to_float(bb_lower_val),
-                "BB_Pct": to_float(bb_pct_val),
-                "MFI": to_float(mfi_val),
-                "ATR_Pct": to_float(atr_pct),
-                "ATR": to_float(atr),
-                "Trend_Score": int(trend_score),
-                "Last_Reg_Close": last_reg_close
-            }
-            if last_reg_close is not None and last_reg_close > 0:
-                cache.regular_close[symbol] = last_reg_close
-
-        except Exception as e:
-            print("Tech error:", e)
-            pass
+    try:
+        work_res = WorkResult(
+            key=WorkKey(WorkType.HISTORICAL_DATA.value, str(symbol).strip().upper()),
+            sequence=1,
+            obs_time=None,
+            data=observed.data,
+            provenance=None,
+        )
+        sym, updates = _build_historical_cache_candidate(work_res)
+        _publish_market_data_candidate(sym, updates)
+    except Exception as e:
+        print("Tech error:", e)
 
 
 def _extract_fast_info_snapshot(t_obj) -> dict:
@@ -4836,6 +5132,7 @@ def enqueue_market_batch_quotes(
     symbols: Sequence[str],
     status: str,
     metrics: Optional[Sequence[str]] = None,
+    coordinator: Optional[BackgroundIntelligenceCoordinator] = None,
 ) -> Tuple[bool, Optional[Any]]:
     """
     Enqueues non-blocking batched quote acquisition on MARKET_DATA_COORDINATOR.
@@ -4845,6 +5142,7 @@ def enqueue_market_batch_quotes(
     clean_syms = tuple(dict.fromkeys(str(s).strip().upper() for s in symbols if s and str(s).strip()))
     if not clean_syms:
         return False, None
+    eff_coord = MARKET_DATA_COORDINATOR if coordinator is None else coordinator
     clean_status = str(status or "OPEN").strip().upper()
     metric_set = _normalize_requested_metrics(metrics, default=_default_batch_metrics_for_status(clean_status))
     metric_sig = ",".join(metric_set)
@@ -4854,7 +5152,7 @@ def enqueue_market_batch_quotes(
         for s in clean_syms
         for m in metric_set
     )
-    return MARKET_DATA_COORDINATOR.enqueue(
+    return eff_coord.enqueue(
         work_type=WorkType.MARKET_DATA.value,
         target=batch_target,
         obs_time=None,
@@ -4875,6 +5173,7 @@ def enqueue_market_symbol_fallback(
     need_chart_open: bool = False,
     need_polygon_vol: bool = False,
     metrics: Optional[Sequence[str]] = None,
+    coordinator: Optional[BackgroundIntelligenceCoordinator] = None,
 ) -> Tuple[bool, Optional[Any]]:
     """
     Enqueues non-blocking per-symbol fallback/supplemental market-data acquisition on
@@ -4884,6 +5183,7 @@ def enqueue_market_symbol_fallback(
     """
     if not symbol or not str(symbol).strip():
         return False, None
+    eff_coord = MARKET_DATA_COORDINATOR if coordinator is None else coordinator
     sym_clean = str(symbol).strip().upper()
     clean_status = str(status or "OPEN").strip().upper()
     now_ts = t_time.time()
@@ -4939,7 +5239,7 @@ def enqueue_market_symbol_fallback(
     request_target = f"FALLBACK_REQ:{clean_status}:{metric_sig}:{sym_clean}"
     child_keys = tuple(_metric_work_key(m, sym_clean) for m in requested_metrics)
 
-    return MARKET_DATA_COORDINATOR.enqueue(
+    return eff_coord.enqueue(
         work_type=WorkType.MARKET_DATA.value,
         target=request_target,
         obs_time=None,
@@ -4960,16 +5260,21 @@ def enqueue_market_symbol_fallback(
     )
 
 
-def enqueue_market_vwap(symbol: str, status: str) -> Tuple[bool, Optional[Any]]:
+def enqueue_market_vwap(
+    symbol: str,
+    status: str,
+    coordinator: Optional[BackgroundIntelligenceCoordinator] = None,
+) -> Tuple[bool, Optional[Any]]:
     """
     Enqueues non-blocking intraday VWAP acquisition on MARKET_DATA_COORDINATOR
     with a session-specific request key and stable per-symbol VWAP:{symbol} result key.
     """
     if not symbol or not str(symbol).strip():
         return False, None
+    eff_coord = MARKET_DATA_COORDINATOR if coordinator is None else coordinator
     sym_clean = str(symbol).strip().upper()
     clean_status = str(status or "OPEN").strip().upper()
-    return MARKET_DATA_COORDINATOR.enqueue(
+    return eff_coord.enqueue(
         work_type=WorkType.MARKET_DATA.value,
         target=f"VWAP_REQUEST:{clean_status}:{sym_clean}",
         obs_time=None,
@@ -4979,12 +5284,19 @@ def enqueue_market_vwap(symbol: str, status: str) -> Tuple[bool, Optional[Any]]:
     )
 
 
-def apply_background_market_data_results() -> List[Tuple[WorkResult, bool, str]]:
+def apply_background_market_data_results(
+    coordinator: Optional[BackgroundIntelligenceCoordinator] = None,
+    applicator: Optional[BackgroundResultApplicator] = None,
+    fallback_requests: Optional[Dict[str, dict]] = None,
+) -> List[Tuple[WorkResult, bool, str]]:
     """
     Drains completed market-data results from MARKET_DATA_COORDINATOR and applies them
     on the coordinating thread via MARKET_DATA_RESULT_APPLICATOR's explicit publication callback.
     """
-    results = MARKET_DATA_COORDINATOR.drain_results()
+    eff_coord = MARKET_DATA_COORDINATOR if coordinator is None else coordinator
+    eff_app = MARKET_DATA_RESULT_APPLICATOR if applicator is None else applicator
+    eff_fb_store = _MARKET_DATA_FALLBACK_REQUESTS if fallback_requests is None else fallback_requests
+    results = eff_coord.drain_results()
     if not results:
         return []
 
@@ -5003,7 +5315,7 @@ def apply_background_market_data_results() -> List[Tuple[WorkResult, bool, str]]
         ):
             batch_quote_applied[sym] = str(res.data.get("status") or "OPEN").strip().upper()
 
-    audit = MARKET_DATA_RESULT_APPLICATOR.apply_results(
+    audit = eff_app.apply_results(
         results=results,
         grounding_target={},
         scout_cache_target={},
@@ -5082,9 +5394,9 @@ def apply_background_market_data_results() -> List[Tuple[WorkResult, bool, str]]
     if pending_fallbacks:
         with _MARKET_DATA_FALLBACK_STATE_LOCK:
             for sym, req in pending_fallbacks.items():
-                existing = _MARKET_DATA_FALLBACK_REQUESTS.get(sym)
+                existing = eff_fb_store.get(sym)
                 if existing is None or req.get("need_price") or not existing.get("need_price"):
-                    _MARKET_DATA_FALLBACK_REQUESTS[sym] = req
+                    eff_fb_store[sym] = req
 
     return audit
 
@@ -5094,6 +5406,9 @@ def coordinate_market_data_cycle(
     status: str,
     vwap_batch: Sequence[str] = (),
     now_ny: Optional[datetime] = None,
+    coordinator: Optional[BackgroundIntelligenceCoordinator] = None,
+    applicator: Optional[BackgroundResultApplicator] = None,
+    fallback_requests: Optional[Dict[str, dict]] = None,
 ) -> dict:
     """
     Non-blocking coordinating-thread market-data step for the recurring monitoring loop.
@@ -5104,18 +5419,31 @@ def coordinate_market_data_cycle(
     if now_ny is None:
         now_ny = datetime.now(ny_tz)
 
-    applied_audit = apply_background_market_data_results()
-    batch_accepted, _ = enqueue_market_batch_quotes(symbols, status=status)
+    eff_fb_store = _MARKET_DATA_FALLBACK_REQUESTS if fallback_requests is None else fallback_requests
+    applied_audit = apply_background_market_data_results(
+        coordinator=coordinator,
+        applicator=applicator,
+        fallback_requests=eff_fb_store,
+    )
+    batch_accepted, _ = enqueue_market_batch_quotes(
+        symbols,
+        status=status,
+        coordinator=coordinator,
+    )
 
     vwap_accepted = 0
     for b_sym in vwap_batch:
-        acc, _ = enqueue_market_vwap(b_sym, status=status)
+        acc, _ = enqueue_market_vwap(
+            b_sym,
+            status=status,
+            coordinator=coordinator,
+        )
         if acc:
             vwap_accepted += 1
 
     with _MARKET_DATA_FALLBACK_STATE_LOCK:
-        fallback_queue = dict(_MARKET_DATA_FALLBACK_REQUESTS)
-        _MARKET_DATA_FALLBACK_REQUESTS.clear()
+        fallback_queue = dict(eff_fb_store)
+        eff_fb_store.clear()
 
     fallback_enqueued = 0
     for sym in symbols:
@@ -5123,7 +5451,12 @@ def coordinate_market_data_cycle(
         refresh_cached_symbol_state(sym_clean, status, now_ny=now_ny)
         req = fallback_queue.pop(sym_clean, None)
         if req is not None:
-            acc, _ = enqueue_market_symbol_fallback(sym_clean, status=status, **req)
+            acc, _ = enqueue_market_symbol_fallback(
+                sym_clean,
+                status=status,
+                coordinator=coordinator,
+                **req,
+            )
             if acc:
                 fallback_enqueued += 1
 
@@ -5133,6 +5466,380 @@ def coordinate_market_data_cycle(
         "batch_enqueued": bool(batch_accepted),
         "vwap_enqueued": vwap_accepted,
         "fallback_enqueued": fallback_enqueued,
+    }
+
+
+def _build_historical_cache_candidate(
+    res: WorkResult,
+    now_ny: Optional[datetime] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Validates a completed HISTORICAL_DATA WorkResult on the coordinating thread against
+    live cache state and returns (symbol, cache_updates_dict) ready for atomic publication.
+    """
+    if not isinstance(res, WorkResult):
+        raise ValueError("Historical result must be a WorkResult")
+    if res.key.work_type != WorkType.HISTORICAL_DATA.value:
+        raise ValueError(f"Expected HISTORICAL_DATA work_type, got {res.key.work_type}")
+    if res.error is not None:
+        raise ValueError(str(res.error))
+    if not isinstance(res.data, dict):
+        raise ValueError("Historical result payload must be a dict")
+    if res.data.get("kind") != "historical_data":
+        raise ValueError(f"Unexpected historical payload kind: {res.data.get('kind')!r}")
+
+    target_sym = str(res.key.target or "").strip().upper()
+    payload_sym = str(res.data.get("symbol") or "").strip().upper()
+    if not target_sym or payload_sym != target_sym:
+        raise ValueError(f"Historical symbol mismatch: target={target_sym!r}, payload={payload_sym!r}")
+
+    source = res.data.get("source")
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("Historical candidate missing non-empty source metadata")
+
+    hist = res.data.get("history")
+    if not isinstance(hist, pd.DataFrame):
+        raise ValueError("Historical candidate history must be a pandas DataFrame")
+
+    current_hist = cache.history.get(target_sym)
+    is_valid, reason = validate_historical_dataframe(hist, current_hist)
+    if not is_valid:
+        raise ValueError(f"Historical publication rejected for {target_sym}: {reason}")
+
+    ref_date = now_ny.date() if now_ny is not None else current_market_session_date()
+    valid_fetch_date = validate_session_date(
+        res.data.get("last_history_fetch_date"),
+        reference_date=ref_date,
+    )
+
+    technicals = res.data.get("technicals")
+    if not isinstance(technicals, dict):
+        raise ValueError("Historical candidate technicals must be a dict")
+    if technicals.get("status") == "UNAVAILABLE":
+        raise ValueError("Historical candidate technicals marked UNAVAILABLE")
+    missing_keys = [k for k in _HISTORICAL_REQUIRED_TECH_KEYS if k not in technicals]
+    if missing_keys:
+        raise ValueError(f"Historical candidate technicals missing keys: {missing_keys}")
+
+    trend_val = technicals.get("Trend_Score")
+    if isinstance(trend_val, bool) or not isinstance(trend_val, (int, float)) or not math.isfinite(float(trend_val)):
+        raise ValueError(f"Historical candidate invalid Trend_Score: {trend_val!r}")
+
+    for num_key in (
+        "SMA_20", "SMA_50", "SMA_200", "RSI", "MACD", "MACD_Signal",
+        "MACD_Hist", "BB_Upper", "BB_Lower", "BB_Pct", "MFI", "ATR_Pct",
+        "ATR", "Last_Reg_Close",
+    ):
+        val = technicals.get(num_key)
+        if val is not None:
+            num_status, num_val = classify_market_numeric(val)
+            if isinstance(val, bool) or num_status != "VALID" or num_val is None:
+                raise ValueError(f"Historical candidate invalid numeric technical {num_key}={val!r}")
+
+    reg_close_raw = res.data.get("regular_close")
+    reg_close_val: Optional[float] = None
+    if reg_close_raw is not None:
+        reg_status, parsed_reg = classify_market_numeric(reg_close_raw)
+        if isinstance(reg_close_raw, bool) or reg_status != "VALID" or parsed_reg is None or parsed_reg <= 0:
+            raise ValueError(f"Historical candidate invalid regular_close: {reg_close_raw!r}")
+        reg_close_val = float(parsed_reg)
+
+    clean_technicals = dict(technicals)
+    clean_technicals["Trend_Score"] = int(trend_val)
+
+    updates: Dict[str, Any] = {
+        "history": hist.copy(deep=True),
+        "technicals": clean_technicals,
+        "last_history_fetch_date": valid_fetch_date,
+    }
+    if reg_close_val is not None:
+        updates["regular_close"] = reg_close_val
+
+    return target_sym, updates
+
+
+def _build_gex_cache_candidate(
+    res: WorkResult,
+    now_ts: Optional[float] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Validates a completed OPTIONS_GEX WorkResult on the coordinating thread and returns
+    (symbol, cache_updates_dict) ready for atomic publication.
+    """
+    if not isinstance(res, WorkResult):
+        raise ValueError("Options/GEX result must be a WorkResult")
+    if res.key.work_type != WorkType.OPTIONS_GEX.value:
+        raise ValueError(f"Expected OPTIONS_GEX work_type, got {res.key.work_type}")
+    if res.error is not None:
+        raise ValueError(str(res.error))
+    if not isinstance(res.data, dict):
+        raise ValueError("Options/GEX result payload must be a dict")
+    if res.data.get("kind") != "options_gex":
+        raise ValueError(f"Unexpected GEX payload kind: {res.data.get('kind')!r}")
+
+    target_sym = str(res.key.target or "").strip().upper()
+    payload_sym = str(res.data.get("symbol") or "").strip().upper()
+    if not target_sym or payload_sym != target_sym:
+        raise ValueError(f"GEX symbol mismatch: target={target_sym!r}, payload={payload_sym!r}")
+
+    source = res.data.get("source")
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("GEX candidate missing non-empty source metadata")
+
+    spot_raw = res.data.get("spot_price")
+    spot_status, spot_num = classify_market_numeric(spot_raw)
+    if isinstance(spot_raw, bool) or spot_status != "VALID" or spot_num is None or spot_num <= 0:
+        raise ValueError(f"GEX candidate invalid spot_price: {spot_raw!r}")
+
+    contract_count = res.data.get("contract_count")
+    if isinstance(contract_count, bool) or not isinstance(contract_count, int) or contract_count <= 0:
+        raise ValueError(f"GEX candidate invalid contract_count: {contract_count!r}")
+
+    eff_now = float(t_time.time() if now_ts is None else now_ts)
+    fetched_raw = res.data.get("fetched_at")
+    fetched_status, fetched_num = classify_market_numeric(fetched_raw)
+    if isinstance(fetched_raw, bool) or fetched_status != "VALID" or fetched_num is None or fetched_num <= 0:
+        raise ValueError(f"GEX candidate invalid fetched_at: {fetched_raw!r}")
+    if fetched_num > (eff_now + 60.0):
+        raise ValueError(f"GEX candidate future fetched_at timestamp: {fetched_num!r}")
+    if (eff_now - fetched_num) >= GEX_REFRESH_TTL_SECONDS:
+        raise ValueError(f"GEX candidate expired before publication for {target_sym}")
+
+    profile = res.data.get("gex_profile")
+    if not isinstance(profile, dict):
+        raise ValueError("GEX candidate gex_profile must be a dict")
+    clean_profile: Dict[str, float] = {}
+    for key in _GEX_REQUIRED_KEYS:
+        if key not in profile:
+            raise ValueError(f"GEX candidate missing field '{key}'")
+        raw_val = profile[key]
+        val_status, val_num = classify_market_numeric(raw_val)
+        if isinstance(raw_val, bool) or val_status != "VALID" or val_num is None:
+            raise ValueError(f"GEX candidate invalid field {key}={raw_val!r}")
+        clean_profile[key] = float(val_num)
+
+    updates: Dict[str, Any] = {
+        "gex": dict(clean_profile),
+        "gex_cache": dict(clean_profile),
+        "last_gex_fetch": float(fetched_num),
+    }
+    return target_sym, updates
+
+
+def enqueue_historical_data(
+    symbol: str,
+    t_obj: Any = None,
+    today_str: Optional[str] = None,
+    now_ny: Optional[datetime] = None,
+    force: bool = False,
+    coordinator: Optional[BackgroundIntelligenceCoordinator] = None,
+) -> Tuple[bool, Optional[WorkKey]]:
+    """
+    Non-blocking historical + technical-indicator enqueue onto HEAVY_MARKET_DATA_COORDINATOR.
+    Snapshots detached existing history on the coordinating thread and preserves daily refresh
+    deduplication when valid history is already recorded for today's NY session date.
+    """
+    if not symbol or not str(symbol).strip():
+        return False, None
+    eff_coord = HEAVY_MARKET_DATA_COORDINATOR if coordinator is None else coordinator
+    sym_clean = str(symbol).strip().upper()
+    eff_today = today_str or get_today_str()
+
+    existing_hist = cache.history.get(sym_clean)
+    if (
+        not force
+        and isinstance(existing_hist, pd.DataFrame)
+        and not existing_hist.empty
+        and cache.last_history_fetch_date.get(sym_clean) == eff_today
+    ):
+        return False, None
+
+    existing_hist_copy = (
+        existing_hist.copy(deep=True)
+        if isinstance(existing_hist, pd.DataFrame) and not existing_hist.empty
+        else None
+    )
+
+    return eff_coord.enqueue(
+        work_type=WorkType.HISTORICAL_DATA.value,
+        target=sym_clean,
+        obs_time=None,
+        fn=_acquire_historical_and_technicals_raw,
+        kwargs={
+            "symbol": sym_clean,
+            "t_obj": t_obj,
+            "existing_hist": existing_hist_copy,
+            "today_str": eff_today,
+            "now_ny": now_ny,
+        },
+    )
+
+
+def enqueue_options_gex(
+    symbol: str,
+    ticker_obj: Any = None,
+    spot_price: Any = None,
+    force: bool = False,
+    now_ts: Optional[float] = None,
+    coordinator: Optional[BackgroundIntelligenceCoordinator] = None,
+) -> Tuple[bool, Optional[WorkKey]]:
+    """
+    Non-blocking options/GEX enqueue onto HEAVY_MARKET_DATA_COORDINATOR.
+    Enforces valid positive spot price and the 1,800-second GEX refresh TTL without
+    advancing cache.last_gex_fetch before worker completion and coordinating-thread publication.
+    """
+    if not symbol or not str(symbol).strip():
+        return False, None
+    eff_coord = HEAVY_MARKET_DATA_COORDINATOR if coordinator is None else coordinator
+    sym_clean = str(symbol).strip().upper()
+    eff_spot = cache.prices.get(sym_clean) if spot_price is None else spot_price
+    spot_status, spot_num = classify_market_numeric(eff_spot)
+    if isinstance(eff_spot, bool) or spot_status != "VALID" or spot_num is None or spot_num <= 0:
+        return False, None
+
+    eff_now = float(t_time.time() if now_ts is None else now_ts)
+    last_fetch = cache.last_gex_fetch.get(sym_clean)
+    cached_gex = cache.gex_cache.get(sym_clean)
+    if (
+        not force
+        and not isinstance(last_fetch, bool)
+        and isinstance(last_fetch, (int, float))
+        and math.isfinite(float(last_fetch))
+        and 0 <= (eff_now - float(last_fetch)) < GEX_REFRESH_TTL_SECONDS
+        and isinstance(cached_gex, dict)
+    ):
+        if sym_clean not in cache.gex:
+            cache.gex[sym_clean] = dict(cached_gex)
+        return False, None
+
+    return eff_coord.enqueue(
+        work_type=WorkType.OPTIONS_GEX.value,
+        target=sym_clean,
+        obs_time=None,
+        fn=_acquire_options_gex_raw,
+        kwargs={
+            "symbol": sym_clean,
+            "ticker_obj": ticker_obj,
+            "spot_price": float(spot_num),
+        },
+    )
+
+
+def apply_background_heavy_market_data_results(
+    now_ny: Optional[datetime] = None,
+    now_ts: Optional[float] = None,
+    coordinator: Optional[BackgroundIntelligenceCoordinator] = None,
+    applicator: Optional[BackgroundResultApplicator] = None,
+) -> List[Tuple[WorkResult, bool, str]]:
+    """
+    Drains completed historical and options/GEX results from HEAVY_MARKET_DATA_COORDINATOR
+    and publishes valid candidates atomically on the coordinating thread via
+    HEAVY_MARKET_DATA_RESULT_APPLICATOR.
+    """
+    eff_coord = HEAVY_MARKET_DATA_COORDINATOR if coordinator is None else coordinator
+    eff_app = HEAVY_MARKET_DATA_RESULT_APPLICATOR if applicator is None else applicator
+    results = eff_coord.drain_results()
+    if not results:
+        return []
+
+    def _publish_heavy_result(res: WorkResult) -> None:
+        if res.key.work_type == WorkType.HISTORICAL_DATA.value:
+            sym, updates = _build_historical_cache_candidate(res, now_ny=now_ny)
+            _publish_market_data_candidate(sym, updates)
+        elif res.key.work_type == WorkType.OPTIONS_GEX.value:
+            sym, updates = _build_gex_cache_candidate(res, now_ts=now_ts)
+            _publish_market_data_candidate(sym, updates)
+        else:
+            raise ValueError(f"Unsupported heavy market-data work_type: {res.key.work_type!r}")
+
+    return eff_app.apply_results(
+        results=results,
+        on_publish=_publish_heavy_result,
+    )
+
+
+def coordinate_heavy_market_data_cycle(
+    symbols: Sequence[str],
+    tickers_obj: Optional[Dict[str, Any]] = None,
+    is_heavy: bool = False,
+    include_historical: bool = True,
+    include_gex: bool = True,
+    today_str: Optional[str] = None,
+    now_ny: Optional[datetime] = None,
+    now_ts: Optional[float] = None,
+    coordinator: Optional[BackgroundIntelligenceCoordinator] = None,
+    applicator: Optional[BackgroundResultApplicator] = None,
+) -> Dict[str, int]:
+    """
+    Non-blocking heavy market-data cycle orchestrator run on the coordinating thread.
+    Applies completed historical and options/GEX results first, then enqueues eligible
+    historical refreshes and GEX refreshes onto HEAVY_MARKET_DATA_COORDINATOR.
+    """
+    audit = apply_background_heavy_market_data_results(
+        now_ny=now_ny,
+        now_ts=now_ts,
+        coordinator=coordinator,
+        applicator=applicator,
+    )
+    historical_applied = sum(
+        1 for res, ok, _ in audit if ok and res.key.work_type == WorkType.HISTORICAL_DATA.value
+    )
+    gex_applied = sum(
+        1 for res, ok, _ in audit if ok and res.key.work_type == WorkType.OPTIONS_GEX.value
+    )
+    rejected_count = sum(1 for _, ok, _ in audit if not ok)
+
+    eff_today = today_str or (now_ny.strftime("%Y-%m-%d") if now_ny is not None else get_today_str())
+    eff_now = float(t_time.time() if now_ts is None else now_ts)
+    ticker_map = tickers_obj or {}
+
+    historical_enqueued = 0
+    gex_enqueued = 0
+
+    for sym in symbols:
+        sym_clean = str(sym or "").strip().upper()
+        if not sym_clean:
+            continue
+        t_obj = ticker_map.get(sym_clean) if sym_clean in ticker_map else ticker_map.get(sym)
+
+        if include_historical:
+            cur_hist = cache.history.get(sym_clean)
+            need_hist = (
+                is_heavy
+                or cur_hist is None
+                or (isinstance(cur_hist, pd.DataFrame) and cur_hist.empty)
+                or cache.last_history_fetch_date.get(sym_clean) != eff_today
+            )
+            if need_hist:
+                acc, _ = enqueue_historical_data(
+                    sym_clean,
+                    t_obj=t_obj,
+                    today_str=eff_today,
+                    now_ny=now_ny,
+                    coordinator=coordinator,
+                )
+                if acc:
+                    historical_enqueued += 1
+
+        if include_gex:
+            if is_heavy or sym_clean not in cache.last_gex_fetch:
+                acc, _ = enqueue_options_gex(
+                    sym_clean,
+                    ticker_obj=t_obj,
+                    spot_price=cache.prices.get(sym_clean),
+                    now_ts=eff_now,
+                    coordinator=coordinator,
+                )
+                if acc:
+                    gex_enqueued += 1
+
+    return {
+        "applied_count": historical_applied + gex_applied,
+        "historical_applied": historical_applied,
+        "gex_applied": gex_applied,
+        "rejected_count": rejected_count,
+        "historical_enqueued": historical_enqueued,
+        "gex_enqueued": gex_enqueued,
     }
 
 
@@ -5233,7 +5940,7 @@ def calculate_score(symbol):
     p = cache.prices.get(symbol)
     v = cache.vwaps.get(symbol, 0)
 
-    if p is None or p <= 0 or not t:
+    if p is None or p <= 0 or not t or t.get("status") == "UNAVAILABLE":
         return 0, ""
 
     score = 0
@@ -5861,10 +6568,17 @@ def get_macro_telemetry_context():
 # -----------------------------
 def run_daemon():
     global GLOBAL_STATE, FORCE_REFRESH, ALL_TICKERS, TICKERS, MACRO_TICKERS
+    daemon_mkt_coord = MARKET_DATA_COORDINATOR
+    daemon_mkt_app = MARKET_DATA_RESULT_APPLICATOR
+    daemon_heavy_coord = HEAVY_MARKET_DATA_COORDINATOR
+    daemon_heavy_app = HEAVY_MARKET_DATA_RESULT_APPLICATOR
+    daemon_bg_coord = BACKGROUND_COORDINATOR
+    daemon_bg_app = BACKGROUND_RESULT_APPLICATOR
+    daemon_fallback_requests: Dict[str, dict] = {}
     print(f"{CYAN}Initializing GEM Dashboard v16.0 (Data Hardened + Trend)...{RESET}")
     tickers_obj = {sym: yf.Ticker(sym) for sym in ALL_TICKERS}
 
-    print(f"{YELLOW}Performing initial heavy fetch...{RESET}")
+    print(f"{YELLOW}Scheduling initial heavy fetch (non-blocking)...{RESET}")
     def _set_boot(phase, progress, total, sym, status_msg=None):
         def _updater(current):
             s = dict(current)
@@ -5887,87 +6601,47 @@ def run_daemon():
             return s
         update_global_state_snapshot(_updater)
 
-    total_tickers = len(tickers_obj)
-    for idx, (sym, obj) in enumerate(tickers_obj.items()):
-        _set_boot(
-            "TECHNICAL_ANALYSIS",
-            idx + 1,
-            total_tickers,
-            sym,
-            "INITIALIZING - LOADING TECHNICALS (MAY TAKE 1 MIN)..."
-        )
-
-        print(f"Loading {sym}...", end="\r")
-        update_history_and_technicals(sym, obj)
-
-    cache.save_to_disk(ALL_TICKERS)
-
-    # Initial GEX population — uses batch quotes for spot price, then computes
-    # GEX per ticker with a throttled delay to avoid Yahoo Finance rate limits.
-    print(f"{YELLOW}Loading initial GEX profiles...{RESET}")
     status = get_market_status()
-    boot_quotes = get_batch_quotes(ALL_TICKERS)
-    total_gex = len(ALL_TICKERS)
-    for idx, sym in enumerate(ALL_TICKERS):
-        _set_boot(
-            "GEX_PROFILES",
-            idx + 1,
-            total_gex,
-            sym,
-            "INITIALIZING - LOADING GEX PROFILES (MAY TAKE 1 MIN)..."
-        )
+    startup_ny_now = datetime.now(ZoneInfo("America/New_York"))
+    total_tickers = len(ALL_TICKERS)
+    _set_boot(
+        "TECHNICAL_ANALYSIS",
+        total_tickers,
+        total_tickers,
+        "SCHEDULED",
+        "INITIALIZING - SCHEDULING NON-BLOCKING MARKET & HEAVY DATA..."
+    )
+    coordinate_market_data_cycle(
+        ALL_TICKERS,
+        status,
+        [],
+        now_ny=startup_ny_now,
+        coordinator=daemon_mkt_coord,
+        applicator=daemon_mkt_app,
+        fallback_requests=daemon_fallback_requests,
+    )
+    coordinate_heavy_market_data_cycle(
+        ALL_TICKERS,
+        tickers_obj=tickers_obj,
+        is_heavy=True,
+        include_historical=True,
+        include_gex=True,
+        now_ny=startup_ny_now,
+        coordinator=daemon_heavy_coord,
+        applicator=daemon_heavy_app,
+    )
+    print(f"{GREEN}Initial live and heavy market-data workloads queued.{RESET}")
 
-        obj = tickers_obj[sym]
-        # Get an initial price from batch quotes
-        q = boot_quotes.get(sym, {})
-        spot = None
-        if status == "PRE-MARKET":
-            spot = q.get('preMarketPrice')
-        elif status == "AFTER-HOURS":
-            spot = q.get('postMarketPrice')
-        if not spot:
-            spot = q.get('regularMarketPrice')
-        if not spot:
-            spot = cache.prices.get(sym)
-        if spot and float(spot) > 0:
-            spot = float(spot)
-            cache.prices[sym] = spot
-            print(f"  GEX [{idx+1}/{total_gex}] {sym}...", end="\r")
-            
-            now_ts = t_time.time()
-            if sym in cache.last_gex_fetch and (now_ts - cache.last_gex_fetch[sym]) < 1800:
-                cache.gex[sym] = cache.gex_cache[sym]
-            else:
-                gex_profile = get_gex_profile(obj, spot)
-                cache.gex[sym] = gex_profile
-                cache.last_gex_fetch[sym] = now_ts
-                cache.gex_cache[sym] = gex_profile
-
-            # GEX loop sleep (lines 914)
-            t_time.sleep(0.2)  # OPTIMIZED: Reduced from 2s
-        else:
-            cache.gex[sym] = {
-                'net_gex': 0.0, 'flip_price': 0.0,
-                'inventory_velocity_delta': 0.0, 'gex_slope': 0.0,
-                'flip_proximity_percent': 0.0, 'strike_oi_magnet': 0.0
-            }
-    print(f"{GREEN}GEX profiles loaded.{RESET}                    ")
-
-    # Hold boot panel at 100% for a minimum window so the browser poll loop
-    # (every 3s) can observe the completed state before we clear it.
-    # This prevents the race condition on fast restarts with cached GEX data.
-    current_boot_total = get_global_state_snapshot().get("boot_total", len(ALL_TICKERS))
-    _set_boot("GEX_PROFILES", current_boot_total, current_boot_total, "COMPLETE")
-    print(f"{YELLOW}Holding boot panel visible for browser poll window...{RESET}")
-    t_time.sleep(5)
-
-    # Clear boot progress keys to signal completion to the frontend
+    # Clear boot progress keys so startup completes cleanly without blocking monitoring
     _clear_boot()
 
     try:
         while True:
             # 1. Apply any completed background intelligence results under monotonic ordering
-            apply_background_intelligence_results()
+            apply_background_intelligence_results(
+                coordinator=daemon_bg_coord,
+                applicator=daemon_bg_app,
+            )
 
             # Dynamically reload TICKERS and MACRO_TICKERS from SSOT on every cycle
             try:
@@ -6051,7 +6725,25 @@ def run_daemon():
             if remaining_tickers and not is_heavy:
                 print(f"{YELLOW}⏳ VWAP batch: [{', '.join(batch)}] fresh | [{', '.join(remaining_tickers)}] cached from prior cycle{RESET}")
 
-            coordinate_market_data_cycle(ALL_TICKERS, status, batch, now_ny=ny_now)
+            coordinate_market_data_cycle(
+                ALL_TICKERS,
+                status,
+                batch,
+                now_ny=ny_now,
+                coordinator=daemon_mkt_coord,
+                applicator=daemon_mkt_app,
+                fallback_requests=daemon_fallback_requests,
+            )
+            heavy_stats = coordinate_heavy_market_data_cycle(
+                ALL_TICKERS,
+                tickers_obj=tickers_obj,
+                is_heavy=is_heavy,
+                include_historical=True,
+                include_gex=True,
+                now_ny=ny_now,
+                coordinator=daemon_heavy_coord,
+                applicator=daemon_heavy_app,
+            )
 
             sep_line = "-" * table_width
             print(sep_line)
@@ -6071,44 +6763,10 @@ def run_daemon():
                 'VIXY': {'price': None, 'gap': 0.0, 'status': 'UNAVAILABLE'}
             }
 
-            needs_save = False
+            needs_save = bool(heavy_stats.get("historical_applied", 0) > 0)
 
             for i, sym in enumerate(ALL_TICKERS):
-                # Dynamic sleep: slower on heavy refresh to respect rate limits
-                if is_heavy or sym not in cache.history or cache.history[sym].empty:
-                    # OPTIMIZED: Reduced from 1.5s
-                    t_time.sleep(0.5) 
-                else:
-                    # OPTIMIZED: Reduced from 0.1s
-                    t_time.sleep(0.05)
-
-                obj = tickers_obj[sym]
-
-                if is_heavy or sym not in cache.history or cache.history[sym].empty:
-                    update_history_and_technicals(sym, obj)
-                    needs_save = True
-
-                # GEX is heavy, run only on heavy cycles after price is known
-                if is_heavy:
-                    spot_price = cache.prices.get(sym)
-                    if spot_price and spot_price > 0:
-                        now_ts = t_time.time()
-                        if sym in cache.last_gex_fetch and (now_ts - cache.last_gex_fetch[sym]) < 1800:
-                            gex_profile = cache.gex_cache[sym]
-                        else:
-                            gex_profile = get_gex_profile(obj, spot_price)
-                            cache.last_gex_fetch[sym] = now_ts
-                            cache.gex_cache[sym] = gex_profile
-                        cache.gex[sym] = gex_profile
-                    else:
-                        cache.gex[sym] = {
-                            'net_gex': 0.0, 
-                            'flip_price': 0.0, 
-                            'inventory_velocity_delta': 0.0,
-                            'gex_slope': 0.0,
-                            'flip_proximity_percent': 0.0,
-                            'strike_oi_magnet': 0.0
-                        }
+                t_time.sleep(0.05)
 
                 p = cache.prices.get(sym)
                 gap = float(cache.gaps.get(sym, 0.0))
@@ -6210,7 +6868,7 @@ def run_daemon():
                 else:
                     chg_cell = f"{WHITE}{chg_val:<{w_gap}}{R_RST}"
 
-                rsi_raw = techs.get('RSI', 0)
+                rsi_raw = to_float(techs.get('RSI'), default=0.0) or 0.0
                 rsi_val = f"{rsi_raw:.1f}"
                 if rsi_raw >= 70:
                     rsi_cell = f"{RED}{rsi_val:<{w_rsi}}{R_RST}"
@@ -6223,7 +6881,7 @@ def run_daemon():
                 # For INVERSE_MACRO tickers (VIX, IEF, UUP): rising price = bearish for equities,
                 # so we invert the COLORS (UP=RED, DOWN=GREEN) while keeping the label
                 # matching actual price direction.
-                ts = techs.get("Trend_Score", 0)
+                ts = int(to_float(techs.get("Trend_Score"), default=0) or 0)
                 if ts >= 3:
                     # UP: good for normal tickers (GREEN), bad for inverse tickers (RED)
                     up_color = RED if sym in INVERSE_MACRO else GREEN
@@ -6252,8 +6910,10 @@ def run_daemon():
                     elif score >= 3:
                         score_disp = f"{RED}+{score} (RISK){R_RST}"
 
-                atr_val = techs.get('ATR_Pct', 0)
-                atr_str = "0.00%" if pd.isna(atr_val) else f"{atr_val:.2f}%"
+                atr_val = to_float(techs.get('ATR_Pct'), default=0.0)
+                if atr_val is None:
+                    atr_val = 0.0
+                atr_str = f"{atr_val:.2f}%"
                 vol_str = format_volume(vol, sym)
                 vwap_str = f"{vwap:.2f}" if vwap > 0 else "-"
 
@@ -6293,7 +6953,7 @@ def run_daemon():
 
                 # Derive dealer_posture from net_gex sign per
                 # gem_trading_rules/rules.md > ENH_20 (Synthetic GEX Logic)
-                _raw_gex = float(gex_data.get('net_gex', 0.0))
+                _raw_gex = float(to_float(gex_data.get('net_gex'), default=0.0) or 0.0)
                 if _raw_gex > 0:
                     _dealer_posture = "LONG_GAMMA"
                 elif _raw_gex < 0:
@@ -6358,18 +7018,18 @@ def run_daemon():
 
                     # Technicals
                     "atr_percent": float(atr_val),
-                    "atr": float(techs.get("ATR", 0)),
+                    "atr": float(to_float(techs.get("ATR"), default=0.0) or 0.0),
                     "rsi": float(rsi_raw),
-                    "macd": round(float(techs.get("MACD", 0.0) or 0.0), 4),
-                    "macd_signal": round(float(techs.get("MACD_Signal", 0.0) or 0.0), 4),
-                    "macd_hist": round(float(techs.get("MACD_Hist", 0.0) or 0.0), 4),
+                    "macd": round(float(to_float(techs.get("MACD"), default=0.0) or 0.0), 4),
+                    "macd_signal": round(float(to_float(techs.get("MACD_Signal"), default=0.0) or 0.0), 4),
+                    "macd_hist": round(float(to_float(techs.get("MACD_Hist"), default=0.0) or 0.0), 4),
                     "macd_slope": str(techs.get("MACD_Slope", "EXPANDING_POSITIVE")),
                     "macd_status": str(techs.get("MACD_Status", "NEUTRAL")),
                     "vwap": float(vwap),
                     "distance_from_vwap": float(distance_from_vwap(sym)),
                     # trend_score thresholds: gem_trading_rules/rules.md > TREND_SCORE_UP_THRESHOLD (3) / TREND_SCORE_DOWN_THRESHOLD (-3)
                     # For INVERSE_MACRO tickers: negated so rising price = negative (bearish for equities)
-                    "trend_score": int(-techs.get("Trend_Score", 0)) if sym in INVERSE_MACRO else int(techs.get("Trend_Score", 0)),
+                    "trend_score": int(-ts) if sym in INVERSE_MACRO else int(ts),
                     
                     # Macro Context & Volatility Regime (Rules > VOLATILITY_REGIME_THRESHOLDS)
                     "vix_price": cur_vix_p,
@@ -6380,14 +7040,14 @@ def run_daemon():
                     "net_gex_total": _raw_gex,
                     "gex_exposure": _raw_gex,  # Normalized GEX exposure (position-level scaling done by SSoT Gem)
                     "dealer_posture": _dealer_posture,  # gem_trading_rules/rules.md > dealer_posture_logic
-                    "gamma_flip_price": float(gex_data.get('flip_price', 0.0)),
-                    "inventory_velocity_delta": float(gex_data.get('inventory_velocity_delta', 0.0)),
-                    "gex_slope": float(gex_data.get('gex_slope', 0.0)),
-                    "flip_proximity_percent": float(gex_data.get('flip_proximity_percent', 0.0)),
-                    "strike_oi_magnet": float(gex_data.get('strike_oi_magnet', 0.0)),
-                    "ma_20": float(techs.get("SMA_20") or 0.0),
-                    "ma_50": float(techs.get("SMA_50") or 0.0),
-                    "ma_200": float(techs.get("SMA_200") or 0.0),
+                    "gamma_flip_price": float(to_float(gex_data.get('flip_price'), default=0.0) or 0.0),
+                    "inventory_velocity_delta": float(to_float(gex_data.get('inventory_velocity_delta'), default=0.0) or 0.0),
+                    "gex_slope": float(to_float(gex_data.get('gex_slope'), default=0.0) or 0.0),
+                    "flip_proximity_percent": float(to_float(gex_data.get('flip_proximity_percent'), default=0.0) or 0.0),
+                    "strike_oi_magnet": float(to_float(gex_data.get('strike_oi_magnet'), default=0.0) or 0.0),
+                    "ma_20": float(to_float(techs.get("SMA_20"), default=0.0) or 0.0),
+                    "ma_50": float(to_float(techs.get("SMA_50"), default=0.0) or 0.0),
+                    "ma_200": float(to_float(techs.get("SMA_200"), default=0.0) or 0.0),
                     "score": int(score) if actionable else 0,
                     "signal": classify_signal(sym),
                     # trend label thresholds: gem_trading_rules/rules.md > TREND_SCORE_UP_THRESHOLD / TREND_SCORE_DOWN_THRESHOLD
@@ -6400,7 +7060,7 @@ def run_daemon():
                     "fib_forecast": calculate_fib_forecast(
                         sym, p, cache.history.get(sym),
                         open_price=float(cache.day_open.get(sym, 0.0) or (techs.get("open") if isinstance(techs, dict) else 0.0) or 0.0),
-                        atr=float(techs.get("ATR", 0.0) or 0.0),
+                        atr=float(to_float(techs.get("ATR"), default=0.0) or 0.0),
                         rsi=float(rsi_raw or 50.0),
                         rvol=float(calculate_rvol(sym) or 1.0),
                         vwap=float(vwap or 0.0)

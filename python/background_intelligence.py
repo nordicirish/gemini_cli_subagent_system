@@ -217,6 +217,8 @@ class WorkType(str, enum.Enum):
     GROUNDING = "grounding"
     SCOUT = "scout"
     MARKET_DATA = "market_data"
+    HISTORICAL_DATA = "historical_data"
+    OPTIONS_GEX = "options_gex"
 
 
 class WorkStatus(str, enum.Enum):
@@ -371,13 +373,15 @@ class BackgroundIntelligenceCoordinator:
         max_queue_size: int = 50,
         max_results_size: int = 50,
         cooldown_tracker: Optional[FailureCooldownTracker] = None,
-        clock_fn: Callable[[], float] = time.monotonic
+        clock_fn: Callable[[], float] = time.monotonic,
+        worker_name_prefix: str = "BackgroundIntelligenceWorker",
     ):
         self.max_workers = max(1, int(max_workers))
         self.max_queue_size = max(1, int(max_queue_size))
         self.max_results_size = max(1, int(max_results_size))
         self.clock_fn = clock_fn
         self.cooldown_tracker = cooldown_tracker or FailureCooldownTracker(clock_fn=clock_fn)
+        self.worker_name_prefix = str(worker_name_prefix or "BackgroundIntelligenceWorker")
 
         self._queue: queue.Queue = queue.Queue(maxsize=self.max_queue_size)
         self._results_queue: queue.Queue = queue.Queue(maxsize=self.max_results_size)
@@ -407,7 +411,7 @@ class BackgroundIntelligenceCoordinator:
             for i in range(self.max_workers):
                 t = threading.Thread(
                     target=self._worker_loop,
-                    name=f"BackgroundIntelligenceWorker-{i+1}",
+                    name=f"{self.worker_name_prefix}-{i+1}",
                     daemon=True
                 )
                 self._workers.append(t)
@@ -601,7 +605,8 @@ class BackgroundIntelligenceCoordinator:
 
             # Transition from QUEUED to IN_FLIGHT under lock
             with self._lock:
-                self._pending_keys.pop(item.key, None)
+                if self._pending_keys.get(item.key) is item:
+                    self._pending_keys.pop(item.key, None)
                 if self._shutdown_event.is_set() or item.cancel_event.is_set():
                     item.status = WorkStatus.CANCELLED
                     item.error = "Cancelled due to coordinator shutdown or request"
@@ -655,7 +660,8 @@ class BackgroundIntelligenceCoordinator:
                     )
             finally:
                 with self._lock:
-                    self._in_flight_keys.pop(item.key, None)
+                    if self._in_flight_keys.get(item.key) is item:
+                        self._in_flight_keys.pop(item.key, None)
                     item.event.set()
 
                 # Produce result for coordinator handoff if not cancelled
@@ -884,9 +890,9 @@ class BackgroundResultApplicator:
     def apply_results(
         self,
         results: List[WorkResult],
-        grounding_target: dict,
-        scout_cache_target: dict,
-        scout_category_map: dict,
+        grounding_target: Optional[dict] = None,
+        scout_cache_target: Optional[dict] = None,
+        scout_category_map: Optional[dict] = None,
         latest_issued_provider: Optional[Callable[[WorkKey], int] | Dict[WorkKey, int]] = None,
         require_source_time: bool = False,
         on_publish: Optional[Callable[[WorkResult], None]] = None,
@@ -996,9 +1002,15 @@ class BackgroundResultApplicator:
 
                     # 4. Apply result based on work type
                     if r.key.work_type == WorkType.GROUNDING.value:
+                        if grounding_target is None:
+                            audit.append((r, False, "Missing grounding_target mapping"))
+                            continue
                         grounding_target[r.key.target] = r.data
                         applied = True
                     elif r.key.work_type == WorkType.SCOUT.value:
+                        if scout_cache_target is None or scout_category_map is None:
+                            audit.append((r, False, "Missing scout target mapping"))
+                            continue
                         scout_cache_target[r.key.target] = {
                             "tickers": r.data,
                             "cached_at": time.time(),
@@ -1015,6 +1027,19 @@ class BackgroundResultApplicator:
                         # coordinating thread under key_lock) is the only permitted publication route.
                         if on_publish is None or not callable(on_publish):
                             msg = "Market-data publication callback required"
+                            logger.warning(f"[BackgroundResultApplicator] {r.key} rejected fail-closed: {msg}")
+                            audit.append((r, False, msg))
+                            continue
+                        applied = True
+                    elif r.key.work_type in (
+                        WorkType.HISTORICAL_DATA.value,
+                        WorkType.OPTIONS_GEX.value,
+                    ):
+                        # Heavy market-data results (historical data / options GEX) are never
+                        # assigned to shared state directly and are not treated as live quote
+                        # observations. An explicit coordinating-thread on_publish callback is required.
+                        if on_publish is None or not callable(on_publish):
+                            msg = f"Publication callback required for {r.key.work_type}"
                             logger.warning(f"[BackgroundResultApplicator] {r.key} rejected fail-closed: {msg}")
                             audit.append((r, False, msg))
                             continue
