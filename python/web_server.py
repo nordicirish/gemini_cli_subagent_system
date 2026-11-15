@@ -454,33 +454,15 @@ def reset_chat():
     return {"status": "success"}
 
 @app.post("/api/set_cache_policy")
-def set_cache_policy(data: dict):
-    global global_chat_session, _session_hydrated, ORCHESTRATOR_MODEL
-    disable_cache = data.get("disable_cache", False)
-    
-    # Update config.json
-    try:
-        config_path = "context/config.json"
-        config_data = {}
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-        
-        config_data["DISABLE_CACHE"] = disable_cache
-        
-        # Ensure context directory exists
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(config_data, f, indent=2)
-    except Exception as ce:
-        framework.log(f"[System Error] Failed to write cache policy to config.json: {ce}")
-
-    print("[System] Context Caching is permanently deprecated.")
-    
-    # Rebuild session
-    global_chat_session = create_new_session()
-    _session_hydrated = False
-    return {"status": "success", "disable_cache": True}
+def set_cache_policy(data: Optional[dict] = None):
+    framework.log("[System] Context caching control invoked; context caching is deprecated and inactive in the local Antigravity runtime.")
+    return {
+        "status": "deprecated",
+        "caching_supported": False,
+        "caching_active": False,
+        "disable_cache": True,
+        "message": "Context caching is deprecated and inactive in the local Antigravity runtime.",
+    }
 
 @app.post("/api/set_model")
 def set_model(data: dict):
@@ -527,15 +509,28 @@ def set_model(data: dict):
     active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
     return {"status": "success", "current_model": ORCHESTRATOR_MODEL, "warning": active_model_warning}
 
+def _normalize_for_json(obj: Any) -> Any:
+    """Recursively converts read-only Mapping/Sequence views into plain JSON-serializable structures."""
+    try:
+        from fetch_stocks import sanitize_json_payload
+        return sanitize_json_payload(obj)
+    except ImportError:
+        if isinstance(obj, collections.abc.Mapping):
+            return {k: _normalize_for_json(v) for k, v in obj.items()}
+        if isinstance(obj, collections.abc.Sequence) and not isinstance(obj, (str, bytes)):
+            return [_normalize_for_json(x) for x in obj]
+        return obj
+
+
 def assemble_slim_tickers(raw_tickers: Any) -> list[dict]:
     """
     Assembles non-authoritative market feed telemetry for DATA_PACKET injection.
     Fails closed: missing price_validity and freshness explicitly default to UNAVAILABLE.
     """
     slim_tickers = []
-    if isinstance(raw_tickers, list):
+    if isinstance(raw_tickers, collections.abc.Sequence) and not isinstance(raw_tickers, (str, bytes)):
         for t in raw_tickers:
-            if isinstance(t, dict):
+            if isinstance(t, collections.abc.Mapping):
                 slim_tickers.append({
                     "ticker": t.get("ticker"),
                     "price": t.get("price"),
@@ -718,14 +713,15 @@ def chat_endpoint(req: ChatRequest):
 
             # Load trade lessons via persistence service (optional enrichment)
             trade_lessons = live_state.get("trade_lessons", [])
-            if not trade_lessons or not isinstance(trade_lessons, list):
+            is_lesson_seq = isinstance(trade_lessons, collections.abc.Sequence) and not isinstance(trade_lessons, (str, bytes))
+            if not trade_lessons or not is_lesson_seq:
                 try:
                     trade_lessons = get_persistence_service().get_trade_lessons()
                 except Exception as tle:
                     framework.log(f"[System Warning] Optional trade lessons retrieval failed: {tle}")
                     trade_lessons = []
-            if not isinstance(trade_lessons, list):
-                trade_lessons = []
+                is_lesson_seq = isinstance(trade_lessons, collections.abc.Sequence) and not isinstance(trade_lessons, (str, bytes))
+            trade_lessons_list = list(trade_lessons) if is_lesson_seq else []
 
             # Load decision log via persistence service (optional enrichment)
             decision_log = []
@@ -737,16 +733,17 @@ def chat_endpoint(req: ChatRequest):
             if not isinstance(decision_log, list):
                 decision_log = []
 
+            raw_meta = live_state.get("_meta", {})
             data_packet = {
-                "_meta": live_state.get("_meta", {}) if isinstance(live_state.get("_meta"), dict) else {},
+                "_meta": raw_meta if isinstance(raw_meta, (dict, collections.abc.Mapping)) else {},
                 "timestamp": live_state.get("timestamp", current_iso),
                 "market_status": live_state.get("status", "UNKNOWN"),
                 "tickers": slim_tickers,
                 "ssot": ssot,
-                "trade_lessons": trade_lessons[-10:],
+                "trade_lessons": trade_lessons_list[-10:],
                 "decision_log": decision_log[-10:],
             }
-            data_packet_json = json.dumps(data_packet, indent=2, default=str)
+            data_packet_json = json.dumps(_normalize_for_json(data_packet), separators=(",", ":"), default=str)
             auto_data_block = load_data_packet_injection_prompt(data_packet_json)
             framework.log(f"[System] DATA_PACKET injected: {len(slim_tickers)} tickers, {len(slim_portfolio)} positions.")
         except Exception as enrichment_err:

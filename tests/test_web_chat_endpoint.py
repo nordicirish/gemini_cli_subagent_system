@@ -11,6 +11,8 @@ Covers:
 6. Optional Non-Authoritative Lesson Retrieval Failure Handling (Scope B).
 """
 
+import hashlib
+import json
 import os
 import sys
 import unittest
@@ -737,6 +739,140 @@ class TestDaemonExecutionPathPersistenceIntegrity(unittest.TestCase):
         # Lessons fallback to empty list
         self.assertEqual(out["trade_lessons"], [])
         self.assertIsNotNone(out["local_storage_state"])
+
+
+class TestStage332ContextAndTokenEfficiency(unittest.TestCase):
+    def setUp(self):
+        self._orig_model = web_server.ORCHESTRATOR_MODEL
+        self._orig_session = web_server.global_chat_session
+        self._orig_hydrated = web_server._session_hydrated
+        web_server.cancel_event.clear()
+
+    def tearDown(self):
+        web_server.ORCHESTRATOR_MODEL = self._orig_model
+        web_server.global_chat_session = self._orig_session
+        web_server._session_hydrated = self._orig_hydrated
+        web_server.framework.reset_turn_usage()
+        web_server.cancel_event.clear()
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_serializes_compact_data_packet_with_exact_semantic_equality(self, mock_dispatch, mock_charts):
+        """DATA_PACKET uses compact JSON serialization with exact semantic equality across all fields and SSoT."""
+        mock_dispatch.return_value = {
+            "status": "completed",
+            "response": "Compact payload verified.",
+            "turn_count": 1,
+        }
+
+        ssot_data = get_persistence_service().get_ssot_data()
+        populated_state = {
+            "_meta": {"reliability": "High", "cycle_id": "stage332-test"},
+            "timestamp": "2026-11-15T12:30:00",
+            "status": "OPEN",
+            "financial_state_valid": True,
+            "local_storage_state": ssot_data,
+            "tickers": [
+                {
+                    "ticker": "SPY",
+                    "price": 595.5,
+                    "price_validity": "VALID",
+                    "freshness": "CURRENT",
+                    "price_source": "yfinance",
+                    "rsi": 54.2,
+                    "net_gex_total": 1.2345,
+                }
+            ],
+        }
+
+        with patch_global_state(populated_state):
+            res = web_server.chat_endpoint(web_server.ChatRequest(message="Check compact DATA_PACKET"))
+
+        self.assertEqual(res["status"], "success")
+        dispatched_msg = mock_dispatch.call_args.kwargs["initial_message"]
+        self.assertIsInstance(dispatched_msg, str)
+
+        start_marker = "```json\n"
+        end_marker = "\n```\n[END_DATA_PACKET]"
+        start_idx = dispatched_msg.find(start_marker)
+        end_idx = dispatched_msg.find(end_marker, start_idx)
+        self.assertNotEqual(start_idx, -1)
+        self.assertNotEqual(end_idx, -1)
+        packet_str = dispatched_msg[start_idx + len(start_marker):end_idx]
+
+        self.assertNotIn("\n", packet_str)
+        self.assertNotIn("ImmutableDict(", packet_str)
+
+        compact_parsed = json.loads(packet_str)
+        pretty_equivalent = json.loads(json.dumps(compact_parsed, indent=2, default=str))
+        self.assertEqual(compact_parsed, pretty_equivalent)
+        self.assertEqual(packet_str, json.dumps(compact_parsed, separators=(",", ":"), default=str))
+
+        self.assertEqual(compact_parsed["_meta"], {"reliability": "High", "cycle_id": "stage332-test"})
+        self.assertEqual(compact_parsed["timestamp"], "2026-11-15T12:30:00")
+        self.assertEqual(compact_parsed["market_status"], "OPEN")
+        self.assertEqual(compact_parsed["ssot"]["portfolio_snapshot"], ssot_data["portfolio_snapshot"])
+        self.assertEqual(compact_parsed["ssot"]["unallocated_cash_eur"], ssot_data["unallocated_cash_eur"])
+        self.assertEqual(compact_parsed["ssot"]["watched_tickers"], ssot_data["watched_tickers"])
+        self.assertEqual(compact_parsed["tickers"][0]["ticker"], "SPY")
+        self.assertEqual(compact_parsed["tickers"][0]["net_gex_total"], 1.234)
+        self.assertIn("trade_lessons", compact_parsed)
+        self.assertIn("decision_log", compact_parsed)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_returns_honest_estimated_token_usage(self, mock_dispatch, mock_charts):
+        """/api/chat reports heuristic estimate labels and zero cached tokens when runner estimates tokens."""
+        from agent_framework import AntigravityResponse
+
+        def simulate_turn(**kwargs):
+            with patch.object(
+                web_server.framework.antigravity_runner,
+                "run_prompt",
+                return_value=AntigravityResponse("Council reply", prompt_tokens=321, candidate_tokens=42, is_estimated=True),
+            ):
+                web_server.framework.generate_response_with_fallback("prompt", "instr", "PRO")
+            return {"status": "completed", "response": "Council reply", "turn_count": 1}
+
+        mock_dispatch.side_effect = simulate_turn
+
+        res = web_server.chat_endpoint(web_server.ChatRequest(message="Status check"))
+        self.assertEqual(res["status"], "success")
+        usage = res["usage"]
+        self.assertTrue(usage["is_estimated"])
+        self.assertEqual(usage["token_accounting_mode"], "heuristic_estimate")
+        self.assertEqual(usage["prompt_tokens"], 321)
+        self.assertEqual(usage["candidates_tokens"], 42)
+        self.assertEqual(usage["estimated_prompt_tokens"], 321)
+        self.assertEqual(usage["estimated_candidates_tokens"], 42)
+        self.assertIsNone(usage["actual_prompt_tokens"])
+        self.assertIsNone(usage["actual_candidates_tokens"])
+        self.assertEqual(usage["cached_tokens"], 0)
+        self.assertFalse(usage["caching_active"])
+
+    def test_set_cache_policy_reports_deprecated_without_mutating_config_or_session(self):
+        """set_cache_policy does not mutate context/config.json or rebuild the active session."""
+        config_path = os.path.join(os.path.dirname(__file__), "..", "context", "config.json")
+        with open(config_path, "rb") as f:
+            before_hash = hashlib.sha256(f.read()).hexdigest()
+
+        sentinel_session = MagicMock(name="SentinelSession")
+        web_server.global_chat_session = sentinel_session
+        web_server._session_hydrated = True
+
+        for flag in (False, True):
+            res = web_server.set_cache_policy({"disable_cache": flag})
+            self.assertEqual(res["status"], "deprecated")
+            self.assertFalse(res["caching_supported"])
+            self.assertFalse(res["caching_active"])
+            self.assertTrue(res["disable_cache"])
+            self.assertIn("deprecated", res["message"].lower())
+
+        with open(config_path, "rb") as f:
+            after_hash = hashlib.sha256(f.read()).hexdigest()
+        self.assertEqual(before_hash, after_hash)
+        self.assertIs(web_server.global_chat_session, sentinel_session)
+        self.assertTrue(web_server._session_hydrated)
 
 
 if __name__ == "__main__":

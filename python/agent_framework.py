@@ -225,17 +225,36 @@ types = SimpleNamespace(Part=Part)
 # Antigravity App Agent Runtime (Local agy CLI integration)
 # ---------------------------------------------------------------------------
 class AntigravityResponse:
-    def __init__(self, text: str, prompt_tokens: int = 0, candidate_tokens: int = 0, model_name: str = "gemini-3.8-flash"):
+    def __init__(
+        self,
+        text: str,
+        prompt_tokens: int = 0,
+        candidate_tokens: int = 0,
+        model_name: str = "gemini-3.8-flash",
+        is_estimated: bool = True,
+        token_accounting_mode: Optional[str] = None,
+    ):
         self.text = text
         self.function_calls = []
         part = SimpleNamespace(text=text)
         content = SimpleNamespace(parts=[part])
         candidate = SimpleNamespace(content=content, finish_reason="STOP", safety_ratings=[])
         self.candidates = [candidate]
+        self.is_estimated = bool(is_estimated)
+        resolved_mode = token_accounting_mode or (
+            "heuristic_estimate" if self.is_estimated else "provider_measured"
+        )
+        self.token_accounting_mode = resolved_mode
         self.usage_metadata = SimpleNamespace(
             prompt_token_count=prompt_tokens,
             candidates_token_count=candidate_tokens,
-            cached_content_token_count=0
+            cached_content_token_count=0,
+            estimated_prompt_tokens=prompt_tokens if self.is_estimated else None,
+            estimated_candidate_tokens=candidate_tokens if self.is_estimated else None,
+            actual_prompt_tokens=None if self.is_estimated else prompt_tokens,
+            actual_candidate_tokens=None if self.is_estimated else candidate_tokens,
+            is_estimated=self.is_estimated,
+            token_accounting_mode=resolved_mode,
         )
         self.model_name = model_name
 
@@ -710,7 +729,14 @@ class AntigravityAgentRunner:
         output_text = out.strip()
         p_tokens = len(full_prompt) // 4
         c_tokens = len(output_text) // 4
-        return AntigravityResponse(output_text, prompt_tokens=p_tokens, candidate_tokens=c_tokens, model_name=model)
+        return AntigravityResponse(
+            output_text,
+            prompt_tokens=p_tokens,
+            candidate_tokens=c_tokens,
+            model_name=model,
+            is_estimated=True,
+            token_accounting_mode="heuristic_estimate",
+        )
 
 
 MAX_SUBAGENT_TOOL_TURNS = 3
@@ -938,7 +964,7 @@ class AgentFramework:
         return text
 
     def _get_sys_instruction(self, base_instruction: str) -> str:
-        """Appends the full rules and SSoT documentation to the system instruction."""
+        """Appends the full rules documentation to the system instruction without duplicating DATA_PACKET lessons."""
         parts = [base_instruction]
         rules_path = os.path.join("gem_trading_rules", "rules.md")
         if os.path.exists(rules_path):
@@ -948,16 +974,6 @@ class AgentFramework:
                     parts.append(f"\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{self._minify_payload(raw_rules)}")
             except Exception as e:
                 self.log(f"[Warning] Failed to read rules.md: {e}")
-        
-        lessons_path = os.path.join("context", "trade_lessons.json")
-        if os.path.exists(lessons_path):
-            try:
-                with open(lessons_path, "r", encoding="utf-8") as f:
-                    lessons_data = json.load(f)
-                    lessons_str = json.dumps(lessons_data, indent=2)
-                    parts.append(f"\n\n--- TRADE LESSONS REPOSITORY ---\n{self._minify_payload(lessons_str)}")
-            except Exception as e:
-                self.log(f"[Warning] Failed to read trade_lessons.json: {e}")
         return "".join(parts)
 
     def _log_handshake(self, direction, model_name, client_label, prompt, config, response=None, error=None, latency=None):
@@ -979,10 +995,19 @@ class AgentFramework:
                 llm_logger.info(msg)
             elif direction == "RESPONSE" and response:
                 t_p, t_c = 0, 0
+                is_estimated = getattr(response, "is_estimated", True)
+                accounting_mode = getattr(
+                    response,
+                    "token_accounting_mode",
+                    "heuristic_estimate" if is_estimated else "provider_measured",
+                )
                 if hasattr(response, 'usage_metadata') and response.usage_metadata:
                     t_p = response.usage_metadata.prompt_token_count or 0
                     t_c = response.usage_metadata.candidates_token_count or 0
+                    is_estimated = getattr(response.usage_metadata, "is_estimated", is_estimated)
+                    accounting_mode = getattr(response.usage_metadata, "token_accounting_mode", accounting_mode)
 
+                token_label = "Estimated Tokens (chars//4)" if is_estimated else "Measured Tokens"
                 text_preview = "No text output"
                 try:
                     if hasattr(response, "text") and response.text:
@@ -996,7 +1021,7 @@ class AgentFramework:
 
                 msg = (
                     f"[{direction}] Model: {model_name} ({client_label}) | Status: SUCCESS{latency_str} | "
-                    f"Tokens: [Prompt: {t_p}, Candidate: {t_c}] | "
+                    f"{token_label} [{accounting_mode}]: [Prompt: {t_p}, Candidate: {t_c}, Cached: 0] | "
                     f"Preview: {text_preview}"
                 )
                 llm_logger.info(msg)
@@ -1011,7 +1036,21 @@ class AgentFramework:
 
     def reset_turn_usage(self):
         """Clear token counters for a new chat session turn."""
-        self.turn_usage = {'prompt_tokens': 0, 'candidates_tokens': 0, 'cached_tokens': 0, 'estimated_cost': 0.0}
+        self._has_estimated_usage = False
+        self._has_measured_usage = False
+        self.turn_usage = {
+            'prompt_tokens': 0,
+            'candidates_tokens': 0,
+            'cached_tokens': 0,
+            'estimated_prompt_tokens': 0,
+            'estimated_candidates_tokens': 0,
+            'actual_prompt_tokens': None,
+            'actual_candidates_tokens': None,
+            'is_estimated': True,
+            'token_accounting_mode': 'heuristic_estimate',
+            'caching_active': False,
+            'estimated_cost': 0.0,
+        }
 
     def _calculate_call_cost(self, model_name, client_label, input_tokens, output_tokens, cached_tokens=0) -> float:
         norm_model = model_name.replace("models/", "")
@@ -1088,9 +1127,54 @@ class AgentFramework:
             elapsed = time.time() - start_time
             self._log_handshake("RESPONSE", target_model, "Antigravity Local", prompt, None, response=resp, latency=elapsed)
 
-            # Zero marginal cost for local Antigravity sessions
-            self.turn_usage['prompt_tokens'] += resp.usage_metadata.prompt_token_count
-            self.turn_usage['candidates_tokens'] += resp.usage_metadata.candidates_token_count
+            # Zero marginal cost for local Antigravity sessions; distinguish heuristic estimates from measured usage
+            usage_meta = getattr(resp, "usage_metadata", None)
+            p_count = (getattr(usage_meta, "prompt_token_count", 0) or 0) if usage_meta else 0
+            c_count = (getattr(usage_meta, "candidates_token_count", 0) or 0) if usage_meta else 0
+            resp_is_estimated = getattr(
+                usage_meta,
+                "is_estimated",
+                getattr(resp, "is_estimated", True),
+            )
+            resp_mode = getattr(
+                usage_meta,
+                "token_accounting_mode",
+                getattr(
+                    resp,
+                    "token_accounting_mode",
+                    "heuristic_estimate" if resp_is_estimated else "provider_measured",
+                ),
+            )
+
+            lock = getattr(self, "_usage_lock", None)
+            if lock is None:
+                lock = threading.Lock()
+                self._usage_lock = lock
+            with lock:
+                self.turn_usage['prompt_tokens'] += p_count
+                self.turn_usage['candidates_tokens'] += c_count
+                self.turn_usage['cached_tokens'] = 0
+                self.turn_usage['caching_active'] = False
+                if resp_is_estimated:
+                    self._has_estimated_usage = True
+                    self.turn_usage['estimated_prompt_tokens'] = (self.turn_usage.get('estimated_prompt_tokens') or 0) + p_count
+                    self.turn_usage['estimated_candidates_tokens'] = (self.turn_usage.get('estimated_candidates_tokens') or 0) + c_count
+                else:
+                    self._has_measured_usage = True
+                    self.turn_usage['actual_prompt_tokens'] = (self.turn_usage.get('actual_prompt_tokens') or 0) + p_count
+                    self.turn_usage['actual_candidates_tokens'] = (self.turn_usage.get('actual_candidates_tokens') or 0) + c_count
+
+                has_est = getattr(self, "_has_estimated_usage", False)
+                has_meas = getattr(self, "_has_measured_usage", False)
+                if has_est and has_meas:
+                    self.turn_usage['is_estimated'] = True
+                    self.turn_usage['token_accounting_mode'] = 'mixed_estimated_and_measured'
+                elif has_meas:
+                    self.turn_usage['is_estimated'] = False
+                    self.turn_usage['token_accounting_mode'] = resp_mode or 'provider_measured'
+                else:
+                    self.turn_usage['is_estimated'] = True
+                    self.turn_usage['token_accounting_mode'] = resp_mode or 'heuristic_estimate'
             return resp
         except Exception as e:
             elapsed = time.time() - start_time

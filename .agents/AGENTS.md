@@ -93,3 +93,5 @@ Every code change must traverse the fail-closed lifecycle:
 ```
 
 **Fail-Closed Rule:** If required automated tests fail, if unresolved relevant defects remain, if review evidence is incomplete, if unapproved files or Protected Financial Assets (`Protocol 06`) are touched, if permitted blockers or deferrals lack explicit documentation and justification under Protocol 05, if stage reports are written to `docs/engineering/` without explicit authorisation, or if an agent attempts to self-approve or auto-advance stages, the task is marked `REJECTED` and execution terminates immediately.
+
+- **Pre-Verdict Verification Skill (`/stage-gate`):** `.agents/skills/stage-gate/SKILL.md` is the standard pre-verdict verification skill executing read-only scope inspection, Protected Financial Asset invariance checks, artifact hygiene scans, and Protocol 05 scope-proportional test routing.

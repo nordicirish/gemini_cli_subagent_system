@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 
@@ -21,6 +21,7 @@ from agent_framework import (
     APPROVED_PARALLEL_COUNCIL_ROLES,
     APPROVED_PARALLEL_COUNCIL_TOOLS,
     AgentFramework,
+    AntigravityAgentRunner,
     AntigravityResponse,
     MAX_PARALLEL_COUNCIL_WORKERS,
 )
@@ -437,6 +438,149 @@ class TestParallelCouncilOrchestration(unittest.TestCase):
 
         self.assertEqual(captured_roles, ["Bullish Advocate"])
         self.assertEqual(out, "Thesis complete")
+
+
+class TestContextAndTokenEfficiency(unittest.TestCase):
+    def setUp(self):
+        self.framework = AgentFramework()
+
+    def test_get_sys_instruction_preserves_rules_and_excludes_redundant_trade_lessons(self):
+        """_get_sys_instruction keeps base instruction and rules.md while omitting duplicated trade_lessons.json."""
+        sys_inst = self.framework._get_sys_instruction("BASE_INSTRUCTION_MARKER")
+
+        self.assertTrue(sys_inst.startswith("BASE_INSTRUCTION_MARKER"))
+        self.assertIn("--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---", sys_inst)
+        self.assertNotIn("--- TRADE LESSONS REPOSITORY ---", sys_inst)
+
+    def test_antigravity_response_and_runner_honest_token_accounting(self):
+        """AntigravityResponse and run_prompt label heuristic estimates honestly and report zero cached tokens."""
+        est_resp = AntigravityResponse("hello world", prompt_tokens=20, candidate_tokens=3)
+        self.assertTrue(est_resp.is_estimated)
+        self.assertEqual(est_resp.token_accounting_mode, "heuristic_estimate")
+        self.assertTrue(est_resp.usage_metadata.is_estimated)
+        self.assertEqual(est_resp.usage_metadata.token_accounting_mode, "heuristic_estimate")
+        self.assertEqual(est_resp.usage_metadata.prompt_token_count, 20)
+        self.assertEqual(est_resp.usage_metadata.candidates_token_count, 3)
+        self.assertEqual(est_resp.usage_metadata.estimated_prompt_tokens, 20)
+        self.assertEqual(est_resp.usage_metadata.estimated_candidate_tokens, 3)
+        self.assertIsNone(est_resp.usage_metadata.actual_prompt_tokens)
+        self.assertIsNone(est_resp.usage_metadata.actual_candidate_tokens)
+        self.assertEqual(est_resp.usage_metadata.cached_content_token_count, 0)
+
+        meas_resp = AntigravityResponse("measured", prompt_tokens=150, candidate_tokens=25, is_estimated=False)
+        self.assertFalse(meas_resp.is_estimated)
+        self.assertEqual(meas_resp.token_accounting_mode, "provider_measured")
+        self.assertFalse(meas_resp.usage_metadata.is_estimated)
+        self.assertEqual(meas_resp.usage_metadata.actual_prompt_tokens, 150)
+        self.assertEqual(meas_resp.usage_metadata.actual_candidate_tokens, 25)
+        self.assertIsNone(meas_resp.usage_metadata.estimated_prompt_tokens)
+        self.assertIsNone(meas_resp.usage_metadata.estimated_candidate_tokens)
+        self.assertEqual(meas_resp.usage_metadata.cached_content_token_count, 0)
+
+        captured_prompt = {}
+        mock_proc = MagicMock()
+        mock_proc.pid = 99999
+        mock_proc.returncode = 0
+        mock_proc.poll.return_value = 0
+
+        def fake_communicate(input=None):
+            captured_prompt["text"] = input
+            return ("Agent reply output", "")
+
+        mock_proc.communicate.side_effect = fake_communicate
+
+        runner = AntigravityAgentRunner(agy_path="mock_agy.exe")
+        with patch("agent_framework.subprocess.Popen", return_value=mock_proc), \
+             patch("agent_framework._cleanup_subprocess"):
+            run_resp = runner.run_prompt("Analyze SPY", system_instruction="SYS", mode="FAST")
+
+        expected_prompt_tokens = len(captured_prompt["text"]) // 4
+        expected_candidate_tokens = len("Agent reply output") // 4
+        self.assertTrue(run_resp.is_estimated)
+        self.assertEqual(run_resp.token_accounting_mode, "heuristic_estimate")
+        self.assertEqual(run_resp.usage_metadata.prompt_token_count, expected_prompt_tokens)
+        self.assertEqual(run_resp.usage_metadata.candidates_token_count, expected_candidate_tokens)
+        self.assertEqual(run_resp.usage_metadata.estimated_prompt_tokens, expected_prompt_tokens)
+        self.assertEqual(run_resp.usage_metadata.estimated_candidate_tokens, expected_candidate_tokens)
+        self.assertIsNone(run_resp.usage_metadata.actual_prompt_tokens)
+        self.assertIsNone(run_resp.usage_metadata.actual_candidate_tokens)
+        self.assertEqual(run_resp.usage_metadata.cached_content_token_count, 0)
+
+    def test_turn_usage_accumulates_estimated_vs_actual_tokens_without_fabricated_cache(self):
+        """AgentFramework.turn_usage distinguishes heuristic estimates from measured usage and never fabricates cache."""
+        self.framework.reset_turn_usage()
+        self.assertEqual(
+            self.framework.turn_usage,
+            {
+                "prompt_tokens": 0,
+                "candidates_tokens": 0,
+                "cached_tokens": 0,
+                "estimated_prompt_tokens": 0,
+                "estimated_candidates_tokens": 0,
+                "actual_prompt_tokens": None,
+                "actual_candidates_tokens": None,
+                "is_estimated": True,
+                "token_accounting_mode": "heuristic_estimate",
+                "caching_active": False,
+                "estimated_cost": 0.0,
+            },
+        )
+
+        # 1. Heuristic-estimated calls
+        with patch.object(
+            self.framework.antigravity_runner,
+            "run_prompt",
+            return_value=AntigravityResponse("est out", prompt_tokens=120, candidate_tokens=30, is_estimated=True),
+        ):
+            self.framework.generate_response_with_fallback("p1", "i1", "FAST")
+
+        self.assertEqual(self.framework.turn_usage["prompt_tokens"], 120)
+        self.assertEqual(self.framework.turn_usage["candidates_tokens"], 30)
+        self.assertEqual(self.framework.turn_usage["estimated_prompt_tokens"], 120)
+        self.assertEqual(self.framework.turn_usage["estimated_candidates_tokens"], 30)
+        self.assertIsNone(self.framework.turn_usage["actual_prompt_tokens"])
+        self.assertIsNone(self.framework.turn_usage["actual_candidates_tokens"])
+        self.assertTrue(self.framework.turn_usage["is_estimated"])
+        self.assertEqual(self.framework.turn_usage["token_accounting_mode"], "heuristic_estimate")
+        self.assertEqual(self.framework.turn_usage["cached_tokens"], 0)
+        self.assertFalse(self.framework.turn_usage["caching_active"])
+
+        # 2. Pure provider-measured turn
+        self.framework.reset_turn_usage()
+        with patch.object(
+            self.framework.antigravity_runner,
+            "run_prompt",
+            return_value=AntigravityResponse("meas out", prompt_tokens=200, candidate_tokens=45, is_estimated=False),
+        ):
+            self.framework.generate_response_with_fallback("p2", "i2", "PRO")
+
+        self.assertFalse(self.framework.turn_usage["is_estimated"])
+        self.assertEqual(self.framework.turn_usage["token_accounting_mode"], "provider_measured")
+        self.assertEqual(self.framework.turn_usage["actual_prompt_tokens"], 200)
+        self.assertEqual(self.framework.turn_usage["actual_candidates_tokens"], 45)
+        self.assertEqual(self.framework.turn_usage["estimated_prompt_tokens"], 0)
+        self.assertEqual(self.framework.turn_usage["estimated_candidates_tokens"], 0)
+        self.assertEqual(self.framework.turn_usage["cached_tokens"], 0)
+        self.assertFalse(self.framework.turn_usage["caching_active"])
+
+        # 3. Mixed measured + estimated in the same turn
+        with patch.object(
+            self.framework.antigravity_runner,
+            "run_prompt",
+            return_value=AntigravityResponse("mix out", prompt_tokens=40, candidate_tokens=10, is_estimated=True),
+        ):
+            self.framework.generate_response_with_fallback("p3", "i3", "FAST")
+
+        self.assertTrue(self.framework.turn_usage["is_estimated"])
+        self.assertEqual(self.framework.turn_usage["token_accounting_mode"], "mixed_estimated_and_measured")
+        self.assertEqual(self.framework.turn_usage["prompt_tokens"], 240)
+        self.assertEqual(self.framework.turn_usage["candidates_tokens"], 55)
+        self.assertEqual(self.framework.turn_usage["actual_prompt_tokens"], 200)
+        self.assertEqual(self.framework.turn_usage["actual_candidates_tokens"], 45)
+        self.assertEqual(self.framework.turn_usage["estimated_prompt_tokens"], 40)
+        self.assertEqual(self.framework.turn_usage["estimated_candidates_tokens"], 10)
+        self.assertEqual(self.framework.turn_usage["cached_tokens"], 0)
+        self.assertFalse(self.framework.turn_usage["caching_active"])
 
 
 if __name__ == "__main__":
