@@ -940,14 +940,37 @@ class TestImportAndLifecycleSafety(unittest.TestCase):
     """Verifies that module import and repository initialization create zero files on disk."""
 
     def test_import_and_factory_creates_no_files(self):
-        # Confirm that production database paths do not exist
-        self.assertFalse(os.path.exists("context/gem.db"))
-        self.assertFalse(os.path.exists("cache/market_data.db"))
+        production_db = Path("context/gem.db")
+        cache_db = Path("cache/market_data.db")
 
-        # Instantiate DatabaseManager for a non-existent path without connecting
-        dm = DatabaseManager("temp_test_nonexistent.db", profile=PRIMARY_FINANCIAL_PROFILE)
-        factory = RepositoryFactory(dm)
-        self.assertFalse(os.path.exists("temp_test_nonexistent.db"))
+        production_hash = (
+            hashlib.sha256(production_db.read_bytes()).hexdigest()
+            if production_db.exists()
+            else None
+        )
+
+        self.assertFalse(cache_db.exists())
+
+        with tempfile.TemporaryDirectory() as td:
+            factory_db = Path(td) / "factory_must_not_create.db"
+            dm = DatabaseManager(
+                str(factory_db),
+                profile=PRIMARY_FINANCIAL_PROFILE,
+            )
+            RepositoryFactory(dm)
+
+            self.assertFalse(factory_db.exists())
+
+        self.assertFalse(cache_db.exists())
+
+        if production_hash is None:
+            self.assertFalse(production_db.exists())
+        else:
+            self.assertTrue(production_db.exists())
+            self.assertEqual(
+                hashlib.sha256(production_db.read_bytes()).hexdigest(),
+                production_hash,
+            )
 
     def test_state_files_invariance(self):
         expected_hashes = {

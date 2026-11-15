@@ -2851,46 +2851,5 @@ class TestStage15D112SchemaVersionUpgradeAndCompatibility(unittest.TestCase):
             self.assertEqual(cursor.fetchone()[0], "RULE_IMMUTABLE")
 
 
-# Adapt test_import_and_factory_creates_no_files to accommodate authorized cutover to context/gem.db
-def _apply_import_lifecycle_adaptation():
-    try:
-        try:
-            import test_database_repositories as _tdr
-        except ImportError:
-            import tests.test_database_repositories as _tdr
-
-        def _adapted_test_import_and_factory_creates_no_files(self):
-            # Confirm that cache database does not exist prematurely
-            self.assertFalse(os.path.exists("cache/market_data.db"))
-            # If context/gem.db exists following authorized cutover, verify its structural integrity in read-only mode
-            if os.path.exists("context/gem.db"):
-                db_file = "context/gem.db".replace("\\", "/")
-                conn = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
-                try:
-                    cur = conn.cursor()
-                    cur.execute("PRAGMA integrity_check;")
-                    self.assertEqual(cur.fetchall(), [("ok",)])
-                finally:
-                    conn.close()
-
-            # Instantiate DatabaseManager for a non-existent path without connecting
-            dm = DatabaseManager("temp_test_nonexistent.db", profile=PRIMARY_FINANCIAL_PROFILE)
-            factory = _tdr.RepositoryFactory(dm)
-            self.assertFalse(os.path.exists("temp_test_nonexistent.db"))
-
-        _tdr.TestImportAndLifecycleSafety.test_import_and_factory_creates_no_files = _adapted_test_import_and_factory_creates_no_files
-
-        for mod_name in ("test_database_repositories", "tests.test_database_repositories"):
-            if mod_name in sys.modules:
-                mod = sys.modules[mod_name]
-                if hasattr(mod, "TestImportAndLifecycleSafety"):
-                    setattr(mod.TestImportAndLifecycleSafety, "test_import_and_factory_creates_no_files", _adapted_test_import_and_factory_creates_no_files)
-    except (ImportError, AttributeError):
-        pass
-
-
-_apply_import_lifecycle_adaptation()
-
-
 if __name__ == "__main__":
     unittest.main()
