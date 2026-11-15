@@ -61,10 +61,11 @@ All verification must be classified into one of four distinct categories:
 ### 4. Environment & Deployment Tests
 - **Scope:** Cloud infrastructure, cloud credentials/networking, deployment scripts, operational monitoring, production hardware performance, and production-scale workload testing.
 - **Requirements:**
-  - May be formally deferred until the corresponding deployment, infrastructure, or operational stage.
-  - Any deferral must be explicitly recorded as deferred verification with stated rationale, remaining risk, and designated verification stage.
-  - Deferral must never waive mandatory financial-integrity, security, authorization, or deterministic correctness requirements.
-  - All deferred items relevant to a release must be validated prior to production release.
+  - May be formally deferred until the corresponding deployment, infrastructure, or operational stage only with explicit Human Owner authorization.
+  - A deferral cannot automatically be treated as an accepted limitation.
+  - Any proposed deferral must be explicitly recorded as deferred verification documenting its stated rationale, diagnostic evidence, remaining risk, affected verification, and designated future verification stage.
+  - A deferral must never waive mandatory financial-integrity, security, authorization, or deterministic correctness requirements.
+  - All deferred verification items relevant to a release must be validated prior to the associated production release.
 
 ## 4. Risk-Proportionate Test Execution
 
@@ -90,7 +91,7 @@ When running baseline or verification suites, any failure must be captured and e
    - Full test identifier (`test_module.ClassName.test_name`).
    - Exact execution command line.
    - Standard output and standard error.
-   - Process exit code (`$LASTEXITCODE`).
+   - Process exit code from the execution environment (e.g., `$LASTEXITCODE` in PowerShell, `%ERRORLEVEL%` in Command Prompt, or `$?` in POSIX shells).
    - Execution environment details (OS, Python version, system load, time of day/market session).
    - Whether the failure was reproduced upon controlled inspection.
    - Source code analysis of the failure mechanism.
@@ -102,8 +103,9 @@ When running baseline or verification suites, any failure must be captured and e
 3. **Investigation & Anti-Gaming Safeguards:**
    - **No Repeated Reruns:** Repeatedly running a failing test in a loop hoping for a transient pass is strictly forbidden.
    - **No Silent Modification:** Never alter test assertions, skip decorators, or production code to conceal baseline failures.
+   - **No Automatic Acceptance of Blockers or Deferrals:** A blocker, intermittent failure, or deferral cannot automatically be treated as an accepted limitation. Any proposed blocker or deferral must document its stated rationale, diagnostic evidence, remaining risk, affected verification, and (for deferred items) the designated future verification stage. Explicit Human Owner authorization is mandatory before any blocker or deferral can be accepted as a permitted limitation.
    - **Demonstrably Unrelated Baseline Failures:** If a pre-existing baseline failure is demonstrably unrelated to the authorized scope and cannot compromise the safety or correctness of the change, work may proceed only if explicitly authorized by the Human Owner with the failure documented as an unresolved baseline limitation.
-   - **Relevant Failures Block Execution:** If an unresolved failure intersects the modified code or its dependencies, execution must halt immediately (fail-closed).
+   - **Unresolved Relevant Defects Remain Fail-Closed:** If an unresolved failure or defect intersects the modified code or its dependencies, execution must halt immediately (fail-closed). Deferrals or environmental explanations cannot excuse unresolved relevant defects.
 
 ## 6. Truth in Reporting & Acceptance Categories
 
@@ -117,4 +119,8 @@ All verification reporting in Gemini completion handovers must classify test out
 
 **Reporting Rules:**
 - Never describe blocked, intermittent, or deferred tests as "Passed".
+- Explicit Human Owner authorization is required before any blocked, intermittent, or deferred state can be accepted as a permitted limitation.
+- Any blocked or deferred report must document its reason, diagnostic evidence, remaining risk, affected verification, and (for deferred items) the designated future verification stage.
+- A deferral cannot waive deterministic correctness, security, financial integrity, or authorization requirements. All deferred verifications relevant to a release must be completed before the associated production release.
+- Unresolved relevant defects remain fail-closed.
 - Report actual numbers for tests run, failures, errors, and skips directly from the runner output. Inferring test outcomes without execution is strictly prohibited.

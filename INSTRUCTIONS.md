@@ -71,9 +71,9 @@ Before editing any file in any stage:
    Do not require installing `pytest` or adding external test dependencies.
 3. **Baseline Failure Protocol:**
    - If baseline tests fail prior to your edits, capture the full diagnostic evidence: exact test name, command, stdout, stderr, process exit code, and execution environment.
-   - Investigate the root cause and failure mechanism, and classify the failure under Protocol 05 (reproducible defect, intermittent contention/timing, external dependency failure, environmental failure, or deferred verification).
+   - Investigate the root cause and failure mechanism, and classify the failure under Protocol 05 (reproducible defect, intermittent contention/timing, external dependency failure, or environmental failure). Verification outcomes are reported separately under Protocol 05 (Passed, Failed, Intermittent, Blocked, or Deferred).
    - STOP immediately and report the discrepancy if the failure blocks safe progress, introduces ambiguity into authorised functionality, or affects required stage acceptance.
-   - Permit continuation only when the failure is demonstrably unrelated to the authorised task, and both the authorised specification and repository governance permit it under an explicit documented limitation.
+   - Permit continuation only when the failure is demonstrably unrelated to the authorised task, and both the authorised specification and repository governance permit it under an explicit documented limitation authorised by the Human Owner.
    - Never silently modify tests or production code to make the baseline pass; never suppress, delete, or bypass test assertions.
    - A passing rerun does not erase an intermittent failure; repeated reruns merely to obtain a passing result are prohibited.
 4. Execute appropriate targeted unit, regression, and integration tests for authorised changes in proportion to risk, adhering to Protocol 05.
