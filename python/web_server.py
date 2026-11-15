@@ -384,6 +384,12 @@ class ChatRequest(BaseModel):
     message: str
     history: list = []
     skip_debate: bool = False # New: Support for browser session memory
+    include_charts: bool = False
+
+
+def should_attach_charts(req: ChatRequest) -> bool:
+    """Attach chart screenshots only when explicitly requested by the client."""
+    return bool(getattr(req, "include_charts", False))
 
 @app.post("/api/cancel_chat")
 def cancel_chat():
@@ -774,7 +780,7 @@ def chat_endpoint(req: ChatRequest):
         active_model_str = f"[ACTIVE_MODEL]: {ORCHESTRATOR_MODEL}\n"
         current_message = f"{active_model_str}{prompt_prefix}[SYSTEM_TIME (NEW YORK / ET): {current_iso}] [USER_QUERY]: {req.message}"
         
-        chart_parts, chart_symbols = get_chart_parts()
+        chart_parts, chart_symbols = get_chart_parts() if should_attach_charts(req) else ([], [])
         if chart_parts:
             framework.log(f"[Vision] Attaching {len(chart_parts)} fresh 1m chart screenshot(s) [{', '.join(chart_symbols)}] to Gemini multimodal prompt...")
 

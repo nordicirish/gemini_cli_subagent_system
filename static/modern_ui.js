@@ -67,6 +67,9 @@ const ModernChat = {
         this.newChatBtn = document.getElementById('new-chat-btn');
         this.historyBtn = document.getElementById('history-chat-btn');
         this.currentLogElement = null;
+        this.currentThinkingId = null;
+        this.activeAbortController = null;
+        this.includeChartsNext = false;
         this.isAborted = false;
 
         if (this.launcher) this.launcher.onclick = () => this.toggle();
@@ -102,8 +105,9 @@ const ModernChat = {
         this.cachingToggle = document.getElementById('context-caching-toggle');
         this.cachingContainer = document.getElementById('context-caching-toggle-container');
         if (this.cachingToggle) {
+            this.cachingToggle.checked = false;
+            this.cachingToggle.disabled = true;
             this.cachingToggle.onchange = () => this.toggleCaching();
-            this.cachingToggle.checked = true;
         }
         // Default subscription ON
         if (this.geminiSubscriptionToggle) {
@@ -145,12 +149,6 @@ const ModernChat = {
         this.fetchModels();
         // Always hide chat on page load — only shown when user clicks the launcher
         this.hide();
-        // If subscription is active by default, auto-trigger caching on startup
-        if (this.geminiSubscriptionToggle && this.geminiSubscriptionToggle.checked && this.cachingToggle) {
-            this.cachingToggle.checked = true;
-            // Small delay so fetchModels() has set the model first
-            setTimeout(() => this.toggleCaching(), 800);
-        }
         console.log('Gemini CLI Chat UI Initialized');
     },
 
@@ -470,11 +468,18 @@ const ModernChat = {
     syncSettingsPopover() {
         const subOn = this.geminiSubscriptionToggle ? this.geminiSubscriptionToggle.checked : true;
         const paidOn = this.paidTiersToggle ? this.paidTiersToggle.checked : false;
-        const cacheOn = this.cachingToggle ? this.cachingToggle.checked : true;
+        const cacheOn = false; // Context caching is inactive in local CLI execution mode
 
         this._setKnob('settings-sub-knob', 'settings-sub-toggle', subOn);
         this._setKnob('settings-paid-knob', 'settings-paid-toggle', paidOn);
         this._setKnob('settings-caching-knob', 'settings-caching-toggle', cacheOn);
+
+        const cachingTrack = document.getElementById('settings-caching-toggle');
+        if (cachingTrack) {
+            cachingTrack.style.opacity = '0.45';
+            cachingTrack.style.cursor = 'not-allowed';
+            cachingTrack.title = 'Context caching is not active in local CLI execution mode';
+        }
 
         // Show/hide plan banner and advanced section based on subscription state
         const banner = document.getElementById('settings-plan-banner');
@@ -487,7 +492,6 @@ const ModernChat = {
         if (!this.geminiSubscriptionToggle) return;
         this.geminiSubscriptionToggle.checked = !this.geminiSubscriptionToggle.checked;
         const isOn = this.geminiSubscriptionToggle.checked;
-        if (isOn && this.cachingToggle) { this.cachingToggle.checked = true; this.toggleCaching(); }
         if (isOn && this.paidTiersToggle) this.paidTiersToggle.checked = true;
         this.fetchModels();
         this.updateTotalSessionCost();
@@ -503,53 +507,27 @@ const ModernChat = {
     },
 
     toggleSettingsCaching() {
-        if (!this.cachingToggle) return;
-        this.cachingToggle.checked = !this.cachingToggle.checked;
-        this.toggleCaching();
+        if (this.cachingToggle) {
+            this.cachingToggle.checked = false;
+            this.cachingToggle.disabled = true;
+        }
         this.syncSettingsPopover();
     },
 
     async toggleCaching() {
         if (!this.cachingToggle) return;
-        const disableCache = !this.cachingToggle.checked;
-        try {
-            const res = await fetch('/api/set_cache_policy', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ disable_cache: disableCache })
-            });
-            if (res.ok) {
-                const action = disableCache ? "disabled" : "enabled";
-                console.log(`Context caching manually ${action}`);
-            }
-        } catch (e) {
-            console.error('Failed to set cache policy', e);
-        }
+        // Context caching is retired/inactive in local CLI execution mode
+        this.cachingToggle.checked = false;
+        this.cachingToggle.disabled = true;
+        this.syncSettingsPopover();
     },
 
     async updateCachingToggleVisibility() {
-        if (!this.modelSelector || !this.cachingToggle) return;
-        const model = this.modelSelector.value || '';
-        const nameLower = model.toLowerCase();
-        const isPaid = nameLower.includes('pro') || (nameLower.includes('preview') && !nameLower.includes('flash') && !nameLower.includes('thinking'));
-
-        // cachingContainer is now inside the settings popover — never show it in the header
+        if (!this.cachingToggle) return;
+        // cachingContainer is inside the settings popover — keep retired toggle hidden and disabled
         if (this.cachingContainer) this.cachingContainer.style.display = 'none';
-
-        if (!isPaid) {
-            // Non-pro model: disable caching silently
-            if (this.cachingToggle.checked) {
-                this.cachingToggle.checked = false;
-                await this.toggleCaching();
-            }
-        } else if (this.geminiSubscriptionToggle && this.geminiSubscriptionToggle.checked) {
-            // Subscription + pro: force caching on
-            if (!this.cachingToggle.checked) {
-                this.cachingToggle.checked = true;
-                await this.toggleCaching();
-            }
-        }
-        // Sync popover knob if open
+        this.cachingToggle.checked = false;
+        this.cachingToggle.disabled = true;
         this.syncSettingsPopover();
     },
 
@@ -585,7 +563,7 @@ const ModernChat = {
                 </div>
             </div>
             <p style="margin: 0; font-size: 0.85rem; line-height: 1.5; color: rgba(255, 255, 255, 0.85);">
-                Paid Tier keys support much higher throughput and enable ultra-fast <strong>Context Caching</strong>, saving up to 75% on token costs and increasing response speed by 3x to 5x.
+                Paid Tier keys support higher rate limits and unlock Pro reasoning models for full Council execution.
             </p>
             <button id="upgrade-tier-btn" style="
                 background: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%);
@@ -643,12 +621,11 @@ const ModernChat = {
                 // 4. Trigger model change
                 await this.changeModel();
                 
-                // 5. Automatically enable Context Caching
                 if (this.cachingToggle) {
-                    this.cachingToggle.checked = true;
-                    await this.toggleCaching();
-                    this.appendMessage('ai', '🚀 Paid Tier active and **Context Caching** enabled for maximum speed & cost savings!', false);
+                    this.cachingToggle.checked = false;
+                    this.cachingToggle.disabled = true;
                 }
+                this.appendMessage('ai', '🚀 Paid Tier active — switched Council to Pro reasoning tier.', false);
             }
         }
     },
@@ -985,11 +962,20 @@ const ModernChat = {
                 const subActive = this.geminiSubscriptionToggle && this.geminiSubscriptionToggle.checked;
                 const badge = document.createElement('div');
                 badge.className = 'cost-estimator';
+                const isEstimated = Boolean(usage && (usage.is_estimated || usage.token_accounting_mode === 'heuristic_estimate'));
                 let tokenInfo = '';
                 if (usage) {
-                    tokenInfo = ` <span style="font-size:0.65rem;opacity:0.7">(${usage.prompt_tokens + usage.cached_tokens} in / ${usage.candidates_tokens} out)</span>`;
+                    const cachedIn = usage.caching_active ? (usage.cached_tokens || 0) : 0;
+                    const inTokens = (usage.actual_prompt_tokens ?? usage.estimated_prompt_tokens ?? usage.prompt_tokens ?? 0) + cachedIn;
+                    const outTokens = usage.actual_candidates_tokens ?? usage.estimated_candidates_tokens ?? usage.candidates_tokens ?? 0;
+                    const tokenText = isEstimated
+                        ? `~${inTokens} est. in / ~${outTokens} est. out · chars/4 est.`
+                        : `${inTokens} in / ${outTokens} out`;
+                    tokenInfo = ` <span style="font-size:0.65rem;opacity:0.7">(${tokenText})</span>`;
                 }
-                const costStr = `Est. Cost: $${cost.toFixed(4)}`;
+                const costStr = isEstimated
+                    ? `Heuristic Est. Cost: $${cost.toFixed(4)}`
+                    : `Est. Cost: $${cost.toFixed(4)}`;
                 const planStr = subActive ? ` <span style="color:#58a6ff;font-size:0.65rem;margin-left:5px;font-weight:bold">[Plan Active]</span>` : '';
                 badge.innerHTML = `🪙 ${costStr}${planStr}${tokenInfo}`;
                 msgDiv.appendChild(badge);
@@ -1017,21 +1003,63 @@ const ModernChat = {
         if (save) this.saveHistory();
     },
 
+    shouldCaptureCharts(text, options = {}) {
+        if (options && options.includeCharts === true) return true;
+        if (this.includeChartsNext === true) return true;
+        if (!text) return false;
+        if (text === this.BOOT_PROMPT || text.startsWith('SYSTEM DIRECTIVE:')) return false;
+        return /\b(chart screenshot|attach chart|capture chart|1m chart|tradingview chart|inspect chart)\b/i.test(text);
+    },
+
+    _cleanupPendingTurnUI(thinkingId = null) {
+        const targetId = thinkingId || this.currentThinkingId;
+        if (targetId) {
+            const tMsg = document.getElementById(targetId);
+            if (tMsg) tMsg.remove();
+        }
+        if (!thinkingId || this.currentThinkingId === thinkingId) {
+            this.currentThinkingId = null;
+            this.currentLogElement = null;
+            if (this.input) {
+                this.input.disabled = false;
+                this.input.focus();
+            }
+            if (this.sendBtn) this.sendBtn.style.display = 'flex';
+            if (this.stopBtn) this.stopBtn.style.display = 'none';
+            const statusIndicator = document.getElementById('chat-status-indicator');
+            if (statusIndicator) {
+                statusIndicator.textContent = 'Status: Ready';
+                statusIndicator.style.color = '#8b949e';
+            }
+        }
+    },
+
     async stopMessage() {
         this.isAborted = true;
-        document.getElementById('chat-status-indicator').textContent = 'Status: Stopping...';
+        const statusIndicator = document.getElementById('chat-status-indicator');
+        if (statusIndicator) statusIndicator.textContent = 'Status: Stopping...';
+        if (this.activeAbortController) {
+            try {
+                this.activeAbortController.abort();
+            } catch (e) {}
+            this.activeAbortController = null;
+        }
+        this._cleanupPendingTurnUI(this.currentThinkingId);
+        this.appendMessage('ai', '🛑 Request cancelled by user.', false);
         try {
             await fetch('/api/cancel_chat', { method: 'POST' });
         } catch (e) {}
-        this.stopBtn.style.display = 'none';
-        this.sendBtn.style.display = 'flex';
+        if (statusIndicator) {
+            statusIndicator.textContent = 'Status: Ready';
+            statusIndicator.style.color = '#8b949e';
+        }
     },
 
     calculateCost(usage, model) {
         if (!usage || !model) return 0.0;
-        let p = usage.prompt_tokens || 0;
-        let c = usage.candidates_tokens || 0;
-        let cached = usage.cached_tokens || 0;
+        const p = usage.actual_prompt_tokens ?? usage.estimated_prompt_tokens ?? usage.prompt_tokens ?? 0;
+        const c = usage.actual_candidates_tokens ?? usage.estimated_candidates_tokens ?? usage.candidates_tokens ?? 0;
+        const cached = usage.caching_active ? (usage.cached_tokens || 0) : 0;
 
         let inputPrice = 0, cachePrice = 0, outputPrice = 0;
         if (model.includes('pro')) {
@@ -1048,11 +1076,13 @@ const ModernChat = {
         return cost;
     },
 
-    async sendMessage(isLogRequest = false) {
+    async sendMessage(isLogRequest = false, options = {}) {
         const text = this.input.value.trim();
         if (!text) return;
 
         this.isAborted = false;
+        const includeCharts = this.shouldCaptureCharts(text, options);
+        this.includeChartsNext = false;
 
         // Show friendly label in the chat bubble for quick-prompts; full text goes to the API
         const displayLabel = this._pendingDisplayLabel || null;
@@ -1086,6 +1116,9 @@ const ModernChat = {
         logText.style.cssText = 'font-size:0.78rem; color:#888; margin-top:5px; font-style:italic;';
         logText.textContent = 'Awaiting DATA_PACKET injection...';
 
+        const abortController = new AbortController();
+        this.activeAbortController = abortController;
+        this.currentThinkingId = thinkingId;
         this.currentLogElement = logText;
         msgDiv.appendChild(thinkingText);
         msgDiv.appendChild(logText);
@@ -1101,16 +1134,19 @@ const ModernChat = {
         if (statusIndicator) statusIndicator.textContent = '';
 
         try {
-            // Render & capture live 1m TradingView charts before dispatching chat to Gemini LLM
-            if (typeof window.captureTargetChartScreenshots === 'function') {
+            // Render & capture live 1m TradingView charts only when explicitly requested
+            if (includeCharts && typeof window.captureTargetChartScreenshots === 'function') {
                 if (this.currentLogElement) {
                     this.currentLogElement.textContent = 'Rendering & capturing live 1m TradingView charts...';
                 }
                 await window.captureTargetChartScreenshots();
+                if (this.isAborted || abortController.signal.aborted) return;
                 if (this.currentLogElement) {
                     this.currentLogElement.textContent = 'Live charts synchronized. Ingesting prompt...';
                 }
             }
+
+            if (this.isAborted || abortController.signal.aborted) return;
 
             // Get last 15 messages for session hydration
             const savedHistory = JSON.parse(localStorage.getItem('gem_chat_history') || '[]');
@@ -1119,20 +1155,26 @@ const ModernChat = {
             const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                signal: abortController.signal,
                 body: JSON.stringify({
                     message: text,
-                    history: historyPayload
+                    history: historyPayload,
+                    include_charts: includeCharts
                 })
             });
 
-            if (this.isAborted) return;
+            if (this.isAborted || abortController.signal.aborted) return;
 
             const data = await res.json();
+
+            if (this.isAborted || abortController.signal.aborted) return;
 
             // Remove thinking message
             const tMsg = document.getElementById(thinkingId);
             if (tMsg) tMsg.remove();
-            this.currentLogElement = null;
+            if (this.currentThinkingId === thinkingId) {
+                this.currentLogElement = null;
+            }
 
             if (data.status === 'success') {
                 const activeModel = data.active_model || data.model;
@@ -1175,16 +1217,15 @@ const ModernChat = {
                 this.appendMessage('ai', '⚠️ Error: ' + data.message);
             }
         } catch (e) {
-            if (this.isAborted) return;
+            if (this.isAborted || (e && e.name === 'AbortError')) return;
             const tMsg = document.getElementById(thinkingId);
             if (tMsg) tMsg.remove();
             this.appendMessage('ai', '⚠️ Error: Connection failed. Is the server running?');
         } finally {
-            this.input.disabled = false;
-            this.sendBtn.style.display = 'flex';
-            this.stopBtn.style.display = 'none';
-            document.getElementById('chat-status-indicator').textContent = 'Status: Ready';
-            this.input.focus();
+            if (this.activeAbortController === abortController) {
+                this.activeAbortController = null;
+            }
+            this._cleanupPendingTurnUI(thinkingId);
         }
     },
 

@@ -875,5 +875,95 @@ class TestStage332ContextAndTokenEfficiency(unittest.TestCase):
         self.assertTrue(web_server._session_hydrated)
 
 
+class TestStage333ChatLatencyAndUxCleanup(unittest.TestCase):
+    def setUp(self):
+        self._orig_model = web_server.ORCHESTRATOR_MODEL
+        self._orig_session = web_server.global_chat_session
+        web_server.cancel_event.clear()
+
+    def tearDown(self):
+        web_server.ORCHESTRATOR_MODEL = self._orig_model
+        web_server.global_chat_session = self._orig_session
+        web_server.cancel_event.clear()
+
+    @patch("web_server.get_chart_parts", return_value=(["FAKE_CHART_PART"], ["SPY"]))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_skips_chart_capture_by_default(self, mock_dispatch, mock_charts):
+        """Standard /api/chat requests do not attach chart screenshots unless include_charts=True."""
+        mock_dispatch.return_value = {
+            "status": "completed",
+            "response": "Portfolio posture checked without chart blocking.",
+            "turn_count": 1,
+        }
+
+        req = web_server.ChatRequest(message="What is our current cash allocation?")
+        self.assertFalse(req.include_charts)
+        res = web_server.chat_endpoint(req)
+
+        self.assertEqual(res["status"], "success")
+        mock_charts.assert_not_called()
+        dispatched_msg = mock_dispatch.call_args.kwargs["initial_message"]
+        self.assertIsInstance(dispatched_msg, str)
+
+    @patch("web_server.get_chart_parts", return_value=(["FAKE_CHART_PART"], ["SPY"]))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_attaches_charts_when_explicitly_requested(self, mock_dispatch, mock_charts):
+        """/api/chat invokes get_chart_parts and prepends chart parts when include_charts=True."""
+        mock_dispatch.return_value = {
+            "status": "completed",
+            "response": "Reviewed 1m chart structure.",
+            "turn_count": 1,
+        }
+
+        req = web_server.ChatRequest(message="Inspect 1m SPY chart", include_charts=True)
+        res = web_server.chat_endpoint(req)
+
+        self.assertEqual(res["status"], "success")
+        mock_charts.assert_called_once()
+        dispatched_msg = mock_dispatch.call_args.kwargs["initial_message"]
+        self.assertIsInstance(dispatched_msg, list)
+        self.assertEqual(dispatched_msg[0], "FAKE_CHART_PART")
+        self.assertIsInstance(dispatched_msg[-1], str)
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_cancellation_returns_clean_status_and_preserves_session(self, mock_dispatch, mock_charts):
+        """/api/cancel_chat signals cancel_event and preserves session/model on clean cancellation."""
+        initial_model = web_server.ORCHESTRATOR_MODEL
+        sentinel_session = MagicMock(name="SentinelSession")
+        web_server.global_chat_session = sentinel_session
+
+        def simulate_cancel(**kwargs):
+            cancel_res = web_server.cancel_chat()
+            self.assertEqual(cancel_res["status"], "cancelled")
+            self.assertTrue(kwargs["cancel_check"]())
+            return {"status": "cancelled", "response": "[OFFLINE] Request cancelled by user."}
+
+        mock_dispatch.side_effect = simulate_cancel
+
+        res = web_server.chat_endpoint(web_server.ChatRequest(message="Long analysis"))
+        self.assertEqual(res["status"], "success")
+        self.assertIn("cancelled", res["response"].lower())
+        self.assertTrue(web_server.cancel_event.is_set())
+        self.assertEqual(web_server.ORCHESTRATOR_MODEL, initial_model)
+        self.assertIs(web_server.global_chat_session, sentinel_session)
+
+    def test_modern_ui_js_stage333_contracts(self):
+        """static/modern_ui.js enforces opt-in chart capture, honest token estimates, retired cache toggle, and AbortController cleanup."""
+        ui_path = os.path.join(os.path.dirname(__file__), "..", "static", "modern_ui.js")
+        with open(ui_path, "r", encoding="utf-8") as f:
+            ui_js = f.read()
+
+        self.assertIn("shouldCaptureCharts", ui_js)
+        self.assertIn("include_charts: includeCharts", ui_js)
+        self.assertIn("AbortController", ui_js)
+        self.assertIn("_cleanupPendingTurnUI", ui_js)
+        self.assertIn("chars/4 est.", ui_js)
+        self.assertIn("Heuristic Est. Cost", ui_js)
+        self.assertNotIn("saving up to 75% on token costs", ui_js)
+        self.assertNotIn("Context Caching** enabled", ui_js)
+        self.assertNotIn("/api/set_cache_policy", ui_js)
+
+
 if __name__ == "__main__":
     unittest.main()

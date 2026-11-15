@@ -1,4 +1,4 @@
-﻿# GEM Trading Agent Framework - Dependency Installer Script
+# GEM Trading Agent Framework - Dependency Installer Script
 # Installs verified python dependencies inside .venv or globally on Windows.
 
 Write-Host "==========================================================" -ForegroundColor Cyan
