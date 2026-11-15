@@ -139,14 +139,30 @@ def _isolated_all_coordinators(
 
 class _HeavyMarketDataTestBase(unittest.TestCase):
     def setUp(self):
+        super().setUp()
+        self._original_all_tickers = list(fs.ALL_TICKERS)
+        self.addCleanup(self._restore_all_tickers)
+        fixture_symbols = [
+            "AAPL", "MSFT", "AMD", "QQQ", "META", "IWM", "DIA"
+        ]
+        fs.ALL_TICKERS = list(dict.fromkeys(
+            self._original_all_tickers + fixture_symbols
+        ))
         fs.cache.clear()
         with fs._MARKET_DATA_FALLBACK_STATE_LOCK:
             fs._MARKET_DATA_FALLBACK_REQUESTS.clear()
 
+    def _restore_all_tickers(self):
+        fs.ALL_TICKERS = list(self._original_all_tickers)
+
     def tearDown(self):
-        fs.cache.clear()
-        with fs._MARKET_DATA_FALLBACK_STATE_LOCK:
-            fs._MARKET_DATA_FALLBACK_REQUESTS.clear()
+        try:
+            fs.ALL_TICKERS = list(self._original_all_tickers)
+            fs.cache.clear()
+            with fs._MARKET_DATA_FALLBACK_STATE_LOCK:
+                fs._MARKET_DATA_FALLBACK_REQUESTS.clear()
+        finally:
+            super().tearDown()
 
 
 class TestStage223CoordinatorIsolation(_HeavyMarketDataTestBase):

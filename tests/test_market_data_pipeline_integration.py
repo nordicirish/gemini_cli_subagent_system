@@ -137,16 +137,28 @@ def _isolated_pipeline_coordinators(
 
 class _MarketDataPipelineIntegrationTestBase(unittest.TestCase):
     def setUp(self):
+        super().setUp()
+        self._original_all_tickers = list(fs.ALL_TICKERS)
+        self.addCleanup(self._restore_all_tickers)
+        default_test_symbols = ["SPY", "AAPL", "MSFT", "QQQ", "NVDA", "GOOG", "AMZN"]
+        fs.ALL_TICKERS = list(dict.fromkeys(self._original_all_tickers + default_test_symbols))
         fs.cache.clear()
         fs.FORCE_REFRESH = False
         with fs._MARKET_DATA_FALLBACK_STATE_LOCK:
             fs._MARKET_DATA_FALLBACK_REQUESTS.clear()
 
+    def _restore_all_tickers(self):
+        fs.ALL_TICKERS = list(self._original_all_tickers)
+
     def tearDown(self):
-        fs.cache.clear()
-        fs.FORCE_REFRESH = False
-        with fs._MARKET_DATA_FALLBACK_STATE_LOCK:
-            fs._MARKET_DATA_FALLBACK_REQUESTS.clear()
+        try:
+            fs.ALL_TICKERS = list(self._original_all_tickers)
+            fs.cache.clear()
+            fs.FORCE_REFRESH = False
+            with fs._MARKET_DATA_FALLBACK_STATE_LOCK:
+                fs._MARKET_DATA_FALLBACK_REQUESTS.clear()
+        finally:
+            super().tearDown()
 
     def _seed_valid_spot_cache(
         self,
@@ -628,6 +640,7 @@ class TestMarketDataPipelineIntegration(_MarketDataPipelineIntegrationTestBase):
 
         with _isolated_pipeline_coordinators() as (heavy_coord, heavy_app, _, _, _, _):
             # Cycle 1 with initial symbol list: only AAPL
+            fs.ALL_TICKERS = ["AAPL"]
             stats1 = fs.coordinate_heavy_market_data_cycle(
                 symbols=["AAPL"],
                 tickers_obj={"AAPL": _Ticker("AAPL")},
@@ -641,6 +654,7 @@ class TestMarketDataPipelineIntegration(_MarketDataPipelineIntegrationTestBase):
             self.assertIn("AAPL", fs.cache.history)
 
             # Dynamic expansion: GOOG is added to symbol list
+            fs.ALL_TICKERS = ["AAPL", "GOOG"]
             stats2 = fs.coordinate_heavy_market_data_cycle(
                 symbols=["AAPL", "GOOG"],
                 tickers_obj={"AAPL": _Ticker("AAPL"), "GOOG": _Ticker("GOOG")},
@@ -672,6 +686,7 @@ class TestMarketDataPipelineIntegration(_MarketDataPipelineIntegrationTestBase):
 
         with _isolated_pipeline_coordinators() as (heavy_coord, heavy_app, _, _, _, _):
             # Enqueue both AAPL and DEL in Cycle 1
+            fs.ALL_TICKERS = ["AAPL", "DEL"]
             stats1 = fs.coordinate_heavy_market_data_cycle(
                 symbols=["AAPL", "DEL"],
                 tickers_obj={"AAPL": _Ticker("AAPL"), "DEL": _Ticker("DEL")},
@@ -687,6 +702,7 @@ class TestMarketDataPipelineIntegration(_MarketDataPipelineIntegrationTestBase):
             self.assertIn("DEL", fs.cache.history)
 
             # Cycle 2: DEL is removed from active list; only AAPL is monitored
+            fs.ALL_TICKERS = ["AAPL"]
             stats2 = fs.coordinate_heavy_market_data_cycle(
                 symbols=["AAPL"],
                 tickers_obj={"AAPL": _Ticker("AAPL")},
@@ -710,6 +726,7 @@ class TestMarketDataPipelineIntegration(_MarketDataPipelineIntegrationTestBase):
 
         with _isolated_pipeline_coordinators() as (heavy_coord, heavy_app, _, _, _, _):
             # Phase 1: READD active, completes initial fetch
+            fs.ALL_TICKERS = ["AAPL", "READD"]
             acc1, item1 = fs.enqueue_historical_data("READD", t_obj=t_obj, today_str="2026-04-20", coordinator=heavy_coord)
             self.assertTrue(acc1)
             self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
@@ -718,10 +735,12 @@ class TestMarketDataPipelineIntegration(_MarketDataPipelineIntegrationTestBase):
             seq1 = item1.sequence
 
             # Phase 2: READD removed from active symbols list during subsequent monitoring
+            fs.ALL_TICKERS = ["AAPL"]
             # Existing valid cache data is preserved!
             self.assertIn("READD", fs.cache.history)
 
             # Phase 3: READD is re-added on the next trading day
+            fs.ALL_TICKERS = ["AAPL", "READD"]
             acc2, item2 = fs.enqueue_historical_data("READD", t_obj=t_obj, today_str="2026-04-21", coordinator=heavy_coord)
             self.assertTrue(acc2)
             self.assertGreater(item2.sequence, seq1)
@@ -840,84 +859,153 @@ class TestMarketDataPipelineIntegration(_MarketDataPipelineIntegrationTestBase):
         self.assertEqual(fs.cache.last_gex_fetch["SPY"], 1_700_000_000.0)
 
     def test_15_cancellation_and_shutdown_with_queued_work(self):
-        """15. Coordinator shutdown drains queued work cleanly and prevents subsequent enqueue."""
+        """15. Coordinator shutdown cancels queued work while worker is still blocked and prevents subsequent enqueue."""
         t1_started = threading.Event()
-        blocker = threading.Event()
-
-        def _blocking_work():
-            t1_started.set()
-            blocker.wait(timeout=3.0)
-            return bi.ObservedResult(data={})
+        s1_saw_cancel = threading.Event()
+        s2_executed = threading.Event()
+        s3_executed = threading.Event()
+        fallback_release = threading.Event()
 
         coord = bi.BackgroundIntelligenceCoordinator(max_workers=1, max_queue_size=10)
-        try:
-            # 1 running, 2 queued
-            coord.enqueue(bi.WorkType.HISTORICAL_DATA.value, "S1", fn=_blocking_work)
-            self.assertTrue(t1_started.wait(timeout=2.0))
-            coord.enqueue(bi.WorkType.HISTORICAL_DATA.value, "S2", fn=_blocking_work)
-            coord.enqueue(bi.WorkType.HISTORICAL_DATA.value, "S3", fn=_blocking_work)
-            self.assertEqual(coord.pending_count(), 2)
 
-            blocker.set()
+        def _s1_work(cancel_check=None):
+            t1_started.set()
+            if not fallback_release.is_set() and not (cancel_check and cancel_check()):
+                coord._shutdown_event.wait(timeout=3.0)
+            if cancel_check and cancel_check():
+                s1_saw_cancel.set()
+            return bi.ObservedResult(data={})
+
+        def _queued_work_spy(flag: threading.Event):
+            flag.set()
+            return bi.ObservedResult(data={})
+
+        try:
+            # 1 running (still blocked), 2 queued
+            acc1, item1 = coord.enqueue(bi.WorkType.HISTORICAL_DATA.value, "S1", fn=_s1_work)
+            self.assertTrue(acc1)
+            self.assertTrue(t1_started.wait(timeout=2.0))
+            self.assertEqual(coord.in_flight_count(), 1)
+
+            acc2, item2 = coord.enqueue(
+                bi.WorkType.HISTORICAL_DATA.value, "S2", fn=lambda: _queued_work_spy(s2_executed)
+            )
+            acc3, item3 = coord.enqueue(
+                bi.WorkType.HISTORICAL_DATA.value, "S3", fn=lambda: _queued_work_spy(s3_executed)
+            )
+            self.assertTrue(acc2)
+            self.assertTrue(acc3)
+            self.assertEqual(coord.in_flight_count(), 1)
+            self.assertEqual(coord.pending_count(), 2)
+            self.assertEqual(item2.status, bi.WorkStatus.QUEUED)
+            self.assertEqual(item3.status, bi.WorkStatus.QUEUED)
+
+            # Call shutdown directly WITHOUT releasing blocked worker S1 first
             shutdown_ok = coord.shutdown(timeout=2.0)
             self.assertTrue(shutdown_ok)
+            self.assertTrue(s1_saw_cancel.is_set())
+            self.assertFalse(s2_executed.is_set())
+            self.assertFalse(s3_executed.is_set())
+            self.assertEqual(item1.status, bi.WorkStatus.CANCELLED)
+            self.assertEqual(item2.status, bi.WorkStatus.CANCELLED)
+            self.assertEqual(item3.status, bi.WorkStatus.CANCELLED)
+            self.assertTrue(item2.cancel_event.is_set())
+            self.assertTrue(item3.cancel_event.is_set())
+            self.assertEqual(coord.pending_count(), 0)
+            self.assertEqual(coord.in_flight_count(), 0)
+            self.assertTrue(coord._queue.empty())
+            self.assertTrue(all(not w.is_alive() for w in coord._workers))
+            self.assertEqual(coord.drain_results(), [])
+
             # Enqueue after shutdown returns False
-            acc, key = coord.enqueue(bi.WorkType.HISTORICAL_DATA.value, "POST", fn=lambda: bi.ObservedResult(data={}))
-            self.assertFalse(acc)
-            self.assertIsNone(key)
+            acc_post, key_post = coord.enqueue(
+                bi.WorkType.HISTORICAL_DATA.value, "POST", fn=lambda: bi.ObservedResult(data={})
+            )
+            self.assertFalse(acc_post)
+            self.assertIsNone(key_post)
         finally:
-            blocker.set()
+            fallback_release.set()
+            coord.shutdown(timeout=1.0)
 
     def test_16_cancellation_and_shutdown_with_in_flight_work(self):
         """16. In-flight work terminates cleanly on coordinator shutdown without resource leaks."""
+        worker_started = threading.Event()
         cancel_detected = threading.Event()
-
-        def _cancellable_work(cancel_check=None):
-            deadline = time.monotonic() + 2.0
-            while time.monotonic() < deadline:
-                if cancel_check and cancel_check():
-                    cancel_detected.set()
-                    return bi.ObservedResult(data={"cancelled": True})
-                time.sleep(0.01)
-            return bi.ObservedResult(data={})
+        fallback_release = threading.Event()
 
         coord = bi.BackgroundIntelligenceCoordinator(max_workers=1)
+
+        def _cancellable_work(cancel_check=None):
+            worker_started.set()
+            if not fallback_release.is_set() and not (cancel_check and cancel_check()):
+                coord._shutdown_event.wait(timeout=3.0)
+            if cancel_check and cancel_check():
+                cancel_detected.set()
+                raise RuntimeError("Cancelled in flight")
+            return bi.ObservedResult(data={})
+
         try:
-            acc, _ = coord.enqueue(bi.WorkType.HISTORICAL_DATA.value, "CANCEL_TEST", fn=_cancellable_work)
+            acc, item = coord.enqueue(bi.WorkType.HISTORICAL_DATA.value, "CANCEL_TEST", fn=_cancellable_work)
             self.assertTrue(acc)
-            time.sleep(0.05)
-            # Coordinator shutdown signals cancellation
+            self.assertTrue(worker_started.wait(timeout=2.0))
+            self.assertEqual(coord.in_flight_count(), 1)
+            self.assertEqual(coord.pending_count(), 0)
+
+            # Coordinator shutdown signals cancellation while worker is active
             shutdown_ok = coord.shutdown(timeout=2.0)
             self.assertTrue(shutdown_ok)
             self.assertTrue(cancel_detected.is_set())
+            self.assertTrue(item.cancel_event.is_set())
+            self.assertEqual(item.status, bi.WorkStatus.CANCELLED)
+            self.assertEqual(coord.in_flight_count(), 0)
+            self.assertEqual(coord.pending_count(), 0)
+            self.assertEqual(coord.drain_results(), [])
+            self.assertTrue(all(not w.is_alive() for w in coord._workers))
         finally:
+            fallback_release.set()
             coord.shutdown(timeout=1.0)
 
     def test_17_bounded_shutdown_and_visible_timeout_behaviour(self):
         """17. Shutdown timeout remains visible, bounded, and does not report false success."""
+        worker_started = threading.Event()
         hung_event = threading.Event()
 
         def _hung_worker():
+            worker_started.set()
             hung_event.wait(timeout=5.0)
             return bi.ObservedResult(data={})
 
         coord = bi.BackgroundIntelligenceCoordinator(max_workers=1)
+        clean_ok = False
         try:
-            coord.enqueue(bi.WorkType.HISTORICAL_DATA.value, "HUNG", fn=_hung_worker)
-            time.sleep(0.05)
+            acc, item = coord.enqueue(bi.WorkType.HISTORICAL_DATA.value, "HUNG", fn=_hung_worker)
+            self.assertTrue(acc)
+            self.assertTrue(worker_started.wait(timeout=2.0))
+            self.assertEqual(coord.in_flight_count(), 1)
+            self.assertEqual(coord.pending_count(), 0)
 
             t0 = time.monotonic()
             with self.assertLogs(bi.logger, level="WARNING") as cm:
-                shutdown_ok = coord.shutdown(timeout=0.3)
+                shutdown_ok = coord.shutdown(timeout=0.2)
             elapsed = time.monotonic() - t0
 
-            # Bounded: did not hang indefinitely; returned False
+            # Bounded: did not hang indefinitely; returned False with incomplete state
             self.assertFalse(shutdown_ok)
             self.assertLess(elapsed, 0.8)
             self.assertTrue(any("Shutdown incomplete" in msg for msg in cm.output))
+            self.assertEqual(item.status, bi.WorkStatus.CANCELLED)
+            self.assertEqual(coord.in_flight_count(), 1)
+            self.assertEqual(coord.pending_count(), 0)
+            self.assertTrue(any(w.is_alive() for w in coord._workers))
         finally:
             hung_event.set()
-            coord.shutdown(timeout=2.0)
+            clean_ok = coord.shutdown(timeout=2.0)
+
+        self.assertTrue(clean_ok)
+        self.assertEqual(coord.in_flight_count(), 0)
+        self.assertEqual(coord.pending_count(), 0)
+        self.assertEqual(coord.drain_results(), [])
+        self.assertTrue(all(not w.is_alive() for w in coord._workers))
 
     def test_18_preservation_of_valid_live_and_heavy_cache_entries_after_failed_publication(self):
         """18. Failed or rejected candidates preserve valid live and heavy cache entries atomically."""
@@ -1114,6 +1202,426 @@ class TestMarketDataPipelineIntegration(_MarketDataPipelineIntegrationTestBase):
                 self.assertIn(req_gex, fs.cache.gex["AAPL"])
                 self.assertTrue(math.isfinite(fs.cache.gex["AAPL"][req_gex]))
             self.assertGreater(fs.cache.last_gex_fetch["AAPL"], 0)
+
+    def test_21_in_flight_historical_result_rejected_when_symbol_removed_before_publication(self):
+        """21. In-flight historical work for a symbol removed from ALL_TICKERS is rejected at publication."""
+        now_ny = datetime(2026, 4, 20, 11, 0, tzinfo=NY_TZ)
+        prior_df = _make_sample_history_df(
+            days=40,
+            base_price=80.0,
+            end_date=datetime(2026, 4, 17, 16, 0, tzinfo=NY_TZ),
+        )
+        prior_tech = fs._compute_technicals_from_history(prior_df, last_reg_close=95.0)
+        new_df = _make_sample_history_df(days=220, base_price=100.0, end_date=now_ny)
+
+        fs.cache.history["REM_HIST"] = prior_df.copy()
+        fs.cache.technicals["REM_HIST"] = dict(prior_tech)
+        fs.cache.last_history_fetch_date["REM_HIST"] = "2026-04-17"
+        fs.cache.regular_close["REM_HIST"] = 95.0
+
+        rem_started = threading.Event()
+        rem_release = threading.Event()
+
+        class _RemHistTicker:
+            ticker = "REM_HIST"
+            fast_info = SimpleNamespace(regular_market_previous_close=210.0)
+
+            def history(self, **kwargs):
+                rem_started.set()
+                if not rem_release.wait(timeout=3.0):
+                    raise TimeoutError("REM_HIST historical release timed out")
+                return new_df.copy()
+
+        class _ActiveHistTicker:
+            ticker = "AAPL"
+            fast_info = SimpleNamespace(regular_market_previous_close=155.0)
+
+            def history(self, **kwargs):
+                return new_df.copy()
+
+        fs.ALL_TICKERS = ["REM_HIST", "AAPL"]
+        with _isolated_pipeline_coordinators(heavy_workers=2) as (heavy_coord, heavy_app, _, _, _, _):
+            try:
+                acc_rem, item_rem = fs.enqueue_historical_data(
+                    "REM_HIST",
+                    t_obj=_RemHistTicker(),
+                    today_str="2026-04-20",
+                    now_ny=now_ny,
+                    coordinator=heavy_coord,
+                )
+                acc_aapl, item_aapl = fs.enqueue_historical_data(
+                    "AAPL",
+                    t_obj=_ActiveHistTicker(),
+                    today_str="2026-04-20",
+                    now_ny=now_ny,
+                    coordinator=heavy_coord,
+                )
+                self.assertTrue(acc_rem)
+                self.assertTrue(acc_aapl)
+                self.assertTrue(rem_started.wait(timeout=2.0))
+
+                # Remove REM_HIST from authoritative active list while worker is genuinely in flight
+                fs.ALL_TICKERS = ["AAPL"]
+                rem_release.set()
+                self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+
+                audit = fs.apply_background_heavy_market_data_results(
+                    now_ny=now_ny,
+                    coordinator=heavy_coord,
+                    applicator=heavy_app,
+                )
+                audit_by_sym = {res.key.target: (applied, reason) for res, applied, reason in audit}
+                self.assertEqual(len(audit_by_sym), 2)
+                self.assertFalse(audit_by_sym["REM_HIST"][0])
+                self.assertIn("inactive symbol", audit_by_sym["REM_HIST"][1].lower())
+                self.assertTrue(audit_by_sym["AAPL"][0])
+
+                # Prior valid cache for removed symbol is preserved; applicator sequence NOT advanced
+                self.assertEqual(len(fs.cache.history["REM_HIST"]), 40)
+                self.assertEqual(fs.cache.technicals["REM_HIST"], prior_tech)
+                self.assertEqual(fs.cache.last_history_fetch_date["REM_HIST"], "2026-04-17")
+                self.assertEqual(fs.cache.regular_close["REM_HIST"], 95.0)
+                self.assertEqual(heavy_app.get_last_applied(item_rem.key), (-1, ""))
+
+                # Active symbol published normally
+                self.assertIn("AAPL", fs.cache.history)
+                self.assertEqual(len(fs.cache.history["AAPL"]), 220)
+                self.assertEqual(heavy_app.get_last_applied(item_aapl.key)[0], item_aapl.sequence)
+
+                # Re-adding REM_HIST permits subsequent valid historical publication
+                fs.ALL_TICKERS = ["AAPL", "REM_HIST"]
+                acc_readd, item_readd = fs.enqueue_historical_data(
+                    "REM_HIST",
+                    t_obj=_RemHistTicker(),
+                    today_str="2026-04-20",
+                    now_ny=now_ny,
+                    coordinator=heavy_coord,
+                )
+                self.assertTrue(acc_readd)
+                self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+                audit_readd = fs.apply_background_heavy_market_data_results(
+                    now_ny=now_ny,
+                    coordinator=heavy_coord,
+                    applicator=heavy_app,
+                )
+                self.assertEqual(len(audit_readd), 1)
+                self.assertTrue(audit_readd[0][1])
+                self.assertEqual(len(fs.cache.history["REM_HIST"]), 220)
+                self.assertEqual(fs.cache.last_history_fetch_date["REM_HIST"], "2026-04-20")
+                self.assertEqual(heavy_app.get_last_applied(item_readd.key)[0], item_readd.sequence)
+            finally:
+                rem_release.set()
+
+    def test_22_in_flight_gex_result_rejected_when_symbol_removed_before_publication(self):
+        """22. In-flight GEX work for a symbol removed from ALL_TICKERS is rejected at publication."""
+        prior_gex = {k: 42.0 for k in fs._GEX_REQUIRED_KEYS}
+        prior_fetch = 1_700_000_000.0
+        now_ts = prior_fetch + 2000.0
+
+        self._seed_valid_spot_cache(
+            "REM_GEX",
+            price=250.0,
+            obs_time="2026-04-20T15:00:00Z",
+            retrieval_time="2026-04-20T15:00:01Z",
+        )
+        self._seed_valid_spot_cache(
+            "SPY",
+            price=500.0,
+            obs_time="2026-04-20T15:00:00Z",
+            retrieval_time="2026-04-20T15:00:01Z",
+        )
+        fs.cache.gex["REM_GEX"] = dict(prior_gex)
+        fs.cache.gex_cache["REM_GEX"] = dict(prior_gex)
+        fs.cache.last_gex_fetch["REM_GEX"] = prior_fetch
+
+        rem_started = threading.Event()
+        rem_release = threading.Event()
+
+        class _RemGexTicker:
+            ticker = "REM_GEX"
+            options = ["2026-06-19"]
+            fast_info = SimpleNamespace(three_month_average_volume=35_000_000)
+
+            def option_chain(self, exp):
+                rem_started.set()
+                if not rem_release.wait(timeout=3.0):
+                    raise TimeoutError("REM_GEX release timed out")
+                return _make_option_chain_pair(250.0)
+
+        class _SpyGexTicker:
+            ticker = "SPY"
+            options = ["2026-06-19"]
+            fast_info = SimpleNamespace(three_month_average_volume=50_000_000)
+
+            def option_chain(self, exp):
+                return _make_option_chain_pair(500.0)
+
+        fs.ALL_TICKERS = ["REM_GEX", "SPY"]
+        with _isolated_pipeline_coordinators(heavy_workers=2) as (heavy_coord, heavy_app, _, _, _, _), \
+             patch.object(fs.t_time, "time", return_value=now_ts):
+            try:
+                acc_rem, item_rem = fs.enqueue_options_gex(
+                    "REM_GEX",
+                    ticker_obj=_RemGexTicker(),
+                    spot_price=250.0,
+                    now_ts=now_ts,
+                    coordinator=heavy_coord,
+                )
+                acc_spy, item_spy = fs.enqueue_options_gex(
+                    "SPY",
+                    ticker_obj=_SpyGexTicker(),
+                    spot_price=500.0,
+                    now_ts=now_ts,
+                    coordinator=heavy_coord,
+                )
+                self.assertTrue(acc_rem)
+                self.assertTrue(acc_spy)
+                self.assertTrue(rem_started.wait(timeout=2.0))
+
+                # Remove REM_GEX from authoritative active list while worker is genuinely in flight
+                fs.ALL_TICKERS = ["SPY"]
+                rem_release.set()
+                self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+
+                audit = fs.apply_background_heavy_market_data_results(
+                    now_ts=now_ts,
+                    coordinator=heavy_coord,
+                    applicator=heavy_app,
+                )
+                audit_by_sym = {res.key.target: (applied, reason) for res, applied, reason in audit}
+                self.assertEqual(len(audit_by_sym), 2)
+                self.assertFalse(audit_by_sym["REM_GEX"][0])
+                self.assertIn("inactive symbol", audit_by_sym["REM_GEX"][1].lower())
+                self.assertTrue(audit_by_sym["SPY"][0])
+
+                # Prior valid cache and refresh timestamp preserved; sequence NOT advanced
+                self.assertEqual(fs.cache.gex["REM_GEX"], prior_gex)
+                self.assertEqual(fs.cache.gex_cache["REM_GEX"], prior_gex)
+                self.assertEqual(fs.cache.last_gex_fetch["REM_GEX"], prior_fetch)
+                self.assertEqual(heavy_app.get_last_applied(item_rem.key), (-1, ""))
+
+                # Unrelated active symbol published normally
+                self.assertIn("SPY", fs.cache.gex)
+                self.assertGreater(fs.cache.last_gex_fetch["SPY"], 0)
+                self.assertEqual(heavy_app.get_last_applied(item_spy.key)[0], item_spy.sequence)
+
+                # Re-adding REM_GEX permits subsequent valid GEX publication
+                fs.ALL_TICKERS = ["SPY", "REM_GEX"]
+                acc_readd, item_readd = fs.enqueue_options_gex(
+                    "REM_GEX",
+                    ticker_obj=_RemGexTicker(),
+                    spot_price=250.0,
+                    now_ts=now_ts,
+                    coordinator=heavy_coord,
+                )
+                self.assertTrue(acc_readd)
+                self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+                audit_readd = fs.apply_background_heavy_market_data_results(
+                    now_ts=now_ts,
+                    coordinator=heavy_coord,
+                    applicator=heavy_app,
+                )
+                self.assertEqual(len(audit_readd), 1)
+                self.assertTrue(audit_readd[0][1])
+                self.assertNotEqual(fs.cache.gex["REM_GEX"], prior_gex)
+                self.assertEqual(fs.cache.last_gex_fetch["REM_GEX"], now_ts)
+                self.assertEqual(heavy_app.get_last_applied(item_readd.key)[0], item_readd.sequence)
+            finally:
+                rem_release.set()
+
+    def test_23_strict_timestamp_identity_utc_and_ny_dst_validation(self):
+        """23. Strict UTC and America/New_York DST validation rejects foreign/invalid offsets fail-closed."""
+        # Valid UTC and valid America/New_York representations (both EDT summer and EST winter)
+        self.assertEqual(
+            fs._canonical_spot_timestamp("2026-07-15T15:00:00Z", "obs"),
+            "2026-07-15T15:00:00Z",
+        )
+        self.assertEqual(
+            fs._canonical_spot_timestamp("2026-07-15T15:00:00+00:00", "obs"),
+            "2026-07-15T15:00:00Z",
+        )
+        self.assertEqual(
+            fs._canonical_spot_timestamp("2026-07-15T11:00:00-04:00", "obs"),
+            "2026-07-15T15:00:00Z",
+        )
+        self.assertEqual(
+            fs._canonical_spot_timestamp("2026-01-15T10:30:00-05:00", "obs"),
+            "2026-01-15T15:30:00Z",
+        )
+        self.assertTrue(
+            fs._matches_canonical_timestamp("2026-07-15T11:00:00-04:00", "2026-07-15T15:00:00Z")
+        )
+        self.assertTrue(
+            fs._matches_canonical_timestamp("2026-01-15T15:30:00+00:00", "2026-01-15T10:30:00-05:00")
+        )
+
+        # Rejected timestamps: wrong DST offset, spring/fall transitions, foreign offsets (even same instant),
+        # -00:00, naive, missing, and malformed values
+        invalid_timestamps = [
+            "2026-01-15T10:30:00-04:00",  # -04:00 invalid in January EST
+            "2026-07-15T11:00:00-05:00",  # -05:00 invalid in July EDT
+            "2026-03-08T02:30:00-05:00",  # Nonexistent spring-forward gap
+            "2026-03-08T02:30:00-04:00",  # Nonexistent spring-forward gap
+            "2026-11-01T01:30:00-04:00",  # Ambiguous fall-back transition
+            "2026-11-01T01:30:00-05:00",  # Ambiguous fall-back transition
+            "2026-07-15T17:00:00+02:00",  # Foreign offset for same UTC instant (15:00Z)
+            "2026-07-15T08:00:00-07:00",  # Foreign US Pacific offset for same UTC instant (15:00Z)
+            "2026-01-15T09:30:00-06:00",  # Foreign US Central offset for same UTC instant (15:30Z)
+            "2026-07-15T15:00:00-00:00",  # RFC3339 -00:00
+            "2026-07-15T15:00:00",        # Naive
+            "2026-07-15 15:00:00Z",       # Malformed separator
+            "not-a-timestamp",            # Malformed text
+            "",                           # Empty
+            None,                         # Missing
+        ]
+        for bad_ts in invalid_timestamps:
+            with self.subTest(bad_ts=bad_ts):
+                with self.assertRaises(ValueError):
+                    fs._canonical_spot_timestamp(bad_ts, "spot observation_time")
+                # Even self-equality or same-instant foreign offsets must fail _matches_canonical_timestamp
+                self.assertFalse(fs._matches_canonical_timestamp(bad_ts, bad_ts))
+                self.assertFalse(fs._matches_canonical_timestamp(bad_ts, "2026-07-15T15:00:00Z"))
+                self.assertFalse(fs._matches_canonical_timestamp("2026-07-15T15:00:00Z", bad_ts))
+
+        # Mismatched valid instants must fail
+        self.assertFalse(
+            fs._matches_canonical_timestamp("2026-07-15T11:00:00-04:00", "2026-07-15T15:00:01Z")
+        )
+
+        prior_gex = {k: 88.8 for k in fs._GEX_REQUIRED_KEYS}
+        prior_fetch = 1_700_000_000.0
+        now_ts = time.time()
+        app = bi.BackgroundResultApplicator()
+        key = bi.WorkKey(bi.WorkType.OPTIONS_GEX.value, "SPY")
+
+        # Enqueue & publication both fail closed for invalid timestamps while preserving caches & sequence
+        bad_cache_ts_cases = [
+            "2026-01-15T10:30:00-04:00",  # Invalid winter DST offset
+            "2026-07-15T11:00:00-05:00",  # Invalid summer DST offset
+            "2026-07-15T17:00:00+02:00",  # Foreign offset matching 15:00Z
+            "2026-03-08T02:30:00-05:00",  # Nonexistent DST time
+            "2026-11-01T01:30:00-04:00",  # Ambiguous DST time
+            "2026-07-15T15:00:00-00:00",  # Ambiguous -00:00
+            "2026-07-15T15:00:00",        # Naive
+            "not-a-timestamp",            # Malformed
+            None,                         # Missing
+        ]
+        for seq, bad_ts in enumerate(bad_cache_ts_cases, start=1):
+            fs.cache.gex["SPY"] = dict(prior_gex)
+            fs.cache.gex_cache["SPY"] = dict(prior_gex)
+            fs.cache.last_gex_fetch["SPY"] = prior_fetch
+
+            # Enqueue validation fails closed when cache holds invalid timestamp
+            self._seed_valid_spot_cache(
+                "SPY",
+                price=500.0,
+                obs_time=bad_ts,
+                retrieval_time="2026-07-15T15:00:01Z",
+            )
+            acc_bad, key_bad = fs.enqueue_options_gex("SPY", force=True)
+            self.assertFalse(acc_bad)
+            self.assertIsNone(key_bad)
+
+            # Publication validation fails closed even if candidate snapshot carries invalid or foreign timestamp
+            self._seed_valid_spot_cache(
+                "SPY",
+                price=500.0,
+                obs_time="2026-07-15T15:00:00Z",
+                retrieval_time="2026-07-15T15:00:01Z",
+            )
+            bad_res = bi.WorkResult(
+                key=key,
+                sequence=seq,
+                data={
+                    "kind": "options_gex",
+                    "symbol": "SPY",
+                    "spot_price": 500.0,
+                    "spot_snapshot": {
+                        "price": 500.0,
+                        "observation_time": bad_ts,
+                        "retrieval_time": "2026-07-15T15:00:01Z",
+                    },
+                    "gex_profile": {k: 999.0 for k in fs._GEX_REQUIRED_KEYS},
+                    "fetched_at": now_ts,
+                    "source": "YAHOO_OPTIONS",
+                    "contract_count": 5,
+                },
+            )
+            audit = app.apply_results(
+                [bad_res],
+                on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r, now_ts=now_ts)),
+            )
+            self.assertFalse(audit[0][1])
+            self.assertEqual(app.get_last_applied(key), (-1, ""))
+            self.assertEqual(fs.cache.gex["SPY"], prior_gex)
+            self.assertEqual(fs.cache.gex_cache["SPY"], prior_gex)
+            self.assertEqual(fs.cache.last_gex_fetch["SPY"], prior_fetch)
+
+        # Valid NY EDT/EST cache reconciles with matching canonical UTC snapshot at both enqueue & publication
+        valid_pairs = [
+            ("2026-07-15T11:00:00-04:00", "2026-07-15T11:00:01-04:00", "2026-07-15T15:00:00Z", "2026-07-15T15:00:01Z"),
+            ("2026-01-15T10:30:00-05:00", "2026-01-15T10:30:01-05:00", "2026-01-15T15:30:00Z", "2026-01-15T15:30:01Z"),
+        ]
+        for idx, (ny_obs, ny_ret, utc_obs, utc_ret) in enumerate(valid_pairs, start=100):
+            self._seed_valid_spot_cache("SPY", price=500.0, obs_time=ny_obs, retrieval_time=ny_ret)
+            class _SpyTicker:
+                ticker = "SPY"
+                options = ["2026-06-19"]
+                fast_info = SimpleNamespace(three_month_average_volume=50_000_000)
+
+                def option_chain(self, exp):
+                    return _make_option_chain_pair(500.0)
+
+            with _isolated_pipeline_coordinators() as (heavy_coord, _, _, _, _, _), \
+                 patch.object(fs.t_time, "time", return_value=now_ts):
+                acc_ok, item_ok = fs.enqueue_options_gex(
+                    "SPY",
+                    ticker_obj=_SpyTicker(),
+                    spot_price=500.0,
+                    now_ts=now_ts,
+                    force=True,
+                    coordinator=heavy_coord,
+                )
+                self.assertTrue(acc_ok)
+                self.assertEqual(item_ok.kwargs["spot_snapshot"]["observation_time"], utc_obs)
+                self.assertEqual(item_ok.kwargs["spot_snapshot"]["retrieval_time"], utc_ret)
+                self.assertTrue(_wait_workers_idle(heavy_coord, timeout=3.0))
+                audit_ok = fs.apply_background_heavy_market_data_results(now_ts=now_ts, coordinator=heavy_coord)
+                self.assertEqual(len(audit_ok), 1)
+                self.assertTrue(audit_ok[0][1])
+
+        # Direct publication candidate with valid NY cache and valid UTC snapshot
+        self._seed_valid_spot_cache(
+            "SPY",
+            price=500.0,
+            obs_time="2026-01-15T10:30:00-05:00",
+            retrieval_time="2026-01-15T10:30:01-05:00",
+        )
+        valid_est_res = bi.WorkResult(
+            key=key,
+            sequence=200,
+            data={
+                "kind": "options_gex",
+                "symbol": "SPY",
+                "spot_price": 500.0,
+                "spot_snapshot": {
+                    "price": 500.0,
+                    "observation_time": "2026-01-15T15:30:00Z",
+                    "retrieval_time": "2026-01-15T15:30:01Z",
+                },
+                "gex_profile": {k: 7.5 for k in fs._GEX_REQUIRED_KEYS},
+                "fetched_at": now_ts,
+                "source": "YAHOO_OPTIONS",
+                "contract_count": 5,
+            },
+        )
+        audit_est = app.apply_results(
+            [valid_est_res],
+            on_publish=lambda r: fs._publish_market_data_candidate(*fs._build_gex_cache_candidate(r, now_ts=now_ts)),
+        )
+        self.assertTrue(audit_est[0][1])
+        self.assertEqual(app.get_last_applied(key)[0], 200)
+        self.assertEqual(fs.cache.gex["SPY"]["net_gex"], 7.5)
 
 
 if __name__ == "__main__":

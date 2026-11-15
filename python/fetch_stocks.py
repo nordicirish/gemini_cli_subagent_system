@@ -3318,7 +3318,7 @@ def update_history_and_technicals(symbol, t_obj):
             data=observed.data,
             provenance=None,
         )
-        sym, updates = _build_historical_cache_candidate(work_res)
+        sym, updates = _validate_historical_payload_to_updates(work_res)
         _publish_market_data_candidate(sym, updates)
     except Exception as e:
         print("Tech error:", e)
@@ -5489,13 +5489,31 @@ def coordinate_market_data_cycle(
     }
 
 
-def _build_historical_cache_candidate(
+def _is_symbol_active(symbol: str) -> bool:
+    """
+    Verifies on the coordinating thread whether `symbol` is currently present in the
+    authoritative active watch list (`ALL_TICKERS`).
+    """
+    if not isinstance(symbol, str) or not symbol.strip():
+        return False
+    sym_clean = symbol.strip().upper()
+    if not isinstance(ALL_TICKERS, (list, tuple, set, frozenset)):
+        return False
+    active_symbols = {
+        str(item).strip().upper()
+        for item in ALL_TICKERS
+        if isinstance(item, str) and item.strip()
+    }
+    return sym_clean in active_symbols
+
+
+def _validate_historical_payload_to_updates(
     res: WorkResult,
     now_ny: Optional[datetime] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """
-    Validates a completed HISTORICAL_DATA WorkResult on the coordinating thread against
-    live cache state and returns (symbol, cache_updates_dict) ready for atomic publication.
+    Validates a completed HISTORICAL_DATA WorkResult payload against live cache state
+    and returns (symbol, cache_updates_dict) ready for atomic publication.
     """
     if not isinstance(res, WorkResult):
         raise ValueError("Historical result must be a WorkResult")
@@ -5578,6 +5596,21 @@ def _build_historical_cache_candidate(
     return target_sym, updates
 
 
+def _build_historical_cache_candidate(
+    res: WorkResult,
+    now_ny: Optional[datetime] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Validates a completed HISTORICAL_DATA WorkResult on the coordinating thread against
+    active watch list eligibility and live cache state, returning (symbol, cache_updates_dict)
+    ready for atomic publication.
+    """
+    target_sym, updates = _validate_historical_payload_to_updates(res, now_ny=now_ny)
+    if not _is_symbol_active(target_sym):
+        raise ValueError(f"Historical publication rejected for inactive symbol {target_sym}")
+    return target_sym, updates
+
+
 def _validate_utc_timestamp(value: Any, field_name: str) -> str:
     """
     Validates that value is a present, non-empty string representing a strict UTC
@@ -5596,57 +5629,84 @@ def _validate_utc_timestamp(value: Any, field_name: str) -> str:
     return valid_utc
 
 
+_ISO8601_NY_OFFSET_REGEX = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:-04:00|-05:00)\Z"
+)
+
+
 def _canonical_spot_timestamp(value: Any, field_name: str) -> str:
     """
-    Validates and resolves a spot observation/retrieval timestamp for snapshot capture.
+    Validates and resolves a spot observation/retrieval timestamp for snapshot capture
+    and publication verification.
     Accepts:
     1. Strict UTC ISO-8601 with explicit 'Z' or zero offset (+00:00).
-    2. Valid New York session timezone (-04:00 or -05:00) from live quote cache,
-       which is converted to strict canonical UTC ISO-8601 with 'Z'.
-    Fails closed: rejects naive, missing, non-string, malformed, or foreign-offset timestamps.
+    2. Valid America/New_York session timezone (-04:00 EDT or -05:00 EST) whose offset
+       matches the actual America/New_York offset for that exact local date/time.
+    Both are normalized to strict canonical UTC ISO-8601 with 'Z'.
+    Fails closed: rejects naive, missing, non-string, malformed, -00:00, foreign offsets,
+    wrong-season DST offsets, and nonexistent/ambiguous DST transition timestamps.
     """
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"Missing {field_name}")
 
     raw = value.strip()
     if "-00:00" in raw:
-        raise ValueError(f"Ambiguous timestamp offset '-00:00' in '{value}'")
+        raise ValueError(f"Invalid {field_name}: ambiguous timestamp offset '-00:00' in {value!r}")
 
     try:
-        return validate_utc_iso8601_timestamp(raw)
+        valid_utc = validate_utc_iso8601_timestamp(raw)
+        dt_utc = datetime.fromisoformat(valid_utc).astimezone(timezone.utc)
+        return validate_utc_iso8601_timestamp(dt_utc.isoformat().replace("+00:00", "Z"))
     except Exception:
         pass
+
+    if not _ISO8601_NY_OFFSET_REGEX.match(raw):
+        raise ValueError(f"Invalid {field_name}: non-UTC, non-New York ISO-8601 timestamp {value!r}")
 
     try:
         dt = datetime.fromisoformat(raw)
         if dt.tzinfo is None:
             raise ValueError(f"Naive timestamp without tzinfo: {value!r}")
-        offset = dt.utcoffset()
-        offset_secs = offset.total_seconds() if offset is not None else None
-        if offset_secs not in (-14400, -18000):
-            raise ValueError(f"Non-UTC, non-NY offset in {field_name}: {value!r}")
+
+        ny_zone = ZoneInfo("America/New_York")
+        naive_local = dt.replace(tzinfo=None)
+        ny_fold0 = naive_local.replace(tzinfo=ny_zone, fold=0)
+        ny_fold1 = naive_local.replace(tzinfo=ny_zone, fold=1)
+
+        if ny_fold0.utcoffset() != ny_fold1.utcoffset():
+            raise ValueError(
+                f"Nonexistent or ambiguous America/New_York DST transition timestamp: {value!r}"
+            )
+        if dt.utcoffset() != ny_fold0.utcoffset():
+            raise ValueError(
+                f"Offset {dt.utcoffset()} is invalid for America/New_York at {value!r} "
+                f"(expected {ny_fold0.utcoffset()})"
+            )
+
+        dt_ny = dt.astimezone(ny_zone)
+        if dt_ny.replace(tzinfo=None) != naive_local or dt_ny.utcoffset() != dt.utcoffset():
+            raise ValueError(f"America/New_York roundtrip mismatch for {value!r}")
+
         dt_utc = dt.astimezone(timezone.utc)
         return validate_utc_iso8601_timestamp(dt_utc.isoformat().replace("+00:00", "Z"))
     except Exception as exc:
         raise ValueError(f"Invalid {field_name}: {exc}") from exc
 
 
-def _matches_canonical_timestamp(cached_ts: Any, canonical_utc: str) -> bool:
+def _matches_canonical_timestamp(cached_ts: Any, canonical_utc: Any) -> bool:
     """
-    Verifies that cached_ts matches canonical_utc.
-    Matches if equal as strings, or if both represent the exact same UTC instant.
-    Rejects naive, missing, malformed, or unequal timestamps fail-closed.
+    Verifies that both `cached_ts` and `canonical_utc` pass strict UTC / America/New_York
+    canonical timestamp validation and represent the exact same UTC instant.
+    Rejects naive, missing, malformed, foreign-offset, invalid-DST, and unequal
+    timestamps fail-closed.
     """
-    if cached_ts == canonical_utc:
-        return True
-    if not isinstance(cached_ts, str) or not isinstance(canonical_utc, str):
-        return False
     try:
-        dt_cached = datetime.fromisoformat(cached_ts.strip())
-        dt_canon = datetime.fromisoformat(canonical_utc.strip())
-        if dt_cached.tzinfo is None or dt_canon.tzinfo is None:
-            return False
-        return dt_cached.astimezone(timezone.utc) == dt_canon.astimezone(timezone.utc)
+        canon_cached = _canonical_spot_timestamp(cached_ts, "cached timestamp")
+        canon_expected = _canonical_spot_timestamp(canonical_utc, "expected timestamp")
+        return (
+            datetime.fromisoformat(canon_cached).astimezone(timezone.utc)
+            == datetime.fromisoformat(canon_expected).astimezone(timezone.utc)
+        )
     except Exception:
         return False
 
@@ -5658,8 +5718,8 @@ def _build_gex_cache_candidate(
     """
     Validates a completed OPTIONS_GEX WorkResult on the coordinating thread and returns
     (symbol, cache_updates_dict) ready for atomic publication.
-    Enforces canonical spot observation identity, freshness and actionability against current
-    live market-data cache.
+    Enforces active watch list eligibility, canonical spot observation identity,
+    freshness and actionability against current live market-data cache.
     """
     if not isinstance(res, WorkResult):
         raise ValueError("Options/GEX result must be a WorkResult")
@@ -5676,6 +5736,9 @@ def _build_gex_cache_candidate(
     payload_sym = str(res.data.get("symbol") or "").strip().upper()
     if not target_sym or payload_sym != target_sym:
         raise ValueError(f"GEX symbol mismatch: target={target_sym!r}, payload={payload_sym!r}")
+
+    if not _is_symbol_active(target_sym):
+        raise ValueError(f"GEX publication rejected for inactive symbol {target_sym}")
 
     source = res.data.get("source")
     if not isinstance(source, str) or not source.strip():
@@ -5701,11 +5764,11 @@ def _build_gex_cache_candidate(
     ):
         raise ValueError("GEX candidate has invalid snapshot spot price")
 
-    observation_time = _validate_utc_timestamp(
+    observation_time = _canonical_spot_timestamp(
         snapshot.get("observation_time"),
         "spot observation_time",
     )
-    retrieval_time = _validate_utc_timestamp(
+    retrieval_time = _canonical_spot_timestamp(
         snapshot.get("retrieval_time"),
         "spot retrieval_time",
     )
