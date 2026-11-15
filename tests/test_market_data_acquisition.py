@@ -1563,6 +1563,7 @@ class TestStage222ProvenanceAwareContracts(_MarketDataTestBase):
 
     def test_25_provider_chart_open_finnhub_polygon_prev_and_yahoo_prev_close(self):
         today_ny = datetime.now(NY_TZ).date()
+        fake_now_open = datetime(today_ny.year, today_ny.month, today_ny.day, 10, 30, tzinfo=NY_TZ)
         prev_day = today_ny - timedelta(days=1)
         prev_daily_dt = datetime(prev_day.year, prev_day.month, prev_day.day, 9, 30, tzinfo=NY_TZ)
         today_open_dt = datetime(today_ny.year, today_ny.month, today_ny.day, 9, 30, tzinfo=NY_TZ)
@@ -1578,14 +1579,20 @@ class TestStage222ProvenanceAwareContracts(_MarketDataTestBase):
                 }]
             }
         }
-        with patch.object(fs, "safe_yf_get", return_value=_FakeHttpResponse(open_payload)):
+        with patch.object(fs, "safe_yf_get", return_value=_FakeHttpResponse(open_payload)), \
+             patch("fetch_stocks.datetime") as dt_mock:
+            dt_mock.now.return_value = fake_now_open
+            dt_mock.fromtimestamp.side_effect = datetime.fromtimestamp
             co = fs._acquire_chart_open_raw("AAPL")
         self.assertEqual(co.value, 188.5)
         self.assertEqual(co.obs_time, _utc_iso(int(today_open_dt.timestamp())))
         self.assertEqual(co.source, "INTRADAY_CHART_OPEN")
 
         bad_open = {"chart": {"result": [{"timestamp": [None], "indicators": {"quote": [{"open": [188.5]}]}}]}}
-        with patch.object(fs, "safe_yf_get", return_value=_FakeHttpResponse(bad_open)):
+        with patch.object(fs, "safe_yf_get", return_value=_FakeHttpResponse(bad_open)), \
+             patch("fetch_stocks.datetime") as dt_mock:
+            dt_mock.now.return_value = fake_now_open
+            dt_mock.fromtimestamp.side_effect = datetime.fromtimestamp
             self.assertIsNone(fs._acquire_chart_open_raw("AAPL"))
 
         # 2. Finnhub raw extracts c paired with t, never pc
