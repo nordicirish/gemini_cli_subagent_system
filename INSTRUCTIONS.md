@@ -12,13 +12,15 @@
 - **PERMITTED:** Read-only Git inspection (`git status --short`, `git rev-parse HEAD`, `git branch --show-current`, `git diff`).
 
 ## 3. PROTECTED FINANCIAL ASSETS & DOMAIN BOUNDARIES
-- **Strictly Read-Only Protected Assets:**
+- **Strictly Read-Only Protected Assets (Protocol 06):**
   - `engine_instructions/*.md`
   - `gem_trading_rules/rules.md`
   - `context/ssot.json`
+  - `context/trade_lessons.json`
+  - `context/decision_log.json`
   - `context/config.json`
 - Engineering workers must NEVER modify protected assets, trading mandates, risk thresholds, indicator formulas, or position-sizing logic, and must NEVER run global version-string replacements across protected files (`antigravity.md` Mandate 13 is superseded).
-- Production database files (`context/*.db`, `cache/*.db`) and `.restore_lock` / `.lock` files must never be tracked in Git or mutated outside authorised tests.
+- Prohibited runtime artifacts (`context/*.db`, `cache/*.db`, `*.lock`, `*.restore_lock`, `*.cutover_lock`) must never be tracked in Git (check tracked index entries vs. untracked gitignored local runtime files) or mutated outside authorised tests.
 
 ## 4. STANDING NEGATIVE INVARIANTS
 1. **Failure & Cleanup Atomicity:** Roll back incomplete transactions and release all locks, connections, cursors, files, subprocesses, and tokens in `try...finally` blocks on every exit path without concealing primary exceptions.

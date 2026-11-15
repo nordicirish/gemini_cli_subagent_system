@@ -1,10 +1,12 @@
 import os
-from fastapi import BackgroundTasks, HTTPException, Request
+import collections
+from fastapi import BackgroundTasks, Body, HTTPException, Request
 import sys
 import uvicorn
 import asyncio
 import json
 import collections.abc
+import uuid
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
@@ -79,11 +81,20 @@ def log_to_queue(message: str):
         except:
             pass
 
-import threading
 cancel_event = threading.Event()
+_chat_execution_lock = threading.RLock()
+_turn_registry_lock = threading.Lock()
+_active_turn_id: Optional[str] = None
+_active_turn_event: Optional[threading.Event] = None
+_turn_events: Dict[str, threading.Event] = {}
+_completed_turn_ids: collections.deque = collections.deque(maxlen=256)
+_precancelled_turn_ids: collections.OrderedDict = collections.OrderedDict()
+
 
 def check_cancelled():
-    return cancel_event.is_set()
+    with _turn_registry_lock:
+        active_evt = _active_turn_event
+        return bool(cancel_event.is_set() or (active_evt is not None and active_evt.is_set()))
 
 def load_data_packet_injection_prompt(data_packet_json: str) -> str:
     prompt_path = "prompts/data_packet_injection_prompt.txt"
@@ -385,18 +396,70 @@ class ChatRequest(BaseModel):
     history: list = []
     skip_debate: bool = False # New: Support for browser session memory
     include_charts: bool = False
+    turn_id: Optional[str] = None
+
+
+class CancelChatRequest(BaseModel):
+    turn_id: Optional[str] = None
 
 
 def should_attach_charts(req: ChatRequest) -> bool:
     """Attach chart screenshots only when explicitly requested by the client."""
     return bool(getattr(req, "include_charts", False))
 
+
+def _extract_cancel_turn_id(req: Any) -> Optional[str]:
+    if req is None:
+        return None
+    if isinstance(req, str):
+        val = req.strip()
+        return val or None
+    if isinstance(req, dict):
+        val = req.get("turn_id")
+        return val.strip() if isinstance(val, str) and val.strip() else None
+    val = getattr(req, "turn_id", None)
+    return val.strip() if isinstance(val, str) and val.strip() else None
+
+
 @app.post("/api/cancel_chat")
-def cancel_chat():
-    global cancel_event
-    cancel_event.set()
+def cancel_chat(req: Optional[Any] = Body(default=None)):
+    global cancel_event, _active_turn_id, _active_turn_event
+    requested_turn_id = _extract_cancel_turn_id(req)
+    with _turn_registry_lock:
+        if requested_turn_id is not None:
+            if requested_turn_id == _active_turn_id:
+                if _active_turn_event is not None:
+                    _active_turn_event.set()
+                cancel_event.set()
+                framework.log(f"[System] Cancellation signal received for active turn {requested_turn_id}.")
+                return {"status": "cancelled", "turn_id": requested_turn_id}
+            if requested_turn_id in _completed_turn_ids:
+                framework.log(
+                    f"[System] Ignored stale cancellation for completed turn {requested_turn_id} (active: {_active_turn_id})."
+                )
+                return {
+                    "status": "ignored_stale",
+                    "turn_id": requested_turn_id,
+                    "active_turn_id": _active_turn_id,
+                }
+            evt = _turn_events.get(requested_turn_id)
+            if evt is None:
+                evt = threading.Event()
+                _turn_events[requested_turn_id] = evt
+            evt.set()
+            _precancelled_turn_ids[requested_turn_id] = True
+            _precancelled_turn_ids.move_to_end(requested_turn_id)
+            while len(_precancelled_turn_ids) > 256:
+                _precancelled_turn_ids.popitem(last=False)
+            framework.log(f"[System] Pre-execution cancellation recorded for turn {requested_turn_id}.")
+            return {"status": "cancelled", "turn_id": requested_turn_id}
+
+        if _active_turn_event is not None:
+            _active_turn_event.set()
+        cancel_event.set()
+        active_id = _active_turn_id
     framework.log("[System] Cancellation signal received.")
-    return {"status": "cancelled"}
+    return {"status": "cancelled", "turn_id": active_id}
 
 @app.get("/api/prompts/boot")
 def get_boot_prompt():
@@ -454,8 +517,9 @@ def list_models_endpoint():
 @app.post("/api/reset_chat")
 def reset_chat():
     global global_chat_session, _session_hydrated
-    global_chat_session = create_new_session()
-    _session_hydrated = False
+    with _chat_execution_lock:
+        global_chat_session = create_new_session()
+        _session_hydrated = False
     framework.log("[System] Chat session reset.")
     return {"status": "success"}
 
@@ -502,14 +566,15 @@ def set_model(data: dict):
 
     if new_model != ORCHESTRATOR_MODEL or old_free != framework.free_tier_only:
         framework.log(f"[System] Switching Reasoning Tier to {new_model}...")
-        ORCHESTRATOR_MODEL = new_model
-        
-        # Force a fresh session on next chat
-        global_chat_session = None 
-        _session_hydrated = False
-        
-        # Re-create session
-        global_chat_session = create_new_session()
+        with _chat_execution_lock:
+            ORCHESTRATOR_MODEL = new_model
+            
+            # Force a fresh session on next chat
+            global_chat_session = None 
+            _session_hydrated = False
+            
+            # Re-create session
+            global_chat_session = create_new_session()
         framework.log(f"[System] Council re-calibrated on {new_model}.")
     global active_model_warning
     active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
@@ -570,417 +635,495 @@ def assemble_slim_tickers(raw_tickers: Any) -> list[dict]:
 def chat_endpoint(req: ChatRequest):
     """Primary chat route. Auto-injects live GLOBAL_STATE as DATA_PACKET before each user message."""
     global global_chat_session, cancel_event, _session_hydrated, ORCHESTRATOR_MODEL
+    global _active_turn_id, _active_turn_event
 
-    try:
-        # 1. Map names to actual tool functions for manual execution
-        tool_map = {f.__name__: f for f in terminal_tools}
-        
-        import datetime
-        # Calculate US/Eastern (New York) Time (EDT is UTC-4)
-        ny_time = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
-        current_iso = ny_time.strftime("%Y-%m-%dT%H:%M:%S")
+    raw_tid = getattr(req, "turn_id", None)
+    turn_id = (raw_tid.strip() if isinstance(raw_tid, str) and raw_tid.strip() else None) or f"turn-{uuid.uuid4().hex}"
 
-        # --- AUTO DATA INJECTION ---
-        # Build a structured DATA_PACKET from live GLOBAL_STATE for automatic context hydration.
-        # This replaces all manual clipboard copy/paste operations.
-        framework.log("[System] Auto-injecting live DATA_PACKET into context...")
+    with _turn_registry_lock:
+        turn_event = _turn_events.get(turn_id)
+        if turn_event is None:
+            turn_event = threading.Event()
+            _turn_events[turn_id] = turn_event
+        if turn_id in _precancelled_turn_ids:
+            turn_event.set()
+
+    with _chat_execution_lock:
+        activated = False
+        orig_framework_cancel_check = getattr(framework, "cancel_check", check_cancelled)
         try:
-            from fetch_stocks import get_global_state_snapshot
-            live_state = get_global_state_snapshot()
-        except (ImportError, AttributeError):
+            # 1. Map names to actual tool functions for manual execution
+            tool_map = {f.__name__: f for f in terminal_tools}
+
+            import datetime
+            # Calculate US/Eastern (New York) Time (EDT is UTC-4)
+            ny_time = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
+            current_iso = ny_time.strftime("%Y-%m-%dT%H:%M:%S")
+
+            # --- AUTO DATA INJECTION ---
+            # Build a structured DATA_PACKET from live GLOBAL_STATE for automatic context hydration.
+            # This replaces all manual clipboard copy/paste operations.
+            framework.log("[System] Auto-injecting live DATA_PACKET into context...")
             try:
-                from fetch_stocks import GLOBAL_STATE as live_state
-            except ImportError:
-                live_state = {}
+                from fetch_stocks import get_global_state_snapshot
+                live_state = get_global_state_snapshot()
+            except (ImportError, AttributeError):
+                try:
+                    from fetch_stocks import GLOBAL_STATE as live_state
+                except ImportError:
+                    live_state = {}
 
-        # 1. Authoritative financial state boundary enforcement
-        financial_valid = live_state.get("financial_state_valid")
-        local_storage = live_state.get("local_storage_state")
+            # 1. Authoritative financial state boundary enforcement
+            financial_valid = live_state.get("financial_state_valid")
+            local_storage = live_state.get("local_storage_state")
 
-        if (
-            financial_valid is False
-            or (local_storage is None and "local_storage_state" in live_state)
-            or ("local_storage_state" in live_state and not isinstance(local_storage, (dict, collections.abc.Mapping)))
-        ):
-            err_msg = live_state.get("persistence_error") or live_state.get("status") or "Authoritative financial state unavailable"
-            framework.log(f"[Security Alert] Chat dispatch halted: financial state degraded ({err_msg}).")
-            return {
-                "status": "error",
-                "code": "financial_state_degraded",
-                "message": "Authoritative financial state is currently unavailable or corrupted. Chat dispatch halted to prevent unauthorized or hallucinated mutations.",
-            }
-
-        if "local_storage_state" not in live_state:
-            # First run / startup check before daemon cycles:
-            # Validate authoritative financial basket (shares, WAC, cash, rate) and SSoT structure fail-closed
-            try:
-                service = get_persistence_service()
-                service.get_portfolio_basket()
-                ssot_direct = service.get_ssot_data()
-                if not isinstance(ssot_direct, (dict, collections.abc.Mapping)):
-                    raise PersistenceValidationError("SSoT root must be a dictionary")
-                ssot = ssot_direct
-            except Exception as pe:
-                framework.log(f"[Security Alert] Chat dispatch halted: persistence check failed on startup ({pe}).")
+            if (
+                financial_valid is False
+                or (local_storage is None and "local_storage_state" in live_state)
+                or ("local_storage_state" in live_state and not isinstance(local_storage, (dict, collections.abc.Mapping)))
+            ):
+                err_msg = live_state.get("persistence_error") or live_state.get("status") or "Authoritative financial state unavailable"
+                framework.log(f"[Security Alert] Chat dispatch halted: financial state degraded ({err_msg}).")
                 return {
                     "status": "error",
                     "code": "financial_state_degraded",
                     "message": "Authoritative financial state is currently unavailable or corrupted. Chat dispatch halted to prevent unauthorized or hallucinated mutations.",
+                    "turn_id": turn_id,
                 }
-        else:
-            ssot = local_storage
 
-        # 2. Authoritative SSoT Structure Validation & Extraction
-        try:
-            if not isinstance(ssot, (dict, collections.abc.Mapping)):
-                raise PersistenceValidationError(f"Authoritative SSoT root must be a dict, got {type(ssot).__name__}")
-
-            # Validate mutable_state if present
-            if "mutable_state" in ssot:
-                ms = ssot["mutable_state"]
-                if not isinstance(ms, (dict, collections.abc.Mapping)):
-                    raise PersistenceValidationError(
-                        f"Authoritative SSoT mutable_state must be a dict, got {type(ms).__name__}"
-                    )
-            else:
-                ms = ssot
-
-            # Validate portfolio structure
-            raw_portfolio = ms.get("portfolio_snapshot")
-            if raw_portfolio is None and "portfolio_snapshot" in ssot:
-                raw_portfolio = ssot.get("portfolio_snapshot")
-
-            if raw_portfolio is None:
-                portfolio = []
-            elif not isinstance(raw_portfolio, (list, collections.abc.Sequence)) or isinstance(raw_portfolio, (str, bytes)):
-                raise PersistenceValidationError(
-                    f"Authoritative portfolio_snapshot must be a list, got {type(raw_portfolio).__name__}"
-                )
-            else:
-                for idx, p in enumerate(raw_portfolio):
-                    if not isinstance(p, (dict, collections.abc.Mapping)):
-                        raise PersistenceValidationError(
-                            f"Authoritative portfolio entry {idx} must be a dict, got {type(p).__name__}"
-                        )
-                portfolio = raw_portfolio
-
-            # Validate state_context
-            raw_state_ctx = ms.get("state_context")
-            if raw_state_ctx is None and "state_context" in ssot:
-                raw_state_ctx = ssot.get("state_context")
-            if raw_state_ctx is not None and not isinstance(raw_state_ctx, (dict, collections.abc.Mapping)):
-                raise PersistenceValidationError(
-                    f"Authoritative state_context must be a dict, got {type(raw_state_ctx).__name__}"
-                )
-            state_ctx = raw_state_ctx if isinstance(raw_state_ctx, (dict, collections.abc.Mapping)) else {}
-
-            # Validate watched_tickers & scout_categories if present
-            raw_watched = ms.get("watched_tickers")
-            if raw_watched is None and "watched_tickers" in ssot:
-                raw_watched = ssot.get("watched_tickers")
-            if raw_watched is not None and (not isinstance(raw_watched, (list, collections.abc.Sequence)) or isinstance(raw_watched, (str, bytes))):
-                raise PersistenceValidationError(
-                    f"Authoritative watched_tickers must be a list, got {type(raw_watched).__name__}"
-                )
-            watched = list(raw_watched) if raw_watched is not None else []
-
-            raw_scouts = ms.get("scout_categories")
-            if raw_scouts is None and "scout_categories" in ssot:
-                raw_scouts = ssot.get("scout_categories")
-            if raw_scouts is not None and (not isinstance(raw_scouts, (list, collections.abc.Sequence)) or isinstance(raw_scouts, (str, bytes))):
-                raise PersistenceValidationError(
-                    f"Authoritative scout_categories must be a list, got {type(raw_scouts).__name__}"
-                )
-            scouts = list(raw_scouts) if raw_scouts is not None else []
-
-            # Slim portfolio
-            slim_portfolio = [
-                {
-                    "ticker": p.get("ticker"),
-                    "shares": p.get("shares"),
-                    "wac": p.get("wac"),
-                    "status": p.get("status"),
-                    "action": p.get("action"),
-                }
-                for p in portfolio
-            ]
-        except Exception as ssot_err:
-            framework.log(f"[Security Alert] Authoritative SSoT structure validation failed: {ssot_err}")
-            return {
-                "status": "error",
-                "code": "financial_state_degraded",
-                "message": "Authoritative financial state is currently unavailable or corrupted. Chat dispatch halted to prevent unauthorized or hallucinated mutations.",
-            }
-
-        # 3. Optional Enrichment & Non-Authoritative Telemetry Assembly
-        try:
-            # Slim tickers — optional market feed telemetry
-            slim_tickers = assemble_slim_tickers(live_state.get("tickers"))
-
-            # Load trade lessons via persistence service (optional enrichment)
-            trade_lessons = live_state.get("trade_lessons", [])
-            is_lesson_seq = isinstance(trade_lessons, collections.abc.Sequence) and not isinstance(trade_lessons, (str, bytes))
-            if not trade_lessons or not is_lesson_seq:
+            if "local_storage_state" not in live_state:
+                # First run / startup check before daemon cycles:
+                # Validate authoritative financial basket (shares, WAC, cash, rate) and SSoT structure fail-closed
                 try:
-                    trade_lessons = get_persistence_service().get_trade_lessons()
-                except Exception as tle:
-                    framework.log(f"[System Warning] Optional trade lessons retrieval failed: {tle}")
-                    trade_lessons = []
-                is_lesson_seq = isinstance(trade_lessons, collections.abc.Sequence) and not isinstance(trade_lessons, (str, bytes))
-            trade_lessons_list = list(trade_lessons) if is_lesson_seq else []
-
-            # Load decision log via persistence service (optional enrichment)
-            decision_log = []
-            try:
-                decision_log = get_persistence_service().get_decision_log()
-            except Exception as dle:
-                framework.log(f"[System Warning] Optional decision log retrieval failed: {dle}")
-                decision_log = []
-            if not isinstance(decision_log, list):
-                decision_log = []
-
-            raw_meta = live_state.get("_meta", {})
-            data_packet = {
-                "_meta": raw_meta if isinstance(raw_meta, (dict, collections.abc.Mapping)) else {},
-                "timestamp": live_state.get("timestamp", current_iso),
-                "market_status": live_state.get("status", "UNKNOWN"),
-                "tickers": slim_tickers,
-                "ssot": ssot,
-                "trade_lessons": trade_lessons_list[-10:],
-                "decision_log": decision_log[-10:],
-            }
-            data_packet_json = json.dumps(_normalize_for_json(data_packet), separators=(",", ":"), default=str)
-            auto_data_block = load_data_packet_injection_prompt(data_packet_json)
-            framework.log(f"[System] DATA_PACKET injected: {len(slim_tickers)} tickers, {len(slim_portfolio)} positions.")
-        except Exception as enrichment_err:
-            auto_data_block = f"\n[SYSTEM NOTE: Live market telemetry partially unavailable — {enrichment_err}]\n"
-            framework.log(f"[System] Non-authoritative DATA_PACKET enrichment failed: {enrichment_err}")
-        # --- END AUTO DATA INJECTION ---
-
-        # Deferred runtime reset and session initialisation: Only execute after authoritative financial validation succeeds
-        cancel_event.clear()
-        framework.reset_turn_usage()
-
-        if global_chat_session is None:
-            global_chat_session = create_new_session()
-        session = global_chat_session
-
-        # HYDRATION: If server restarted but browser has history, re-prime the LLM
-        prompt_prefix = auto_data_block  # Always prepend live data
-        if req.history and not _session_hydrated:
-            framework.log("[System] Server restart detected. Hydrating memory from browser session...")
-            history_context = load_history_recovery_header_prompt()
-            for msg in req.history: 
-                role = "USER" if msg["role"] == "user" else "COUNCIL"
-                content = msg.get("text", "").replace("\n", " ")[:500]
-                history_context += f"- {role}: {content}\n"
-            prompt_prefix = auto_data_block + history_context + load_history_recovery_footer_prompt()
-            _session_hydrated = True
-
-        active_model_str = f"[ACTIVE_MODEL]: {ORCHESTRATOR_MODEL}\n"
-        current_message = f"{active_model_str}{prompt_prefix}[SYSTEM_TIME (NEW YORK / ET): {current_iso}] [USER_QUERY]: {req.message}"
-        
-        chart_parts, chart_symbols = get_chart_parts() if should_attach_charts(req) else ([], [])
-        if chart_parts:
-            framework.log(f"[Vision] Attaching {len(chart_parts)} fresh 1m chart screenshot(s) [{', '.join(chart_symbols)}] to Gemini multimodal prompt...")
-
-        from tool_dispatcher import GLOBAL_TOOL_DISPATCHER
-        payload_to_send = [*chart_parts, current_message] if chart_parts else current_message
-
-        fallback_occurred = False
-        dispatch_res = GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session(
-            session=session,
-            initial_message=payload_to_send,
-            part_factory=agent_framework.types.Part,
-            agent_role="Terminal Orchestrator",
-            cancel_check=lambda: cancel_event.is_set(),
-            log_callback=framework.log,
-        )
-
-        if dispatch_res.get("status") == "cancelled":
-            return {"status": "success", "response": dispatch_res["response"]}
-
-        full_response = dispatch_res["response"]
-        if not full_response:
-            framework.log("[Orchestrator] WARNING: No text captured across all turns.")
-            return {"status": "success", "response": "_[The model performed its internal reasoning and tools but did not emit a final text summary. Please try again or check system logs.]_"}
-        
-        # Intercept and process EXECUTION_PAYLOAD dynamically (purging it from user display)
-        full_response_original = full_response
-        cleaned_response = full_response
-        payload_processed = False
-        
-        # Look for json markdown code block wrappers
-        idx = full_response.find("```json")
-        if idx == -1:
-            idx = full_response.find("```")
-            
-        if idx != -1:
-            close_idx = full_response.find("```", idx + 3)
-            # Handle truncated code block
-            is_truncated = (close_idx == -1)
-            actual_close_idx = len(full_response) if is_truncated else close_idx
-            
-            block_content = full_response[idx:actual_close_idx + (0 if is_truncated else 3)]
-            if "EXECUTION_PAYLOAD" in block_content or "thoughtSignature" in block_content or "portfolio_snapshot" in block_content:
-                inner_json = block_content
-                if inner_json.startswith("```json"):
-                    inner_json = inner_json[7:]
-                elif inner_json.startswith("```"):
-                    inner_json = inner_json[3:]
-                
-                if not is_truncated:
-                    inner_json = inner_json[:-3]
-                inner_json = inner_json.strip()
-                    
-                framework.log("[System] Auto-processing slice-extracted EXECUTION_PAYLOAD...")
-                try:
-                    res = tools.update_ssot(inner_json)
-                    framework.log(f"[System] SSoT update result: {res}")
-                    payload_html = (
-                        f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
-                        f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden)</summary>'
-                        f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
-                    )
-                    cleaned_response = full_response[:idx] + payload_html + full_response[actual_close_idx + (0 if is_truncated else 3):]
-                    payload_processed = True
+                    service = get_persistence_service()
+                    service.get_portfolio_basket()
+                    ssot_direct = service.get_ssot_data()
+                    if not isinstance(ssot_direct, (dict, collections.abc.Mapping)):
+                        raise PersistenceValidationError("SSoT root must be a dictionary")
+                    ssot = ssot_direct
                 except Exception as pe:
-                    framework.log(f"[System Error] Failed to update SSoT with sliced payload: {pe}")
-                    # Even if parsing fails, hide the broken payload from the chat UI
-                    payload_html = (
-                        f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
-                        f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated)</summary>'
-                        f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
+                    framework.log(f"[Security Alert] Chat dispatch halted: persistence check failed on startup ({pe}).")
+                    return {
+                        "status": "error",
+                        "code": "financial_state_degraded",
+                        "message": "Authoritative financial state is currently unavailable or corrupted. Chat dispatch halted to prevent unauthorized or hallucinated mutations.",
+                        "turn_id": turn_id,
+                    }
+            else:
+                ssot = local_storage
+
+            # 2. Authoritative SSoT Structure Validation & Extraction
+            try:
+                if not isinstance(ssot, (dict, collections.abc.Mapping)):
+                    raise PersistenceValidationError(f"Authoritative SSoT root must be a dict, got {type(ssot).__name__}")
+
+                # Validate mutable_state if present
+                if "mutable_state" in ssot:
+                    ms = ssot["mutable_state"]
+                    if not isinstance(ms, (dict, collections.abc.Mapping)):
+                        raise PersistenceValidationError(
+                            f"Authoritative SSoT mutable_state must be a dict, got {type(ms).__name__}"
+                        )
+                else:
+                    ms = ssot
+
+                # Validate portfolio structure
+                raw_portfolio = ms.get("portfolio_snapshot")
+                if raw_portfolio is None and "portfolio_snapshot" in ssot:
+                    raw_portfolio = ssot.get("portfolio_snapshot")
+
+                if raw_portfolio is None:
+                    portfolio = []
+                elif not isinstance(raw_portfolio, (list, collections.abc.Sequence)) or isinstance(raw_portfolio, (str, bytes)):
+                    raise PersistenceValidationError(
+                        f"Authoritative portfolio_snapshot must be a list, got {type(raw_portfolio).__name__}"
                     )
-                    cleaned_response = full_response[:idx] + payload_html + full_response[actual_close_idx + (0 if is_truncated else 3):]
-                    payload_processed = True
-                        
-        if not payload_processed:
-            # Fallback to direct curly brace extraction
-            start_idx = full_response.find('{')
-            end_idx = full_response.rfind('}')
-            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                candidate = full_response[start_idx:end_idx+1]
-                if "EXECUTION_PAYLOAD" in candidate or "thoughtSignature" in candidate or "portfolio_snapshot" in candidate:
-                    # Clean up code blocks surrounding braces
-                    prefix = full_response[:start_idx].strip()
-                    clean_start_idx = start_idx
-                    if prefix.endswith("```json"):
-                        clean_start_idx = full_response[:start_idx].rfind("```json")
-                    elif prefix.endswith("```"):
-                        clean_start_idx = full_response[:start_idx].rfind("```")
-                        
-                    suffix = full_response[end_idx+1:].strip()
-                    clean_end_idx = end_idx + 1
-                    if suffix.startswith("```"):
-                        rel_idx = full_response[end_idx+1:].find("```")
-                        if rel_idx != -1:
-                            clean_end_idx = end_idx + 1 + rel_idx + 3
-                            
+                else:
+                    for idx, p in enumerate(raw_portfolio):
+                        if not isinstance(p, (dict, collections.abc.Mapping)):
+                            raise PersistenceValidationError(
+                                f"Authoritative portfolio entry {idx} must be a dict, got {type(p).__name__}"
+                            )
+                    portfolio = raw_portfolio
+
+                # Validate state_context
+                raw_state_ctx = ms.get("state_context")
+                if raw_state_ctx is None and "state_context" in ssot:
+                    raw_state_ctx = ssot.get("state_context")
+                if raw_state_ctx is not None and not isinstance(raw_state_ctx, (dict, collections.abc.Mapping)):
+                    raise PersistenceValidationError(
+                        f"Authoritative state_context must be a dict, got {type(raw_state_ctx).__name__}"
+                    )
+                state_ctx = raw_state_ctx if isinstance(raw_state_ctx, (dict, collections.abc.Mapping)) else {}
+
+                # Validate watched_tickers & scout_categories if present
+                raw_watched = ms.get("watched_tickers")
+                if raw_watched is None and "watched_tickers" in ssot:
+                    raw_watched = ssot.get("watched_tickers")
+                if raw_watched is not None and (not isinstance(raw_watched, (list, collections.abc.Sequence)) or isinstance(raw_watched, (str, bytes))):
+                    raise PersistenceValidationError(
+                        f"Authoritative watched_tickers must be a list, got {type(raw_watched).__name__}"
+                    )
+                watched = list(raw_watched) if raw_watched is not None else []
+
+                raw_scouts = ms.get("scout_categories")
+                if raw_scouts is None and "scout_categories" in ssot:
+                    raw_scouts = ssot.get("scout_categories")
+                if raw_scouts is not None and (not isinstance(raw_scouts, (list, collections.abc.Sequence)) or isinstance(raw_scouts, (str, bytes))):
+                    raise PersistenceValidationError(
+                        f"Authoritative scout_categories must be a list, got {type(raw_scouts).__name__}"
+                    )
+                scouts = list(raw_scouts) if raw_scouts is not None else []
+
+                # Slim portfolio
+                slim_portfolio = [
+                    {
+                        "ticker": p.get("ticker"),
+                        "shares": p.get("shares"),
+                        "wac": p.get("wac"),
+                        "status": p.get("status"),
+                        "action": p.get("action"),
+                    }
+                    for p in portfolio
+                ]
+            except Exception as ssot_err:
+                framework.log(f"[Security Alert] Authoritative SSoT structure validation failed: {ssot_err}")
+                return {
+                    "status": "error",
+                    "code": "financial_state_degraded",
+                    "message": "Authoritative financial state is currently unavailable or corrupted. Chat dispatch halted to prevent unauthorized or hallucinated mutations.",
+                    "turn_id": turn_id,
+                }
+
+            # 3. Optional Enrichment & Non-Authoritative Telemetry Assembly
+            try:
+                # Slim tickers — optional market feed telemetry
+                slim_tickers = assemble_slim_tickers(live_state.get("tickers"))
+
+                # Load trade lessons via persistence service (optional enrichment)
+                trade_lessons = live_state.get("trade_lessons", [])
+                is_lesson_seq = isinstance(trade_lessons, collections.abc.Sequence) and not isinstance(trade_lessons, (str, bytes))
+                if not trade_lessons or not is_lesson_seq:
                     try:
-                        json.loads(candidate)
-                        framework.log("[System] Auto-processing brace-extracted EXECUTION_PAYLOAD...")
-                        res = tools.update_ssot(candidate)
+                        trade_lessons = get_persistence_service().get_trade_lessons()
+                    except Exception as tle:
+                        framework.log(f"[System Warning] Optional trade lessons retrieval failed: {tle}")
+                        trade_lessons = []
+                    is_lesson_seq = isinstance(trade_lessons, collections.abc.Sequence) and not isinstance(trade_lessons, (str, bytes))
+                trade_lessons_list = list(trade_lessons) if is_lesson_seq else []
+
+                # Load decision log via persistence service (optional enrichment)
+                decision_log = []
+                try:
+                    decision_log = get_persistence_service().get_decision_log()
+                except Exception as dle:
+                    framework.log(f"[System Warning] Optional decision log retrieval failed: {dle}")
+                    decision_log = []
+                if not isinstance(decision_log, list):
+                    decision_log = []
+
+                raw_meta = live_state.get("_meta", {})
+                data_packet = {
+                    "_meta": raw_meta if isinstance(raw_meta, (dict, collections.abc.Mapping)) else {},
+                    "timestamp": live_state.get("timestamp", current_iso),
+                    "market_status": live_state.get("status", "UNKNOWN"),
+                    "tickers": slim_tickers,
+                    "ssot": ssot,
+                    "trade_lessons": trade_lessons_list[-10:],
+                    "decision_log": decision_log[-10:],
+                }
+                data_packet_json = json.dumps(_normalize_for_json(data_packet), separators=(",", ":"), default=str)
+                auto_data_block = load_data_packet_injection_prompt(data_packet_json)
+                framework.log(f"[System] DATA_PACKET injected: {len(slim_tickers)} tickers, {len(slim_portfolio)} positions.")
+            except Exception as enrichment_err:
+                auto_data_block = f"\n[SYSTEM NOTE: Live market telemetry partially unavailable — {enrichment_err}]\n"
+                framework.log(f"[System] Non-authoritative DATA_PACKET enrichment failed: {enrichment_err}")
+            # --- END AUTO DATA INJECTION ---
+
+            # Abort cleanly if this turn was pre-cancelled or cancelled while queued behind an earlier turn
+            if turn_event.is_set():
+                framework.log(f"[System] Turn {turn_id} cancelled before execution started.")
+                return {
+                    "status": "success",
+                    "response": "[OFFLINE] Session terminated by user interrupt.",
+                    "cancelled": True,
+                    "turn_id": turn_id,
+                }
+
+            # Deferred runtime reset and session initialisation: Only execute after authoritative financial validation succeeds
+            with _turn_registry_lock:
+                cancel_event.clear()
+                _active_turn_id = turn_id
+                _active_turn_event = turn_event
+                activated = True
+
+            framework.reset_turn_usage()
+
+            def turn_cancel_check() -> bool:
+                with _turn_registry_lock:
+                    return bool(
+                        turn_event.is_set()
+                        or (_active_turn_id == turn_id and cancel_event.is_set())
+                    )
+
+            framework.cancel_check = turn_cancel_check
+
+            if global_chat_session is None:
+                global_chat_session = create_new_session()
+            session = global_chat_session
+
+            # HYDRATION: If server restarted but browser has history, re-prime the LLM
+            prompt_prefix = auto_data_block  # Always prepend live data
+            if req.history and not _session_hydrated:
+                framework.log("[System] Server restart detected. Hydrating memory from browser session...")
+                history_context = load_history_recovery_header_prompt()
+                for msg in req.history: 
+                    role = "USER" if msg["role"] == "user" else "COUNCIL"
+                    content = msg.get("text", "").replace("\n", " ")[:500]
+                    history_context += f"- {role}: {content}\n"
+                prompt_prefix = auto_data_block + history_context + load_history_recovery_footer_prompt()
+                _session_hydrated = True
+
+            active_model_str = f"[ACTIVE_MODEL]: {ORCHESTRATOR_MODEL}\n"
+            current_message = f"{active_model_str}{prompt_prefix}[SYSTEM_TIME (NEW YORK / ET): {current_iso}] [USER_QUERY]: {req.message}"
+            
+            chart_parts, chart_symbols = get_chart_parts() if should_attach_charts(req) else ([], [])
+            if chart_parts:
+                framework.log(f"[Vision] Attaching {len(chart_parts)} fresh 1m chart screenshot(s) [{', '.join(chart_symbols)}] to Gemini multimodal prompt...")
+
+            from tool_dispatcher import GLOBAL_TOOL_DISPATCHER
+            payload_to_send = [*chart_parts, current_message] if chart_parts else current_message
+
+            fallback_occurred = False
+            dispatch_res = GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session(
+                session=session,
+                initial_message=payload_to_send,
+                part_factory=agent_framework.types.Part,
+                agent_role="Terminal Orchestrator",
+                cancel_check=turn_cancel_check,
+                log_callback=framework.log,
+            )
+
+            if dispatch_res.get("status") == "cancelled":
+                return {
+                    "status": "success",
+                    "response": dispatch_res["response"],
+                    "cancelled": True,
+                    "turn_id": turn_id,
+                }
+
+            full_response = dispatch_res["response"]
+            if not full_response:
+                framework.log("[Orchestrator] WARNING: No text captured across all turns.")
+                return {
+                    "status": "success",
+                    "response": "_[The model performed its internal reasoning and tools but did not emit a final text summary. Please try again or check system logs.]_",
+                    "turn_id": turn_id,
+                }
+            
+            # Intercept and process EXECUTION_PAYLOAD dynamically (purging it from user display)
+            full_response_original = full_response
+            cleaned_response = full_response
+            payload_processed = False
+            
+            # Look for json markdown code block wrappers
+            idx = full_response.find("```json")
+            if idx == -1:
+                idx = full_response.find("```")
+                
+            if idx != -1:
+                close_idx = full_response.find("```", idx + 3)
+                # Handle truncated code block
+                is_truncated = (close_idx == -1)
+                actual_close_idx = len(full_response) if is_truncated else close_idx
+                
+                block_content = full_response[idx:actual_close_idx + (0 if is_truncated else 3)]
+                if "EXECUTION_PAYLOAD" in block_content or "thoughtSignature" in block_content or "portfolio_snapshot" in block_content:
+                    inner_json = block_content
+                    if inner_json.startswith("```json"):
+                        inner_json = inner_json[7:]
+                    elif inner_json.startswith("```"):
+                        inner_json = inner_json[3:]
+                    
+                    if not is_truncated:
+                        inner_json = inner_json[:-3]
+                    inner_json = inner_json.strip()
+                        
+                    framework.log("[System] Auto-processing slice-extracted EXECUTION_PAYLOAD...")
+                    try:
+                        res = tools.update_ssot(inner_json)
                         framework.log(f"[System] SSoT update result: {res}")
                         payload_html = (
                             f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
                             f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden)</summary>'
-                            f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
+                            f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
                         )
-                        cleaned_response = full_response[:clean_start_idx] + payload_html + full_response[clean_end_idx:]
+                        cleaned_response = full_response[:idx] + payload_html + full_response[actual_close_idx + (0 if is_truncated else 3):]
                         payload_processed = True
                     except Exception as pe:
-                        framework.log(f"[System Error] Failed to update SSoT with brace payload: {pe}")
+                        framework.log(f"[System Error] Failed to update SSoT with sliced payload: {pe}")
                         # Even if parsing fails, hide the broken payload from the chat UI
                         payload_html = (
                             f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
                             f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated)</summary>'
-                            f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
+                            f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
                         )
-                        cleaned_response = full_response[:clean_start_idx] + payload_html + full_response[clean_end_idx:]
+                        cleaned_response = full_response[:idx] + payload_html + full_response[actual_close_idx + (0 if is_truncated else 3):]
                         payload_processed = True
-                        
-        if payload_processed:
-            import re
-            # Clean up the leading title/header text if present
-            cleaned_response = re.sub(
-                r"^\s*(?:#+\s*|\*+\s*|⚖️\s*)*⚖️?\s*Execution\s*Payload\s*(?:\*+\s*)*$", 
-                "", 
-                cleaned_response, 
-                flags=re.IGNORECASE | re.MULTILINE
-            )
-            # Remove redundant blank lines and double horizontal rules left after parsing
-            cleaned_response = re.sub(r"\n{3,}", "\n\n", cleaned_response)
-            cleaned_response = cleaned_response.strip()
-            # Clean trailing dividers if any
-            if cleaned_response.endswith("---"):
-                cleaned_response = cleaned_response[:-3].strip()
-            
-            # Robust fallback if the AI generated NO conversational text
-            if not cleaned_response:
-                cleaned_response = "*(The AI Council executed its routine and synchronized the SSoT, but did not output a conversational summary for this turn.)*"
+                            
+            if not payload_processed:
+                # Fallback to direct curly brace extraction
+                start_idx = full_response.find('{')
+                end_idx = full_response.rfind('}')
+                if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                    candidate = full_response[start_idx:end_idx+1]
+                    if "EXECUTION_PAYLOAD" in candidate or "thoughtSignature" in candidate or "portfolio_snapshot" in candidate:
+                        # Clean up code blocks surrounding braces
+                        prefix = full_response[:start_idx].strip()
+                        clean_start_idx = start_idx
+                        if prefix.endswith("```json"):
+                            clean_start_idx = full_response[:start_idx].rfind("```json")
+                        elif prefix.endswith("```"):
+                            clean_start_idx = full_response[:start_idx].rfind("```")
+                            
+                        suffix = full_response[end_idx+1:].strip()
+                        clean_end_idx = end_idx + 1
+                        if suffix.startswith("```"):
+                            rel_idx = full_response[end_idx+1:].find("```")
+                            if rel_idx != -1:
+                                clean_end_idx = end_idx + 1 + rel_idx + 3
+                                
+                        try:
+                            json.loads(candidate)
+                            framework.log("[System] Auto-processing brace-extracted EXECUTION_PAYLOAD...")
+                            res = tools.update_ssot(candidate)
+                            framework.log(f"[System] SSoT update result: {res}")
+                            payload_html = (
+                                f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
+                                f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden)</summary>'
+                                f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
+                            )
+                            cleaned_response = full_response[:clean_start_idx] + payload_html + full_response[clean_end_idx:]
+                            payload_processed = True
+                        except Exception as pe:
+                            framework.log(f"[System Error] Failed to update SSoT with brace payload: {pe}")
+                            # Even if parsing fails, hide the broken payload from the chat UI
+                            payload_html = (
+                                f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
+                                f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated)</summary>'
+                                f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
+                            )
+                            cleaned_response = full_response[:clean_start_idx] + payload_html + full_response[clean_end_idx:]
+                            payload_processed = True
+                            
+            if payload_processed:
+                import re
+                # Clean up the leading title/header text if present
+                cleaned_response = re.sub(
+                    r"^\s*(?:#+\s*|\*+\s*|⚖️\s*)*⚖️?\s*Execution\s*Payload\s*(?:\*+\s*)*$", 
+                    "", 
+                    cleaned_response, 
+                    flags=re.IGNORECASE | re.MULTILINE
+                )
+                # Remove redundant blank lines and double horizontal rules left after parsing
+                cleaned_response = re.sub(r"\n{3,}", "\n\n", cleaned_response)
+                cleaned_response = cleaned_response.strip()
+                # Clean trailing dividers if any
+                if cleaned_response.endswith("---"):
+                    cleaned_response = cleaned_response[:-3].strip()
                 
-            # Append success badge
-            cleaned_response += "\n\n---\n\n*⚖️ SSoT Shadow State synchronized successfully.*"
-            full_response = cleaned_response
-        else:
-            # Fallback to decision logging if no payload was parsed/updated
+                # Robust fallback if the AI generated NO conversational text
+                if not cleaned_response:
+                    cleaned_response = "*(The AI Council executed its routine and synchronized the SSoT, but did not output a conversational summary for this turn.)*"
+                    
+                # Append success badge
+                cleaned_response += "\n\n---\n\n*⚖️ SSoT Shadow State synchronized successfully.*"
+                full_response = cleaned_response
+            else:
+                # Fallback to decision logging if no payload was parsed/updated
+                try:
+                    tools.intercept_and_log_decision(full_response)
+                except Exception as ie:
+                    framework.log(f"[System Warning] Decision interception inside chat_endpoint failed: {ie}")
+                
+            import re
+            full_response = re.sub(
+                r"TEMPORAL_CHECK:\s*[^\n\)]*\)\s*", 
+                "", 
+                full_response, 
+                flags=re.IGNORECASE
+            )
+
             try:
-                tools.intercept_and_log_decision(full_response)
-            except Exception as ie:
-                framework.log(f"[System Warning] Decision interception inside chat_endpoint failed: {ie}")
+                with open("scratch/debug_output.txt", "w", encoding="utf-8") as df:
+                    df.write("=== RAW FULL RESPONSE ===\n")
+                    df.write(full_response_original + "\n\n")
+                    df.write("=== CLEANED RESPONSE ===\n")
+                    df.write(full_response + "\n")
+            except Exception as e:
+                framework.log(f"Debug write failed: {e}")
+
+            global active_model_warning
+            active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
             
-        import re
-        full_response = re.sub(
-            r"TEMPORAL_CHECK:\s*[^\n\)]*\)\s*", 
-            "", 
-            full_response, 
-            flags=re.IGNORECASE
-        )
+            # Log diagnostics to console/queue
+            usage_lock = getattr(framework, "_usage_lock", None)
+            if usage_lock is not None:
+                with usage_lock:
+                    usage_snapshot = dict(framework.turn_usage)
+            else:
+                usage_snapshot = dict(framework.turn_usage)
+            turn_cost = usage_snapshot.get('estimated_cost', 0.0)
+            session_cost = framework.session_cost
+            framework.log(f"[Diagnostics] Turn Cost: ${turn_cost:.4f} | Total Session Cost: ${session_cost:.4f}")
 
-        try:
-            with open("scratch/debug_output.txt", "w", encoding="utf-8") as df:
-                df.write("=== RAW FULL RESPONSE ===\n")
-                df.write(full_response_original + "\n\n")
-                df.write("=== CLEANED RESPONSE ===\n")
-                df.write(full_response + "\n")
-        except Exception as e:
-            framework.log(f"Debug write failed: {e}")
-
-        global active_model_warning
-        active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
-        
-        # Log diagnostics to console/queue
-        turn_cost = framework.turn_usage['estimated_cost']
-        session_cost = framework.session_cost
-        framework.log(f"[Diagnostics] Turn Cost: ${turn_cost:.4f} | Total Session Cost: ${session_cost:.4f}")
-
-        return {
-            "status": "success", 
-            "response": full_response.strip(),
-            "usage": framework.turn_usage,
-            "model": ORCHESTRATOR_MODEL,
-            "active_model": ORCHESTRATOR_MODEL,
-            "fallback_occurred": fallback_occurred,
-            "warning": active_model_warning
-        }
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        error_msg = str(e)
-        if cancel_event.is_set() or "cancelled" in error_msg.lower():
-            return {"status": "success", "response": "[OFFLINE] Session terminated by user interrupt."}
-            
-
-
-        framework.log(f"[Error] Chat endpoint exception: {error_msg}")
-        if "429" in error_msg or "quota" in error_msg.lower() or "resource_exhausted" in error_msg.lower():
             return {
-                "status": "error",
-                "code": "quota_exhausted",
-                "message": "Free tier quota exhausted. Upgrade to Paid Tier to continue."
+                "status": "success", 
+                "response": full_response.strip(),
+                "usage": usage_snapshot,
+                "model": ORCHESTRATOR_MODEL,
+                "active_model": ORCHESTRATOR_MODEL,
+                "fallback_occurred": fallback_occurred,
+                "warning": active_model_warning,
+                "turn_id": turn_id,
             }
-        return {"status": "error", "message": error_msg}
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            error_msg = str(e)
+            with _turn_registry_lock:
+                turn_cancelled = bool(
+                    turn_event.is_set()
+                    or (_active_turn_id == turn_id and cancel_event.is_set())
+                )
+            if turn_cancelled or "cancelled" in error_msg.lower():
+                return {
+                    "status": "success",
+                    "response": "[OFFLINE] Session terminated by user interrupt.",
+                    "cancelled": True,
+                    "turn_id": turn_id,
+                }
+
+            framework.log(f"[Error] Chat endpoint exception: {error_msg}")
+            if "429" in error_msg or "quota" in error_msg.lower() or "resource_exhausted" in error_msg.lower():
+                return {
+                    "status": "error",
+                    "code": "quota_exhausted",
+                    "message": "Free tier quota exhausted. Upgrade to Paid Tier to continue.",
+                    "turn_id": turn_id,
+                }
+            return {"status": "error", "message": error_msg, "turn_id": turn_id}
+        finally:
+            if activated:
+                framework.cancel_check = orig_framework_cancel_check
+            with _turn_registry_lock:
+                if _active_turn_id == turn_id:
+                    _active_turn_id = None
+                    _active_turn_event = None
+                _turn_events.pop(turn_id, None)
+                _precancelled_turn_ids.pop(turn_id, None)
+                if turn_id not in _completed_turn_ids:
+                    _completed_turn_ids.append(turn_id)
 
 class DecisionLogRequest(BaseModel):
     lesson: str

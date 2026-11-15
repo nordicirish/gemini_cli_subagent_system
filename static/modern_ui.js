@@ -68,6 +68,8 @@ const ModernChat = {
         this.historyBtn = document.getElementById('history-chat-btn');
         this.currentLogElement = null;
         this.currentThinkingId = null;
+        this.activeTurnId = null;
+        this._turnSeq = 0;
         this.activeAbortController = null;
         this.includeChartsNext = false;
         this.isAborted = false;
@@ -962,20 +964,25 @@ const ModernChat = {
                 const subActive = this.geminiSubscriptionToggle && this.geminiSubscriptionToggle.checked;
                 const badge = document.createElement('div');
                 badge.className = 'cost-estimator';
-                const isEstimated = Boolean(usage && (usage.is_estimated || usage.token_accounting_mode === 'heuristic_estimate'));
+                const summary = this._summarizeUsageTokens(usage);
                 let tokenInfo = '';
                 if (usage) {
-                    const cachedIn = usage.caching_active ? (usage.cached_tokens || 0) : 0;
-                    const inTokens = (usage.actual_prompt_tokens ?? usage.estimated_prompt_tokens ?? usage.prompt_tokens ?? 0) + cachedIn;
-                    const outTokens = usage.actual_candidates_tokens ?? usage.estimated_candidates_tokens ?? usage.candidates_tokens ?? 0;
-                    const tokenText = isEstimated
-                        ? `~${inTokens} est. in / ~${outTokens} est. out · chars/4 est.`
-                        : `${inTokens} in / ${outTokens} out`;
+                    let tokenText;
+                    if (summary.isMixed) {
+                        const measIn = summary.actualIn + summary.cachedIn;
+                        tokenText = `${summary.inTokens} in [${measIn} meas. + ~${summary.estIn} est.] / ${summary.outTokens} out [${summary.actualOut} meas. + ~${summary.estOut} est.] · mixed`;
+                    } else if (summary.isEstimatedOnly) {
+                        tokenText = `~${summary.inTokens} est. in / ~${summary.outTokens} est. out · chars/4 est.`;
+                    } else {
+                        tokenText = `${summary.inTokens} in / ${summary.outTokens} out`;
+                    }
                     tokenInfo = ` <span style="font-size:0.65rem;opacity:0.7">(${tokenText})</span>`;
                 }
-                const costStr = isEstimated
-                    ? `Heuristic Est. Cost: $${cost.toFixed(4)}`
-                    : `Est. Cost: $${cost.toFixed(4)}`;
+                const costStr = summary.isMixed
+                    ? `Mixed Est. Cost: $${cost.toFixed(4)}`
+                    : (summary.isEstimatedOnly
+                        ? `Heuristic Est. Cost: $${cost.toFixed(4)}`
+                        : `Est. Cost: $${cost.toFixed(4)}`);
                 const planStr = subActive ? ` <span style="color:#58a6ff;font-size:0.65rem;margin-left:5px;font-weight:bold">[Plan Active]</span>` : '';
                 badge.innerHTML = `🪙 ${costStr}${planStr}${tokenInfo}`;
                 msgDiv.appendChild(badge);
@@ -1011,13 +1018,80 @@ const ModernChat = {
         return /\b(chart screenshot|attach chart|capture chart|1m chart|tradingview chart|inspect chart)\b/i.test(text);
     },
 
-    _cleanupPendingTurnUI(thinkingId = null) {
+    _generateTurnId() {
+        this._turnSeq = (this._turnSeq || 0) + 1;
+        return 'turn-' + Date.now() + '-' + this._turnSeq + '-' + Math.random().toString(36).slice(2, 8);
+    },
+
+    _summarizeUsageTokens(usage) {
+        if (!usage) {
+            return {
+                cachedIn: 0,
+                actualIn: 0,
+                estIn: 0,
+                actualOut: 0,
+                estOut: 0,
+                promptTokens: 0,
+                candidatesTokens: 0,
+                inTokens: 0,
+                outTokens: 0,
+                isMixed: false,
+                isEstimatedOnly: false,
+            };
+        }
+        const cachedIn = usage.caching_active ? (usage.cached_tokens || 0) : 0;
+        const actualIn = Number(usage.actual_prompt_tokens ?? 0) || 0;
+        const estIn = Number(usage.estimated_prompt_tokens ?? 0) || 0;
+        const actualOut = Number(usage.actual_candidates_tokens ?? 0) || 0;
+        const estOut = Number(usage.estimated_candidates_tokens ?? 0) || 0;
+        const hasActual = (usage.actual_prompt_tokens != null && actualIn > 0) || (usage.actual_candidates_tokens != null && actualOut > 0);
+        const hasEstimated = (usage.estimated_prompt_tokens != null && estIn > 0) || (usage.estimated_candidates_tokens != null && estOut > 0);
+        const isMixed = usage.token_accounting_mode === 'mixed_estimated_and_measured' || (hasActual && hasEstimated);
+
+        let promptTokens = 0;
+        let candidatesTokens = 0;
+        if (isMixed) {
+            promptTokens = actualIn + estIn;
+            candidatesTokens = actualOut + estOut;
+        } else if (hasActual) {
+            promptTokens = actualIn;
+            candidatesTokens = actualOut;
+        } else if (hasEstimated) {
+            promptTokens = estIn;
+            candidatesTokens = estOut;
+        } else {
+            promptTokens = Number(usage.prompt_tokens ?? usage.actual_prompt_tokens ?? usage.estimated_prompt_tokens ?? 0) || 0;
+            candidatesTokens = Number(usage.candidates_tokens ?? usage.actual_candidates_tokens ?? usage.estimated_candidates_tokens ?? 0) || 0;
+        }
+
+        const isEstimatedOnly = !isMixed && Boolean(
+            usage.token_accounting_mode === 'heuristic_estimate' || (usage.is_estimated && !hasActual)
+        );
+        return {
+            cachedIn,
+            actualIn,
+            estIn,
+            actualOut,
+            estOut,
+            promptTokens,
+            candidatesTokens,
+            inTokens: promptTokens + cachedIn,
+            outTokens: candidatesTokens,
+            isMixed,
+            isEstimatedOnly,
+        };
+    },
+
+    _cleanupPendingTurnUI(thinkingId = null, turnId = null) {
         const targetId = thinkingId || this.currentThinkingId;
         if (targetId) {
             const tMsg = document.getElementById(targetId);
             if (tMsg) tMsg.remove();
         }
-        if (!thinkingId || this.currentThinkingId === thinkingId) {
+        const matchesThinking = !thinkingId || this.currentThinkingId === thinkingId;
+        const matchesTurn = !turnId || this.activeTurnId === turnId;
+        if (matchesThinking && matchesTurn) {
+            this.activeTurnId = null;
             this.currentThinkingId = null;
             this.currentLogElement = null;
             if (this.input) {
@@ -1036,6 +1110,8 @@ const ModernChat = {
 
     async stopMessage() {
         this.isAborted = true;
+        const turnIdToCancel = this.activeTurnId;
+        const thinkingIdToCancel = this.currentThinkingId;
         const statusIndicator = document.getElementById('chat-status-indicator');
         if (statusIndicator) statusIndicator.textContent = 'Status: Stopping...';
         if (this.activeAbortController) {
@@ -1044,12 +1120,16 @@ const ModernChat = {
             } catch (e) {}
             this.activeAbortController = null;
         }
-        this._cleanupPendingTurnUI(this.currentThinkingId);
+        this._cleanupPendingTurnUI(thinkingIdToCancel, turnIdToCancel);
         this.appendMessage('ai', '🛑 Request cancelled by user.', false);
         try {
-            await fetch('/api/cancel_chat', { method: 'POST' });
+            await fetch('/api/cancel_chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(turnIdToCancel ? { turn_id: turnIdToCancel } : {})
+            });
         } catch (e) {}
-        if (statusIndicator) {
+        if (statusIndicator && (!this.activeTurnId || this.activeTurnId === turnIdToCancel)) {
             statusIndicator.textContent = 'Status: Ready';
             statusIndicator.style.color = '#8b949e';
         }
@@ -1057,9 +1137,10 @@ const ModernChat = {
 
     calculateCost(usage, model) {
         if (!usage || !model) return 0.0;
-        const p = usage.actual_prompt_tokens ?? usage.estimated_prompt_tokens ?? usage.prompt_tokens ?? 0;
-        const c = usage.actual_candidates_tokens ?? usage.estimated_candidates_tokens ?? usage.candidates_tokens ?? 0;
-        const cached = usage.caching_active ? (usage.cached_tokens || 0) : 0;
+        const summary = this._summarizeUsageTokens(usage);
+        const p = summary.promptTokens;
+        const c = summary.candidatesTokens;
+        const cached = summary.cachedIn;
 
         let inputPrice = 0, cachePrice = 0, outputPrice = 0;
         if (model.includes('pro')) {
@@ -1103,8 +1184,9 @@ const ModernChat = {
         }
         this.input.value = '';
 
-        // Thinking indicator
-        const thinkingId = 'msg-' + Date.now();
+        // Thinking indicator keyed by unique turn ID
+        const turnId = (options && options.turnId) || this._generateTurnId();
+        const thinkingId = 'msg-' + turnId;
         const msgDiv = document.createElement('div');
         msgDiv.className = 'modern-message ai thinking-msg';
         msgDiv.id = thinkingId;
@@ -1117,6 +1199,7 @@ const ModernChat = {
         logText.textContent = 'Awaiting DATA_PACKET injection...';
 
         const abortController = new AbortController();
+        this.activeTurnId = turnId;
         this.activeAbortController = abortController;
         this.currentThinkingId = thinkingId;
         this.currentLogElement = logText;
@@ -1133,20 +1216,24 @@ const ModernChat = {
         const statusIndicator = document.getElementById('chat-status-indicator');
         if (statusIndicator) statusIndicator.textContent = '';
 
+        const isTurnStale = () => (
+            this.isAborted || abortController.signal.aborted || this.activeTurnId !== turnId
+        );
+
         try {
             // Render & capture live 1m TradingView charts only when explicitly requested
             if (includeCharts && typeof window.captureTargetChartScreenshots === 'function') {
-                if (this.currentLogElement) {
+                if (this.activeTurnId === turnId && this.currentLogElement) {
                     this.currentLogElement.textContent = 'Rendering & capturing live 1m TradingView charts...';
                 }
                 await window.captureTargetChartScreenshots();
-                if (this.isAborted || abortController.signal.aborted) return;
-                if (this.currentLogElement) {
+                if (isTurnStale()) return;
+                if (this.activeTurnId === turnId && this.currentLogElement) {
                     this.currentLogElement.textContent = 'Live charts synchronized. Ingesting prompt...';
                 }
             }
 
-            if (this.isAborted || abortController.signal.aborted) return;
+            if (isTurnStale()) return;
 
             // Get last 15 messages for session hydration
             const savedHistory = JSON.parse(localStorage.getItem('gem_chat_history') || '[]');
@@ -1159,15 +1246,16 @@ const ModernChat = {
                 body: JSON.stringify({
                     message: text,
                     history: historyPayload,
-                    include_charts: includeCharts
+                    include_charts: includeCharts,
+                    turn_id: turnId
                 })
             });
 
-            if (this.isAborted || abortController.signal.aborted) return;
+            if (isTurnStale()) return;
 
             const data = await res.json();
 
-            if (this.isAborted || abortController.signal.aborted) return;
+            if (isTurnStale()) return;
 
             // Remove thinking message
             const tMsg = document.getElementById(thinkingId);
@@ -1217,7 +1305,7 @@ const ModernChat = {
                 this.appendMessage('ai', '⚠️ Error: ' + data.message);
             }
         } catch (e) {
-            if (this.isAborted || (e && e.name === 'AbortError')) return;
+            if (this.isAborted || (e && e.name === 'AbortError') || this.activeTurnId !== turnId) return;
             const tMsg = document.getElementById(thinkingId);
             if (tMsg) tMsg.remove();
             this.appendMessage('ai', '⚠️ Error: Connection failed. Is the server running?');
@@ -1225,7 +1313,7 @@ const ModernChat = {
             if (this.activeAbortController === abortController) {
                 this.activeAbortController = null;
             }
-            this._cleanupPendingTurnUI(thinkingId);
+            this._cleanupPendingTurnUI(thinkingId, turnId);
         }
     },
 

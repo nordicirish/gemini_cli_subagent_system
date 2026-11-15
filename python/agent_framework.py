@@ -94,6 +94,21 @@ MUTATING_TOOL_NAMES: Set[str] = frozenset({
 })
 
 
+def _iter_wrapped_callables(func: Any) -> List[Any]:
+    """Returns func followed by wrapped inner targets via functools.partial .func or __wrapped__."""
+    chain: List[Any] = []
+    seen_ids: Set[int] = set()
+    curr = func
+    while curr is not None and id(curr) not in seen_ids and len(chain) < 8:
+        seen_ids.add(id(curr))
+        chain.append(curr)
+        next_target = getattr(curr, "func", None)
+        if next_target is None or next_target is curr:
+            next_target = getattr(curr, "__wrapped__", None)
+        curr = next_target
+    return chain
+
+
 def _has_mutating_tool_capability(
     agent_role: Optional[str], agent_tools: Optional[List[Any]]
 ) -> bool:
@@ -109,14 +124,16 @@ def _has_mutating_tool_capability(
 
     if agent_tools:
         for tool in agent_tools:
-            tool_name = tool if isinstance(tool, str) else getattr(tool, "__name__", "")
-            if tool_name in MUTATING_TOOL_NAMES:
-                return True
-            reg_def = GLOBAL_TOOL_REGISTRY.get(tool_name)
-            if reg_def is not None and (
-                reg_def.classification != "READ" or reg_def.affects_financial_state
-            ):
-                return True
+            targets = [tool] if isinstance(tool, str) else _iter_wrapped_callables(tool)
+            for target in targets:
+                tool_name = target.strip() if isinstance(target, str) else getattr(target, "__name__", "")
+                if tool_name in MUTATING_TOOL_NAMES or tool_name in FORBIDDEN_PARALLEL_MUTATING_TOOLS:
+                    return True
+                reg_def = GLOBAL_TOOL_REGISTRY.get(tool_name)
+                if reg_def is not None and (
+                    reg_def.classification != "READ" or reg_def.affects_financial_state
+                ):
+                    return True
 
     return False
 
@@ -135,21 +152,6 @@ def _normalize_parallel_agent_identifier(raw_name: Any) -> Tuple[str, str]:
     return short_name, f"ask_{short_name}"
 
 
-def _iter_wrapped_callables(func: Any) -> List[Any]:
-    """Returns func followed by wrapped inner targets via functools.partial .func or __wrapped__."""
-    chain: List[Any] = []
-    seen_ids: Set[int] = set()
-    curr = func
-    while curr is not None and id(curr) not in seen_ids and len(chain) < 8:
-        seen_ids.add(id(curr))
-        chain.append(curr)
-        next_target = getattr(curr, "func", None)
-        if next_target is None or next_target is curr:
-            next_target = getattr(curr, "__wrapped__", None)
-        curr = next_target
-    return chain
-
-
 def _resolve_agent_role(func: Any, tool_name: str) -> Optional[str]:
     for target in _iter_wrapped_callables(func):
         role = getattr(target, "_agent_role", None)
@@ -159,7 +161,7 @@ def _resolve_agent_role(func: Any, tool_name: str) -> Optional[str]:
 
 
 def _validate_parallel_agent_callable(short_name: str, tool_name: str, func: Any) -> None:
-    """Fails closed if func is not callable, has mutation capabilities, or is not an approved read-only agent."""
+    """Fails closed unless func explicitly declares a matching approved read-only role and safe tools."""
     if not callable(func):
         raise ValueError(f"Parallel council target '{short_name}' is not callable.")
 
@@ -169,24 +171,82 @@ def _validate_parallel_agent_callable(short_name: str, tool_name: str, func: Any
             "and is forbidden from parallel council execution."
         )
 
-    for target in _iter_wrapped_callables(func):
-        role = getattr(target, "_agent_role", None)
-        tools_list = getattr(target, "_agent_tools", None)
-        is_read_only = getattr(target, "_is_read_only_deliberative", True)
+    expected_role = APPROVED_PARALLEL_TOOL_TO_ROLE.get(tool_name)
+    if expected_role is None or tool_name not in APPROVED_PARALLEL_COUNCIL_TOOLS:
+        raise PermissionError(
+            f"Agent '{short_name}' ({tool_name}) is not an approved read-only deliberative council agent."
+        )
+
+    chain = _iter_wrapped_callables(func)
+    roles: List[Any] = []
+    readonly_flags: List[Any] = []
+    tool_lists: List[Any] = []
+
+    for target in chain:
+        if hasattr(target, "_agent_role"):
+            roles.append(getattr(target, "_agent_role"))
+        if hasattr(target, "_is_read_only_deliberative"):
+            readonly_flags.append(getattr(target, "_is_read_only_deliberative"))
+        if hasattr(target, "_agent_tools"):
+            tool_lists.append(getattr(target, "_agent_tools"))
+
+    if not roles or not readonly_flags or not tool_lists:
+        raise PermissionError(
+            f"Agent '{short_name}' ({tool_name}) is missing required read-only capability metadata "
+            "and is forbidden from parallel council execution."
+        )
+
+    for role in roles:
         if (
-            role in FORBIDDEN_PARALLEL_MUTATING_ROLES
-            or is_read_only is False
-            or _has_mutating_tool_capability(role, tools_list)
+            not isinstance(role, str)
+            or role != expected_role
+            or role in FORBIDDEN_PARALLEL_MUTATING_ROLES
+            or _has_mutating_tool_capability(role, None)
         ):
+            raise PermissionError(
+                f"Agent '{short_name}' ({tool_name}) has invalid or mismatched role metadata ({role!r}) "
+                "and is forbidden from parallel council execution."
+            )
+
+    if any(flag is not True for flag in readonly_flags):
+        raise PermissionError(
+            f"Agent '{short_name}' ({tool_name}) lacks explicit read-only deliberative authorization "
+            "and is forbidden from parallel council execution."
+        )
+
+    for tools_list in tool_lists:
+        if not isinstance(tools_list, (list, tuple)):
+            raise PermissionError(
+                f"Agent '{short_name}' ({tool_name}) has invalid tool-capability declaration "
+                "and is forbidden from parallel council execution."
+            )
+        for tool in tools_list:
+            if isinstance(tool, str):
+                t_name = tool.strip()
+                if not t_name:
+                    raise PermissionError(
+                        f"Agent '{short_name}' ({tool_name}) has invalid empty tool declaration."
+                    )
+            elif callable(tool):
+                t_name = getattr(tool, "__name__", "")
+                if not t_name:
+                    raise PermissionError(
+                        f"Agent '{short_name}' ({tool_name}) has unnamed callable tool declaration."
+                    )
+            else:
+                raise PermissionError(
+                    f"Agent '{short_name}' ({tool_name}) has non-callable tool declaration ({type(tool).__name__})."
+                )
+            if t_name in FORBIDDEN_PARALLEL_MUTATING_TOOLS or t_name in MUTATING_TOOL_NAMES:
+                raise PermissionError(
+                    f"Agent '{short_name}' ({tool_name}) has financial mutation or write capabilities "
+                    "and is forbidden from parallel council execution."
+                )
+        if _has_mutating_tool_capability(expected_role, list(tools_list)):
             raise PermissionError(
                 f"Agent '{short_name}' ({tool_name}) has financial mutation or write capabilities "
                 "and is forbidden from parallel council execution."
             )
-
-    if tool_name not in APPROVED_PARALLEL_COUNCIL_TOOLS:
-        raise PermissionError(
-            f"Agent '{short_name}' ({tool_name}) is not an approved read-only deliberative council agent."
-        )
 
 
 def _parse_unique_json_object(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
@@ -912,6 +972,7 @@ class AgentFramework:
         self.agents = {}
         
         # Telemetry
+        self._usage_lock = threading.Lock()
         self.session_cost = 0.0
         self.reset_turn_usage()
 
@@ -1036,21 +1097,26 @@ class AgentFramework:
 
     def reset_turn_usage(self):
         """Clear token counters for a new chat session turn."""
-        self._has_estimated_usage = False
-        self._has_measured_usage = False
-        self.turn_usage = {
-            'prompt_tokens': 0,
-            'candidates_tokens': 0,
-            'cached_tokens': 0,
-            'estimated_prompt_tokens': 0,
-            'estimated_candidates_tokens': 0,
-            'actual_prompt_tokens': None,
-            'actual_candidates_tokens': None,
-            'is_estimated': True,
-            'token_accounting_mode': 'heuristic_estimate',
-            'caching_active': False,
-            'estimated_cost': 0.0,
-        }
+        lock = getattr(self, "_usage_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._usage_lock = lock
+        with lock:
+            self._has_estimated_usage = False
+            self._has_measured_usage = False
+            self.turn_usage = {
+                'prompt_tokens': 0,
+                'candidates_tokens': 0,
+                'cached_tokens': 0,
+                'estimated_prompt_tokens': 0,
+                'estimated_candidates_tokens': 0,
+                'actual_prompt_tokens': None,
+                'actual_candidates_tokens': None,
+                'is_estimated': True,
+                'token_accounting_mode': 'heuristic_estimate',
+                'caching_active': False,
+                'estimated_cost': 0.0,
+            }
 
     def _calculate_call_cost(self, model_name, client_label, input_tokens, output_tokens, cached_tokens=0) -> float:
         norm_model = model_name.replace("models/", "")
@@ -1213,6 +1279,9 @@ class AgentFramework:
         final_instruction = instruction + temporal_anchor
 
         def call_subagent(query: str) -> str:
+            cancel_fn = getattr(self, "cancel_check", None)
+            if cancel_fn and cancel_fn():
+                return "[OFFLINE] Session terminated by user interrupt."
             with execution_role_context(name):
                 self.log(f"\n[Orchestrator -> {name}] Delegating: {query[:100]}...")
 
@@ -1380,8 +1449,11 @@ class AgentFramework:
             _validate_parallel_agent_callable(short_name, tool_name, task_fn)
             validated_entries.append((agent_key, tool_name, task_fn))
 
-        cancel_fn = getattr(self, "cancel_check", None)
-        if cancel_fn and cancel_fn():
+        def _is_cancelled() -> bool:
+            cancel_fn = getattr(self, "cancel_check", None)
+            return bool(cancel_fn and cancel_fn())
+
+        if _is_cancelled():
             return {
                 agent_key: "[OFFLINE] Session terminated by user interrupt."
                 for agent_key in parallel_tasks.keys()
@@ -1395,7 +1467,7 @@ class AgentFramework:
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         try:
             def _run_isolated(tool_name: str, fn: Callable) -> Any:
-                if cancel_fn and cancel_fn():
+                if _is_cancelled():
                     return "[OFFLINE] Session terminated by user interrupt."
                 role = _resolve_agent_role(fn, tool_name)
                 if role:
@@ -1411,7 +1483,7 @@ class AgentFramework:
             cancelled_mid_batch = False
 
             while pending:
-                if cancel_fn and cancel_fn():
+                if _is_cancelled():
                     cancelled_mid_batch = True
                     for f in pending:
                         f.cancel()
@@ -1534,13 +1606,7 @@ class AgentFramework:
                 def make_task(tf=target_func, q=query):
                     return tf(q)
 
-                make_task._agent_role = getattr(
-                    target_func, "_agent_role", APPROVED_PARALLEL_TOOL_TO_ROLE.get(tool_name)
-                )
-                make_task._agent_tools = getattr(target_func, "_agent_tools", None)
-                make_task._is_read_only_deliberative = getattr(
-                    target_func, "_is_read_only_deliberative", True
-                )
+                make_task.__wrapped__ = target_func
                 parallel_tasks[raw_agent_name] = make_task
 
             self.log(f"\n[Parallel Dispatcher] Initializing parallel session for {list(parallel_tasks.keys())}...")

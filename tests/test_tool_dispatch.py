@@ -260,12 +260,16 @@ class TestToolDispatcher(unittest.TestCase):
             return f"BULL[{get_active_caller_role()}]: {query}"
 
         mock_bull._agent_role = "Bullish Advocate"
+        mock_bull._is_read_only_deliberative = True
+        mock_bull._agent_tools = []
 
         def mock_red(query: str) -> str:
             calls["red"] += 1
             return f"RED[{get_active_caller_role()}]: {query}"
 
         mock_red._agent_role = "Red Team Pessimist"
+        mock_red._is_read_only_deliberative = True
+        mock_red._agent_tools = []
 
         with patch.object(framework, "load_system_instruction", return_value="Router instruction"):
             seq_router = framework.create_agent_tool(

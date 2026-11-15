@@ -34,6 +34,13 @@ def _approved_role_to_key(role_name: str) -> str:
     return role_name.lower().replace(" ", "_")
 
 
+def _annotate_readonly_callable(fn, role_name: str, agent_tools=None):
+    fn._agent_role = role_name
+    fn._is_read_only_deliberative = True
+    fn._agent_tools = list(agent_tools or [])
+    return fn
+
+
 class TestParallelCouncilOrchestration(unittest.TestCase):
     def setUp(self):
         self._saved_registry_tools = dict(GLOBAL_TOOL_REGISTRY._tools)
@@ -185,6 +192,8 @@ class TestParallelCouncilOrchestration(unittest.TestCase):
             executed["ran"] = True
             return "ok"
 
+        _annotate_readonly_callable(safe_sibling, "Macro Sentinel", [tools.perform_web_forensic_search])
+
         with patch.object(
             self.framework,
             "generate_response_with_fallback",
@@ -199,7 +208,7 @@ class TestParallelCouncilOrchestration(unittest.TestCase):
 
         # Same check via create_parallel_council_tool: compromised agent must be excluded even under approved key
         ask_council = self.framework.create_parallel_council_tool({
-            "ask_macro_sentinel": lambda q: "macro ok",
+            "ask_macro_sentinel": _annotate_readonly_callable(lambda q: "macro ok", "Macro Sentinel"),
             "ask_bullish_advocate": compromised_agent,
         })
         res = json.loads(ask_council(json.dumps({"bullish_advocate": "Attempt run"})))
@@ -257,14 +266,16 @@ class TestParallelCouncilOrchestration(unittest.TestCase):
             self.assertEqual(self.executed_log, [], f"Zero tasks must run for invalid payload: {payload!r}")
 
         # Also validate direct execute_ephemeral_batch container & key validation
+        bull_1 = _annotate_readonly_callable(lambda: "1", "Bullish Advocate")
+        bull_2 = _annotate_readonly_callable(lambda: "2", "Bullish Advocate")
         with self.assertRaises(ValueError):
             self.framework.execute_ephemeral_batch({})
         with self.assertRaises(ValueError):
             self.framework.execute_ephemeral_batch(["bullish_advocate"])  # type: ignore[arg-type]
         with self.assertRaises(ValueError):
             self.framework.execute_ephemeral_batch({
-                "bullish_advocate": lambda: "1",
-                "ask_bullish_advocate": lambda: "2",
+                "bullish_advocate": bull_1,
+                "ask_bullish_advocate": bull_2,
             })
 
     def test_web_server_council_allowlist_excludes_mutating_agents(self):
@@ -297,7 +308,7 @@ class TestParallelCouncilOrchestration(unittest.TestCase):
         for role in sorted(APPROVED_PARALLEL_COUNCIL_ROLES):  # 15 approved roles (> 8)
             short_key = _approved_role_to_key(role)
 
-            def make_worker(k=short_key):
+            def make_worker(k=short_key, r=role):
                 def _work():
                     with active_lock:
                         state["active"] += 1
@@ -310,7 +321,7 @@ class TestParallelCouncilOrchestration(unittest.TestCase):
                         with active_lock:
                             state["active"] -= 1
 
-                return _work
+                return _annotate_readonly_callable(_work, r)
 
             tasks[short_key] = make_worker()
 
@@ -326,7 +337,7 @@ class TestParallelCouncilOrchestration(unittest.TestCase):
         def failing_macro(query: str) -> str:
             raise RuntimeError("Simulated provider timeout")
 
-        failing_macro._agent_role = "Macro Sentinel"
+        _annotate_readonly_callable(failing_macro, "Macro Sentinel", [tools.perform_web_forensic_search])
         agents_dict["ask_macro_sentinel"] = failing_macro
 
         ask_council = self.framework.create_parallel_council_tool(agents_dict)
@@ -346,8 +357,12 @@ class TestParallelCouncilOrchestration(unittest.TestCase):
         ran = {"count": 0}
         self.framework.cancel_check = lambda: True
         tasks = {
-            "bullish_advocate": lambda: ran.__setitem__("count", ran["count"] + 1) or "ok",
-            "red_team_pessimist": lambda: ran.__setitem__("count", ran["count"] + 1) or "ok",
+            "bullish_advocate": _annotate_readonly_callable(
+                lambda: ran.__setitem__("count", ran["count"] + 1) or "ok", "Bullish Advocate"
+            ),
+            "red_team_pessimist": _annotate_readonly_callable(
+                lambda: ran.__setitem__("count", ran["count"] + 1) or "ok", "Red Team Pessimist"
+            ),
         }
         pre_res = self.framework.execute_ephemeral_batch(tasks)
         self.assertEqual(ran["count"], 0)
@@ -370,7 +385,7 @@ class TestParallelCouncilOrchestration(unittest.TestCase):
         for idx, role in enumerate(sorted(APPROVED_PARALLEL_COUNCIL_ROLES)):
             short_key = _approved_role_to_key(role)
 
-            def make_cancel_worker(i=idx, k=short_key):
+            def make_cancel_worker(i=idx, k=short_key, r=role):
                 def _work():
                     with started_lock:
                         executed_keys.append(k)
@@ -382,7 +397,7 @@ class TestParallelCouncilOrchestration(unittest.TestCase):
                         time.sleep(0.02)
                     return f"ok:{k}"
 
-                return _work
+                return _annotate_readonly_callable(_work, r)
 
             mid_tasks[short_key] = make_cancel_worker()
 
@@ -409,6 +424,10 @@ class TestParallelCouncilOrchestration(unittest.TestCase):
             first_done_gate.set()
             return "third-finished-first"
 
+        _annotate_readonly_callable(slow_first, "Bullish Advocate")
+        _annotate_readonly_callable(fast_second, "Red Team Pessimist")
+        _annotate_readonly_callable(fast_third, "Neutral Structuralist")
+
         res = self.framework.execute_ephemeral_batch({
             ordered_keys[0]: slow_first,
             ordered_keys[1]: fast_second,
@@ -418,6 +437,163 @@ class TestParallelCouncilOrchestration(unittest.TestCase):
         self.assertEqual(res[ordered_keys[0]], "first-finished-last")
         self.assertEqual(res[ordered_keys[1]], "second-finished-first")
         self.assertEqual(res[ordered_keys[2]], "third-finished-first")
+
+    def test_fail_closed_capability_validation_rejects_unannotated_mismatched_and_wrapped_mutating(self):
+        """Fail-closed capability validation rejects unannotated, mismatched, incomplete, and wrapped mutating callables without starting siblings."""
+        sibling_ran = {"count": 0}
+
+        def valid_sibling():
+            sibling_ran["count"] += 1
+            return "sibling ok"
+
+        _annotate_readonly_callable(valid_sibling, "Macro Sentinel", [tools.perform_web_forensic_search])
+
+        # 1. Unannotated lambda/callable is rejected before any sibling runs
+        with self.assertRaises(PermissionError):
+            self.framework.execute_ephemeral_batch({
+                "macro_sentinel": valid_sibling,
+                "bullish_advocate": lambda: "unannotated",
+            })
+        self.assertEqual(sibling_ran["count"], 0)
+
+        # 2. Mismatched role metadata is rejected without running sibling
+        def wrong_role():
+            return "wrong role"
+
+        _annotate_readonly_callable(wrong_role, "Macro Sentinel", [])
+        with self.assertRaises(PermissionError):
+            self.framework.execute_ephemeral_batch({
+                "macro_sentinel": valid_sibling,
+                "bullish_advocate": wrong_role,
+            })
+        self.assertEqual(sibling_ran["count"], 0)
+
+        # 3. Missing read-only flag or invalid/missing _agent_tools is rejected without running sibling
+        def only_role():
+            return "missing flags"
+
+        only_role._agent_role = "Bullish Advocate"
+        with self.assertRaises(PermissionError):
+            self.framework.execute_ephemeral_batch({
+                "macro_sentinel": valid_sibling,
+                "bullish_advocate": only_role,
+            })
+
+        def nonbool_flag():
+            return "truthy int"
+
+        nonbool_flag._agent_role = "Bullish Advocate"
+        nonbool_flag._is_read_only_deliberative = 1
+        nonbool_flag._agent_tools = []
+        with self.assertRaises(PermissionError):
+            self.framework.execute_ephemeral_batch({
+                "macro_sentinel": valid_sibling,
+                "bullish_advocate": nonbool_flag,
+            })
+
+        def missing_tools_decl():
+            return "missing tools"
+
+        missing_tools_decl._agent_role = "Bullish Advocate"
+        missing_tools_decl._is_read_only_deliberative = True
+        with self.assertRaises(PermissionError):
+            self.framework.execute_ephemeral_batch({
+                "macro_sentinel": valid_sibling,
+                "bullish_advocate": missing_tools_decl,
+            })
+
+        def none_tools_decl():
+            return "none tools"
+
+        none_tools_decl._agent_role = "Bullish Advocate"
+        none_tools_decl._is_read_only_deliberative = True
+        none_tools_decl._agent_tools = None
+        with self.assertRaises(PermissionError):
+            self.framework.execute_ephemeral_batch({
+                "macro_sentinel": valid_sibling,
+                "bullish_advocate": none_tools_decl,
+            })
+        self.assertEqual(sibling_ran["count"], 0)
+
+        # 4. Mutating tool declared directly, via functools.partial, or via __wrapped__ alias is rejected
+        def harmless_alias(*args, **kwargs):
+            return "alias"
+
+        harmless_alias.__wrapped__ = tools.update_ssot
+
+        for bad_tools in (
+            [tools.update_ssot],
+            ["update_decision_log"],
+            [harmless_alias],
+            [functools.partial(tools.update_ssot)],
+        ):
+            def bad_agent():
+                return "bad"
+
+            _annotate_readonly_callable(bad_agent, "Bullish Advocate", bad_tools)
+            with self.assertRaises(PermissionError):
+                self.framework.execute_ephemeral_batch({
+                    "macro_sentinel": valid_sibling,
+                    "bullish_advocate": bad_agent,
+                })
+
+            # Also wrap in valid-looking outer wrapper with __wrapped__ and partial
+            def outer_wrapper(*args, **kwargs):
+                return "wrapped"
+
+            _annotate_readonly_callable(outer_wrapper, "Bullish Advocate", [tools.perform_web_forensic_search])
+            outer_wrapper.__wrapped__ = bad_agent
+            with self.assertRaises(PermissionError):
+                self.framework.execute_ephemeral_batch({
+                    "macro_sentinel": valid_sibling,
+                    "bullish_advocate": outer_wrapper,
+                })
+            with self.assertRaises(PermissionError):
+                self.framework.execute_ephemeral_batch({
+                    "macro_sentinel": valid_sibling,
+                    "bullish_advocate": functools.partial(outer_wrapper),
+                })
+
+        self.assertEqual(sibling_ran["count"], 0)
+
+        # 5. Unannotated or mismatched callables passed to create_parallel_council_tool are excluded fail-closed
+        ask_council = self.framework.create_parallel_council_tool({
+            "ask_macro_sentinel": lambda q: "unannotated",
+            "ask_red_team_pessimist": wrong_role,
+            "ask_bullish_advocate": _annotate_readonly_callable(lambda q: "bull ok", "Bullish Advocate"),
+        })
+        excluded_unannotated = json.loads(ask_council(json.dumps({"macro_sentinel": "check"})))
+        self.assertIn("error", excluded_unannotated)
+        excluded_mismatched = json.loads(ask_council(json.dumps({"red_team_pessimist": "check"})))
+        self.assertIn("error", excluded_mismatched)
+        valid_only = json.loads(ask_council(json.dumps({"bullish_advocate": "check"})))
+        self.assertEqual(valid_only["bullish_advocate"], "bull ok")
+
+        # 6. Valid generated read-only agents from create_agent_tool execute cleanly in parallel
+        with patch.object(self.framework, "load_system_instruction", return_value="Dummy instruction"), \
+             patch.object(self.framework, "generate_response_with_fallback", return_value=AntigravityResponse("Generated OK")):
+            gen_bull = self.framework.create_agent_tool(
+                name="Bullish Advocate",
+                file_path="engine_instructions/bullish_gem.md",
+                mode="THINKING",
+                agent_tools=[tools.read_ssot, tools.perform_web_forensic_search],
+            )
+            gen_red = self.framework.create_agent_tool(
+                name="Red Team Pessimist",
+                file_path="engine_instructions/red_team_gem.md",
+                mode="THINKING",
+                agent_tools=[tools.read_ssot],
+            )
+            gen_council = self.framework.create_parallel_council_tool({
+                "ask_bullish_advocate": gen_bull,
+                "ask_red_team_pessimist": gen_red,
+            })
+            gen_out = json.loads(gen_council(json.dumps({
+                "bullish_advocate": "Evaluate SPY",
+                "red_team_pessimist": "Challenge SPY",
+            })))
+            self.assertIn("Generated OK", gen_out["bullish_advocate"])
+            self.assertIn("Generated OK", gen_out["red_team_pessimist"])
 
     def test_create_agent_tool_binds_execution_role_context_when_no_subtools(self):
         """Sequential create_agent_tool wraps calls without subtools in execution_role_context(name)."""

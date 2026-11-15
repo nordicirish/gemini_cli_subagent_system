@@ -14,14 +14,17 @@ Run this workflow automatically before issuing any stage completion report or Ar
 
 ## Step 2: Protected Financial Asset Invariance Gate (Protocol 06)
 1. Run:
-   `git diff --exit-code -- engine_instructions/ gem_trading_rules/rules.md context/ssot.json context/config.json`
+   `git diff --exit-code -- engine_instructions/ gem_trading_rules/rules.md context/ssot.json context/trade_lessons.json context/decision_log.json context/config.json`
 2. If the exit code is non-zero (unless explicitly authorised by the Human Owner for that specific stage), STOP and report a **CRITICAL PROTOCOL 06 VIOLATION**.
 
 ## Step 3: Repository Hygiene & Forbidden Artifact Gate
-Inspect `git status --short` and verify:
-1. Zero new report files exist under `docs/engineering/STAGE_*.md`.
-2. Zero lock files (`*.lock`, `*.restore_lock`) exist in the working tree.
-3. If `context/gem.db` or `context/gem.db.restore_lock` appear as tracked in the Git index, include `git rm --cached context/gem.db context/gem.db.restore_lock` in the Owner Git commands.
+Distinguish tracked Git index violations from untracked local runtime files on disk:
+1. Run:
+   `git ls-files -- "context/*.db" "cache/*.db" "*.lock" "**/*.lock" "*.restore_lock" "**/*.restore_lock" "*.cutover_lock" "**/*.cutover_lock"`
+   If any file is returned as tracked in the Git index, flag it immediately and provide `git rm --cached <paths>` in the Owner Git commands.
+2. Inspect `git status --short` and verify:
+   - Zero new report files exist under `docs/engineering/STAGE_*.md`.
+   - Zero stray unignored prohibited artifacts (`context/*.db`, `cache/*.db`, `*.lock`, `*.restore_lock`, `*.cutover_lock`) appear as untracked/modified in `git status --short` (untracked gitignored local runtime files outside `git status --short` and `git ls-files` are ignored by design).
 
 ## Step 4: Scope-Proportional Test Routing (Protocol 05)
 Select and execute ONLY the test suites matching the modified paths in `git diff --name-only` (unless final milestone closeout is requested):
