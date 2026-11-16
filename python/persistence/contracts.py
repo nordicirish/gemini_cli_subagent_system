@@ -15,7 +15,7 @@ import json
 import math
 import re
 from abc import ABC, abstractmethod
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Any, Dict, List, Optional, Union
 
 
@@ -74,10 +74,12 @@ def validate_financial_decimal(
         )
 
     _sign, digits, exponent = dec.as_tuple()
-    if len(digits) > _MAX_FINANCIAL_DIGITS:
-        raise PersistenceValidationError(
-            f"Precision exceeds {_MAX_FINANCIAL_DIGITS} digits for financial field {field_name}: {val!r}"
-        )
+    if dec != Decimal("0"):
+        effective_integer_digits = max(0, len(digits) + exponent)
+        if effective_integer_digits > _MAX_FINANCIAL_DIGITS:
+            raise PersistenceValidationError(
+                f"Precision exceeds {_MAX_FINANCIAL_DIGITS} digits for financial field {field_name}: {val!r}"
+            )
 
     scale = -exponent if isinstance(exponent, int) and exponent < 0 else 0
     if scale > max_scale:
@@ -108,10 +110,23 @@ def format_financial_decimal(val: Decimal, min_scale: int = 0) -> str:
     if not isinstance(val, Decimal) or not val.is_finite():
         raise PersistenceValidationError(f"Expected finite Decimal to format, got {val!r}")
     normalized = Decimal("0") if val == Decimal("0") else val
-    _sign, _digits, exponent = normalized.as_tuple()
+    _sign, digits, exponent = normalized.as_tuple()
+    if normalized != Decimal("0"):
+        effective_integer_digits = max(0, len(digits) + exponent)
+        if effective_integer_digits > _MAX_FINANCIAL_DIGITS:
+            raise PersistenceValidationError(
+                f"Precision exceeds {_MAX_FINANCIAL_DIGITS} digits for financial value: {val!r}"
+            )
+
     current_scale = -exponent if isinstance(exponent, int) and exponent < 0 else 0
     if min_scale > current_scale:
-        normalized = normalized.quantize(Decimal(10) ** -min_scale)
+        required_precision = max(
+            _MAX_FINANCIAL_DIGITS,
+            len(digits) + max(exponent, 0) + min_scale + 1,
+        )
+        with localcontext() as ctx:
+            ctx.prec = required_precision
+            normalized = normalized.quantize(Decimal(10) ** -min_scale)
     elif normalized == Decimal("0") and current_scale > 0:
         normalized = Decimal("0").quantize(Decimal(10) ** -current_scale)
     return f"{normalized:f}"

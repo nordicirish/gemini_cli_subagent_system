@@ -42,6 +42,7 @@ from persistence import (
 )
 from persistence.contracts import (
     validate_financial_decimal,
+    format_financial_decimal,
     serialize_json_with_exact_decimals,
 )
 try:
@@ -824,10 +825,27 @@ class TestStage37FinancialPrecisionAndCompositeAtomicity(unittest.TestCase):
             ("", 4),
             (None, 4),
             (Decimal("1" * 29), 4),
+            (Decimal("1E+29"), 4),
+            (Decimal("1E+100"), 4),
+            (Decimal("1e9999"), 4),
+            (Decimal("1E+28"), 2),
+            (Decimal("1" + "0" * 28), 2),
         ]
         for bad_val, scale in invalid_inputs:
             with self.assertRaises(PersistenceValidationError, msg=f"Should reject {bad_val!r} at scale={scale}"):
                 validate_financial_decimal(bad_val, "test_field", max_scale=scale)
+
+        # JSON numeric parsing with parse_float=Decimal must also fail-closed on oversized positive exponents
+        oversized_json_tokens = [
+            '{"amount": 1e100}',
+            '{"amount": 1E+29}',
+            '{"amount": 1e9999}',
+            '{"amount": 100000000000000000000000000000}',  # 30-digit integer
+        ]
+        for token_json in oversized_json_tokens:
+            parsed_token = json.loads(token_json, parse_float=Decimal)
+            with self.assertRaises(PersistenceValidationError, msg=f"Should reject JSON token {token_json}"):
+                validate_financial_decimal(parsed_token["amount"], "amount", max_scale=4)
 
         with self.assertRaises(PersistenceValidationError):
             validate_financial_decimal("0", "shares", max_scale=4, allow_zero=False)
@@ -841,6 +859,90 @@ class TestStage37FinancialPrecisionAndCompositeAtomicity(unittest.TestCase):
         self.assertEqual(parsed["shares"], Decimal("12.3456"))
         self.assertEqual(parsed["wac"], Decimal("123.4567"))
         self.assertEqual(parsed["unallocated_cash_eur"], Decimal("1000.55"))
+
+    def test_stage371_decimal_exponent_bounds_and_magnitude_enforcement(self):
+        """F37-01: Positive Decimal exponents expanding magnitude beyond 28 digits are rejected fail-closed."""
+        # 1. Non-zero positive exponents that exceed 28 digits must raise PersistenceValidationError
+        for oversized in (
+            Decimal("1E+28"),  # 1 followed by 28 zeros = 29 digits
+            Decimal("1E+29"),  # 30 digits
+            Decimal("1E+100"), # 101 digits
+            Decimal("1e9999"), # 10000 digits
+            Decimal("9.9E+28"),# 99 followed by 27 zeros = 29 digits
+            Decimal("1.0001E+28"), # 10001 followed by 24 zeros = 29 digits
+        ):
+            with self.assertRaises(PersistenceValidationError, msg=f"Expected rejection for {oversized}"):
+                validate_financial_decimal(oversized, "test_field", max_scale=4)
+
+        # 2. Defensive rejection in format_financial_decimal
+        for bad_decimal in (
+            Decimal("1E+28"),
+            Decimal("1E+29"),
+            Decimal("1E+100"),
+            Decimal("1e9999"),
+            Decimal("9.9E+28"),
+            Decimal("9" * 29),
+        ):
+            with self.assertRaises(PersistenceValidationError, msg=f"Expected format rejection for {bad_decimal}"):
+                format_financial_decimal(bad_decimal, min_scale=2)
+
+    def test_stage371_maximum_valid_28_digit_boundary_and_formatting(self):
+        """F37-01: Valid 28-digit maximum financial values are accepted and format cleanly with min_scale=2 without InvalidOperation."""
+        # Exact 28-digit integer cash amount
+        max_28_int = Decimal("9" * 28)
+        self.assertEqual(validate_financial_decimal(max_28_int, "cash", max_scale=2), max_28_int)
+
+        # format_financial_decimal with min_scale=2 requires prec >= 30, handled cleanly via localcontext
+        formatted_28 = format_financial_decimal(max_28_int, min_scale=2)
+        self.assertEqual(formatted_28, ("9" * 28) + ".00")
+
+        # format_financial_decimal with min_scale=0
+        formatted_28_raw = format_financial_decimal(max_28_int, min_scale=0)
+        self.assertEqual(formatted_28_raw, "9" * 28)
+
+        # Exact 28-digit value expressed with positive exponent (1 followed by 27 zeros = 28 digits)
+        max_28_exp = Decimal("1E+27")
+        self.assertEqual(validate_financial_decimal(max_28_exp, "cash", max_scale=2), max_28_exp)
+        formatted_exp = format_financial_decimal(max_28_exp, min_scale=2)
+        self.assertEqual(formatted_exp, ("1" + "0" * 27) + ".00")
+
+        # Exact 28-digit value with non-unit coefficient (99 followed by 26 zeros = 28 digits)
+        max_28_coeff = Decimal("9.9E+27")
+        self.assertEqual(validate_financial_decimal(max_28_coeff, "cash", max_scale=2), max_28_coeff)
+        formatted_coeff = format_financial_decimal(max_28_coeff, min_scale=2)
+        self.assertEqual(formatted_coeff, ("99" + "0" * 26) + ".00")
+
+        # Zero with min_scale=2 formats cleanly
+        self.assertEqual(format_financial_decimal(Decimal("0"), min_scale=2), "0.00")
+        self.assertEqual(format_financial_decimal(Decimal("0.0"), min_scale=2), "0.00")
+
+    def test_stage371_adapter_positive_exponent_and_boundary_parity(self):
+        """F37-01 parity: Both adapters reject positive-exponent overflows and accept valid 28-digit cash amounts."""
+        for adapter in (self.json_adapter, self.sqlite_adapter):
+            with execution_role_context("Terminal Orchestrator"):
+                # Reject positive-exponent cash overflow
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[],
+                        unallocated_cash_eur=Decimal("1E+29"),
+                    )
+
+                # Reject positive-exponent shares overflow
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": Decimal("1E+29"), "wac": Decimal("500.00")}],
+                        unallocated_cash_eur=Decimal("1000.00"),
+                    )
+
+                # Accept valid 28-digit maximum cash amount with explicit EUR and USD amounts
+                adapter.save_portfolio_basket(
+                    portfolio=[{"ticker": "SPY", "shares": Decimal("10.0000"), "wac": Decimal("500.00")}],
+                    unallocated_cash_eur=Decimal("9" * 28),
+                    unallocated_cash_usd=Decimal("9" * 28),
+                )
+                basket = adapter.get_portfolio_basket()
+                self.assertEqual(basket["unallocated_cash_eur"], Decimal("9" * 28))
+                self.assertEqual(basket["unallocated_cash_usd"], Decimal("9" * 28))
 
     def test_exact_decimal_round_trip_both_adapters(self):
         """Both adapters preserve exact 4-decimal share/WAC and 2-decimal cash values without float drift."""
