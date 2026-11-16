@@ -26,6 +26,11 @@ try:
 except ImportError:
     from python.persistence import get_persistence_service, PersistenceValidationError
 
+try:
+    from atomic_io import atomic_update_json
+except ImportError:
+    from python.atomic_io import atomic_update_json
+
 # Import the existing FastAPI app from fetch_stocks
 from fetch_stocks import app, run_daemon, GLOBAL_STATE, CHART_SCREENSHOTS_BUFFER
 
@@ -573,6 +578,21 @@ def set_model(data: dict):
         prev_hydrated = _session_hydrated
         prev_warning = active_model_warning
 
+        def _restore_in_memory_state():
+            global ORCHESTRATOR_MODEL, global_chat_session, _session_hydrated, active_model_warning
+            ORCHESTRATOR_MODEL = prev_model
+            global_chat_session = prev_session
+            _session_hydrated = prev_hydrated
+            active_model_warning = prev_warning
+            try:
+                framework.free_tier_only = prev_free
+            except Exception:
+                pass
+            try:
+                framework.gemini_subscription_linked = prev_linked
+            except Exception:
+                pass
+
         # Fallback to current model if none provided
         new_model = data.get("model", prev_model)
         include_paid = data.get("include_paid", True)
@@ -596,27 +616,32 @@ def set_model(data: dict):
 
             active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
         except Exception:
-            ORCHESTRATOR_MODEL = prev_model
-            framework.free_tier_only = prev_free
-            framework.gemini_subscription_linked = prev_linked
-            global_chat_session = prev_session
-            _session_hydrated = prev_hydrated
-            active_model_warning = prev_warning
+            _restore_in_memory_state()
             raise
 
-        # Update config.json only after in-memory policy/session transition succeeds
+        # Update config.json atomically only after in-memory policy/session transition succeeds
         try:
             config_path = "context/config.json"
             if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as f:
-                    config_data = json.load(f)
+                def update_subscription_policy(config_data):
+                    if not isinstance(config_data, dict):
+                        raise ValueError("Configuration must be a JSON object")
 
-                if config_data.get("GEMINI_SUBSCRIPTION_LINKED") != gemini_linked:
-                    config_data["GEMINI_SUBSCRIPTION_LINKED"] = gemini_linked
-                    with open(config_path, "w", encoding="utf-8") as f:
-                        json.dump(config_data, f, indent=2)
+                    updated = dict(config_data)
+                    updated["GEMINI_SUBSCRIPTION_LINKED"] = gemini_linked
+                    return updated
+
+                atomic_update_json(
+                    config_path,
+                    update_subscription_policy,
+                )
         except Exception as ce:
-            framework.log(f"[System Error] Failed to write subscription policy to config.json: {ce}")
+            _restore_in_memory_state()
+            try:
+                framework.log(f"[System Error] Failed to write subscription policy to config.json: {ce}")
+            except Exception:
+                pass
+            raise
 
         return {"status": "success", "current_model": ORCHESTRATOR_MODEL, "warning": active_model_warning}
 

@@ -11,12 +11,14 @@ Covers:
 6. Optional Non-Authoritative Lesson Retrieval Failure Handling (Scope B).
 """
 
+import copy
 import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from contextlib import contextmanager
@@ -24,6 +26,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 
+import atomic_io
 import web_server
 import fetch_stocks
 
@@ -1738,6 +1741,450 @@ assert(estBadgeHtml.includes('~120 est. in / ~40 est. out'), estBadgeHtml);
                 self.assertIn(tid, web_server._completed_turn_ids)
                 self.assertIsNone(web_server._active_turn_id)
                 self.assertIsNone(web_server._active_turn_event)
+
+
+class TestStage35ConfigPersistenceAndMutationBoundary(unittest.TestCase):
+    def setUp(self):
+        self._orig_model = web_server.ORCHESTRATOR_MODEL
+        self._orig_session = web_server.global_chat_session
+        self._orig_hydrated = web_server._session_hydrated
+        self._orig_free_tier_only = getattr(web_server.framework, "free_tier_only", True)
+        self._orig_sub_linked = getattr(web_server.framework, "gemini_subscription_linked", False)
+        self._orig_warning = web_server.active_model_warning
+
+        self._real_config_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "context", "config.json")
+        )
+        if os.path.exists(self._real_config_path):
+            with open(self._real_config_path, "rb") as f:
+                self._real_config_sha256 = hashlib.sha256(f.read()).hexdigest()
+        else:
+            self._real_config_sha256 = None
+
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_config_path = os.path.join(self.temp_dir.name, "config.json")
+
+        self._real_exists = os.path.exists
+        self._real_atomic_update = atomic_io.atomic_update_json
+        self._atomic_update_override = None
+
+        def routed_exists(path):
+            if str(path).replace("\\", "/") == "context/config.json":
+                return self._real_exists(self.temp_config_path)
+            return self._real_exists(path)
+
+        def routed_atomic_update(path, update_fn, *args, **kwargs):
+            if str(path).replace("\\", "/") == "context/config.json":
+                if self._atomic_update_override is not None:
+                    return self._atomic_update_override(path, update_fn, *args, **kwargs)
+                return self._real_atomic_update(self.temp_config_path, update_fn, *args, **kwargs)
+            return self._real_atomic_update(path, update_fn, *args, **kwargs)
+
+        self._patch_exists = patch("web_server.os.path.exists", side_effect=routed_exists)
+        self._patch_atomic_update = patch("web_server.atomic_update_json", side_effect=routed_atomic_update)
+        self._patch_exists.start()
+        self._patch_atomic_update.start()
+
+    def tearDown(self):
+        self._patch_atomic_update.stop()
+        self._patch_exists.stop()
+
+        web_server.ORCHESTRATOR_MODEL = self._orig_model
+        web_server.global_chat_session = self._orig_session
+        web_server._session_hydrated = self._orig_hydrated
+        web_server.framework.free_tier_only = self._orig_free_tier_only
+        web_server.framework.gemini_subscription_linked = self._orig_sub_linked
+        web_server.active_model_warning = self._orig_warning
+
+        if self._real_config_sha256 is not None:
+            self.assertTrue(os.path.exists(self._real_config_path))
+            with open(self._real_config_path, "rb") as f:
+                after_sha256 = hashlib.sha256(f.read()).hexdigest()
+            self.assertEqual(self._real_config_sha256, after_sha256)
+        else:
+            self.assertFalse(os.path.exists(self._real_config_path))
+
+        self.temp_dir.cleanup()
+
+    def _write_temp_config_bytes(self, raw_bytes: bytes) -> None:
+        with open(self.temp_config_path, "wb") as f:
+            f.write(raw_bytes)
+
+    def _read_temp_config_bytes(self) -> bytes:
+        with open(self.temp_config_path, "rb") as f:
+            return f.read()
+
+    def test_set_model_atomic_persistence_updates_subscription_policy_and_preserves_unrelated_keys(self):
+        """set_model updates GEMINI_SUBSCRIPTION_LINKED via atomic_update_json without mutating input dict or unrelated keys."""
+        initial_config = {
+            "GEMINI_SUBSCRIPTION_LINKED": False,
+            "ANTIGRAVITY_MODEL_PRO": "gemini-3.8-flash-high",
+            "WATCHLIST": ["SPY", "NVDA"],
+            "SCOUT_TICKER_MAP": {"AI": ["NVDA", "AMD"]},
+            "NESTED_SETTINGS": {"retry": 3, "flags": ["alpha", "beta"]},
+        }
+        self._write_temp_config_bytes(json.dumps(initial_config, indent=2).encode("utf-8"))
+
+        initial_session = MagicMock(name="InitialSession")
+        recalibrated_session = MagicMock(name="RecalibratedSession")
+        web_server.ORCHESTRATOR_MODEL = "gemini-3.8-flash-high"
+        web_server.framework.free_tier_only = True
+        web_server.framework.gemini_subscription_linked = False
+        web_server.global_chat_session = initial_session
+        web_server._session_hydrated = True
+        web_server.active_model_warning = "prior-warning"
+
+        observed_calls = []
+
+        def spy_atomic_update(path, update_fn, *args, **kwargs):
+            def non_mutating_check(cfg):
+                snapshot = copy.deepcopy(cfg) if isinstance(cfg, dict) else cfg
+                result = update_fn(cfg)
+                if isinstance(cfg, dict):
+                    self.assertEqual(cfg, snapshot)
+                    self.assertIsNot(result, cfg)
+                return result
+
+            observed_calls.append(path)
+            return self._real_atomic_update(self.temp_config_path, non_mutating_check, *args, **kwargs)
+
+        self._atomic_update_override = spy_atomic_update
+
+        with (
+            patch("web_server.create_new_session", return_value=recalibrated_session),
+            patch("web_server.check_model_validity", return_value=None),
+        ):
+            res = web_server.set_model(
+                {
+                    "model": "gemini-4-argon-high",
+                    "include_paid": True,
+                    "gemini_subscription_linked": True,
+                }
+            )
+
+        self.assertEqual(observed_calls, ["context/config.json"])
+        self.assertEqual(
+            res,
+            {"status": "success", "current_model": "gemini-4-argon-high", "warning": None},
+        )
+        self.assertEqual(web_server.ORCHESTRATOR_MODEL, "gemini-4-argon-high")
+        self.assertFalse(web_server.framework.free_tier_only)
+        self.assertTrue(web_server.framework.gemini_subscription_linked)
+        self.assertIs(web_server.global_chat_session, recalibrated_session)
+        self.assertFalse(web_server._session_hydrated)
+        self.assertIsNone(web_server.active_model_warning)
+
+        persisted = json.loads(self._read_temp_config_bytes().decode("utf-8"))
+        self.assertTrue(persisted["GEMINI_SUBSCRIPTION_LINKED"])
+        self.assertEqual(persisted["ANTIGRAVITY_MODEL_PRO"], "gemini-3.8-flash-high")
+        self.assertEqual(persisted["WATCHLIST"], ["SPY", "NVDA"])
+        self.assertEqual(persisted["SCOUT_TICKER_MAP"], {"AI": ["NVDA", "AMD"]})
+        self.assertEqual(persisted["NESTED_SETTINGS"], {"retry": 3, "flags": ["alpha", "beta"]})
+
+        leftover_tmp = [name for name in os.listdir(self.temp_dir.name) if name.endswith(".tmp")]
+        self.assertEqual(leftover_tmp, [])
+
+    def test_set_model_persistence_failure_rolls_back_all_in_memory_state_and_reraises(self):
+        """Persistence failure after in-memory transition propagates exception and restores all 6 state fields."""
+        initial_config = {"GEMINI_SUBSCRIPTION_LINKED": False, "ANTIGRAVITY_MODEL_PRO": "gemini-3.8-flash-high"}
+        original_bytes = json.dumps(initial_config, indent=2).encode("utf-8")
+        self._write_temp_config_bytes(original_bytes)
+
+        initial_session = MagicMock(name="InitialSession")
+        recalibrated_session = MagicMock(name="RecalibratedSession")
+        web_server.ORCHESTRATOR_MODEL = "gemini-3.8-flash-high"
+        web_server.framework.free_tier_only = True
+        web_server.framework.gemini_subscription_linked = False
+        web_server.global_chat_session = initial_session
+        web_server._session_hydrated = True
+        web_server.active_model_warning = "existing-warning"
+
+        injected_error = IOError("Simulated atomic replacement failure")
+        transition_observed = {}
+
+        def failing_atomic_update(path, update_fn, *args, **kwargs):
+            transition_observed["model"] = web_server.ORCHESTRATOR_MODEL
+            transition_observed["free_tier_only"] = web_server.framework.free_tier_only
+            transition_observed["sub_linked"] = web_server.framework.gemini_subscription_linked
+            transition_observed["session"] = web_server.global_chat_session
+            transition_observed["hydrated"] = web_server._session_hydrated
+            transition_observed["warning"] = web_server.active_model_warning
+            raise injected_error
+
+        self._atomic_update_override = failing_atomic_update
+
+        with (
+            patch("web_server.create_new_session", return_value=recalibrated_session),
+            patch("web_server.check_model_validity", return_value="new-warning"),
+        ):
+            with self.assertRaises(IOError) as ctx:
+                web_server.set_model(
+                    {
+                        "model": "gemini-4-argon-high",
+                        "include_paid": True,
+                        "gemini_subscription_linked": True,
+                    }
+                )
+
+        self.assertIs(ctx.exception, injected_error)
+        self.assertEqual(transition_observed["model"], "gemini-4-argon-high")
+        self.assertFalse(transition_observed["free_tier_only"])
+        self.assertTrue(transition_observed["sub_linked"])
+        self.assertIs(transition_observed["session"], recalibrated_session)
+        self.assertFalse(transition_observed["hydrated"])
+        self.assertEqual(transition_observed["warning"], "new-warning")
+
+        self.assertEqual(web_server.ORCHESTRATOR_MODEL, "gemini-3.8-flash-high")
+        self.assertTrue(web_server.framework.free_tier_only)
+        self.assertFalse(web_server.framework.gemini_subscription_linked)
+        self.assertIs(web_server.global_chat_session, initial_session)
+        self.assertTrue(web_server._session_hydrated)
+        self.assertEqual(web_server.active_model_warning, "existing-warning")
+        self.assertEqual(self._read_temp_config_bytes(), original_bytes)
+
+    def test_set_model_malformed_json_fails_closed_preserves_file_and_rolls_back_state(self):
+        """Malformed JSON in config fails closed, preserves original file bytes, and rolls back all in-memory state."""
+        malformed_bytes = b'{"GEMINI_SUBSCRIPTION_LINKED": false, "broken": '
+        self._write_temp_config_bytes(malformed_bytes)
+
+        initial_session = MagicMock(name="InitialSession")
+        recalibrated_session = MagicMock(name="RecalibratedSession")
+        web_server.ORCHESTRATOR_MODEL = "gemini-3.8-flash-high"
+        web_server.framework.free_tier_only = True
+        web_server.framework.gemini_subscription_linked = False
+        web_server.global_chat_session = initial_session
+        web_server._session_hydrated = True
+        web_server.active_model_warning = "prior-warning"
+
+        with (
+            patch("web_server.create_new_session", return_value=recalibrated_session),
+            patch("web_server.check_model_validity", return_value=None),
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                web_server.set_model(
+                    {
+                        "model": "gemini-4-argon-high",
+                        "include_paid": True,
+                        "gemini_subscription_linked": True,
+                    }
+                )
+
+        self.assertIn("Failed to parse existing JSON file", str(ctx.exception))
+        self.assertEqual(web_server.ORCHESTRATOR_MODEL, "gemini-3.8-flash-high")
+        self.assertTrue(web_server.framework.free_tier_only)
+        self.assertFalse(web_server.framework.gemini_subscription_linked)
+        self.assertIs(web_server.global_chat_session, initial_session)
+        self.assertTrue(web_server._session_hydrated)
+        self.assertEqual(web_server.active_model_warning, "prior-warning")
+        self.assertEqual(self._read_temp_config_bytes(), malformed_bytes)
+
+    def test_set_model_invalid_top_level_config_structure_fails_closed_preserves_file_and_rolls_back_state(self):
+        """Valid non-object JSON top-level values fail closed, preserve file bytes, and roll back all state."""
+        for raw_payload in (b'["not", "a", "dict"]', b'"not_an_object"'):
+            with self.subTest(raw_payload=raw_payload):
+                self._write_temp_config_bytes(raw_payload)
+
+                initial_session = MagicMock(name="InitialSession")
+                recalibrated_session = MagicMock(name="RecalibratedSession")
+                web_server.ORCHESTRATOR_MODEL = "gemini-3.8-flash-high"
+                web_server.framework.free_tier_only = True
+                web_server.framework.gemini_subscription_linked = False
+                web_server.global_chat_session = initial_session
+                web_server._session_hydrated = True
+                web_server.active_model_warning = "prior-warning"
+
+                with (
+                    patch("web_server.create_new_session", return_value=recalibrated_session),
+                    patch("web_server.check_model_validity", return_value=None),
+                ):
+                    with self.assertRaises(ValueError) as ctx:
+                        web_server.set_model(
+                            {
+                                "model": "gemini-4-argon-high",
+                                "include_paid": True,
+                                "gemini_subscription_linked": True,
+                            }
+                        )
+
+                self.assertIn("Configuration must be a JSON object", str(ctx.exception))
+                self.assertEqual(web_server.ORCHESTRATOR_MODEL, "gemini-3.8-flash-high")
+                self.assertTrue(web_server.framework.free_tier_only)
+                self.assertFalse(web_server.framework.gemini_subscription_linked)
+                self.assertIs(web_server.global_chat_session, initial_session)
+                self.assertTrue(web_server._session_hydrated)
+                self.assertEqual(web_server.active_model_warning, "prior-warning")
+                self.assertEqual(self._read_temp_config_bytes(), raw_payload)
+
+    def test_set_model_missing_config_file_preserves_no_create_behaviour(self):
+        """When config.json does not exist, set_model succeeds in memory and does not create config.json or lock files."""
+        if os.path.exists(self.temp_config_path):
+            os.remove(self.temp_config_path)
+        lock_path = self.temp_config_path + ".lock"
+        if os.path.exists(lock_path):
+            os.remove(lock_path)
+
+        initial_session = MagicMock(name="InitialSession")
+        recalibrated_session = MagicMock(name="RecalibratedSession")
+        web_server.ORCHESTRATOR_MODEL = "gemini-3.8-flash-high"
+        web_server.framework.free_tier_only = True
+        web_server.framework.gemini_subscription_linked = False
+        web_server.global_chat_session = initial_session
+        web_server._session_hydrated = True
+        web_server.active_model_warning = "prior-warning"
+
+        with (
+            patch("web_server.create_new_session", return_value=recalibrated_session),
+            patch("web_server.check_model_validity", return_value=None),
+        ):
+            res = web_server.set_model(
+                {
+                    "model": "gemini-4-argon-high",
+                    "include_paid": True,
+                    "gemini_subscription_linked": True,
+                }
+            )
+
+        self.assertEqual(
+            res,
+            {"status": "success", "current_model": "gemini-4-argon-high", "warning": None},
+        )
+        self.assertEqual(web_server.ORCHESTRATOR_MODEL, "gemini-4-argon-high")
+        self.assertFalse(web_server.framework.free_tier_only)
+        self.assertTrue(web_server.framework.gemini_subscription_linked)
+        self.assertIs(web_server.global_chat_session, recalibrated_session)
+        self.assertFalse(web_server._session_hydrated)
+        self.assertIsNone(web_server.active_model_warning)
+        self.assertFalse(self._real_exists(self.temp_config_path))
+        self.assertFalse(self._real_exists(lock_path))
+
+    def test_set_model_concurrent_configuration_modification_preserves_unrelated_updates(self):
+        """Concurrent atomic_update_json and set_model updates serialize under FileLock without losing unrelated fields."""
+        initial_config = {
+            "GEMINI_SUBSCRIPTION_LINKED": False,
+            "ANTIGRAVITY_MODEL_PRO": "gemini-3.8-flash-high",
+            "CONCURRENT_KEY": "initial",
+        }
+        self._write_temp_config_bytes(json.dumps(initial_config, indent=2).encode("utf-8"))
+
+        web_server.ORCHESTRATOR_MODEL = "gemini-3.8-flash-high"
+        web_server.framework.free_tier_only = True
+        web_server.framework.gemini_subscription_linked = False
+        web_server.global_chat_session = MagicMock(name="InitialSession")
+        web_server._session_hydrated = True
+
+        worker_in_lock = threading.Event()
+        allow_worker_finish = threading.Event()
+        set_model_done = threading.Event()
+        errors = []
+        results = {}
+
+        def worker_update():
+            try:
+                def update_unrelated(cfg):
+                    worker_in_lock.set()
+                    if not allow_worker_finish.wait(timeout=5.0):
+                        raise TimeoutError("Timed out waiting to finish worker update")
+                    updated = dict(cfg)
+                    updated["CONCURRENT_KEY"] = "updated_by_worker"
+                    return updated
+
+                self._real_atomic_update(self.temp_config_path, update_unrelated)
+            except Exception as exc:
+                errors.append(exc)
+
+        def run_set_model():
+            try:
+                results["set_model"] = web_server.set_model(
+                    {
+                        "model": "gemini-4-argon-high",
+                        "include_paid": True,
+                        "gemini_subscription_linked": True,
+                    }
+                )
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                set_model_done.set()
+
+        with (
+            patch("web_server.create_new_session", return_value=MagicMock(name="RecalibratedSession")),
+            patch("web_server.check_model_validity", return_value=None),
+        ):
+            t_worker = threading.Thread(target=worker_update)
+            t_model = threading.Thread(target=run_set_model)
+            t_worker.start()
+            self.assertTrue(worker_in_lock.wait(timeout=3.0))
+            t_model.start()
+
+            # set_model must block on FileLock while worker holds it
+            self.assertFalse(set_model_done.wait(timeout=0.15))
+            allow_worker_finish.set()
+
+            t_worker.join(timeout=5.0)
+            t_model.join(timeout=5.0)
+            self.assertFalse(t_worker.is_alive())
+            self.assertFalse(t_model.is_alive())
+
+        self.assertEqual(errors, [])
+        self.assertEqual(results["set_model"]["status"], "success")
+        persisted = json.loads(self._read_temp_config_bytes().decode("utf-8"))
+        self.assertTrue(persisted["GEMINI_SUBSCRIPTION_LINKED"])
+        self.assertEqual(persisted["CONCURRENT_KEY"], "updated_by_worker")
+        self.assertEqual(persisted["ANTIGRAVITY_MODEL_PRO"], "gemini-3.8-flash-high")
+
+        # Multi-threaded concurrent stress: distinct unrelated keys + set_model updates
+        stress_errors = []
+
+        def key_writer(worker_idx):
+            try:
+                for step in range(5):
+                    def _set_key(cfg, idx=worker_idx, s=step):
+                        nxt = dict(cfg)
+                        nxt[f"WORKER_{idx}"] = s
+                        return nxt
+
+                    self._real_atomic_update(self.temp_config_path, _set_key)
+            except Exception as exc:
+                stress_errors.append(exc)
+
+        def policy_toggler(toggle_idx):
+            try:
+                for step in range(5):
+                    linked_val = bool((toggle_idx + step) % 2)
+                    res = web_server.set_model(
+                        {
+                            "model": "gemini-4-argon-high",
+                            "include_paid": True,
+                            "gemini_subscription_linked": linked_val,
+                        }
+                    )
+                    self.assertEqual(res["status"], "success")
+            except Exception as exc:
+                stress_errors.append(exc)
+
+        with (
+            patch("web_server.create_new_session", return_value=MagicMock(name="StressSession")),
+            patch("web_server.check_model_validity", return_value=None),
+        ):
+            stress_threads = [
+                threading.Thread(target=key_writer, args=(0,)),
+                threading.Thread(target=key_writer, args=(1,)),
+                threading.Thread(target=policy_toggler, args=(0,)),
+                threading.Thread(target=policy_toggler, args=(1,)),
+            ]
+            for t in stress_threads:
+                t.start()
+            for t in stress_threads:
+                t.join(timeout=10.0)
+                self.assertFalse(t.is_alive())
+
+        self.assertEqual(stress_errors, [])
+        final_persisted = json.loads(self._read_temp_config_bytes().decode("utf-8"))
+        self.assertEqual(final_persisted["WORKER_0"], 4)
+        self.assertEqual(final_persisted["WORKER_1"], 4)
+        self.assertEqual(final_persisted["CONCURRENT_KEY"], "updated_by_worker")
+        self.assertEqual(final_persisted["ANTIGRAVITY_MODEL_PRO"], "gemini-3.8-flash-high")
+        self.assertIsInstance(final_persisted["GEMINI_SUBSCRIPTION_LINKED"], bool)
 
 
 if __name__ == "__main__":
