@@ -3,16 +3,19 @@ Unit & Integration Tests for Atomic Persistence and Concurrency Protection
 Governed by Stage 1.1 (R6), Protocol 02, and Stage 1 Section 3.3.
 """
 
+import builtins
+import errno
 import os
 import sys
 import unittest
 import threading
 import tempfile
 import json
-import time
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 
+import atomic_io
 from atomic_io import (
     atomic_write_json,
     atomic_read_json,
@@ -20,6 +23,8 @@ from atomic_io import (
     atomic_write_text,
     FileLock,
     FileLockTimeoutError,
+    _get_held_depths,
+    _get_thread_rlock,
 )
 
 
@@ -323,6 +328,244 @@ class TestAtomicIO(unittest.TestCase):
         finally:
             release_event.set()
             t.join()
+
+    def _assert_local_rlock_released_across_threads(self, norm_path: str) -> None:
+        """Verify on another thread that the process-local RLock is uncontended and thread depth is cleared."""
+        self.assertNotIn(norm_path, _get_held_depths())
+        result = {}
+        done = threading.Event()
+
+        def probe():
+            rlock = _get_thread_rlock(norm_path)
+            acquired = rlock.acquire(blocking=False)
+            if acquired:
+                rlock.release()
+            result["acquired"] = acquired
+            done.set()
+
+        worker = threading.Thread(target=probe)
+        worker.start()
+        self.assertTrue(done.wait(timeout=2.0))
+        worker.join(timeout=2.0)
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(result.get("acquired"), f"Local RLock remained leaked/held for {norm_path}")
+
+    def test_stage34_parent_directory_creation_failure_releases_local_lock_and_recovers(self):
+        """3.4-A/C: Parent directory creation failure releases local lock and allows subsequent acquisition."""
+        target_path = os.path.join(self.temp_dir.name, "missing_parent", "state.json")
+        lock_path = target_path + ".lock"
+        norm_path = os.path.abspath(lock_path)
+
+        with patch("atomic_io.os.makedirs", side_effect=PermissionError(errno.EACCES, "Directory creation denied")):
+            with self.assertRaises(PermissionError) as ctx:
+                with FileLock(lock_path, timeout=0.2):
+                    self.fail("FileLock should not enter body when makedirs fails")
+            self.assertNotIsInstance(ctx.exception, FileLockTimeoutError)
+
+        self._assert_local_rlock_released_across_threads(norm_path)
+
+        # Removal of the failure condition must allow immediate acquisition on both this and another thread
+        worker_errors = []
+
+        def worker_write():
+            try:
+                self.assertTrue(atomic_write_json(target_path, {"recovered": True}, timeout=0.2))
+            except Exception as exc:
+                worker_errors.append(exc)
+
+        t = threading.Thread(target=worker_write)
+        t.start()
+        t.join(timeout=2.0)
+        self.assertFalse(t.is_alive())
+        self.assertEqual(worker_errors, [])
+        self.assertEqual(atomic_read_json(target_path, timeout=0.2), {"recovered": True})
+
+    def test_stage34_lock_file_open_failure_releases_local_lock_and_recovers(self):
+        """3.4-B/C: Opening lock file with non-contention PermissionError fails fast, releases local lock, and recovers."""
+        target_path = os.path.join(self.temp_dir.name, "open_fail.json")
+        lock_path = target_path + ".lock"
+        norm_path = os.path.abspath(lock_path)
+        orig_open = builtins.open
+
+        def fail_lock_open(path, *args, **kwargs):
+            if os.path.abspath(str(path)) == norm_path:
+                raise PermissionError(errno.EACCES, "Lock file open denied")
+            return orig_open(path, *args, **kwargs)
+
+        with patch("builtins.open", side_effect=fail_lock_open):
+            with self.assertRaises(PermissionError) as ctx:
+                with FileLock(lock_path, timeout=0.2):
+                    self.fail("FileLock should not enter body when open() fails")
+            self.assertNotIsInstance(ctx.exception, FileLockTimeoutError)
+
+        self._assert_local_rlock_released_across_threads(norm_path)
+
+        with FileLock(lock_path, timeout=0.2) as fl:
+            self.assertIsNotNone(fl._file)
+            self.assertEqual(_get_held_depths()[norm_path], 1)
+        self._assert_local_rlock_released_across_threads(norm_path)
+
+    def test_stage34_os_lock_failure_closes_handle_releases_local_lock_and_preserves_exception(self):
+        """3.4-B/C: Non-contention OS lock failure closes handle, releases local lock, and preserves original error."""
+        target_path = os.path.join(self.temp_dir.name, "os_fail.json")
+        lock_path = target_path + ".lock"
+        norm_path = os.path.abspath(lock_path)
+        opened_handles = []
+        orig_open = builtins.open
+
+        def track_open(path, *args, **kwargs):
+            handle = orig_open(path, *args, **kwargs)
+            if os.path.abspath(str(path)) == norm_path:
+                opened_handles.append(handle)
+            return handle
+
+        # Case 1: Clean close on non-contention OS locking error
+        with (
+            patch("builtins.open", side_effect=track_open),
+            patch("atomic_io._lock_file", side_effect=OSError(errno.EINVAL, "Invalid lock fd")),
+        ):
+            with self.assertRaises(OSError) as ctx:
+                with FileLock(lock_path, timeout=0.2):
+                    self.fail("FileLock should not enter body when _lock_file fails")
+            self.assertNotIsInstance(ctx.exception, FileLockTimeoutError)
+            self.assertEqual(ctx.exception.errno, errno.EINVAL)
+
+        self.assertEqual(len(opened_handles), 1)
+        self.assertTrue(opened_handles[0].closed)
+        self._assert_local_rlock_released_across_threads(norm_path)
+
+        # Case 2: Close error during cleanup must not replace primary OS locking exception
+        class FailingCloseHandle:
+            def __init__(self, inner):
+                self._inner = inner
+                self.close_attempted = False
+
+            def seek(self, *args, **kwargs):
+                return self._inner.seek(*args, **kwargs)
+
+            def fileno(self):
+                return self._inner.fileno()
+
+            def close(self):
+                self.close_attempted = True
+                try:
+                    self._inner.close()
+                finally:
+                    raise RuntimeError("Cleanup close failure")
+
+        failing_handles = []
+
+        def open_failing_close(self_lock):
+            wrapped = FailingCloseHandle(orig_open(self_lock.norm_path, "a+b"))
+            failing_handles.append(wrapped)
+            return wrapped
+
+        with (
+            patch.object(FileLock, "_open_lock_file", autospec=True, side_effect=open_failing_close),
+            patch("atomic_io._lock_file", side_effect=OSError(errno.EINVAL, "Primary OS lock failure")),
+        ):
+            with self.assertRaises(OSError) as ctx:
+                with FileLock(lock_path, timeout=0.2):
+                    self.fail("FileLock should raise primary OSError")
+            self.assertIn("Primary OS lock failure", str(ctx.exception))
+
+        self.assertEqual(len(failing_handles), 1)
+        self.assertTrue(failing_handles[0].close_attempted)
+        self._assert_local_rlock_released_across_threads(norm_path)
+
+        # Recovery after failure condition clears
+        updated = atomic_update_json(target_path, lambda d: {**d, "ok": True}, timeout=0.2)
+        self.assertEqual(updated, {"ok": True})
+        self.assertEqual(atomic_read_json(target_path, timeout=0.2), {"ok": True})
+
+    def test_stage34_os_lock_contention_timeout_closes_handle_and_releases_local_lock(self):
+        """3.4-B/C/E: OS lock contention timeout closes opened handle, releases local lock, and recovers."""
+        target_path = os.path.join(self.temp_dir.name, "os_timeout.json")
+        lock_path = target_path + ".lock"
+        norm_path = os.path.abspath(lock_path)
+        opened_handles = []
+        orig_open = builtins.open
+
+        def track_open(path, *args, **kwargs):
+            handle = orig_open(path, *args, **kwargs)
+            if os.path.abspath(str(path)) == norm_path:
+                opened_handles.append(handle)
+            return handle
+
+        with (
+            patch("builtins.open", side_effect=track_open),
+            patch("atomic_io._lock_file", side_effect=PermissionError(errno.EACCES, "Contended OS byte lock")),
+        ):
+            with self.assertRaises(FileLockTimeoutError):
+                with FileLock(lock_path, timeout=0.05):
+                    pass
+
+        self.assertGreaterEqual(len(opened_handles), 1)
+        self.assertTrue(all(h.closed for h in opened_handles))
+        self._assert_local_rlock_released_across_threads(norm_path)
+
+        with FileLock(lock_path, timeout=0.2):
+            pass
+        self._assert_local_rlock_released_across_threads(norm_path)
+
+    def test_stage34_nested_reentrant_depth_and_same_instance_reentry(self):
+        """3.4-D/E: Nested acquisitions across separate and identical FileLock instances maintain depth and exclusion."""
+        lock_path = os.path.join(self.temp_dir.name, "nested_depth.json.lock")
+        norm_path = os.path.abspath(lock_path)
+
+        fl_outer = FileLock(lock_path, timeout=0.5)
+        with fl_outer:
+            self.assertEqual(_get_held_depths()[norm_path], 1)
+            outer_file = fl_outer._file
+            self.assertIsNotNone(outer_file)
+            self.assertFalse(outer_file.closed)
+
+            # Same-instance nested reentry
+            with fl_outer:
+                self.assertEqual(_get_held_depths()[norm_path], 2)
+                self.assertIs(fl_outer._file, outer_file)
+
+                # Separate-instance nested reentry
+                with FileLock(lock_path, timeout=0.5) as fl_inner:
+                    self.assertEqual(_get_held_depths()[norm_path], 3)
+                    self.assertIsNone(fl_inner._file)
+
+                    # Another thread still blocked while held at depth 3
+                    contended_error = []
+
+                    def contend():
+                        try:
+                            with FileLock(lock_path, timeout=0.05):
+                                pass
+                        except FileLockTimeoutError as exc:
+                            contended_error.append(exc)
+
+                    t = threading.Thread(target=contend)
+                    t.start()
+                    t.join(timeout=2.0)
+                    self.assertFalse(t.is_alive())
+                    self.assertEqual(len(contended_error), 1)
+
+                self.assertEqual(_get_held_depths()[norm_path], 2)
+                self.assertFalse(outer_file.closed)
+
+            self.assertEqual(_get_held_depths()[norm_path], 1)
+            self.assertFalse(outer_file.closed)
+
+        self.assertTrue(outer_file.closed)
+        self._assert_local_rlock_released_across_threads(norm_path)
+
+        # Immediately reacquirable from another thread
+        reacquired = threading.Event()
+
+        def reacquire():
+            with FileLock(lock_path, timeout=0.2):
+                reacquired.set()
+
+        t2 = threading.Thread(target=reacquire)
+        t2.start()
+        t2.join(timeout=2.0)
+        self.assertTrue(reacquired.is_set())
 
 
 if __name__ == "__main__":

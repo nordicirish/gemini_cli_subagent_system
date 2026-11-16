@@ -9,6 +9,7 @@ import sys
 import time
 import json
 import uuid
+import errno
 import threading
 from typing import Any, Callable, Dict, Optional
 
@@ -63,6 +64,28 @@ def _get_held_depths() -> Dict[str, int]:
     return _LOCAL_STATE.depths
 
 
+_CONTENTION_ERRNOS = frozenset(
+    code
+    for code in (
+        errno.EACCES,
+        errno.EAGAIN,
+        getattr(errno, "EWOULDBLOCK", errno.EAGAIN),
+        getattr(errno, "EDEADLK", 36),
+        getattr(errno, "EDEADLOCK", 36),
+    )
+    if code is not None
+)
+
+
+def _is_lock_contention_error(err: BaseException) -> bool:
+    """Return True when an OSError represents transient lock contention rather than a hard FS failure."""
+    if isinstance(err, BlockingIOError):
+        return True
+    if isinstance(err, OSError):
+        return getattr(err, "errno", None) in _CONTENTION_ERRNOS
+    return False
+
+
 class FileLock:
     """
     Inter-process and inter-thread reentrant file lock with timeout and exponential backoff.
@@ -77,27 +100,26 @@ class FileLock:
         self._rlock = _get_thread_rlock(self.norm_path)
         self._acquired_rlock = False
         self._is_outermost = False
+        self._reentrant_depth = 0
 
-    def __enter__(self):
-        start_time = time.time()
-        backoff = 0.01
-
-        depths = _get_held_depths()
+    def _acquire_local_lock(self, start_time: float, depths: Dict[str, int]) -> bool:
+        """Acquire the process-local RLock; return True if already held reentrantly on this thread."""
         current_depth = depths.get(self.norm_path, 0)
-
-        # If current thread already holds this lock, re-enter without re-locking OS handle
         if current_depth > 0:
             self._rlock.acquire()
+            self._reentrant_depth += 1
             self._acquired_rlock = True
             depths[self.norm_path] = current_depth + 1
-            self._is_outermost = False
-            return self
+            if self._file is None:
+                self._is_outermost = False
+            return True
 
-        # Acquire intra-process thread RLock within timeout
+        backoff = 0.01
         while True:
             if self._rlock.acquire(blocking=False):
+                self._reentrant_depth += 1
                 self._acquired_rlock = True
-                break
+                return False
             if time.time() - start_time >= self.timeout:
                 raise FileLockTimeoutError(
                     f"Could not acquire thread lock on '{self.lock_path}' after {self.timeout}s"
@@ -105,46 +127,81 @@ class FileLock:
             time.sleep(backoff)
             backoff = min(backoff * 1.5, 0.05)
 
-        # Ensure parent directory exists
+    def _ensure_parent_directory(self) -> None:
         parent_dir = os.path.dirname(self.norm_path)
         if parent_dir and not os.path.exists(parent_dir):
             os.makedirs(parent_dir, exist_ok=True)
 
-        # Acquire OS-level file lock for cross-process exclusion
+    def _open_lock_file(self):
+        return open(self.norm_path, "a+b")
+
+    def _acquire_os_lock(self, handle, start_time: float) -> None:
         backoff = 0.01
         while True:
             try:
-                self._file = open(self.norm_path, "a+b")
-                self._file.seek(0)
-                _lock_file(self._file)
-                depths[self.norm_path] = 1
-                self._is_outermost = True
-                return self
-            except (IOError, OSError):
-                if self._file:
-                    try:
-                        self._file.close()
-                    except Exception:
-                        pass
-                    self._file = None
-
+                handle.seek(0)
+                _lock_file(handle)
+                return
+            except (IOError, OSError) as err:
+                if not _is_lock_contention_error(err):
+                    raise
                 if time.time() - start_time >= self.timeout:
-                    if self._acquired_rlock:
-                        self._rlock.release()
-                        self._acquired_rlock = False
                     raise FileLockTimeoutError(
                         f"Could not acquire file lock on '{self.lock_path}' after {self.timeout}s"
-                    )
-
+                    ) from err
                 time.sleep(backoff)
                 backoff = min(backoff * 1.5, 0.1)
+
+    def _release_local_lock_after_failed_acquisition(self) -> None:
+        if self._reentrant_depth > 0 or self._acquired_rlock:
+            self._reentrant_depth = max(0, self._reentrant_depth - 1)
+            self._acquired_rlock = self._reentrant_depth > 0
+            self._rlock.release()
+
+    def __enter__(self):
+        start_time = time.time()
+        depths = _get_held_depths()
+        acquired_local = False
+        handle = None
+        os_locked = False
+
+        try:
+            is_reentrant = self._acquire_local_lock(start_time, depths)
+            if is_reentrant:
+                return self
+            acquired_local = True
+
+            self._ensure_parent_directory()
+            handle = self._open_lock_file()
+            self._acquire_os_lock(handle, start_time)
+            os_locked = True
+
+            self._file = handle
+            handle = None  # Ownership transferred to instance.
+            depths[self.norm_path] = 1
+            self._is_outermost = True
+            return self
+
+        except BaseException:
+            if handle is not None:
+                if os_locked:
+                    _unlock_file(handle)
+                try:
+                    handle.close()
+                except Exception:
+                    pass
+
+            if acquired_local:
+                self._release_local_lock_after_failed_acquisition()
+
+            raise
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         depths = _get_held_depths()
         current_depth = depths.get(self.norm_path, 0)
 
         try:
-            if self._is_outermost and self._file:
+            if current_depth <= 1 and self._file is not None:
                 try:
                     _unlock_file(self._file)
                 finally:
@@ -153,15 +210,17 @@ class FileLock:
                     except Exception:
                         pass
                     self._file = None
+                    self._is_outermost = False
         finally:
             if current_depth <= 1:
                 depths.pop(self.norm_path, None)
             else:
                 depths[self.norm_path] = current_depth - 1
 
-            if self._acquired_rlock:
+            if self._reentrant_depth > 0 or self._acquired_rlock:
+                self._reentrant_depth = max(0, self._reentrant_depth - 1)
+                self._acquired_rlock = self._reentrant_depth > 0
                 self._rlock.release()
-                self._acquired_rlock = False
 
 
 def _write_serialized_unlocked(file_path: str, serialized: str) -> bool:
