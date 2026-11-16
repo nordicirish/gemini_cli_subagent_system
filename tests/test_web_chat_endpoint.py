@@ -1766,7 +1766,9 @@ class TestStage35ConfigPersistenceAndMutationBoundary(unittest.TestCase):
 
         self._real_exists = os.path.exists
         self._real_atomic_update = atomic_io.atomic_update_json
+        self._real_file_lock = atomic_io.FileLock
         self._atomic_update_override = None
+        self._file_lock_enter_hook = None
 
         def routed_exists(path):
             if str(path).replace("\\", "/") == "context/config.json":
@@ -1780,12 +1782,34 @@ class TestStage35ConfigPersistenceAndMutationBoundary(unittest.TestCase):
                 return self._real_atomic_update(self.temp_config_path, update_fn, *args, **kwargs)
             return self._real_atomic_update(path, update_fn, *args, **kwargs)
 
+        def routed_file_lock(lock_path, *args, **kwargs):
+            norm = str(lock_path).replace("\\", "/")
+            if norm == "context/config.json.lock":
+                inner_lock = self._real_file_lock(self.temp_config_path + ".lock", *args, **kwargs)
+                hook = self._file_lock_enter_hook
+                if hook is None:
+                    return inner_lock
+
+                class _HookedLockContext:
+                    def __enter__(self_ctx):
+                        hook()
+                        return inner_lock.__enter__()
+
+                    def __exit__(self_ctx, exc_type, exc_val, exc_tb):
+                        return inner_lock.__exit__(exc_type, exc_val, exc_tb)
+
+                return _HookedLockContext()
+            return self._real_file_lock(lock_path, *args, **kwargs)
+
         self._patch_exists = patch("web_server.os.path.exists", side_effect=routed_exists)
         self._patch_atomic_update = patch("web_server.atomic_update_json", side_effect=routed_atomic_update)
+        self._patch_file_lock = patch("web_server.FileLock", side_effect=routed_file_lock)
         self._patch_exists.start()
         self._patch_atomic_update.start()
+        self._patch_file_lock.start()
 
     def tearDown(self):
+        self._patch_file_lock.stop()
         self._patch_atomic_update.stop()
         self._patch_exists.stop()
 
@@ -2185,6 +2209,78 @@ class TestStage35ConfigPersistenceAndMutationBoundary(unittest.TestCase):
         self.assertEqual(final_persisted["CONCURRENT_KEY"], "updated_by_worker")
         self.assertEqual(final_persisted["ANTIGRAVITY_MODEL_PRO"], "gemini-3.8-flash-high")
         self.assertIsInstance(final_persisted["GEMINI_SUBSCRIPTION_LINKED"], bool)
+
+    def test_set_model_does_not_recreate_config_deleted_before_lock_acquisition(self):
+        """If config.json is deleted while set_model waits for FileLock, recheck skips update without recreating it."""
+        initial_config = {
+            "GEMINI_SUBSCRIPTION_LINKED": False,
+            "ANTIGRAVITY_MODEL_PRO": "gemini-3.8-flash-high",
+        }
+        self._write_temp_config_bytes(json.dumps(initial_config, indent=2).encode("utf-8"))
+
+        initial_session = MagicMock(name="InitialSession")
+        recalibrated_session = MagicMock(name="RecalibratedSession")
+        web_server.ORCHESTRATOR_MODEL = "gemini-3.8-flash-high"
+        web_server.framework.free_tier_only = True
+        web_server.framework.gemini_subscription_linked = False
+        web_server.global_chat_session = initial_session
+        web_server._session_hydrated = True
+        web_server.active_model_warning = "prior-warning"
+
+        waiting_for_lock = threading.Event()
+        set_model_done = threading.Event()
+        self._file_lock_enter_hook = waiting_for_lock.set
+
+        outcomes = {}
+
+        def run_set_model():
+            try:
+                outcomes["result"] = web_server.set_model(
+                    {
+                        "model": "gemini-4-argon-high",
+                        "include_paid": True,
+                        "gemini_subscription_linked": True,
+                    }
+                )
+            except Exception as exc:
+                outcomes["error"] = exc
+            finally:
+                set_model_done.set()
+
+        with (
+            patch("web_server.create_new_session", return_value=recalibrated_session),
+            patch("web_server.check_model_validity", return_value=None),
+        ):
+            with atomic_io.FileLock(self.temp_config_path + ".lock"):
+                t_model = threading.Thread(target=run_set_model)
+                t_model.start()
+
+                self.assertTrue(waiting_for_lock.wait(timeout=3.0))
+                self.assertFalse(set_model_done.wait(timeout=0.15))
+
+                os.remove(self.temp_config_path)
+                self.assertFalse(self._real_exists(self.temp_config_path))
+
+            t_model.join(timeout=5.0)
+            self.assertFalse(t_model.is_alive())
+
+        self.assertNotIn("error", outcomes)
+        self.assertEqual(
+            outcomes.get("result"),
+            {"status": "success", "current_model": "gemini-4-argon-high", "warning": None},
+        )
+        self.assertFalse(self._real_exists(self.temp_config_path))
+        config_files = [
+            name for name in os.listdir(self.temp_dir.name)
+            if name == "config.json" or name.startswith(".config.json.")
+        ]
+        self.assertEqual(config_files, [])
+        self.assertEqual(web_server.ORCHESTRATOR_MODEL, "gemini-4-argon-high")
+        self.assertFalse(web_server.framework.free_tier_only)
+        self.assertTrue(web_server.framework.gemini_subscription_linked)
+        self.assertIs(web_server.global_chat_session, recalibrated_session)
+        self.assertFalse(web_server._session_hydrated)
+        self.assertIsNone(web_server.active_model_warning)
 
 
 if __name__ == "__main__":

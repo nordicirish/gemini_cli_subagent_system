@@ -27,9 +27,9 @@ except ImportError:
     from python.persistence import get_persistence_service, PersistenceValidationError
 
 try:
-    from atomic_io import atomic_update_json
+    from atomic_io import FileLock, atomic_update_json
 except ImportError:
-    from python.atomic_io import atomic_update_json
+    from python.atomic_io import FileLock, atomic_update_json
 
 # Import the existing FastAPI app from fetch_stocks
 from fetch_stocks import app, run_daemon, GLOBAL_STATE, CHART_SCREENSHOTS_BUFFER
@@ -631,10 +631,13 @@ def set_model(data: dict):
                     updated["GEMINI_SUBSCRIPTION_LINKED"] = gemini_linked
                     return updated
 
-                atomic_update_json(
-                    config_path,
-                    update_subscription_policy,
-                )
+                with FileLock(config_path + ".lock"):
+                    # Recheck after obtaining the lock.
+                    if os.path.exists(config_path):
+                        atomic_update_json(
+                            config_path,
+                            update_subscription_policy,
+                        )
         except Exception as ce:
             _restore_in_memory_state()
             try:
