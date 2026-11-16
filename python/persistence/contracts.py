@@ -11,15 +11,133 @@ Confines backend-specific implementation details (JSON file I/O vs. SQLite
 repositories and UnitOfWork) behind a uniform, inspectable interface.
 """
 
+import json
 import math
+import re
 from abc import ABC, abstractmethod
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Union
 
 
+_CANONICAL_DECIMAL_RE = re.compile(r"^[+-]?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$")
+_MAX_FINANCIAL_DIGITS = 28
+
+
 # ---------------------------------------------------------------------------
 # Numeric Validation Utilities
 # ---------------------------------------------------------------------------
+
+def validate_financial_decimal(
+    val: Any,
+    field_name: str,
+    max_scale: int = 4,
+    allow_zero: bool = True,
+    non_negative: bool = True,
+) -> Decimal:
+    """
+    Validates that a financial value is an exact finite Decimal.
+
+    Rejects booleans, raw binary floats, None, custom objects (such as __float__
+    wrappers), non-canonical/whitespace/scientific strings, non-finite values
+    (NaN, +Inf, -Inf), excessive precision (>28 digits), excessive fractional
+    scale (>max_scale), and disallowed negative or zero values fail-closed with
+    PersistenceValidationError.
+    """
+    if isinstance(val, bool):
+        raise PersistenceValidationError(
+            f"Boolean values not allowed for financial field {field_name}"
+        )
+    if isinstance(val, float):
+        raise PersistenceValidationError(
+            f"Binary float not allowed at financial boundary for {field_name}: {val!r}"
+        )
+    if val is None or not isinstance(val, (Decimal, int, str)):
+        raise PersistenceValidationError(
+            f"Unsupported type {type(val).__name__} for financial field {field_name}; "
+            "expected Decimal, int, or canonical numeric string"
+        )
+
+    if isinstance(val, str):
+        if not val or val != val.strip() or not _CANONICAL_DECIMAL_RE.match(val):
+            raise PersistenceValidationError(
+                f"Invalid canonical numeric string for financial field {field_name}: {val!r}"
+            )
+        dec = Decimal(val)
+    elif isinstance(val, int):
+        dec = Decimal(val)
+    else:
+        dec = val
+
+    if not dec.is_finite():
+        raise PersistenceValidationError(
+            f"Non-finite Decimal value not allowed for financial field {field_name}: {val!r}"
+        )
+
+    _sign, digits, exponent = dec.as_tuple()
+    if len(digits) > _MAX_FINANCIAL_DIGITS:
+        raise PersistenceValidationError(
+            f"Precision exceeds {_MAX_FINANCIAL_DIGITS} digits for financial field {field_name}: {val!r}"
+        )
+
+    scale = -exponent if isinstance(exponent, int) and exponent < 0 else 0
+    if scale > max_scale:
+        raise PersistenceValidationError(
+            f"Scale {scale} exceeds maximum allowed scale {max_scale} for financial field {field_name}: {val!r}"
+        )
+
+    if non_negative and dec < Decimal("0"):
+        raise PersistenceValidationError(
+            f"Negative value not allowed for financial field {field_name}: {dec}"
+        )
+
+    if not allow_zero and dec == Decimal("0"):
+        raise PersistenceValidationError(
+            f"Zero value not allowed for financial field {field_name}"
+        )
+
+    if dec == Decimal("0"):
+        if scale > 0:
+            return Decimal("0").quantize(Decimal(10) ** -scale)
+        return Decimal("0")
+
+    return dec
+
+
+def format_financial_decimal(val: Decimal, min_scale: int = 0) -> str:
+    """Formats a finite Decimal as a canonical plain decimal string without scientific notation."""
+    if not isinstance(val, Decimal) or not val.is_finite():
+        raise PersistenceValidationError(f"Expected finite Decimal to format, got {val!r}")
+    normalized = Decimal("0") if val == Decimal("0") else val
+    _sign, _digits, exponent = normalized.as_tuple()
+    current_scale = -exponent if isinstance(exponent, int) and exponent < 0 else 0
+    if min_scale > current_scale:
+        normalized = normalized.quantize(Decimal(10) ** -min_scale)
+    elif normalized == Decimal("0") and current_scale > 0:
+        normalized = Decimal("0").quantize(Decimal(10) ** -current_scale)
+    return f"{normalized:f}"
+
+
+def _serialize_json_node(node: Any) -> str:
+    if isinstance(node, Decimal):
+        return format_financial_decimal(node)
+    if isinstance(node, dict):
+        parts = []
+        for k, v in node.items():
+            key_str = k if isinstance(k, str) else str(k)
+            parts.append(f"{json.dumps(key_str)}:{_serialize_json_node(v)}")
+        return "{" + ",".join(parts) + "}"
+    if isinstance(node, (list, tuple)):
+        return "[" + ",".join(_serialize_json_node(item) for item in node) + "]"
+    return json.dumps(node, allow_nan=False)
+
+
+def serialize_json_with_exact_decimals(data: Any) -> str:
+    """
+    Serializes structured API payloads to JSON while emitting Decimal values as
+    exact JSON numeric literals without binary float conversion.
+    """
+    return _serialize_json_node(data)
+
 
 def validate_finite_float(
     val: Any,
@@ -155,11 +273,11 @@ class PersistenceAdapter(ABC):
     @abstractmethod
     def get_portfolio_basket(self) -> Dict[str, Any]:
         """
-        Returns structured portfolio state:
+        Returns structured portfolio state with exact Decimal financial fields:
         {
-            "portfolio": [{"ticker": str, "shares": float, "wac": float}, ...],
-            "unallocated_cash_eur": float,
-            "unallocated_cash_usd": float,
+            "portfolio": [{"ticker": str, "shares": Decimal, "wac": Decimal}, ...],
+            "unallocated_cash_eur": Decimal,
+            "unallocated_cash_usd": Decimal,
             "eurusd_rate": float
         }
         """
@@ -169,8 +287,8 @@ class PersistenceAdapter(ABC):
     def save_portfolio_basket(
         self,
         portfolio: List[Dict[str, Any]],
-        unallocated_cash_eur: float,
-        unallocated_cash_usd: float = 0.0,
+        unallocated_cash_eur: Union[Decimal, int, str],
+        unallocated_cash_usd: Union[Decimal, int, str] = Decimal("0.00"),
         caller_role: Optional[str] = None,
     ) -> Dict[str, Any]:
         """

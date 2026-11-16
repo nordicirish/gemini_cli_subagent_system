@@ -4,6 +4,7 @@ import json
 import asyncio
 import threading
 import time
+from decimal import Decimal
 
 from atomic_io import (
     atomic_write_json,
@@ -18,9 +19,9 @@ from tool_registry import (
 )
 
 try:
-    from persistence import get_persistence_service
+    from persistence import get_persistence_service, PersistenceError, PersistenceValidationError
 except ImportError:
-    from python.persistence import get_persistence_service
+    from python.persistence import get_persistence_service, PersistenceError, PersistenceValidationError
 
 # We import from the existing fetch_stocks to leverage its battle-tested logic
 from fetch_stocks import handle_paste, run_daemon
@@ -83,7 +84,8 @@ def read_ssot() -> str:
 def update_ssot(payload_json: str) -> str:
     """
     Takes an EXECUTION_PAYLOAD JSON string and merges it into the local SSoT.
-    Enforces financial-state mutation authorization (Stage 1.1 R3).
+    Enforces financial-state mutation authorization (Stage 1.1 R3) and propagates
+    persistence/validation failures fail-closed without returning misleading success text.
     """
     authorize_financial_mutation(
         operation_name="update_ssot",
@@ -91,34 +93,28 @@ def update_ssot(payload_json: str) -> str:
         payload=payload_json,
     )
 
-    try:
-        if isinstance(payload_json, str):
-            payload_data = json.loads(payload_json)
-        elif isinstance(payload_json, dict):
-            payload_data = payload_json
-        else:
-            raise ValueError("payload_json must be a JSON string or dict.")
-
-        # Try intercepting decision log early
+    if isinstance(payload_json, str):
         try:
-            intercept_and_log_decision(payload_data)
-        except PermissionError:
-            raise
-        except Exception as ie:
-            print(f"[System Warning] Decision interception inside update_ssot failed: {ie}")
+            payload_data = json.loads(payload_json, parse_float=Decimal)
+        except json.JSONDecodeError as jde:
+            raise PersistenceValidationError(
+                f"Invalid JSON format provided to update_ssot: {jde}"
+            ) from jde
+        if not isinstance(payload_data, dict):
+            raise PersistenceValidationError("payload_json must resolve to a JSON object.")
+    elif isinstance(payload_json, dict):
+        payload_data = payload_json
+    else:
+        raise PersistenceValidationError("payload_json must be a JSON string or dict.")
 
-        service = get_persistence_service()
-        res = service.update_ssot_payload(payload_data)
+    service = get_persistence_service()
+    res = service.update_ssot_payload(payload_data)
 
-        if res.get("status") == "success":
-            return "SSoT updated successfully."
-        else:
-            return f"Error updating SSoT: {res.get('message', 'Update failed')}"
+    if not isinstance(res, dict) or res.get("status") != "success":
+        msg = res.get("message", "Update failed") if isinstance(res, dict) else "Update failed"
+        raise PersistenceError(f"Error updating SSoT: {msg}")
 
-    except PermissionError:
-        raise
-    except Exception as e:
-        return f"Exception in update_ssot: {str(e)}"
+    return "SSoT updated successfully."
 
 
 def read_trade_lessons() -> str:
@@ -142,14 +138,19 @@ def update_trade_lessons(lessons_json: str) -> str:
         payload=lessons_json,
     )
 
-    try:
-        service = get_persistence_service()
-        service.save_trade_lessons(lessons_json)
-        return "Trade lessons updated successfully."
-    except PermissionError:
-        raise
-    except Exception as e:
-        return f"Error updating trade lessons: {str(e)}"
+    if isinstance(lessons_json, str):
+        try:
+            parsed_lessons = json.loads(lessons_json, parse_float=Decimal)
+        except json.JSONDecodeError as jde:
+            raise PersistenceValidationError(f"Invalid trade lessons JSON: {jde}") from jde
+        if not isinstance(parsed_lessons, (list, dict)):
+            raise PersistenceValidationError("lessons_json must resolve to a JSON list or object.")
+    else:
+        parsed_lessons = lessons_json
+
+    service = get_persistence_service()
+    service.save_trade_lessons(parsed_lessons)
+    return "Trade lessons updated successfully."
 
 
 def read_decision_log() -> str:
@@ -173,144 +174,139 @@ def intercept_and_log_decision(data_input) -> None:
         payload=data_input,
     )
 
-    try:
-        import re
-        import datetime
+    import re
+    import datetime
 
-        parsed_payloads = []
+    parsed_payloads = []
 
-        if isinstance(data_input, dict):
-            parsed_payloads.append(data_input)
-        elif isinstance(data_input, str):
+    if isinstance(data_input, dict):
+        parsed_payloads.append(data_input)
+    elif isinstance(data_input, str):
+        json_blocks = re.findall(
+            r"```json\s*(.*?)\s*```", data_input, re.DOTALL | re.IGNORECASE
+        )
+        if not json_blocks:
             json_blocks = re.findall(
-                r"```json\s*(.*?)\s*```", data_input, re.DOTALL | re.IGNORECASE
+                r"```\s*(.*?)\s*```", data_input, re.DOTALL | re.IGNORECASE
             )
-            if not json_blocks:
-                json_blocks = re.findall(
-                    r"```\s*(.*?)\s*```", data_input, re.DOTALL | re.IGNORECASE
-                )
 
-            for block in json_blocks:
-                try:
-                    block_clean = block.strip()
-                    if block_clean.startswith("{") or block_clean.startswith("["):
-                        parsed_payloads.append(json.loads(block_clean))
-                except Exception:
-                    pass
-
-            if not parsed_payloads:
-                try:
-                    start_idx = data_input.find("{")
-                    end_idx = data_input.rfind("}")
-                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                        parsed_payloads.append(
-                            json.loads(data_input[start_idx : end_idx + 1])
-                        )
-                except Exception:
-                    pass
-        else:
-            return
+        for block in json_blocks:
+            try:
+                block_clean = block.strip()
+                if block_clean.startswith("{") or block_clean.startswith("["):
+                    parsed_payloads.append(json.loads(block_clean, parse_float=Decimal))
+            except Exception:
+                pass
 
         if not parsed_payloads:
-            return
+            try:
+                start_idx = data_input.find("{")
+                end_idx = data_input.rfind("}")
+                if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                    parsed_payloads.append(
+                        json.loads(data_input[start_idx : end_idx + 1], parse_float=Decimal)
+                    )
+            except Exception:
+                pass
+    else:
+        return
 
-        def find_key_recursive(data, target_key):
-            if not isinstance(data, dict):
-                if isinstance(data, list):
-                    for item in data:
-                        res = find_key_recursive(item, target_key)
-                        if res is not None:
-                            return res
-                return None
-            if target_key in data:
-                return data[target_key]
-            for k in (
-                "EXECUTION_PAYLOAD",
-                "mutable_state",
-                "state_context",
-                "payload",
-                "post_execution_state",
-            ):
-                if k in data:
-                    res = find_key_recursive(data[k], target_key)
-                    if res is not None:
-                        return res
-            for val in data.values():
-                if isinstance(val, (dict, list)):
-                    res = find_key_recursive(val, target_key)
+    if not parsed_payloads:
+        return
+
+    def find_key_recursive(data, target_key):
+        if not isinstance(data, dict):
+            if isinstance(data, list):
+                for item in data:
+                    res = find_key_recursive(item, target_key)
                     if res is not None:
                         return res
             return None
+        if target_key in data:
+            return data[target_key]
+        for k in (
+            "EXECUTION_PAYLOAD",
+            "mutable_state",
+            "state_context",
+            "payload",
+            "post_execution_state",
+        ):
+            if k in data:
+                res = find_key_recursive(data[k], target_key)
+                if res is not None:
+                    return res
+        for val in data.values():
+            if isinstance(val, (dict, list)):
+                res = find_key_recursive(val, target_key)
+                if res is not None:
+                    return res
+        return None
 
-        for payload in parsed_payloads:
-            incoming_portfolio = find_key_recursive(payload, "portfolio_snapshot")
-            if incoming_portfolio and isinstance(incoming_portfolio, list):
-                ts = (
-                    find_key_recursive(payload, "timestamp")
-                    or datetime.datetime.now().isoformat()
+    for payload in parsed_payloads:
+        incoming_portfolio = find_key_recursive(payload, "portfolio_snapshot")
+        if incoming_portfolio and isinstance(incoming_portfolio, list):
+            ts = (
+                find_key_recursive(payload, "timestamp")
+                or datetime.datetime.now(datetime.timezone.utc).isoformat()
+            )
+            trigger = (
+                find_key_recursive(payload, "trigger_context") or "ROUTINE_OUTPUT"
+            )
+
+            market_context = {
+                "regime": find_key_recursive(payload, "regime")
+                or find_key_recursive(payload, "risk_regime"),
+                "vix_guard": find_key_recursive(payload, "vix_guard"),
+                "portfolio_value_eur": find_key_recursive(
+                    payload, "portfolio_total_value_eur"
                 )
-                trigger = (
-                    find_key_recursive(payload, "trigger_context") or "ROUTINE_OUTPUT"
+                or find_key_recursive(payload, "total_liquidity_eur"),
+                "unallocated_cash_eur": find_key_recursive(
+                    payload, "unallocated_cash_eur"
                 )
+                or find_key_recursive(payload, "remaining_cash_eur"),
+            }
 
-                market_context = {
-                    "regime": find_key_recursive(payload, "regime")
-                    or find_key_recursive(payload, "risk_regime"),
-                    "vix_guard": find_key_recursive(payload, "vix_guard"),
-                    "portfolio_value_eur": find_key_recursive(
-                        payload, "portfolio_total_value_eur"
+            council_debate = find_key_recursive(payload, "council_debate")
+
+            turn_log = {
+                "timestamp": ts,
+                "trigger_context": trigger,
+                "market_context": market_context,
+                "council_debate": council_debate,
+                "decisions": [],
+            }
+
+            for item in incoming_portfolio:
+                if isinstance(item, dict):
+                    ticker = item.get("ticker")
+                    trade_state = item.get("trade_state", item.get("action"))
+                    scrutiny_audit = item.get("scrutiny_audit")
+                    price = (
+                        item.get("price")
+                        or item.get("current_price")
+                        or item.get("price_at_eval")
                     )
-                    or find_key_recursive(payload, "total_liquidity_eur"),
-                    "unallocated_cash_eur": find_key_recursive(
-                        payload, "unallocated_cash_eur"
-                    )
-                    or find_key_recursive(payload, "remaining_cash_eur"),
-                }
 
-                council_debate = find_key_recursive(payload, "council_debate")
-
-                turn_log = {
-                    "timestamp": ts,
-                    "trigger_context": trigger,
-                    "market_context": market_context,
-                    "council_debate": council_debate,
-                    "decisions": [],
-                }
-
-                for item in incoming_portfolio:
-                    if isinstance(item, dict):
-                        ticker = item.get("ticker")
-                        trade_state = item.get("trade_state", item.get("action"))
-                        scrutiny_audit = item.get("scrutiny_audit")
-                        price = (
-                            item.get("price")
-                            or item.get("current_price")
-                            or item.get("price_at_eval")
+                    if ticker and (trade_state or scrutiny_audit):
+                        turn_log["decisions"].append(
+                            {
+                                "ticker": ticker,
+                                "timestamp": ts,
+                                "trigger_context": trigger,
+                                "price_at_eval": price,
+                                "trade_state": trade_state,
+                                "scrutiny_audit": scrutiny_audit,
+                            }
                         )
 
-                        if ticker and (trade_state or scrutiny_audit):
-                            turn_log["decisions"].append(
-                                {
-                                    "ticker": ticker,
-                                    "timestamp": ts,
-                                    "trigger_context": trigger,
-                                    "price_at_eval": price,
-                                    "trade_state": trade_state,
-                                    "scrutiny_audit": scrutiny_audit,
-                                }
-                            )
-
-                if turn_log["decisions"]:
-                    service = get_persistence_service()
-                    service.append_decision_log(turn_log)
-                    print(
-                        f"[System] Decision Log Appended: {len(turn_log['decisions'])} decisions."
-                    )
-                    break
-    except PermissionError:
-        raise
-    except Exception as e:
-        print(f"[System Error] Decision log interception failure: {e}")
+            if turn_log["decisions"]:
+                service = get_persistence_service()
+                service.append_decision_log(turn_log)
+                print(
+                    f"[System] Decision Log Appended: {len(turn_log['decisions'])} decisions."
+                )
+                break
 
 
 def update_rules(rules_md_content: str) -> str:

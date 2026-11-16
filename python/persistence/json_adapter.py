@@ -10,11 +10,15 @@ and authorization boundaries for the default runtime:
 - context/decision_log.json
 """
 
+from contextlib import ExitStack
+import copy
 import datetime
+from decimal import Decimal, ROUND_HALF_UP
 import json
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import uuid
 
 try:
     import atomic_io
@@ -42,6 +46,8 @@ from .contracts import (
     PersistenceNotFoundError,
     PersistenceValidationError,
     CANONICAL_SSOT_KEYS,
+    format_financial_decimal,
+    validate_financial_decimal,
     validate_finite_float,
 )
 
@@ -90,7 +96,7 @@ class JsonPersistenceAdapter(PersistenceAdapter):
                         f"SSoT file exists but is empty or whitespace-only: '{self.ssot_path}'"
                     )
                 try:
-                    data = json.loads(content)
+                    data = json.loads(content, parse_float=Decimal)
                 except json.JSONDecodeError as jde:
                     raise PersistenceIntegrityError(
                         f"SSoT file contains malformed JSON: '{self.ssot_path}': {jde}"
@@ -117,7 +123,7 @@ class JsonPersistenceAdapter(PersistenceAdapter):
 
     def get_portfolio_basket(self) -> Dict[str, Any]:
         """
-        Extracts structured portfolio basket holdings, unallocated cash,
+        Extracts structured portfolio basket holdings, unallocated cash as exact Decimals,
         and fallback EUR/USD rate from ssot.json.
         Returns default empty basket if file does not exist.
         Raises PersistenceIntegrityError, PersistenceValidationError, or PersistenceError on failure.
@@ -125,8 +131,8 @@ class JsonPersistenceAdapter(PersistenceAdapter):
         if not os.path.exists(self.ssot_path):
             return {
                 "portfolio": [],
-                "unallocated_cash_eur": 0.0,
-                "unallocated_cash_usd": 0.0,
+                "unallocated_cash_eur": Decimal("0.00"),
+                "unallocated_cash_usd": Decimal("0.00"),
                 "eurusd_rate": 1.08,
             }
 
@@ -134,8 +140,8 @@ class JsonPersistenceAdapter(PersistenceAdapter):
         if not data:
             return {
                 "portfolio": [],
-                "unallocated_cash_eur": 0.0,
-                "unallocated_cash_usd": 0.0,
+                "unallocated_cash_eur": Decimal("0.00"),
+                "unallocated_cash_usd": Decimal("0.00"),
                 "eurusd_rate": 1.08,
             }
 
@@ -176,8 +182,14 @@ class JsonPersistenceAdapter(PersistenceAdapter):
             ticker = item.get("ticker")
             if not ticker or not isinstance(ticker, str) or not ticker.strip():
                 raise PersistenceValidationError(f"Portfolio position item {i} missing valid ticker")
-            shares = validate_finite_float(item.get("shares", 0.0), f"shares for position {ticker}")
-            wac = validate_finite_float(item.get("wac", 0.0), f"wac for position {ticker}")
+            shares_raw = item["shares"] if "shares" in item else Decimal("0")
+            wac_raw = item["wac"] if "wac" in item else Decimal("0")
+            shares = validate_financial_decimal(
+                shares_raw, f"shares for position {ticker}", max_scale=4, allow_zero=True, non_negative=True
+            )
+            wac = validate_financial_decimal(
+                wac_raw, f"wac for position {ticker}", max_scale=4, allow_zero=True, non_negative=True
+            )
 
             portfolio.append({
                 "ticker": str(ticker).strip().upper(),
@@ -189,18 +201,30 @@ class JsonPersistenceAdapter(PersistenceAdapter):
             ms.get("unallocated_cash_eur") if ms.get("unallocated_cash_eur") is not None else
             data.get("unallocated_cash_eur") if data.get("unallocated_cash_eur") is not None else
             ep.get("unallocated_cash_eur") if ep.get("unallocated_cash_eur") is not None else
-            state_ctx.get("unallocated_cash_eur", 0.0)
+            state_ctx.get("unallocated_cash_eur", Decimal("0.00"))
         )
         raw_cash_usd = (
             ms.get("unallocated_cash_usd") if ms.get("unallocated_cash_usd") is not None else
             data.get("unallocated_cash_usd") if data.get("unallocated_cash_usd") is not None else
             ep.get("unallocated_cash_usd") if ep.get("unallocated_cash_usd") is not None else
-            state_ctx.get("unallocated_cash_usd", 0.0)
+            state_ctx.get("unallocated_cash_usd", Decimal("0.00"))
         )
         raw_rate = data.get("exchange_rate", 1.08) if data.get("exchange_rate") is not None else 1.08
 
-        cash_eur = validate_finite_float(raw_cash_eur if raw_cash_eur is not None else 0.0, "unallocated_cash_eur")
-        cash_usd = validate_finite_float(raw_cash_usd if raw_cash_usd is not None else 0.0, "unallocated_cash_usd")
+        cash_eur = validate_financial_decimal(
+            raw_cash_eur if raw_cash_eur is not None else Decimal("0.00"),
+            "unallocated_cash_eur",
+            max_scale=2,
+            allow_zero=True,
+            non_negative=True,
+        )
+        cash_usd = validate_financial_decimal(
+            raw_cash_usd if raw_cash_usd is not None else Decimal("0.00"),
+            "unallocated_cash_usd",
+            max_scale=2,
+            allow_zero=True,
+            non_negative=True,
+        )
         rate = validate_finite_float(raw_rate, "exchange_rate", allow_zero=False)
 
         return {
@@ -213,13 +237,13 @@ class JsonPersistenceAdapter(PersistenceAdapter):
     def save_portfolio_basket(
         self,
         portfolio: List[Dict[str, Any]],
-        unallocated_cash_eur: float,
-        unallocated_cash_usd: float = 0.0,
+        unallocated_cash_eur: Union[Decimal, int, str],
+        unallocated_cash_usd: Union[Decimal, int, str] = Decimal("0.00"),
         caller_role: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Saves updated portfolio holdings and cash balances into ssot.json atomically.
-        Enforces authorize_financial_mutation before disk modification.
+        Enforces exact Decimal validation and authorize_financial_mutation before disk modification.
         """
         payload = {
             "portfolio": portfolio,
@@ -236,45 +260,67 @@ class JsonPersistenceAdapter(PersistenceAdapter):
         if not isinstance(portfolio, list):
             raise PersistenceValidationError("Portfolio must be a list of position dictionaries")
 
-        new_snapshot = []
+        new_snapshot_dec: List[Dict[str, Any]] = []
+        new_snapshot_json: List[Dict[str, Any]] = []
         for item in portfolio:
             if not isinstance(item, dict):
                 raise PersistenceValidationError("Portfolio position item must be a dictionary")
             ticker = item.get("ticker")
             if not ticker or not isinstance(ticker, str) or not ticker.strip():
                 raise PersistenceValidationError("Portfolio position item missing valid ticker")
-            shares = validate_finite_float(item.get("shares", 0.0), f"shares for position {ticker}")
-            wac = validate_finite_float(item.get("wac", 0.0), f"wac for position {ticker}")
-            if shares > 0.0:
-                new_snapshot.append({
-                    "ticker": str(ticker).strip().upper(),
+            shares_raw = item["shares"] if "shares" in item else Decimal("0")
+            wac_raw = item["wac"] if "wac" in item else Decimal("0")
+            shares = validate_financial_decimal(
+                shares_raw, f"shares for position {ticker}", max_scale=4, allow_zero=True, non_negative=True
+            )
+            wac = validate_financial_decimal(
+                wac_raw, f"wac for position {ticker}", max_scale=4, allow_zero=True, non_negative=True
+            )
+            if shares > Decimal("0"):
+                clean_ticker = str(ticker).strip().upper()
+                new_snapshot_dec.append({
+                    "ticker": clean_ticker,
                     "shares": shares,
                     "wac": wac,
                 })
+                new_snapshot_json.append({
+                    "ticker": clean_ticker,
+                    "shares": format_financial_decimal(shares),
+                    "wac": format_financial_decimal(wac),
+                })
 
-        eur_cash = validate_finite_float(unallocated_cash_eur, "unallocated_cash_eur")
-        usd_cash = validate_finite_float(unallocated_cash_usd, "unallocated_cash_usd")
-        if usd_cash <= 0.0:
-            usd_cash = round(eur_cash * 1.08, 2)
+        eur_cash = validate_financial_decimal(
+            unallocated_cash_eur, "unallocated_cash_eur", max_scale=2, allow_zero=True, non_negative=True
+        )
+        usd_cash = validate_financial_decimal(
+            unallocated_cash_usd, "unallocated_cash_usd", max_scale=2, allow_zero=True, non_negative=True
+        )
+        # Intentional FX conversion rounding boundary: when explicit USD cash is 0 and
+        # EUR cash > 0, derive USD cash at 1.08 EUR/USD quantized to 2 decimals (ROUND_HALF_UP).
+        if usd_cash == Decimal("0") and eur_cash > Decimal("0"):
+            usd_cash = (eur_cash * Decimal("1.08")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        eur_json_str = format_financial_decimal(eur_cash, min_scale=2)
+        usd_json_str = format_financial_decimal(usd_cash, min_scale=2)
 
         def _update_basket_ssot(data: Any) -> Dict[str, Any]:
             if not isinstance(data, dict):
                 data = {}
-            data["portfolio_snapshot"] = new_snapshot
-            data["unallocated_cash_eur"] = eur_cash
-            data["unallocated_cash_usd"] = usd_cash
+            data["portfolio_snapshot"] = new_snapshot_json
+            data["unallocated_cash_eur"] = eur_json_str
+            data["unallocated_cash_usd"] = usd_json_str
 
             if "mutable_state" in data and isinstance(data["mutable_state"], dict):
-                data["mutable_state"]["portfolio_snapshot"] = new_snapshot
-                data["mutable_state"]["unallocated_cash_eur"] = eur_cash
-                data["mutable_state"]["unallocated_cash_usd"] = usd_cash
+                data["mutable_state"]["portfolio_snapshot"] = new_snapshot_json
+                data["mutable_state"]["unallocated_cash_eur"] = eur_json_str
+                data["mutable_state"]["unallocated_cash_usd"] = usd_json_str
 
             return data
 
-        updated_data = atomic_update_json(self.ssot_path, _update_basket_ssot, default_factory=dict)
+        atomic_update_json(self.ssot_path, _update_basket_ssot, default_factory=dict)
         return {
             "status": "success",
-            "portfolio": new_snapshot,
+            "portfolio": new_snapshot_dec,
             "unallocated_cash_eur": eur_cash,
             "unallocated_cash_usd": usd_cash,
         }
@@ -285,35 +331,46 @@ class JsonPersistenceAdapter(PersistenceAdapter):
         caller_role: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Processes and merges an execution payload into ssot.json,
-        extracts embedded trade lessons to trade_lessons.json, and logs decisions.
+        Atomically processes and merges an execution payload into ssot.json,
+        routes embedded trade lessons to trade_lessons.json, and logs decisions
+        to decision_log.json under coordinated locks with pre-mutation rollback compensation.
         """
-        authorize_financial_mutation(
-            operation_name="update_ssot",
-            target_resource=self.ssot_path,
-            payload=payload,
-            caller_role=caller_role,
-        )
-
         parsed_data = self._parse_payload_input(payload)
         if not isinstance(parsed_data, dict):
             raise PersistenceValidationError("Payload must resolve to a dictionary.")
 
-        # Intercept decision log early if present
-        try:
-            self.append_decision_log_from_payload(parsed_data, caller_role=caller_role)
-        except Exception:
-            pass
+        working_data = copy.deepcopy(parsed_data)
+        sanitized_data = self._validate_and_sanitize_ssot_payload(working_data)
+        extracted_lessons = self._extract_lessons(sanitized_data)
+        decision_entry = self._prepare_decision_log_entry(sanitized_data)
 
-        # Extract lessons from payload
-        extracted_lessons = self._extract_lessons(parsed_data)
+        # Pre-authorize all applicable operations before acquiring locks or mutating files
+        authorize_financial_mutation(
+            operation_name="update_ssot",
+            target_resource=self.ssot_path,
+            payload=parsed_data,
+            caller_role=caller_role,
+        )
+        if decision_entry is not None:
+            authorize_financial_mutation(
+                operation_name="update_decision_log",
+                target_resource=self.decision_log_path,
+                payload=decision_entry,
+                caller_role=caller_role,
+            )
+        if extracted_lessons:
+            authorize_financial_mutation(
+                operation_name="update_trade_lessons",
+                target_resource=self.trade_lessons_path,
+                payload=extracted_lessons,
+                caller_role=caller_role,
+            )
 
-        # Merge portfolio and mutable state into ssot.json
         def _merge_ssot_state(existing_ssot: Any) -> Dict[str, Any]:
             if not isinstance(existing_ssot, dict):
                 existing_ssot = {}
 
-            local_payload = json.loads(json.dumps(parsed_data))
+            local_payload = copy.deepcopy(sanitized_data)
             has_layer_model = "mutable_state" in existing_ssot
 
             # Alias mapping
@@ -326,7 +383,11 @@ class JsonPersistenceAdapter(PersistenceAdapter):
             merged_portfolio = None
             if "portfolio_snapshot" in local_payload:
                 merged_portfolio = local_payload.pop("portfolio_snapshot")
-            elif "mutable_state" in local_payload and isinstance(local_payload["mutable_state"], dict) and "portfolio_snapshot" in local_payload["mutable_state"]:
+            elif (
+                "mutable_state" in local_payload
+                and isinstance(local_payload["mutable_state"], dict)
+                and "portfolio_snapshot" in local_payload["mutable_state"]
+            ):
                 merged_portfolio = local_payload["mutable_state"].pop("portfolio_snapshot")
 
             if existing_ssot:
@@ -350,31 +411,78 @@ class JsonPersistenceAdapter(PersistenceAdapter):
                     else:
                         merged_ssot["portfolio_snapshot"] = merged_portfolio
 
-            # Strip lesson keys from SSoT
-            for tl_key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons", "rule_mutations", "trade_lessons_revision"):
+            # Strip lesson keys and non-canonical keys from SSoT
+            for tl_key in (
+                "trade_lessons",
+                "new_trade_lessons",
+                "compressed_trade_lessons",
+                "rule_mutations",
+                "trade_lessons_revision",
+            ):
                 merged_ssot.pop(tl_key, None)
                 if "mutable_state" in merged_ssot and isinstance(merged_ssot["mutable_state"], dict):
                     merged_ssot["mutable_state"].pop(tl_key, None)
                 if "EXECUTION_PAYLOAD" in merged_ssot and isinstance(merged_ssot["EXECUTION_PAYLOAD"], dict):
                     merged_ssot["EXECUTION_PAYLOAD"].pop(tl_key, None)
 
-            # Prune non-canonical top-level keys
             non_canonical = [k for k in merged_ssot if k not in CANONICAL_SSOT_KEYS]
             for k in non_canonical:
                 merged_ssot.pop(k, None)
 
             return merged_ssot
 
-        result = atomic_update_json(self.ssot_path, _merge_ssot_state, default_factory=dict)
-
-        # Route extracted trade lessons to trade_lessons.json
+        target_files = [self.ssot_path]
+        if decision_entry is not None:
+            target_files.append(self.decision_log_path)
         if extracted_lessons:
-            try:
-                self.save_trade_lessons(extracted_lessons, caller_role=caller_role)
-            except Exception:
-                pass
+            target_files.append(self.trade_lessons_path)
 
-        return {"status": "success", "ssot": result}
+        lock_order = sorted({os.path.abspath(p): p + ".lock" for p in target_files}.items(), key=lambda kv: kv[0])
+
+        with ExitStack() as lock_stack:
+            for _abs_p, lock_p in lock_order:
+                lock_stack.enter_context(atomic_io.FileLock(lock_p, timeout=5.0))
+
+            snapshots: List[Tuple[str, bool, Optional[bytes]]] = []
+            for path in target_files:
+                existed = os.path.exists(path)
+                raw_bytes: Optional[bytes] = None
+                if existed:
+                    with open(path, "rb") as rf:
+                        raw_bytes = rf.read()
+                snapshots.append((path, existed, raw_bytes))
+
+            completed_steps: List[str] = []
+            try:
+                result = atomic_update_json(self.ssot_path, _merge_ssot_state, default_factory=dict)
+                completed_steps.append("ssot")
+
+                if decision_entry is not None:
+                    self.append_decision_log(decision_entry, prepend=False, caller_role=caller_role)
+                    completed_steps.append("decision_log")
+
+                if extracted_lessons:
+                    self.save_trade_lessons(extracted_lessons, caller_role=caller_role)
+                    completed_steps.append("trade_lessons")
+
+                return {"status": "success", "ssot": result}
+            except Exception as exc:
+                rollback_errors: List[str] = []
+                for path, existed, raw_bytes in reversed(snapshots):
+                    try:
+                        self._restore_file_snapshot(path, existed, raw_bytes)
+                    except Exception as rb_err:
+                        rollback_errors.append(f"{path}: {rb_err}")
+
+                if rollback_errors:
+                    raise PersistenceIntegrityError(
+                        f"Composite SSoT update failed after {completed_steps} ({exc}); "
+                        f"rollback compensation failed: {'; '.join(rollback_errors)}"
+                    ) from exc
+
+                if isinstance(exc, (PermissionError, PersistenceValidationError, PersistenceIntegrityError, PersistenceError)):
+                    raise
+                raise PersistenceError(f"Composite SSoT payload update failed cleanly (rolled back): {exc}") from exc
 
     def get_ssot_tickers(self) -> List[str]:
         """Extracts all uppercase active tickers from SSoT, config watchlist, and scouts."""
@@ -433,8 +541,8 @@ class JsonPersistenceAdapter(PersistenceAdapter):
                 data["mutable_state"] = {
                     "portfolio_snapshot": data.get("portfolio_snapshot", []),
                     "watched_tickers": data.get("watched_tickers", []),
-                    "unallocated_cash_eur": data.get("unallocated_cash_eur", 0.0),
-                    "unallocated_cash_usd": data.get("unallocated_cash_usd", 0.0),
+                    "unallocated_cash_eur": data.get("unallocated_cash_eur", "0.00"),
+                    "unallocated_cash_usd": data.get("unallocated_cash_usd", "0.00"),
                 }
             return data
 
@@ -578,11 +686,13 @@ class JsonPersistenceAdapter(PersistenceAdapter):
 
         if isinstance(lessons, str):
             try:
-                new_data = json.loads(lessons)
-            except Exception:
-                new_data = [{"rule": lessons}]
+                new_data = json.loads(lessons, parse_float=Decimal)
+            except json.JSONDecodeError as jde:
+                raise PersistenceValidationError(f"Invalid trade lessons JSON: {jde}") from jde
         else:
             new_data = lessons
+
+        new_data = self._stringify_decimals_recursive(new_data)
 
         def _apply_lessons_update(file_content: Any) -> Any:
             current_data: List[Dict[str, Any]] = []
@@ -593,6 +703,8 @@ class JsonPersistenceAdapter(PersistenceAdapter):
                 is_dict_format = True
             elif isinstance(file_content, list):
                 current_data = list(file_content)
+            elif file_content not in (None, {}):
+                raise PersistenceIntegrityError("Existing trade_lessons.json has invalid structure")
 
             incoming_list: List[Dict[str, Any]] = []
             if isinstance(new_data, list):
@@ -602,9 +714,15 @@ class JsonPersistenceAdapter(PersistenceAdapter):
             elif isinstance(new_data, dict):
                 incoming_list = [new_data]
             else:
-                incoming_list = [{"rule": str(new_data)}]
+                raise PersistenceValidationError("Trade lessons payload must resolve to a list or dict")
 
             for item in incoming_list:
+                if not isinstance(item, (dict, str)):
+                    raise PersistenceValidationError(f"Invalid trade lesson item type: {type(item).__name__}")
+                if isinstance(item, dict):
+                    rule_txt = item.get("rule", item.get("directive_text"))
+                    if not isinstance(rule_txt, str) or not rule_txt.strip():
+                        raise PersistenceValidationError("Trade lesson dict missing non-empty 'rule' or 'directive_text'")
                 current_data.append(item)
 
             # Re-index items if appropriate
@@ -648,6 +766,10 @@ class JsonPersistenceAdapter(PersistenceAdapter):
             payload=entry,
             caller_role=caller_role,
         )
+        if not isinstance(entry, dict):
+            raise PersistenceValidationError("Decision log entry must be a dictionary")
+
+        clean_entry = self._stringify_decimals_recursive(entry)
 
         def _update_log(existing: Any) -> Any:
             is_dict = False
@@ -660,9 +782,9 @@ class JsonPersistenceAdapter(PersistenceAdapter):
                 log_data = []
 
             if prepend:
-                log_data.insert(0, entry)
+                log_data.insert(0, clean_entry)
             else:
-                log_data.append(entry)
+                log_data.append(clean_entry)
 
             if len(log_data) > 300:
                 log_data = log_data[:300] if prepend else log_data[-300:]
@@ -681,58 +803,9 @@ class JsonPersistenceAdapter(PersistenceAdapter):
         if not isinstance(parsed, dict):
             return False
 
-        incoming_portfolio = self._find_key_recursive(parsed, "portfolio_snapshot")
-        if not (incoming_portfolio and isinstance(incoming_portfolio, list)):
+        turn_log = self._prepare_decision_log_entry(parsed)
+        if turn_log is None:
             return False
-
-        ts = (
-            self._find_key_recursive(parsed, "timestamp") or
-            datetime.datetime.now(datetime.timezone.utc).isoformat()
-        )
-        trigger = self._find_key_recursive(parsed, "trigger_context") or "ROUTINE_OUTPUT"
-
-        market_context = {
-            "regime": self._find_key_recursive(parsed, "regime") or self._find_key_recursive(parsed, "risk_regime"),
-            "vix_guard": self._find_key_recursive(parsed, "vix_guard"),
-            "portfolio_value_eur": (
-                self._find_key_recursive(parsed, "portfolio_total_value_eur") or
-                self._find_key_recursive(parsed, "total_liquidity_eur")
-            ),
-            "unallocated_cash_eur": (
-                self._find_key_recursive(parsed, "unallocated_cash_eur") or
-                self._find_key_recursive(parsed, "remaining_cash_eur")
-            ),
-        }
-        council_debate = self._find_key_recursive(parsed, "council_debate")
-
-        decisions = []
-        for item in incoming_portfolio:
-            if isinstance(item, dict):
-                ticker = item.get("ticker")
-                trade_state = item.get("trade_state", item.get("action"))
-                scrutiny_audit = item.get("scrutiny_audit")
-                price = item.get("price") or item.get("current_price") or item.get("price_at_eval")
-
-                if ticker and (trade_state or scrutiny_audit):
-                    decisions.append({
-                        "ticker": ticker,
-                        "timestamp": ts,
-                        "trigger_context": trigger,
-                        "price_at_eval": price,
-                        "trade_state": trade_state,
-                        "scrutiny_audit": scrutiny_audit,
-                    })
-
-        if not decisions:
-            return False
-
-        turn_log = {
-            "timestamp": ts,
-            "trigger_context": trigger,
-            "market_context": market_context,
-            "council_debate": council_debate,
-            "decisions": decisions,
-        }
 
         self.append_decision_log(turn_log, prepend=False, caller_role=caller_role)
         return True
@@ -755,11 +828,176 @@ class JsonPersistenceAdapter(PersistenceAdapter):
     # Internal Helpers
     # -----------------------------------------------------------------------
 
+    def _stringify_decimals_recursive(self, obj: Any) -> Any:
+        if isinstance(obj, Decimal):
+            if not obj.is_finite():
+                raise PersistenceValidationError(f"Non-finite Decimal value not allowed: {obj!r}")
+            return format_financial_decimal(obj)
+        if isinstance(obj, dict):
+            return {k: self._stringify_decimals_recursive(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._stringify_decimals_recursive(item) for item in obj]
+        return obj
+
+    def _validate_and_sanitize_ssot_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validates financial fields (shares, wac, cash) in SSoT payload and converts Decimals cleanly."""
+        if "mutable_state" in data and data["mutable_state"] is not None and not isinstance(data["mutable_state"], dict):
+            raise PersistenceValidationError("mutable_state in SSoT payload must be a dictionary")
+
+        for scope_name in ("root", "mutable_state", "EXECUTION_PAYLOAD"):
+            if scope_name == "root":
+                scope = data
+            else:
+                scope = data.get(scope_name)
+            if not isinstance(scope, dict):
+                continue
+
+            for p_key in ("portfolio_snapshot", "portfolio"):
+                if p_key in scope:
+                    raw_p = scope[p_key]
+                    if not isinstance(raw_p, list):
+                        raise PersistenceValidationError(f"{p_key} must be a list")
+                    for idx, item in enumerate(raw_p):
+                        if not isinstance(item, dict):
+                            raise PersistenceValidationError(f"{p_key}[{idx}] must be a dictionary")
+                        if "shares" in item:
+                            s_dec = validate_financial_decimal(
+                                item["shares"],
+                                f"shares for {item.get('ticker', idx)}",
+                                max_scale=4,
+                                allow_zero=True,
+                                non_negative=True,
+                            )
+                            item["shares"] = format_financial_decimal(s_dec)
+                        if "wac" in item:
+                            w_dec = validate_financial_decimal(
+                                item["wac"],
+                                f"wac for {item.get('ticker', idx)}",
+                                max_scale=4,
+                                allow_zero=True,
+                                non_negative=True,
+                            )
+                            item["wac"] = format_financial_decimal(w_dec)
+
+            for c_key in ("unallocated_cash_eur", "unallocated_cash_usd"):
+                if c_key in scope and scope[c_key] is not None:
+                    c_dec = validate_financial_decimal(
+                        scope[c_key], c_key, max_scale=2, allow_zero=True, non_negative=True
+                    )
+                    scope[c_key] = format_financial_decimal(c_dec, min_scale=2)
+
+        return self._stringify_decimals_recursive(data)
+
+    def _prepare_decision_log_entry(self, parsed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        explicit_entry = self._find_key_recursive(parsed, "decision_log_entry")
+        if explicit_entry is not None:
+            if not isinstance(explicit_entry, dict):
+                raise PersistenceValidationError("decision_log_entry must be a dictionary")
+            return self._stringify_decimals_recursive(copy.deepcopy(explicit_entry))
+
+        incoming_portfolio = self._find_key_recursive(parsed, "portfolio_snapshot")
+        ts = (
+            self._find_key_recursive(parsed, "timestamp")
+            or datetime.datetime.now(datetime.timezone.utc).isoformat()
+        )
+        trigger = self._find_key_recursive(parsed, "trigger_context") or "ROUTINE_OUTPUT"
+
+        decisions = []
+        if isinstance(incoming_portfolio, list):
+            for item in incoming_portfolio:
+                if isinstance(item, dict):
+                    ticker = item.get("ticker")
+                    trade_state = item.get("trade_state", item.get("action"))
+                    scrutiny_audit = item.get("scrutiny_audit")
+                    price = item.get("price") or item.get("current_price") or item.get("price_at_eval")
+
+                    if ticker and (trade_state or scrutiny_audit):
+                        decisions.append({
+                            "ticker": ticker,
+                            "timestamp": ts,
+                            "trigger_context": trigger,
+                            "price_at_eval": price,
+                            "trade_state": trade_state,
+                            "scrutiny_audit": scrutiny_audit,
+                        })
+
+        has_explicit_decision_meta = any(
+            k in parsed for k in ("decision", "council_decision", "recommendation", "final_decision", "action")
+        )
+        if not decisions and not has_explicit_decision_meta:
+            return None
+
+        if not decisions:
+            decisions.append({
+                "ticker": parsed.get("ticker", "SESSION"),
+                "timestamp": ts,
+                "trigger_context": trigger,
+                "trade_state": (
+                    parsed.get("action")
+                    or parsed.get("final_decision")
+                    or parsed.get("recommendation")
+                    or parsed.get("decision")
+                    or parsed.get("council_decision")
+                    or "HOLD"
+                ),
+            })
+
+        market_context = {
+            "regime": self._find_key_recursive(parsed, "regime") or self._find_key_recursive(parsed, "risk_regime"),
+            "vix_guard": self._find_key_recursive(parsed, "vix_guard"),
+            "portfolio_value_eur": (
+                self._find_key_recursive(parsed, "portfolio_total_value_eur")
+                or self._find_key_recursive(parsed, "total_liquidity_eur")
+            ),
+            "unallocated_cash_eur": (
+                self._find_key_recursive(parsed, "unallocated_cash_eur")
+                or self._find_key_recursive(parsed, "remaining_cash_eur")
+            ),
+        }
+        council_debate = self._find_key_recursive(parsed, "council_debate")
+
+        turn_log = {
+            "timestamp": ts,
+            "trigger_context": trigger,
+            "market_context": market_context,
+            "council_debate": council_debate,
+            "decisions": decisions,
+        }
+        return self._stringify_decimals_recursive(turn_log)
+
+    def _restore_file_snapshot(self, target_path: str, existed: bool, raw_bytes: Optional[bytes]) -> None:
+        if existed:
+            if raw_bytes is None:
+                return
+            parent_dir = os.path.dirname(os.path.abspath(target_path))
+            if parent_dir and not os.path.exists(parent_dir):
+                os.makedirs(parent_dir, exist_ok=True)
+            base_name = os.path.basename(target_path)
+            tmp_path = os.path.join(parent_dir, f".{base_name}.{uuid.uuid4().hex}.rollback.tmp")
+            try:
+                with open(tmp_path, "wb") as wf:
+                    wf.write(raw_bytes)
+                    wf.flush()
+                    os.fsync(wf.fileno())
+                os.replace(tmp_path, target_path)
+            except Exception:
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+                raise
+        else:
+            if os.path.exists(target_path):
+                os.remove(target_path)
+
     def _parse_payload_input(self, payload: Union[str, Dict[str, Any]]) -> Any:
         if isinstance(payload, dict):
             return payload
         if not isinstance(payload, str):
-            return {}
+            raise PersistenceValidationError(
+                f"Unsupported payload type for JSON adapter: {type(payload).__name__}"
+            )
 
         clean_str = payload.strip()
         # Extract markdown json fence if present
@@ -781,9 +1019,9 @@ class JsonPersistenceAdapter(PersistenceAdapter):
                 clean_str = clean_str[sb:eb + 1]
 
         try:
-            return json.loads(clean_str)
-        except Exception:
-            return {}
+            return json.loads(clean_str, parse_float=Decimal)
+        except Exception as exc:
+            raise PersistenceValidationError(f"Invalid JSON payload: {exc}") from exc
 
     def _map_aliases(self, data: Any) -> None:
         if not isinstance(data, dict):
@@ -797,17 +1035,27 @@ class JsonPersistenceAdapter(PersistenceAdapter):
 
     def _extract_lessons(self, data: Dict[str, Any]) -> List[Any]:
         extracted: List[Any] = []
-        for key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons"):
-            val = data.pop(key, None)
-            if val is None and "mutable_state" in data and isinstance(data["mutable_state"], dict):
-                val = data["mutable_state"].pop(key, None)
-            if val is None and "EXECUTION_PAYLOAD" in data and isinstance(data["EXECUTION_PAYLOAD"], dict):
-                val = data["EXECUTION_PAYLOAD"].pop(key, None)
-
-            if isinstance(val, list):
-                extracted.extend(val)
-            elif isinstance(val, dict):
-                extracted.append(val)
+        for scope_dict in (
+            data,
+            data.get("mutable_state") if isinstance(data.get("mutable_state"), dict) else None,
+            data.get("EXECUTION_PAYLOAD") if isinstance(data.get("EXECUTION_PAYLOAD"), dict) else None,
+        ):
+            if scope_dict is None:
+                continue
+            for key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons"):
+                if key not in scope_dict:
+                    continue
+                val = scope_dict.pop(key, None)
+                if val is None:
+                    continue
+                if isinstance(val, list):
+                    extracted.extend(val)
+                elif isinstance(val, (dict, str)):
+                    extracted.append(val)
+                else:
+                    raise PersistenceValidationError(
+                        f"Invalid trade lessons structure for key '{key}': got {type(val).__name__}"
+                    )
         return extracted
 
     def _deep_merge(self, base: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:

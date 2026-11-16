@@ -72,7 +72,6 @@ class AuditLogger:
 
     def __init__(self, log_path: str = AUDIT_LOG_FILE):
         self.log_path = log_path
-        self._ensure_dir()
 
     def _ensure_dir(self):
         parent = os.path.dirname(self.log_path)

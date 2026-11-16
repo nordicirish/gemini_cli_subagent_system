@@ -51,6 +51,7 @@ cache/
 *.lock
 *.restore_lock
 *.cutover_lock
+context/agent_logs/*.jsonl
 
 # SQLite runtime database & WAL sidecars
 context/gem.db

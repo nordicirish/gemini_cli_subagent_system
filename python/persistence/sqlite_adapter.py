@@ -13,11 +13,11 @@ and fail-closed authorization boundaries without modifying production databases.
 """
 
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
 try:
@@ -50,6 +50,8 @@ from .contracts import (
     PersistenceValidationError,
     PersistenceIntegrityError,
     PersistenceError,
+    format_financial_decimal,
+    validate_financial_decimal,
     validate_finite_float,
 )
 
@@ -112,8 +114,256 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
         except Exception as e:
             raise PersistenceError(f"Failed to retrieve canonical SSoT projection from SQLite: {e}") from e
 
+    def _normalize_portfolio_items(self, portfolio: Any) -> Dict[str, Dict[str, Decimal]]:
+        if not isinstance(portfolio, list):
+            raise PersistenceValidationError("Portfolio must be a list of position dictionaries")
+
+        new_map: Dict[str, Dict[str, Decimal]] = {}
+        for item in portfolio:
+            if not isinstance(item, dict):
+                raise PersistenceValidationError("Portfolio item must be a dictionary")
+            t_raw = item.get("ticker", "")
+            if not isinstance(t_raw, str) or not t_raw.strip():
+                raise PersistenceValidationError("Portfolio item missing ticker")
+            t = t_raw.strip().upper()
+            shares_val = item["shares"] if "shares" in item else Decimal("0")
+            wac_val = item["wac"] if "wac" in item else Decimal("0")
+            shares_dec = validate_financial_decimal(
+                shares_val, f"shares for {t}", max_scale=4, allow_zero=True, non_negative=True
+            )
+            wac_dec = validate_financial_decimal(
+                wac_val, f"wac for {t}", max_scale=4, allow_zero=True, non_negative=True
+            )
+            if shares_dec > Decimal("0"):
+                new_map[t] = {
+                    "shares": shares_dec,
+                    "wac": wac_dec,
+                }
+        return new_map
+
+    def _reconcile_portfolio_and_cash_in_uow(
+        self,
+        uow: UnitOfWork,
+        new_map: Optional[Dict[str, Dict[str, Decimal]]],
+        eur_dec: Optional[Decimal],
+        usd_dec: Optional[Decimal],
+        caller_role: Optional[str] = None,
+    ) -> None:
+        if eur_dec is not None:
+            uow.cash.set_cash_balance(
+                account_id="PRIMARY",
+                currency="EUR",
+                amount=eur_dec,
+                caller_role=caller_role,
+            )
+
+        if usd_dec is not None:
+            uow.cash.set_cash_balance(
+                account_id="PRIMARY",
+                currency="USD",
+                amount=usd_dec,
+                caller_role=caller_role,
+            )
+
+        if new_map is not None:
+            existing_positions = uow.positions.list_positions("PRIMARY")
+            existing_map = {p.ticker: p for p in existing_positions}
+
+            for t in existing_map:
+                if t not in new_map:
+                    uow.positions.delete_position("PRIMARY", t, caller_role=caller_role)
+
+            for t, data in new_map.items():
+                uow.positions.upsert_position(
+                    account_id="PRIMARY",
+                    ticker=t,
+                    shares=data["shares"],
+                    wac_eur=data["wac"],
+                    caller_role=caller_role,
+                )
+
+    def _parse_payload_input(self, payload: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+        if isinstance(payload, dict):
+            return payload
+        if isinstance(payload, str):
+            clean_str = payload.strip()
+            if "```" in clean_str:
+                m = re.search(r"```(?:json)?\s*(.*?)\s*```", clean_str, re.IGNORECASE | re.DOTALL)
+                if m:
+                    clean_str = m.group(1).strip()
+            clean_str = re.sub(r"\[cite_start\]", "", clean_str)
+            clean_str = re.sub(r"\[cite:\s*\d+(?:,\s*\d+)*\]", "", clean_str).strip()
+            if not (clean_str.startswith("{") or clean_str.startswith("[")):
+                sb = clean_str.find("{")
+                eb = clean_str.rfind("}")
+                if sb != -1 and eb != -1 and eb > sb:
+                    clean_str = clean_str[sb : eb + 1]
+            try:
+                parsed = json.loads(clean_str, parse_float=Decimal)
+            except json.JSONDecodeError as jde:
+                raise PersistenceValidationError(f"Invalid JSON payload: {jde}") from jde
+            if not isinstance(parsed, dict):
+                raise PersistenceValidationError("Payload must resolve to a dictionary.")
+            return parsed
+        raise PersistenceValidationError(f"Unsupported payload type: {type(payload).__name__}")
+
+    def _extract_lessons_from_payload(self, data: Dict[str, Any]) -> List[Any]:
+        extracted: List[Any] = []
+        ms = data.get("mutable_state") if isinstance(data.get("mutable_state"), dict) else {}
+        ep = data.get("EXECUTION_PAYLOAD") if isinstance(data.get("EXECUTION_PAYLOAD"), dict) else {}
+        for scope in (data, ms, ep):
+            for key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons"):
+                if key not in scope:
+                    continue
+                val = scope.get(key)
+                if val is None:
+                    continue
+                if isinstance(val, list):
+                    extracted.extend(val)
+                elif isinstance(val, (dict, str)):
+                    extracted.append(val)
+                else:
+                    raise PersistenceValidationError(
+                        f"Invalid trade lessons structure for key '{key}': got {type(val).__name__}"
+                    )
+        return extracted
+
+    def _save_lessons_in_uow(
+        self,
+        uow: UnitOfWork,
+        raw_lessons: List[Any],
+        caller_role: Optional[str] = None,
+    ) -> None:
+        for idx, item in enumerate(raw_lessons):
+            if isinstance(item, str):
+                code = f"L-{idx + 1}"
+                directive = item
+                category = "RISK"
+                status = "ACTIVE"
+            elif isinstance(item, dict):
+                rule_text = item.get("rule", item.get("directive_text", ""))
+                if not isinstance(rule_text, str):
+                    raise PersistenceValidationError("Trade lesson rule/directive_text must be a string")
+                if ":" in rule_text:
+                    parts = rule_text.split(":", 1)
+                    code = parts[0].strip()
+                    directive = parts[1].strip()
+                else:
+                    code = item.get("rule_code", f"L-{idx + 1}")
+                    directive = rule_text
+                if not isinstance(directive, str) or not directive.strip():
+                    raise PersistenceValidationError(f"Trade lesson at index {idx} has empty directive text")
+                category = str(item.get("category", "RISK"))
+                status = str(item.get("status", "ACTIVE"))
+            else:
+                raise PersistenceValidationError(
+                    f"Unsupported trade lesson entry type at index {idx}: {type(item).__name__}"
+                )
+
+            clean_code = re.sub(r"[^A-Za-z0-9_-]", "", str(code)).upper() or f"L-{idx + 1}"
+            uow.trade_lessons.upsert_lesson(
+                rule_code=clean_code,
+                directive_text=directive,
+                category=category,
+                status=status,
+                caller_role=caller_role,
+            )
+
+    def _extract_decision_params_from_payload(
+        self,
+        data: Dict[str, Any],
+        portfolio_source: Any = None,
+    ) -> Optional[Dict[str, Any]]:
+        ms = data.get("mutable_state") if isinstance(data.get("mutable_state"), dict) else {}
+        ep = data.get("EXECUTION_PAYLOAD") if isinstance(data.get("EXECUTION_PAYLOAD"), dict) else {}
+
+        explicit_entry = data.get("decision_log_entry") or ms.get("decision_log_entry") or ep.get("decision_log_entry")
+        if explicit_entry is not None and not isinstance(explicit_entry, dict):
+            raise PersistenceValidationError("decision_log_entry must be a dictionary")
+
+        has_portfolio_decision = isinstance(portfolio_source, list) and any(
+            isinstance(item, dict) and (item.get("trade_state") or item.get("action") or item.get("scrutiny_audit"))
+            for item in portfolio_source
+        )
+        decision_keys = (
+            "decision",
+            "council_decision",
+            "council_debate",
+            "decisions",
+            "recommendation",
+            "final_decision",
+            "action",
+            "outcome",
+            "trigger_context",
+        )
+        has_decision_key = any(k in data or k in ms or k in ep for k in decision_keys)
+
+        if explicit_entry is None and not has_decision_key and not has_portfolio_decision:
+            return None
+
+        entry = explicit_entry or {}
+        first_decision_item = None
+        if isinstance(portfolio_source, list):
+            for item in portfolio_source:
+                if isinstance(item, dict) and (item.get("trade_state") or item.get("action") or item.get("scrutiny_audit")):
+                    first_decision_item = item
+                    break
+
+        session_id = entry.get("session_id") or data.get("session_id") or uuid.uuid4().hex
+        ticker = (
+            entry.get("ticker")
+            or (first_decision_item.get("ticker") if first_decision_item else None)
+            or data.get("ticker")
+            or "SESSION"
+        )
+        action_proposed = (
+            entry.get("action_proposed")
+            or entry.get("outcome")
+            or data.get("action")
+            or data.get("final_decision")
+            or data.get("recommendation")
+            or (first_decision_item.get("trade_state") or first_decision_item.get("action") if first_decision_item else None)
+            or "HOLD"
+        )
+        decision_outcome = (
+            entry.get("decision_outcome")
+            or entry.get("outcome")
+            or data.get("decision")
+            or data.get("council_decision")
+            or "AUTO_LOGGED"
+        )
+        raw_votes = entry.get("votes", entry.get("council_debate", data.get("council_debate", {})))
+        if isinstance(raw_votes, dict):
+            votes = raw_votes
+        elif raw_votes is None:
+            votes = {}
+        else:
+            votes = {"summary": raw_votes}
+
+        transcript_text = entry.get(
+            "transcript_text",
+            entry.get("lesson", json.dumps(data, default=decimal_to_canonical_str)),
+        )
+        ts = entry.get("timestamp_utc") or data.get("timestamp_utc")
+        if ts is None:
+            cand_ts = entry.get("timestamp")
+            if isinstance(cand_ts, str) and (cand_ts.endswith("Z") or cand_ts.endswith("+00:00")):
+                ts = cand_ts
+            else:
+                ts = datetime.now(timezone.utc).isoformat()
+
+        return {
+            "session_id": session_id,
+            "ticker": ticker,
+            "action_proposed": action_proposed,
+            "decision_outcome": decision_outcome,
+            "votes": votes,
+            "transcript_text": transcript_text,
+            "timestamp_utc": ts,
+        }
+
     def get_portfolio_basket(self) -> Dict[str, Any]:
-        """Retrieves active holdings and cash balances from SQLite."""
+        """Retrieves active holdings and cash balances from SQLite as exact Decimals."""
         try:
             with UnitOfWork(self._db_manager, auto_commit=False) as uow:
                 cash_eur_rec = uow.cash.get_cash("PRIMARY", "EUR")
@@ -122,23 +372,34 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
 
                 portfolio = []
                 for p in positions_recs:
-                    shares_val = validate_finite_float(p.shares, f"shares for {p.ticker}")
-                    wac_val = validate_finite_float(p.wac_eur, f"wac for {p.ticker}")
-                    if shares_val > 0.0:
+                    shares_val = validate_financial_decimal(
+                        p.shares, f"shares for {p.ticker}", max_scale=4, allow_zero=True, non_negative=True
+                    )
+                    wac_val = validate_financial_decimal(
+                        p.wac_eur, f"wac for {p.ticker}", max_scale=4, allow_zero=True, non_negative=True
+                    )
+                    if shares_val > Decimal("0"):
                         portfolio.append({
                             "ticker": p.ticker,
                             "shares": shares_val,
                             "wac": wac_val,
                         })
 
-                eur_amount = validate_finite_float(cash_eur_rec.amount if cash_eur_rec else 0.0, "unallocated_cash_eur")
-                usd_amount = validate_finite_float(cash_usd_rec.amount if cash_usd_rec else 0.0, "unallocated_cash_usd")
+                eur_raw = cash_eur_rec.amount if cash_eur_rec else Decimal("0.00")
+                usd_raw = cash_usd_rec.amount if cash_usd_rec else Decimal("0.00")
+                eur_amount = validate_financial_decimal(
+                    eur_raw, "unallocated_cash_eur", max_scale=2, allow_zero=True, non_negative=True
+                )
+                usd_amount = validate_financial_decimal(
+                    usd_raw, "unallocated_cash_usd", max_scale=2, allow_zero=True, non_negative=True
+                )
+                rate = validate_finite_float(1.08, "exchange_rate", allow_zero=False, non_negative=True)
 
                 return {
                     "portfolio": portfolio,
                     "unallocated_cash_eur": eur_amount,
                     "unallocated_cash_usd": usd_amount,
-                    "eurusd_rate": 1.08,
+                    "eurusd_rate": rate,
                 }
         except (PersistenceValidationError, PersistenceIntegrityError):
             raise
@@ -150,13 +411,13 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
     def save_portfolio_basket(
         self,
         portfolio: List[Dict[str, Any]],
-        unallocated_cash_eur: float,
-        unallocated_cash_usd: float = 0.0,
+        unallocated_cash_eur: Union[Decimal, int, str],
+        unallocated_cash_usd: Union[Decimal, int, str] = Decimal("0.00"),
         caller_role: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Atomically updates cash and position records inside a single UnitOfWork transaction.
-        Enforces Decimal validation, authorization, and automatic rollback on failure.
+        Enforces exact Decimal validation, authorization, and automatic rollback on failure.
         """
         authorize_financial_mutation(
             operation_name="update_ssot",
@@ -165,74 +426,36 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
             caller_role=caller_role,
         )
 
-        if not isinstance(portfolio, list):
-            raise PersistenceValidationError("Portfolio must be a list of position dictionaries")
-
-        new_map: Dict[str, Dict[str, Any]] = {}
-        for item in portfolio:
-            if not isinstance(item, dict):
-                raise PersistenceValidationError("Portfolio item must be a dictionary")
-            t = str(item.get("ticker", "")).strip().upper()
-            if not t:
-                raise PersistenceValidationError("Portfolio item missing ticker")
-            shares = validate_finite_float(item.get("shares", 0.0), f"shares for {t}")
-            wac = validate_finite_float(item.get("wac", 0.0), f"wac for {t}")
-            if shares > 0.0:
-                new_map[t] = {
-                    "shares": Decimal(str(round(shares, 4))),
-                    "wac": Decimal(str(round(wac, 4))),
-                }
-
-        eur_cash = validate_finite_float(unallocated_cash_eur, "unallocated_cash_eur")
-        usd_cash = validate_finite_float(unallocated_cash_usd, "unallocated_cash_usd")
-        eur_dec = Decimal(str(round(eur_cash, 2)))
-        usd_val = usd_cash if usd_cash > 0.0 else round(eur_cash * 1.08, 2)
-        usd_dec = Decimal(str(round(usd_val, 2)))
+        new_map = self._normalize_portfolio_items(portfolio)
+        eur_dec = validate_financial_decimal(
+            unallocated_cash_eur, "unallocated_cash_eur", max_scale=2, allow_zero=True, non_negative=True
+        )
+        usd_dec = validate_financial_decimal(
+            unallocated_cash_usd, "unallocated_cash_usd", max_scale=2, allow_zero=True, non_negative=True
+        )
+        # Intentional FX conversion rounding boundary: when explicit USD cash is 0 and
+        # EUR cash > 0, derive USD cash at 1.08 EUR/USD quantized to 2 decimals (ROUND_HALF_UP).
+        if usd_dec == Decimal("0") and eur_dec > Decimal("0"):
+            usd_dec = (eur_dec * Decimal("1.08")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         try:
             with UnitOfWork(self._db_manager, auto_commit=True) as uow:
-                # 1. Update cash balances
-                uow.cash.set_cash_balance(
-                    account_id="PRIMARY",
-                    currency="EUR",
-                    amount=eur_dec,
+                self._reconcile_portfolio_and_cash_in_uow(
+                    uow=uow,
+                    new_map=new_map,
+                    eur_dec=eur_dec,
+                    usd_dec=usd_dec,
                     caller_role=caller_role,
                 )
-
-                uow.cash.set_cash_balance(
-                    account_id="PRIMARY",
-                    currency="USD",
-                    amount=usd_dec,
-                    caller_role=caller_role,
-                )
-
-                # 2. Reconcile positions atomically
-                existing_positions = uow.positions.list_positions("PRIMARY")
-                existing_map = {p.ticker: p for p in existing_positions}
-
-                # Delete positions not present in new basket
-                for t in existing_map:
-                    if t not in new_map:
-                        uow.positions.delete_position("PRIMARY", t, caller_role=caller_role)
-
-                # Upsert positions
-                for t, data in new_map.items():
-                    uow.positions.upsert_position(
-                        account_id="PRIMARY",
-                        ticker=t,
-                        shares=data["shares"],
-                        wac_eur=data["wac"],
-                        caller_role=caller_role,
-                    )
 
             return {
                 "status": "success",
                 "portfolio": [
-                    {"ticker": t, "shares": float(d["shares"]), "wac": float(d["wac"])}
+                    {"ticker": t, "shares": d["shares"], "wac": d["wac"]}
                     for t, d in new_map.items()
                 ],
-                "unallocated_cash_eur": float(eur_dec),
-                "unallocated_cash_usd": float(usd_dec),
+                "unallocated_cash_eur": eur_dec,
+                "unallocated_cash_usd": usd_dec,
             }
         except TransactionIntegrityError as tie:
             raise PersistenceIntegrityError(f"Transaction integrity failure: {tie}") from tie
@@ -246,43 +469,132 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
         payload: Union[str, Dict[str, Any]],
         caller_role: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Merges an execution payload into SQLite persistence via UnitOfWork."""
+        """
+        Atomically merges portfolio/cash updates, decision log entries, and extracted
+        trade lessons inside a single SQLite UnitOfWork transaction.
+        """
+        data = self._parse_payload_input(payload)
+
+        ms = data.get("mutable_state")
+        if ms is not None and not isinstance(ms, dict):
+            raise PersistenceValidationError("mutable_state in payload must be a dictionary")
+        ms_dict = ms if isinstance(ms, dict) else {}
+
+        ep = data.get("EXECUTION_PAYLOAD")
+        if ep is not None and not isinstance(ep, dict):
+            raise PersistenceValidationError("EXECUTION_PAYLOAD in payload must be a dictionary")
+        ep_dict = ep if isinstance(ep, dict) else {}
+
+        raw_portfolio = None
+        has_portfolio = False
+        for scope in (ms_dict, data, ep_dict):
+            if "portfolio_snapshot" in scope:
+                raw_portfolio = scope["portfolio_snapshot"]
+                has_portfolio = True
+                break
+            if "portfolio" in scope:
+                raw_portfolio = scope["portfolio"]
+                has_portfolio = True
+                break
+
+        raw_eur = None
+        has_eur = False
+        for scope in (ms_dict, data, ep_dict):
+            if "unallocated_cash_eur" in scope:
+                raw_eur = scope["unallocated_cash_eur"]
+                has_eur = True
+                break
+
+        raw_usd = None
+        has_usd = False
+        for scope in (ms_dict, data, ep_dict):
+            if "unallocated_cash_usd" in scope:
+                raw_usd = scope["unallocated_cash_usd"]
+                has_usd = True
+                break
+
+        new_map = self._normalize_portfolio_items(raw_portfolio) if has_portfolio else None
+        eur_dec = (
+            validate_financial_decimal(
+                raw_eur, "unallocated_cash_eur", max_scale=2, allow_zero=True, non_negative=True
+            )
+            if has_eur
+            else None
+        )
+        usd_dec = (
+            validate_financial_decimal(
+                raw_usd, "unallocated_cash_usd", max_scale=2, allow_zero=True, non_negative=True
+            )
+            if has_usd
+            else None
+        )
+        if eur_dec is not None and not has_usd and eur_dec > Decimal("0"):
+            usd_dec = (eur_dec * Decimal("1.08")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        extracted_lessons = self._extract_lessons_from_payload(data)
+        decision_params = self._extract_decision_params_from_payload(data, portfolio_source=raw_portfolio)
+
+        # Pre-authorize all applicable mutations before opening the transaction
         authorize_financial_mutation(
             operation_name="update_ssot",
             target_resource="ssot_payload",
-            payload=payload,
+            payload=data,
             caller_role=caller_role,
         )
-
-        if isinstance(payload, str):
-            clean_str = payload.strip()
-            if "```" in clean_str:
-                m = re.search(r"```(?:json)?\s*(.*?)\s*```", clean_str, re.IGNORECASE | re.DOTALL)
-                if m:
-                    clean_str = m.group(1).strip()
-            data = json.loads(clean_str)
-        else:
-            data = payload
-
-        # Extract portfolio and cash
-        ms = data.get("mutable_state", {}) if isinstance(data.get("mutable_state"), dict) else data
-        raw_portfolio = ms.get("portfolio_snapshot") or data.get("portfolio_snapshot") or []
-        eur_cash = ms.get("unallocated_cash_eur") or data.get("unallocated_cash_eur") or 0.0
-        usd_cash = ms.get("unallocated_cash_usd") or data.get("unallocated_cash_usd") or 0.0
-
-        if raw_portfolio or eur_cash > 0:
-            self.save_portfolio_basket(raw_portfolio, float(eur_cash), float(usd_cash), caller_role=caller_role)
-
-        # Extract lessons
-        extracted_lessons = []
-        for key in ("trade_lessons", "new_trade_lessons", "compressed_trade_lessons"):
-            val = data.get(key) or ms.get(key)
-            if isinstance(val, list):
-                extracted_lessons.extend(val)
+        if decision_params is not None:
+            authorize_financial_mutation(
+                operation_name="update_decision_log",
+                target_resource="decision_log",
+                payload=decision_params,
+                caller_role=caller_role,
+            )
         if extracted_lessons:
-            self.save_trade_lessons(extracted_lessons, caller_role=caller_role)
+            authorize_financial_mutation(
+                operation_name="update_trade_lessons",
+                target_resource="trade_lessons",
+                payload=extracted_lessons,
+                caller_role=caller_role,
+            )
 
-        return {"status": "success"}
+        try:
+            with UnitOfWork(self._db_manager, auto_commit=True) as uow:
+                if has_portfolio or has_eur or has_usd:
+                    self._reconcile_portfolio_and_cash_in_uow(
+                        uow=uow,
+                        new_map=new_map,
+                        eur_dec=eur_dec,
+                        usd_dec=usd_dec,
+                        caller_role=caller_role,
+                    )
+
+                if decision_params is not None:
+                    uow.decision_log.append_decision(
+                        session_id=decision_params["session_id"],
+                        action_proposed=decision_params["action_proposed"],
+                        decision_outcome=decision_params["decision_outcome"],
+                        ticker=decision_params["ticker"],
+                        votes=decision_params["votes"],
+                        transcript_text=decision_params["transcript_text"],
+                        caller_role=caller_role,
+                        timestamp_utc=validate_timestamp_utc(decision_params["timestamp_utc"]),
+                    )
+
+                if extracted_lessons:
+                    self._save_lessons_in_uow(
+                        uow=uow,
+                        raw_lessons=extracted_lessons,
+                        caller_role=caller_role,
+                    )
+
+            return {"status": "success"}
+        except TransactionIntegrityError as tie:
+            raise PersistenceIntegrityError(f"Transaction integrity failure: {tie}") from tie
+        except (PermissionError, PersistenceValidationError, PersistenceIntegrityError):
+            raise
+        except ValidationError as ve:
+            raise PersistenceValidationError(f"Validation failed during composite SSoT update: {ve}") from ve
+        except Exception as e:
+            raise PersistenceError(f"Failed composite SSoT payload update in SQLite: {e}") from e
 
     def get_ssot_tickers(self) -> List[str]:
         """Returns all monitored tickers from active positions and watchlist."""
@@ -450,33 +762,12 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
 
         try:
             with UnitOfWork(self._db_manager, auto_commit=True) as uow:
-                for idx, item in enumerate(raw):
-                    if isinstance(item, str):
-                        code = f"L-{idx + 1}"
-                        directive = item
-                    elif isinstance(item, dict):
-                        rule_text = item.get("rule", item.get("directive_text", ""))
-                        if ":" in rule_text:
-                            parts = rule_text.split(":", 1)
-                            code = parts[0].strip()
-                            directive = parts[1].strip()
-                        else:
-                            code = item.get("rule_code", f"L-{idx + 1}")
-                            directive = rule_text or "Default Directive"
-                    else:
-                        continue
-
-                    # Clean code to uppercase alphanumeric identifier
-                    clean_code = re.sub(r"[^A-Za-z0-9_-]", "", code).upper() or f"L-{idx + 1}"
-                    uow.trade_lessons.upsert_lesson(
-                        rule_code=clean_code,
-                        directive_text=directive,
-                        category="RISK",
-                        status="ACTIVE",
-                    )
+                self._save_lessons_in_uow(uow=uow, raw_lessons=raw, caller_role=caller_role)
             return self.get_trade_lessons()
-        except PermissionError:
+        except (PermissionError, PersistenceValidationError):
             raise
+        except ValidationError as ve:
+            raise PersistenceValidationError(f"Invalid trade lesson: {ve}") from ve
         except Exception as e:
             raise PersistenceError(f"Failed to save trade lessons in SQLite: {e}") from e
 
@@ -554,7 +845,11 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
             "ticker": "SESSION",
             "action_proposed": "HOLD",
             "decision_outcome": "AUTO_LOGGED",
-            "transcript_text": json.dumps(payload) if isinstance(payload, dict) else str(payload),
+            "transcript_text": (
+                json.dumps(payload, default=decimal_to_canonical_str)
+                if isinstance(payload, dict)
+                else str(payload)
+            ),
         }
         self.append_decision_log(entry, caller_role=caller_role)
         return True

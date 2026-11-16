@@ -55,15 +55,16 @@ Planning, assessment, or prompt preparation does not authorise implementation.
 
 Treat every repository as an independent project. Establish its purpose, users, technology, architecture, current state, constraints, and objectives. Never transfer assumptions between projects.
 
+Whenever an audit, independent review, or technical assessment identifies actionable work, the Reviewer/Architect (Gemini 4 Argon) consolidates all related fixes into a single cohesive stage and outputs the complete Delta-Only implementation prompt in the same response without pausing for a separate roadmap-authorisation turn.
+
 Follow this lifecycle:
 1. **Inspect:** Argon verifies repository, branch, HEAD, `git status --short`, architecture, and baseline metrics read-only.
-2. **Assess:** Identify defects, risks, and opportunities.
-3. **Plan:** Define small stages with objectives, authorised files, exclusions, dependencies, acceptance criteria, and scope-proportional tests.
-4. **Authorise:** Obtain explicit Human Owner approval.
-5. **Specify:** Prepare a compact, delta-only implementation specification referencing `@INSTRUCTIONS.md`.
-6. **Implement:** Hydrogen executes the authorised work and runs scope-proportional tests.
-7. **Review:** Argon independently inspects the resulting `git diff` and test evidence under the Two-Pass Acceptance Cap.
-8. **Decide:** Argon issues a formal acceptance verdict in chat only and stops for Human Owner commit and next-stage authorisation. Never automatically begin another stage.
+2. **Assess & Consolidate:** Identify defects, risks, and opportunities, and consolidate all related actionable fixes into a single stage rather than fragmenting shared files across multiple turns.
+3. **Specify & Plan:** In the same response as the audit or assessment, define the stage (objectives, authorised files, exclusions, dependencies, acceptance criteria, and scope-proportional tests) and output the complete, compact Delta-Only implementation prompt referencing `@INSTRUCTIONS.md` without pausing for a separate roadmap-authorisation turn.
+4. **Authorise:** Obtain explicit Human Owner approval before any code edits begin.
+5. **Implement:** Hydrogen executes the authorised work and runs scope-proportional tests.
+6. **Review:** Argon independently inspects the resulting `git diff` and test evidence under the Two-Pass Acceptance Cap.
+7. **Decide:** Argon issues a formal acceptance verdict in chat only and stops for Human Owner commit and next-stage authorisation. Never automatically begin another stage.
 
 ## REPOSITORY INSPECTION AND EVIDENCE
 

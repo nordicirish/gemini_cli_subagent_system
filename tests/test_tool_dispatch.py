@@ -342,6 +342,52 @@ class TestToolDispatcher(unittest.TestCase):
         self.assertTrue(seq_res.success, f"Sequential router dispatch failed: {seq_res.error}")
         self.assertIn("Sequential router output", seq_res.result)
 
+    def test_stage37_update_ssot_propagates_failure_and_logs_failed_audit(self):
+        """R4: tools.update_ssot raises persistence errors rather than returning success/exception strings, causing ToolDispatcher to record FAILED."""
+        from decimal import Decimal
+        from persistence import PersistenceError, PersistenceValidationError
+
+        with patch("tools.get_persistence_service") as mock_get_service:
+            mock_service = MagicMock()
+            mock_service.update_ssot_payload.side_effect = PersistenceError("Simulated composite write failure")
+            mock_get_service.return_value = mock_service
+
+            # 1. Direct call raises instead of returning "Exception in update_ssot: ..."
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PersistenceError):
+                    tools.update_ssot('{"mutable_state": {"unallocated_cash_eur": "100.55"}}')
+
+                # Verify JSON parsing used parse_float=Decimal (no float leakage)
+                passed_payload = mock_service.update_ssot_payload.call_args[0][0]
+                self.assertEqual(passed_payload["mutable_state"]["unallocated_cash_eur"], "100.55")
+
+                with self.assertRaises(PersistenceValidationError):
+                    tools.update_ssot("{bad json")
+
+            # 2. Dispatch through ToolDispatcher marks tool execution as FAILED in result and AuditLogger
+            res = GLOBAL_TOOL_DISPATCHER.dispatch_single_tool(
+                tool_name="update_ssot",
+                args={"payload_json": '{"mutable_state": {"unallocated_cash_eur": 100.55}}'},
+                agent_role="Terminal Orchestrator",
+            )
+            self.assertFalse(res.success)
+            self.assertIn("Simulated composite write failure", res.error or "")
+
+            with open(self.audit_log.log_path, "r", encoding="utf-8") as f:
+                events = [json.loads(line) for line in f if line.strip()]
+            failed_events = [e for e in events if e.get("tool_name") == "update_ssot" and e.get("status") == "FAILED"]
+            self.assertGreaterEqual(len(failed_events), 1)
+            self.assertEqual(failed_events[-1]["error_classification"], "PersistenceError")
+
+            # 3. tools.update_trade_lessons & intercept_and_log_decision also propagate errors fail-closed
+            mock_service.save_trade_lessons.side_effect = PersistenceError("Lessons write failure")
+            mock_service.append_decision_log.side_effect = PersistenceError("Decision write failure")
+            with execution_role_context("Terminal Orchestrator"):
+                with self.assertRaises(PersistenceError):
+                    tools.update_trade_lessons('[{"rule": "L-99: Test rule"}]')
+                with self.assertRaises(PersistenceError):
+                    tools.intercept_and_log_decision({"portfolio_snapshot": [{"ticker": "SPY", "action": "HOLD"}]})
+
 
 if __name__ == "__main__":
     unittest.main()

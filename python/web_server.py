@@ -8,8 +8,9 @@ import asyncio
 import json
 import collections.abc
 import uuid
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError, field_validator
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, JSONResponse
 import threading
@@ -19,12 +20,21 @@ from agent_framework import types, Part
 from agent_framework import AgentFramework
 import agent_framework
 import tools
+from audit_logger import redact_secrets
 # cloud_sync removed — GDrive Decoupling Guardrail (ANTIGRAVITY v11.03)
 
 try:
     from persistence import get_persistence_service, PersistenceValidationError
+    from persistence.contracts import (
+        serialize_json_with_exact_decimals,
+        validate_financial_decimal,
+    )
 except ImportError:
     from python.persistence import get_persistence_service, PersistenceValidationError
+    from python.persistence.contracts import (
+        serialize_json_with_exact_decimals,
+        validate_financial_decimal,
+    )
 
 try:
     from atomic_io import FileLock, atomic_update_json
@@ -55,18 +65,59 @@ def get_chart_parts() -> tuple[list, list]:
                 pass
     return chart_parts, chart_symbols
 
+class DecimalJSONResponse(JSONResponse):
+    """JSONResponse preserving exact Decimal numeric representations without binary float conversion."""
+
+    def render(self, content: Any) -> bytes:
+        return serialize_json_with_exact_decimals(content).encode("utf-8")
+
+
+def _reject_non_finite_json_constant(const: str) -> None:
+    raise PersistenceValidationError(f"Non-finite JSON constant not allowed: {const}")
+
+
 class BasketItem(BaseModel):
     ticker: str
-    shares: float
-    wac: float
+    shares: Decimal
+    wac: Decimal
+
+    @field_validator("shares", mode="before")
+    @classmethod
+    def _validate_shares(cls, v: Any) -> Decimal:
+        return validate_financial_decimal(
+            v, "shares", max_scale=4, allow_zero=True, non_negative=True
+        )
+
+    @field_validator("wac", mode="before")
+    @classmethod
+    def _validate_wac(cls, v: Any) -> Decimal:
+        return validate_financial_decimal(
+            v, "wac", max_scale=4, allow_zero=True, non_negative=True
+        )
+
 
 class BasketRequest(BaseModel):
     basket: List[BasketItem]
 
+
 class BasketSaveRequest(BaseModel):
     portfolio: List[BasketItem]
-    unallocated_cash_eur: float
-    unallocated_cash_usd: float = 0.0
+    unallocated_cash_eur: Decimal
+    unallocated_cash_usd: Decimal = Decimal("0.00")
+
+    @field_validator("unallocated_cash_eur", mode="before")
+    @classmethod
+    def _validate_cash_eur(cls, v: Any) -> Decimal:
+        return validate_financial_decimal(
+            v, "unallocated_cash_eur", max_scale=2, allow_zero=True, non_negative=True
+        )
+
+    @field_validator("unallocated_cash_usd", mode="before")
+    @classmethod
+    def _validate_cash_usd(cls, v: Any) -> Decimal:
+        return validate_financial_decimal(
+            v, "unallocated_cash_usd", max_scale=2, allow_zero=True, non_negative=True
+        )
 
 # --- LOGGING SYSTEM ---
 _system_logs_queue = None
@@ -984,7 +1035,8 @@ def chat_endpoint(req: ChatRequest):
             # Intercept and process EXECUTION_PAYLOAD dynamically (purging it from user display)
             full_response_original = full_response
             cleaned_response = full_response
-            payload_processed = False
+            payload_extracted = False
+            payload_succeeded = False
             
             # Look for json markdown code block wrappers
             idx = full_response.find("```json")
@@ -1019,19 +1071,21 @@ def chat_endpoint(req: ChatRequest):
                             f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
                         )
                         cleaned_response = full_response[:idx] + payload_html + full_response[actual_close_idx + (0 if is_truncated else 3):]
-                        payload_processed = True
+                        payload_extracted = True
+                        payload_succeeded = True
                     except Exception as pe:
-                        framework.log(f"[System Error] Failed to update SSoT with sliced payload: {pe}")
-                        # Even if parsing fails, hide the broken payload from the chat UI
+                        framework.log(f"[System Error] Failed to update SSoT with sliced payload: {redact_secrets(str(pe))}")
+                        # Surface explicit failure details without claiming SSoT synchronization succeeded
                         payload_html = (
                             f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
-                            f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated)</summary>'
+                            f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ System Execution Payload (SSoT Synchronization Failed)</summary>'
                             f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
                         )
                         cleaned_response = full_response[:idx] + payload_html + full_response[actual_close_idx + (0 if is_truncated else 3):]
-                        payload_processed = True
+                        payload_extracted = True
+                        payload_succeeded = False
                             
-            if not payload_processed:
+            if not payload_extracted:
                 # Fallback to direct curly brace extraction
                 start_idx = full_response.find('{')
                 end_idx = full_response.rfind('}')
@@ -1054,7 +1108,7 @@ def chat_endpoint(req: ChatRequest):
                                 clean_end_idx = end_idx + 1 + rel_idx + 3
                                 
                         try:
-                            json.loads(candidate)
+                            json.loads(candidate, parse_float=Decimal)
                             framework.log("[System] Auto-processing brace-extracted EXECUTION_PAYLOAD...")
                             res = tools.update_ssot(candidate)
                             framework.log(f"[System] SSoT update result: {res}")
@@ -1064,19 +1118,21 @@ def chat_endpoint(req: ChatRequest):
                                 f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
                             )
                             cleaned_response = full_response[:clean_start_idx] + payload_html + full_response[clean_end_idx:]
-                            payload_processed = True
+                            payload_extracted = True
+                            payload_succeeded = True
                         except Exception as pe:
-                            framework.log(f"[System Error] Failed to update SSoT with brace payload: {pe}")
-                            # Even if parsing fails, hide the broken payload from the chat UI
+                            framework.log(f"[System Error] Failed to update SSoT with brace payload: {redact_secrets(str(pe))}")
+                            # Surface explicit failure details without claiming SSoT synchronization succeeded
                             payload_html = (
                                 f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
-                                f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ Incomplete SSoT Payload (Truncated)</summary>'
+                                f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ System Execution Payload (SSoT Synchronization Failed)</summary>'
                                 f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
                             )
                             cleaned_response = full_response[:clean_start_idx] + payload_html + full_response[clean_end_idx:]
-                            payload_processed = True
+                            payload_extracted = True
+                            payload_succeeded = False
                             
-            if payload_processed:
+            if payload_extracted:
                 import re
                 # Clean up the leading title/header text if present
                 cleaned_response = re.sub(
@@ -1094,17 +1150,23 @@ def chat_endpoint(req: ChatRequest):
                 
                 # Robust fallback if the AI generated NO conversational text
                 if not cleaned_response:
-                    cleaned_response = "*(The AI Council executed its routine and synchronized the SSoT, but did not output a conversational summary for this turn.)*"
+                    if payload_succeeded:
+                        cleaned_response = "*(The AI Council executed its routine and synchronized the SSoT, but did not output a conversational summary for this turn.)*"
+                    else:
+                        cleaned_response = "*(An Execution Payload was detected in this response, but SSoT synchronization failed and authoritative state was not updated.)*"
                     
-                # Append success badge
-                cleaned_response += "\n\n---\n\n*⚖️ SSoT Shadow State synchronized successfully.*"
+                # Append honest status badge matching actual composite persistence outcome
+                if payload_succeeded:
+                    cleaned_response += "\n\n---\n\n*⚖️ SSoT Shadow State synchronized successfully.*"
+                else:
+                    cleaned_response += "\n\n---\n\n*⚠️ SSoT Shadow State synchronization failed. Authoritative state was not updated.*"
                 full_response = cleaned_response
             else:
                 # Fallback to decision logging if no payload was parsed/updated
                 try:
                     tools.intercept_and_log_decision(full_response)
                 except Exception as ie:
-                    framework.log(f"[System Warning] Decision interception inside chat_endpoint failed: {ie}")
+                    framework.log(f"[System Warning] Decision interception inside chat_endpoint failed: {redact_secrets(str(ie))}")
                 
             import re
             full_response = re.sub(
@@ -1343,42 +1405,75 @@ def save_macro(req: MacroRequest):
 def get_basket():
     try:
         service = get_persistence_service()
-        return service.get_portfolio_basket()
+        basket = service.get_portfolio_basket()
+        return DecimalJSONResponse(basket)
     except Exception as e:
-        framework.log(f"[Error] get_basket failed: {e}")
-    return {"portfolio": [], "unallocated_cash_eur": 0.0, "unallocated_cash_usd": 0.0, "eurusd_rate": 1.08}
+        framework.log(f"[Error] Portfolio Basket Retrieval Failed: {redact_secrets(str(e))}")
+        return JSONResponse(
+            {"status": "error", "detail": "Authoritative portfolio persistence unavailable"},
+            status_code=503,
+        )
+
 
 @app.post("/api/basket")
-def save_basket(req: BasketSaveRequest):
+async def save_basket(request: Request):
     from tool_registry import authorize_financial_mutation
     authorize_financial_mutation(
         operation_name="update_ssot",
         target_resource="context/ssot.json",
-        payload=req.dict(),
     )
     try:
+        raw_bytes = await request.body()
+        try:
+            raw_payload = json.loads(
+                raw_bytes.decode("utf-8"),
+                parse_float=Decimal,
+                parse_constant=_reject_non_finite_json_constant,
+            )
+        except PersistenceValidationError as pve:
+            return JSONResponse({"status": "error", "detail": redact_secrets(str(pve))}, status_code=422)
+        except Exception as parse_err:
+            return JSONResponse(
+                {"status": "error", "detail": f"Invalid financial JSON payload: {redact_secrets(str(parse_err))}"},
+                status_code=422,
+            )
+
+        try:
+            req = BasketSaveRequest.model_validate(raw_payload)
+        except (ValidationError, PersistenceValidationError) as ve:
+            return JSONResponse({"status": "error", "detail": redact_secrets(str(ve))}, status_code=422)
+
+        authorize_financial_mutation(
+            operation_name="update_ssot",
+            target_resource="context/ssot.json",
+            payload=req.model_dump(),
+        )
+
         # Validate portfolio symbols before saving (only active holdings with shares > 0)
-        symbols = [item.ticker for item in req.portfolio if item.shares > 0]
+        symbols = [item.ticker for item in req.portfolio if item.shares > Decimal("0")]
         invalid = check_invalid_tickers(symbols)
         if invalid:
             raise HTTPException(
-                status_code=400, 
-                detail=f"Invalid ticker symbol(s): {', '.join(invalid)}"
+                status_code=400,
+                detail=f"Invalid ticker symbol(s): {', '.join(invalid)}",
             )
 
         new_snapshot = [
             {"ticker": item.ticker, "shares": item.shares, "wac": item.wac}
-            for item in req.portfolio if item.shares > 0
+            for item in req.portfolio if item.shares > Decimal("0")
         ]
 
         service = get_persistence_service()
-        service.save_portfolio_basket(
+        updated_basket = service.save_portfolio_basket(
             portfolio=new_snapshot,
             unallocated_cash_eur=req.unallocated_cash_eur,
             unallocated_cash_usd=req.unallocated_cash_usd,
         )
-        framework.log(f"[System] SSoT Basket & Cash updated: {len(new_snapshot)} holding(s). Cash: {req.unallocated_cash_eur} EUR | {req.unallocated_cash_usd} USD")
-        
+        framework.log(
+            f"[System] SSoT Basket & Cash updated: {len(new_snapshot)} holding(s). "
+            f"Cash: {req.unallocated_cash_eur} EUR | {req.unallocated_cash_usd} USD"
+        )
+
         # Hot-reload TICKERS in fetch_stocks so the scanning daemon immediately registers changes
         try:
             import fetch_stocks
@@ -1409,16 +1504,26 @@ def save_basket(req: BasketSaveRequest):
             elif isinstance(getattr(fetch_stocks, "GLOBAL_STATE", None), dict):
                 fetch_stocks.GLOBAL_STATE["local_storage_state"] = service.get_ssot_data()
         except Exception as se:
-            framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
-            
-        return {"status": "success", "portfolio": new_snapshot}
+            framework.log(f"[Warning] Failed to hot-reload TICKERS: {redact_secrets(str(se))}")
+
+        return DecimalJSONResponse({
+            "status": "success",
+            "portfolio": updated_basket.get("portfolio", new_snapshot),
+            "unallocated_cash_eur": updated_basket.get("unallocated_cash_eur", req.unallocated_cash_eur),
+            "unallocated_cash_usd": updated_basket.get("unallocated_cash_usd", req.unallocated_cash_usd),
+        })
     except PermissionError:
         raise
     except HTTPException as he:
         raise he
+    except PersistenceValidationError as ve:
+        return JSONResponse({"status": "error", "detail": redact_secrets(str(ve))}, status_code=422)
     except Exception as e:
-        framework.log(f"[Error] Basket Save Failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        framework.log(f"[Error] Basket Save Failed: {redact_secrets(str(e))}")
+        return JSONResponse(
+            {"status": "error", "detail": "Failed to persist portfolio basket"},
+            status_code=503,
+        )
 
 @app.get("/api/watchlist")
 def get_watch_list():
@@ -1596,15 +1701,18 @@ def save_scout_categories(categories: List[str], background_tasks: BackgroundTas
         authorize_financial_mutation("update_ssot", "context/ssot.json", payload=categories)
         get_persistence_service().save_scout_categories(categories)
         framework.log("[System] Scout categories updated.")
-        
+
         # Queue the heavy Dynamic Search yfinance reload logic in the background
         background_tasks.add_task(reload_scout_tickers_task)
-                
+        return {"status": "success", "categories": categories}
     except PermissionError:
         raise
     except Exception as e:
-        framework.log(f"[Error] Scout Categories Save Failed: {e}")
-    return {"status": "success", "categories": categories}
+        framework.log(f"[Error] Scout Categories Save Failed: {redact_secrets(str(e))}")
+        return JSONResponse(
+            {"status": "error", "detail": "Failed to persist scout categories"},
+            status_code=503,
+        )
 
 @app.get("/api/system_logs")
 async def system_logs_endpoint():

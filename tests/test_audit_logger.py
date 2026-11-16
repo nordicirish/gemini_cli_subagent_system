@@ -126,6 +126,40 @@ class TestAuditLogger(unittest.TestCase):
             parsed = json.loads(line)
             self.assertEqual(parsed["action_category"], "CONCURRENT_TEST")
 
+    def test_stage37_canonical_audit_log_gitignored_and_untouched(self):
+        """R5: Runtime agent-events.jsonl is gitignored, lazy-dir on init, and tests leave canonical log unmodified."""
+        import hashlib
+
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        gitignore_path = os.path.join(repo_root, ".gitignore")
+        with open(gitignore_path, "r", encoding="utf-8") as f:
+            gitignore_text = f.read()
+        self.assertIn("context/agent_logs/*.jsonl", gitignore_text)
+
+        # Lazy directory creation: instantiating AuditLogger must not create directories/files before log_event()
+        nested_dir = os.path.join(self.temp_dir.name, "lazy_audit_subdir")
+        lazy_log = os.path.join(nested_dir, "events.jsonl")
+        self.assertFalse(os.path.exists(nested_dir))
+        logger = AuditLogger(log_path=lazy_log)
+        self.assertFalse(os.path.exists(nested_dir))
+        self.assertFalse(os.path.exists(lazy_log))
+
+        # Canonical log file remains byte-for-byte invariant when isolated AuditLogger logs events
+        canonical_log = os.path.join(repo_root, "context", "agent_logs", "agent-events.jsonl")
+        with open(canonical_log, "rb") as f:
+            before_hash = hashlib.sha256(f.read()).hexdigest()
+
+        logger.log_event(AuditEvent(action_category="ISOLATION_TEST", status="SUCCESS", agent_role="System"))
+        self.assertTrue(os.path.exists(lazy_log))
+
+        with open(canonical_log, "rb") as f:
+            after_hash = hashlib.sha256(f.read()).hexdigest()
+        self.assertEqual(before_hash, after_hash)
+        self.assertEqual(
+            after_hash.lower(),
+            "58a830fe4a59a02bb16d33df10c1a09b3e76a2b6250377e26ee37a8d73d8bc3d",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

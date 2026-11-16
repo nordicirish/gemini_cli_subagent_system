@@ -544,8 +544,8 @@ class TestSqlitePersistenceAdapterCanonicalProjection(unittest.TestCase):
 
             with execution_role_context("Terminal Orchestrator"):
                 adapter.save_portfolio_basket(
-                    portfolio=[{"ticker": "AAPL", "shares": 10.0, "wac": 150.0}],
-                    unallocated_cash_eur=1000.0,
+                    portfolio=[{"ticker": "AAPL", "shares": Decimal("10"), "wac": Decimal("150.00")}],
+                    unallocated_cash_eur=Decimal("1000.00"),
                 )
 
             proj2 = adapter.get_ssot_data()

@@ -41,6 +41,7 @@ def patch_global_state(state):
     finally:
         fetch_stocks.publish_global_state_snapshot(orig)
 from persistence import (
+    configure_persistence,
     get_persistence_service,
     reset_persistence_service,
     PersistenceIntegrityError,
@@ -2281,6 +2282,413 @@ class TestStage35ConfigPersistenceAndMutationBoundary(unittest.TestCase):
         self.assertIs(web_server.global_chat_session, recalibrated_session)
         self.assertFalse(web_server._session_hydrated)
         self.assertIsNone(web_server.active_model_warning)
+
+
+class TestStage37ConsolidatedTrustPrecisionAndPersistence(unittest.TestCase):
+    """Comprehensive tests for Stage 3.7 R1 (origin boundary), R2 (Decimal API), R3 (fail-closed basket & UI), R4 (chat/scout error propagation)."""
+
+    def setUp(self):
+        reset_persistence_service()
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_context = os.path.join(self.temp_dir.name, "context")
+        os.makedirs(self.temp_context, exist_ok=True)
+        self._orig_tickers = list(fetch_stocks.TICKERS)
+        self._orig_macro = list(fetch_stocks.MACRO_TICKERS)
+        self._orig_all_tickers = list(fetch_stocks.ALL_TICKERS)
+        self._orig_force_refresh = fetch_stocks.FORCE_REFRESH
+        self._orig_state = fetch_stocks.get_global_state_snapshot()
+        self._orig_model = web_server.ORCHESTRATOR_MODEL
+        self._orig_session = web_server.global_chat_session
+
+    def tearDown(self):
+        reset_persistence_service()
+        fetch_stocks.TICKERS = self._orig_tickers
+        fetch_stocks.MACRO_TICKERS = self._orig_macro
+        fetch_stocks.ALL_TICKERS = self._orig_all_tickers
+        fetch_stocks.FORCE_REFRESH = self._orig_force_refresh
+        fetch_stocks.publish_global_state_snapshot(self._orig_state)
+        web_server.ORCHESTRATOR_MODEL = self._orig_model
+        web_server.global_chat_session = self._orig_session
+        self.temp_dir.cleanup()
+
+    def test_r1_cors_allowlist_origin_guard_and_loopback_binding(self):
+        """R1: Wildcard CORS absent, credentials disabled, trusted local origins accepted, untrusted origins rejected 403, and loopback 127.0.0.1 preserved."""
+        from fastapi.testclient import TestClient
+
+        cors_middlewares = [
+            mw for mw in web_server.app.user_middleware
+            if getattr(mw.cls, "__name__", "") == "CORSMiddleware"
+        ]
+        self.assertEqual(len(cors_middlewares), 1)
+        cors_opts = cors_middlewares[0].kwargs
+        self.assertNotIn("*", cors_opts["allow_origins"])
+        self.assertFalse(cors_opts["allow_credentials"])
+        self.assertEqual(
+            set(cors_opts["allow_origins"]),
+            set(fetch_stocks.TRUSTED_LOCAL_ORIGINS),
+        )
+
+        # Verify dynamic sidecar port support in get_trusted_local_origins()
+        with patch.dict(os.environ, {"ANTIGRAVITY_SIDECAR_WEB_PORT": "8123"}):
+            dynamic_origins = fetch_stocks.get_trusted_local_origins()
+            self.assertIn("http://127.0.0.1:8123", dynamic_origins)
+            self.assertIn("http://localhost:8123", dynamic_origins)
+            self.assertIn("http://127.0.0.1:8000", dynamic_origins)
+            self.assertIn("http://localhost:8000", dynamic_origins)
+
+        client = TestClient(web_server.app)
+
+        # Trusted local origin accepted cleanly
+        for trusted in ("http://127.0.0.1:8000", "http://localhost:8000"):
+            res = client.get("/api/tickers", headers={"Origin": trusted})
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.headers.get("access-control-allow-origin"), trusted)
+            self.assertNotIn("access-control-allow-credentials", res.headers)
+
+        # Untrusted cross-origin GET, POST, and OPTIONS preflight rejected fail-closed with 403
+        for evil in (
+            "http://evil.example.com",
+            "https://attacker.local",
+            "http://127.0.0.1.evil.com:8000",
+            "http://localhost:9999",
+        ):
+            r_get = client.get("/api/tickers", headers={"Origin": evil})
+            self.assertEqual(r_get.status_code, 403)
+            self.assertIsNone(r_get.headers.get("access-control-allow-origin"))
+
+            r_post = client.post("/api/basket", json={"portfolio": [], "unallocated_cash_eur": 0}, headers={"Origin": evil})
+            self.assertEqual(r_post.status_code, 403)
+            self.assertIsNone(r_post.headers.get("access-control-allow-origin"))
+
+            r_opt = client.options(
+                "/api/basket",
+                headers={"Origin": evil, "Access-Control-Request-Method": "POST"},
+            )
+            self.assertEqual(r_opt.status_code, 403)
+            self.assertIsNone(r_opt.headers.get("access-control-allow-origin"))
+
+        # Loopback binding preserved in source entrypoints
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        for fname in ("web_server.py", "fetch_stocks.py"):
+            with open(os.path.join(repo_root, "python", fname), "r", encoding="utf-8") as f:
+                src = f.read()
+            self.assertIn('uvicorn.run(app, host="127.0.0.1"', src)
+            self.assertNotIn('host="0.0.0.0"', src)
+            self.assertNotIn("host='0.0.0.0'", src)
+
+    def test_r2_pydantic_models_and_basket_endpoints_preserve_decimal_and_reject_invalid(self):
+        """R2: BasketItem/BasketSaveRequest and /api/basket round-trip exact Decimals and reject float, bool, NaN, Inf, negative, and excess scale."""
+        from decimal import Decimal
+        from fastapi.testclient import TestClient
+        from pydantic import ValidationError
+
+        # Pydantic models reject raw Python floats, booleans, non-finite, negative, and excessive scale
+        with self.assertRaises((ValidationError, PersistenceValidationError)):
+            web_server.BasketItem(ticker="NVDA", shares=12.345, wac="100.00")
+        with self.assertRaises((ValidationError, PersistenceValidationError)):
+            web_server.BasketItem(ticker="NVDA", shares=True, wac="100.00")
+        with self.assertRaises((ValidationError, PersistenceValidationError)):
+            web_server.BasketItem(ticker="NVDA", shares="12.34567", wac="100.00")
+        with self.assertRaises((ValidationError, PersistenceValidationError)):
+            web_server.BasketSaveRequest(portfolio=[], unallocated_cash_eur=100.5)
+        with self.assertRaises((ValidationError, PersistenceValidationError)):
+            web_server.BasketSaveRequest(portfolio=[], unallocated_cash_eur="100.555")
+
+        valid_req = web_server.BasketSaveRequest(
+            portfolio=[web_server.BasketItem(ticker="NVDA", shares=Decimal("12.3456"), wac="123.4567")],
+            unallocated_cash_eur=Decimal("1000.55"),
+        )
+        self.assertEqual(valid_req.portfolio[0].shares, Decimal("12.3456"))
+        self.assertEqual(valid_req.unallocated_cash_eur, Decimal("1000.55"))
+
+        configure_persistence(backend="json", base_dir=self.temp_dir.name)
+        with open(os.path.join(self.temp_context, "ssot.json"), "w", encoding="utf-8") as f:
+            json.dump({"mutable_state": {}}, f)
+
+        client = TestClient(web_server.app)
+        with (
+            patch("web_server.check_invalid_tickers", return_value=[]),
+            patch("fetch_stocks._load_ssot_tickers", return_value=["NVDA"]),
+            patch("fetch_stocks._load_macro_tickers", return_value=[]),
+        ):
+            # Exact Decimal round-trip via POST /api/basket -> GET /api/basket
+            res_post = client.post(
+                "/api/basket",
+                content='{"portfolio":[{"ticker":"NVDA","shares":12.3456,"wac":19.9999}],"unallocated_cash_eur":1000.55,"unallocated_cash_usd":1080.59}',
+                headers={"Content-Type": "application/json", "Origin": "http://127.0.0.1:8000"},
+            )
+            self.assertEqual(res_post.status_code, 200)
+            raw_post_body = res_post.text
+            self.assertIn("12.3456", raw_post_body)
+            self.assertIn("19.9999", raw_post_body)
+            self.assertIn("1000.55", raw_post_body)
+
+            res_get = client.get("/api/basket", headers={"Origin": "http://127.0.0.1:8000"})
+            self.assertEqual(res_get.status_code, 200)
+            parsed_get = json.loads(res_get.text, parse_float=Decimal)
+            self.assertEqual(parsed_get["portfolio"][0]["shares"], Decimal("12.3456"))
+            self.assertEqual(parsed_get["portfolio"][0]["wac"], Decimal("19.9999"))
+            self.assertEqual(parsed_get["unallocated_cash_eur"], Decimal("1000.55"))
+
+            # Reject NaN, Infinity, excessive scale, booleans, negative cash over HTTP
+            for bad_body in (
+                '{"portfolio":[{"ticker":"NVDA","shares":NaN,"wac":100}],"unallocated_cash_eur":100}',
+                '{"portfolio":[{"ticker":"NVDA","shares":Infinity,"wac":100}],"unallocated_cash_eur":100}',
+                '{"portfolio":[{"ticker":"NVDA","shares":1.12345,"wac":100}],"unallocated_cash_eur":100}',
+                '{"portfolio":[{"ticker":"NVDA","shares":true,"wac":100}],"unallocated_cash_eur":100}',
+                '{"portfolio":[],"unallocated_cash_eur":-1.00}',
+                '{"portfolio":[],"unallocated_cash_eur":10.999}',
+            ):
+                bad_res = client.post(
+                    "/api/basket",
+                    content=bad_body,
+                    headers={"Content-Type": "application/json", "Origin": "http://127.0.0.1:8000"},
+                )
+                self.assertEqual(bad_res.status_code, 422, f"Expected 422 for {bad_body}, got {bad_res.status_code}")
+
+    def test_r3_basket_endpoints_fail_closed_with_503_and_redact_secrets(self):
+        """R3: /api/basket and /api/get_basket return HTTP 503 error (never empty/zero fallback) and redact secrets from error logs."""
+        from fastapi.testclient import TestClient
+
+        mock_service = MagicMock()
+        mock_service.get_portfolio_basket.side_effect = PersistenceIntegrityError(
+            "Corrupt SSoT api_key=AIzaSyD-secret12345"
+        )
+        logged_messages = []
+
+        client = TestClient(web_server.app)
+        with (
+            patch("web_server.get_persistence_service", return_value=mock_service),
+            patch("fetch_stocks.get_persistence_service", return_value=mock_service),
+            patch.object(web_server.framework, "log", side_effect=logged_messages.append),
+        ):
+            r_web = client.get("/api/basket", headers={"Origin": "http://127.0.0.1:8000"})
+            self.assertEqual(r_web.status_code, 503)
+            body_web = r_web.json()
+            self.assertEqual(body_web["status"], "error")
+            self.assertEqual(body_web["detail"], "Authoritative portfolio persistence unavailable")
+            self.assertNotIn("portfolio", body_web)
+            self.assertNotIn("unallocated_cash_eur", body_web)
+            self.assertNotIn("AIzaSyD-secret12345", json.dumps(body_web))
+
+            r_fs = client.get("/api/get_basket", headers={"Origin": "http://127.0.0.1:8000"})
+            self.assertEqual(r_fs.status_code, 503)
+            body_fs = r_fs.json()
+            self.assertEqual(body_fs["status"], "error")
+            self.assertEqual(body_fs["detail"], "Authoritative portfolio persistence unavailable")
+
+        self.assertTrue(any("[REDACTED_SECRET]" in m for m in logged_messages))
+        self.assertFalse(any("AIzaSyD-secret12345" in m for m in logged_messages))
+
+    def test_r3_modern_ui_preserves_stale_portfolio_and_renders_degraded_state(self):
+        """R3: modern_ui.js fetchPortfolio/renderPortfolio preserve lastValidPortfolioBasket and surface degraded/stale state on 503 errors."""
+        node_bin = shutil.which("node")
+        self.assertIsNotNone(node_bin, "node executable must be available")
+        ui_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "modern_ui.js"))
+
+        script = r"""
+const fs = require('fs');
+const vm = require('vm');
+const assert = require('assert');
+
+const uiCode = fs.readFileSync(process.argv[1], 'utf8');
+
+function makeElement(tag, id) {
+    const el = {
+        tagName: tag.toUpperCase(),
+        id: id || '',
+        className: '',
+        innerHTML: '',
+        textContent: '',
+        value: '',
+        style: {},
+        children: [],
+        attributes: {},
+        firstChild: null,
+        parentNode: null,
+        setAttribute(k, v) { this.attributes[k] = String(v); },
+        getAttribute(k) { return this.attributes[k]; },
+        appendChild(child) {
+            child.parentNode = this;
+            this.children.push(child);
+            this.firstChild = this.children[0] || null;
+            if (child.id) elementsById[child.id] = child;
+            return child;
+        },
+        insertBefore(newChild, refChild) {
+            newChild.parentNode = this;
+            const idx = this.children.indexOf(refChild);
+            if (idx === -1) this.children.push(newChild);
+            else this.children.splice(idx, 0, newChild);
+            this.firstChild = this.children[0] || null;
+            if (newChild.id) elementsById[newChild.id] = newChild;
+            return newChild;
+        },
+        remove() {
+            if (this.id && elementsById[this.id] === this) delete elementsById[this.id];
+            if (this.parentNode) {
+                this.parentNode.children = this.parentNode.children.filter(c => c !== this);
+                this.parentNode.firstChild = this.parentNode.children[0] || null;
+            }
+        },
+        focus() {},
+        querySelectorAll() { return []; },
+        querySelector() { return null; },
+        addEventListener() {},
+        classList: { contains: () => false, add() {}, remove() {} },
+    };
+    if (id) elementsById[id] = el;
+    return el;
+}
+
+const elementsById = {};
+[
+    'portfolio-content', 'portfolio-manager-body',
+    'chat-window', 'launch-chat-btn', 'chat-close-btn', 'chat-input',
+    'chat-messages', 'send-chat-btn', 'stop-chat-btn', 'chat-model-select',
+    'new-chat-btn', 'history-chat-btn', 'model-selector'
+].forEach(id => makeElement('div', id));
+
+const basketResponses = [
+    // 1. Initial failure before any valid load -> unavailable, not stale, body untouched
+    { ok: false, status: 503, json: async () => ({ status: 'error', detail: 'Authoritative portfolio persistence unavailable' }) },
+    // 2. Valid authoritative load -> renders NVDA and 1000.55 EUR
+    { ok: true, status: 200, json: async () => ({ portfolio: [{ ticker: 'NVDA', shares: 12.3456, wac: 123.4567 }], unallocated_cash_eur: 1000.55, unallocated_cash_usd: 1080.59, eurusd_rate: 1.08 }) },
+    // 3. Subsequent persistence outage -> preserves NVDA & 1000.55 EUR in DOM, marks degraded + stale
+    { ok: false, status: 503, json: async () => ({ status: 'error', detail: 'Authoritative portfolio persistence unavailable' }) },
+    // 4. Recovery authoritative load -> clears degraded banner and updates DOM
+    { ok: true, status: 200, json: async () => ({ portfolio: [{ ticker: 'SPY', shares: 5, wac: 500.0 }], unallocated_cash_eur: 2500.00, unallocated_cash_usd: 2700.00, eurusd_rate: 1.08 }) },
+];
+
+const sandbox = {
+    console, Date, Math, JSON, Number, Boolean, Object, Array, String, Promise, AbortController,
+    EventSource: class MockEventSource { close() {} },
+    setTimeout, clearTimeout,
+    window: { addEventListener() {} },
+    document: {
+        body: makeElement('body'),
+        activeElement: null,
+        getElementById: (id) => elementsById[id] || null,
+        createElement: (tag) => makeElement(tag),
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        addEventListener() {},
+    },
+    localStorage: { _s: {}, getItem: () => null, setItem() {}, removeItem() {} },
+    marked: { parse: (s) => String(s) },
+    fetch: async (url) => {
+        if (url === '/api/basket') return basketResponses.shift();
+        return { ok: true, status: 200, json: async () => ({}) };
+    },
+};
+
+vm.runInNewContext(uiCode, sandbox);
+const chatUI = sandbox.window.chatUI;
+chatUI.init();
+
+(async () => {
+    const tbody = elementsById['portfolio-manager-body'];
+    const section = elementsById['portfolio-content'];
+
+    // 1. Initial failure: does not fabricate 0 cash/empty rows
+    await sandbox.window.fetchPortfolio(true);
+    assert.strictEqual(chatUI.portfolioDegraded, true);
+    assert.strictEqual(chatUI.lastValidPortfolioBasket, null);
+    assert.strictEqual(tbody.getAttribute('data-portfolio-state'), 'degraded');
+    assert.strictEqual(tbody.getAttribute('data-portfolio-stale'), 'false');
+    assert.strictEqual(tbody.innerHTML, '');
+    assert(elementsById['portfolio-degraded-banner'].textContent.includes('PORTFOLIO UNAVAILABLE'));
+
+    // 2. Authoritative load succeeds
+    await sandbox.window.fetchPortfolio(true);
+    assert.strictEqual(chatUI.portfolioDegraded, false);
+    assert.strictEqual(tbody.getAttribute('data-portfolio-state'), 'authoritative');
+    assert(tbody.innerHTML.includes('NVDA'));
+    assert(tbody.innerHTML.includes('12.3456'));
+    assert(tbody.innerHTML.includes('1000.55'));
+    assert.strictEqual(elementsById['portfolio-degraded-banner'].style.display, 'none');
+
+    const snapshotHtmlBeforeOutage = tbody.innerHTML;
+
+    // 3. Subsequent 503 preserves lastValidPortfolioBasket & NVDA/1000.55 DOM rows
+    await sandbox.window.fetchPortfolio(true);
+    assert.strictEqual(chatUI.portfolioDegraded, true);
+    assert.strictEqual(tbody.getAttribute('data-portfolio-state'), 'degraded');
+    assert.strictEqual(tbody.getAttribute('data-portfolio-stale'), 'true');
+    assert.strictEqual(section.getAttribute('data-portfolio-stale'), 'true');
+    assert.strictEqual(tbody.innerHTML, snapshotHtmlBeforeOutage);
+    assert(elementsById['portfolio-degraded-banner'].textContent.includes('STALE PORTFOLIO DATA'));
+
+    // 4. Recovery restores authoritative state
+    await sandbox.window.fetchPortfolio(true);
+    assert.strictEqual(chatUI.portfolioDegraded, false);
+    assert.strictEqual(tbody.getAttribute('data-portfolio-state'), 'authoritative');
+    assert.strictEqual(tbody.getAttribute('data-portfolio-stale'), 'false');
+    assert(tbody.innerHTML.includes('SPY'));
+    assert.strictEqual(elementsById['portfolio-degraded-banner'].style.display, 'none');
+})().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});
+"""
+        proc = subprocess.run([node_bin, "-e", script, ui_path], capture_output=True, text=True, timeout=15)
+        self.assertEqual(proc.returncode, 0, f"Node test failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}")
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_r4_chat_endpoint_reports_honest_failure_on_slice_and_brace_payload_sync_errors(self, mock_dispatch, mock_charts):
+        """R4: Both slice-extracted and brace-extracted SSoT sync failures report failure without claiming SSoT Shadow State synchronized successfully."""
+        valid_state = {"financial_state_valid": True, "local_storage_state": {}, "tickers": []}
+
+        with (
+            patch_global_state(valid_state),
+            patch("tools.update_ssot", side_effect=PersistenceError("Disk rollback triggered")),
+        ):
+            # 1. Slice-extracted fenced JSON payload
+            mock_dispatch.return_value = {
+                "status": "completed",
+                "response": 'Summary text.\n```json\n{"EXECUTION_PAYLOAD": {"portfolio_snapshot": []}}\n```',
+                "turn_count": 1,
+            }
+            res_slice = web_server.chat_endpoint(web_server.ChatRequest(message="Update via fenced payload"))
+            self.assertEqual(res_slice["status"], "success")
+            self.assertNotIn("synchronized successfully", res_slice["response"])
+            self.assertIn("SSoT Synchronization Failed", res_slice["response"])
+            self.assertIn("synchronization failed. Authoritative state was not updated", res_slice["response"])
+
+            # 2. Brace-extracted unfenced payload
+            mock_dispatch.return_value = {
+                "status": "completed",
+                "response": 'Summary text. {"EXECUTION_PAYLOAD": {"portfolio_snapshot": []}}',
+                "turn_count": 1,
+            }
+            res_brace = web_server.chat_endpoint(web_server.ChatRequest(message="Update via brace payload"))
+            self.assertEqual(res_brace["status"], "success")
+            self.assertNotIn("synchronized successfully", res_brace["response"])
+            self.assertIn("SSoT Synchronization Failed", res_brace["response"])
+            self.assertIn("synchronization failed. Authoritative state was not updated", res_brace["response"])
+
+    def test_r4_scout_categories_fails_honestly_with_503_and_skips_background_reload(self):
+        """R4: /api/scout_categories returns HTTP 503 error and does not trigger ticker reload when persistence fails."""
+        from fastapi.testclient import TestClient
+
+        mock_service = MagicMock()
+        mock_service.save_scout_categories.side_effect = PersistenceError("Simulated scout categories write error")
+
+        client = TestClient(web_server.app)
+        with (
+            patch("web_server.get_persistence_service", return_value=mock_service),
+            patch("web_server.reload_scout_tickers_task") as mock_reload,
+        ):
+            res = client.post(
+                "/api/scout_categories",
+                json=["AI_INFRA", "DEFENSE"],
+                headers={"Origin": "http://127.0.0.1:8000"},
+            )
+            self.assertEqual(res.status_code, 503)
+            body = res.json()
+            self.assertEqual(body["status"], "error")
+            mock_reload.assert_not_called()
 
 
 if __name__ == "__main__":

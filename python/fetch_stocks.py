@@ -41,6 +41,7 @@ import json
 import pyperclip
 import re
 import math
+from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from scipy.stats import norm
 from yfinance.data import YfData
@@ -51,6 +52,7 @@ import collections.abc
 logger = logging.getLogger(__name__)
 from types import MappingProxyType
 from atomic_io import atomic_write_json, atomic_read_json, atomic_update_json
+from audit_logger import redact_secrets
 from tool_registry import authorize_financial_mutation
 from background_intelligence import (
     BackgroundIntelligenceCoordinator,
@@ -74,9 +76,19 @@ from background_intelligence import (
 )
 
 try:
-    from persistence import get_persistence_service
+    from persistence import get_persistence_service, PersistenceValidationError
+    from persistence.contracts import (
+        format_financial_decimal,
+        serialize_json_with_exact_decimals,
+        validate_financial_decimal,
+    )
 except ImportError:
-    from python.persistence import get_persistence_service
+    from python.persistence import get_persistence_service, PersistenceValidationError
+    from python.persistence.contracts import (
+        format_financial_decimal,
+        serialize_json_with_exact_decimals,
+        validate_financial_decimal,
+    )
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
@@ -898,8 +910,58 @@ def update_global_state_snapshot(updater_fn: Callable[[Any], Any]) -> ImmutableD
         frozen = freeze_snapshot(new_snapshot)
         GLOBAL_STATE = frozen
         return frozen
+def get_trusted_local_origins() -> List[str]:
+    """Returns explicit trusted local dashboard origins without wildcards."""
+    origins: List[str] = [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+    ]
+    sidecar_port_env = os.environ.get("ANTIGRAVITY_SIDECAR_WEB_PORT", "").strip()
+    if sidecar_port_env:
+        try:
+            port_num = int(sidecar_port_env)
+            if 1 <= port_num <= 65535:
+                for candidate in (
+                    f"http://127.0.0.1:{port_num}",
+                    f"http://localhost:{port_num}",
+                ):
+                    if candidate not in origins:
+                        origins.append(candidate)
+        except ValueError:
+            pass
+    return origins
+
+
+class DecimalJSONResponse(JSONResponse):
+    """JSONResponse that preserves exact Decimal numeric representations without float conversion."""
+
+    def render(self, content: Any) -> bytes:
+        return serialize_json_with_exact_decimals(content).encode("utf-8")
+
+
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+TRUSTED_LOCAL_ORIGINS = get_trusted_local_origins()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=TRUSTED_LOCAL_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept"],
+)
+
+
+@app.middleware("http")
+async def enforce_trusted_local_origin(request: Request, call_next):
+    """Fail-closed browser origin check rejecting untrusted cross-origin requests."""
+    origin = request.headers.get("origin")
+    if origin is not None:
+        allowed = set(get_trusted_local_origins())
+        if origin not in allowed:
+            return JSONResponse(
+                {"status": "error", "detail": "Untrusted origin rejected"},
+                status_code=403,
+            )
+    return await call_next(request)
 
 def save_config():
     global config, SCOUT_LIMIT, SCOUT_MAX_RSI
@@ -1016,41 +1078,89 @@ def get_basket():
         service = get_persistence_service()
         basket = service.get_portfolio_basket()
         raw_basket = basket.get("portfolio", [])
-        return JSONResponse([{"ticker": i["ticker"], "shares": i.get("shares", 0), "wac": i.get("wac", 0)} for i in raw_basket])
+        return DecimalJSONResponse([
+            {
+                "ticker": i["ticker"],
+                "shares": i.get("shares", Decimal("0")),
+                "wac": i.get("wac", Decimal("0")),
+            }
+            for i in raw_basket
+        ])
     except Exception as e:
-        print(f"SSoT Read Warning: {e}")
-    return JSONResponse([])
+        print(f"[Error] Portfolio Basket Load Failed: {redact_secrets(str(e))}")
+        return JSONResponse(
+            {"status": "error", "detail": "Authoritative portfolio persistence unavailable"},
+            status_code=503,
+        )
+
 
 @app.post("/api/save_basket")
 async def save_basket(req: Request):
     global TICKERS, ALL_TICKERS
     try:
-        basket = await req.json()
+        authorize_financial_mutation("update_ssot", "context/ssot.json")
+        raw_bytes = await req.body()
+
+        def _reject_constant(const: str) -> None:
+            raise PersistenceValidationError(f"Non-finite JSON constant not allowed: {const}")
+
+        try:
+            basket = json.loads(
+                raw_bytes.decode("utf-8"),
+                parse_float=Decimal,
+                parse_constant=_reject_constant,
+            )
+        except PersistenceValidationError:
+            raise
+        except Exception as jde:
+            raise PersistenceValidationError(f"Invalid JSON payload: {jde}") from jde
+
+        if not isinstance(basket, list):
+            raise PersistenceValidationError("Portfolio basket payload must be a JSON array")
+
         authorize_financial_mutation("update_ssot", "context/ssot.json", payload=basket)
         new_snapshot = []
-        for item in basket:
-            if item.get("shares", 0) > 0:
+        for idx, item in enumerate(basket):
+            if not isinstance(item, dict):
+                raise PersistenceValidationError(f"Basket item {idx} must be a dictionary")
+            ticker = item.get("ticker")
+            if not isinstance(ticker, str) or not ticker.strip():
+                raise PersistenceValidationError(f"Basket item {idx} missing valid ticker")
+            shares_raw = item["shares"] if "shares" in item else Decimal("0")
+            wac_raw = item["wac"] if "wac" in item else Decimal("0")
+            shares_dec = validate_financial_decimal(
+                shares_raw, f"shares for {ticker}", max_scale=4, allow_zero=True, non_negative=True
+            )
+            wac_dec = validate_financial_decimal(
+                wac_raw, f"wac for {ticker}", max_scale=4, allow_zero=True, non_negative=True
+            )
+            if shares_dec > Decimal("0"):
                 new_snapshot.append({
-                    "ticker": item["ticker"],
-                    "shares": item["shares"],
-                    "wac": item["wac"]
+                    "ticker": ticker.strip().upper(),
+                    "shares": shares_dec,
+                    "wac": wac_dec,
                 })
 
         service = get_persistence_service()
         existing_basket = service.get_portfolio_basket()
-        cash_eur = existing_basket.get("unallocated_cash_eur", 0.0)
-        cash_usd = existing_basket.get("unallocated_cash_usd", 0.0)
+        cash_eur = existing_basket.get("unallocated_cash_eur", Decimal("0.00"))
+        cash_usd = existing_basket.get("unallocated_cash_usd", Decimal("0.00"))
         service.save_portfolio_basket(new_snapshot, unallocated_cash_eur=cash_eur, unallocated_cash_usd=cash_usd)
 
         # Reload TICKERS
         TICKERS = _load_ssot_tickers()
         ALL_TICKERS = TICKERS + MACRO_TICKERS
-        return JSONResponse({"status": "success"})
+        return DecimalJSONResponse({"status": "success", "count": len(new_snapshot)})
     except PermissionError:
         raise
+    except PersistenceValidationError as pve:
+        return JSONResponse({"status": "error", "detail": redact_secrets(str(pve))}, status_code=422)
     except Exception as e:
-        print(f"Basket Sync Failed: {e}")
-    return JSONResponse({"status": "error"})
+        print(f"[Error] Basket Sync Failed: {redact_secrets(str(e))}")
+        return JSONResponse(
+            {"status": "error", "detail": "Failed to persist portfolio basket"},
+            status_code=503,
+        )
 
 @app.get("/api/get_watch_list")
 def get_watch_list():
@@ -1097,6 +1207,10 @@ def sanitize_json_payload(obj):
         return {k: sanitize_json_payload(v) for k, v in obj.items()}
     elif isinstance(obj, collections.abc.Sequence) and not isinstance(obj, (str, bytes)):
         return [sanitize_json_payload(x) for x in obj]
+    elif isinstance(obj, Decimal):
+        if not obj.is_finite():
+            return None
+        return format_financial_decimal(obj)
     elif isinstance(obj, float):
         if math.isnan(obj) or math.isinf(obj):
             return None

@@ -40,6 +40,10 @@ from persistence import (
     PersistenceValidationError,
     validate_finite_float,
 )
+from persistence.contracts import (
+    validate_financial_decimal,
+    serialize_json_with_exact_decimals,
+)
 try:
     from python.tool_registry import execution_role_context, authorize_financial_mutation
 except ImportError:
@@ -132,42 +136,52 @@ class TestJsonPersistenceAdapter(unittest.TestCase):
         basket = self.adapter.get_portfolio_basket()
         self.assertEqual(len(basket["portfolio"]), 1)
         self.assertEqual(basket["portfolio"][0]["ticker"], "SPY")
-        self.assertEqual(basket["portfolio"][0]["shares"], 10.0)
-        self.assertEqual(basket["portfolio"][0]["wac"], 500.0)
-        self.assertEqual(basket["unallocated_cash_eur"], 2500.0)
-        self.assertEqual(basket["unallocated_cash_usd"], 2700.0)
+        self.assertIsInstance(basket["portfolio"][0]["shares"], Decimal)
+        self.assertEqual(basket["portfolio"][0]["shares"], Decimal("10.0"))
+        self.assertIsInstance(basket["portfolio"][0]["wac"], Decimal)
+        self.assertEqual(basket["portfolio"][0]["wac"], Decimal("500.0"))
+        self.assertIsInstance(basket["unallocated_cash_eur"], Decimal)
+        self.assertEqual(basket["unallocated_cash_eur"], Decimal("2500.0"))
+        self.assertIsInstance(basket["unallocated_cash_usd"], Decimal)
+        self.assertEqual(basket["unallocated_cash_usd"], Decimal("2700.0"))
 
     def test_save_portfolio_basket_preserves_external_sections(self):
         with execution_role_context("Terminal Orchestrator"):
             new_portfolio = [
-                {"ticker": "NVDA", "shares": 15.0, "wac": 120.0},
-                {"ticker": "AMD", "shares": 20.0, "wac": 140.0},
+                {"ticker": "NVDA", "shares": Decimal("15"), "wac": Decimal("120.00")},
+                {"ticker": "AMD", "shares": Decimal("20"), "wac": Decimal("140.00")},
             ]
             res = self.adapter.save_portfolio_basket(
                 portfolio=new_portfolio,
-                unallocated_cash_eur=3000.0,
-                unallocated_cash_usd=3240.0,
+                unallocated_cash_eur=Decimal("3000.00"),
+                unallocated_cash_usd=Decimal("3240.00"),
             )
             self.assertEqual(res["status"], "success")
+            self.assertEqual(res["unallocated_cash_eur"], Decimal("3000.00"))
+            self.assertEqual(res["unallocated_cash_usd"], Decimal("3240.00"))
 
-        # Read back raw SSoT to verify external section preservation
+        # Read back raw SSoT to verify external section preservation and exact canonical string storage
         ssot = self.adapter.get_ssot_data()
         self.assertIn("state_context", ssot)
         self.assertEqual(ssot["state_context"]["regime"], "NORMAL")
         self.assertIn("runtime_flags", ssot)
         self.assertEqual(ssot["runtime_flags"]["dry_run"], False)
 
-        # Check updated basket
-        self.assertEqual(ssot["unallocated_cash_eur"], 3000.0)
+        # Check updated basket on disk & via get_portfolio_basket
+        self.assertEqual(ssot["unallocated_cash_eur"], "3000.00")
         self.assertEqual(len(ssot["portfolio_snapshot"]), 2)
         self.assertEqual(ssot["portfolio_snapshot"][0]["ticker"], "NVDA")
+
+        basket = self.adapter.get_portfolio_basket()
+        self.assertEqual(basket["unallocated_cash_eur"], Decimal("3000.00"))
+        self.assertEqual(basket["portfolio"][0]["shares"], Decimal("15"))
 
     def test_financial_mutation_rejected_for_engineering_roles(self):
         with execution_role_context("Python Engineer"):
             with self.assertRaises(PermissionError):
                 self.adapter.save_portfolio_basket(
-                    portfolio=[{"ticker": "HACK", "shares": 100, "wac": 10.0}],
-                    unallocated_cash_eur=9999.0,
+                    portfolio=[{"ticker": "HACK", "shares": Decimal("100"), "wac": Decimal("10.00")}],
+                    unallocated_cash_eur=Decimal("9999.00"),
                 )
 
     def test_watchlist_operations(self):
@@ -214,8 +228,8 @@ class TestJsonPersistenceAdapter(unittest.TestCase):
         self.assertEqual(self.adapter.get_ssot_data(), {})
         basket = self.adapter.get_portfolio_basket()
         self.assertEqual(basket["portfolio"], [])
-        self.assertEqual(basket["unallocated_cash_eur"], 0.0)
-        self.assertEqual(basket["unallocated_cash_usd"], 0.0)
+        self.assertEqual(basket["unallocated_cash_eur"], Decimal("0.00"))
+        self.assertEqual(basket["unallocated_cash_usd"], Decimal("0.00"))
         self.assertEqual(basket["eurusd_rate"], 1.08)
 
     def test_empty_ssot_file_fails_closed_with_integrity_error(self):
@@ -303,12 +317,12 @@ class TestJsonPersistenceAdapter(unittest.TestCase):
             with execution_role_context("Terminal Orchestrator"):
                 with self.assertRaises(PersistenceValidationError, msg=f"save_portfolio_basket should reject non-finite shares: {nf}"):
                     self.adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": nf, "wac": 500.0}],
-                        unallocated_cash_eur=1000.0,
+                        portfolio=[{"ticker": "SPY", "shares": nf, "wac": Decimal("500.0")}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
                 with self.assertRaises(PersistenceValidationError, msg=f"save_portfolio_basket should reject non-finite cash: {nf}"):
                     self.adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
+                        portfolio=[{"ticker": "SPY", "shares": Decimal("10.0"), "wac": Decimal("500.0")}],
                         unallocated_cash_eur=nf,
                     )
 
@@ -327,10 +341,10 @@ class TestJsonPersistenceAdapter(unittest.TestCase):
 
         basket = self.adapter.get_portfolio_basket()
         self.assertEqual(len(basket["portfolio"]), 2)
-        self.assertEqual(basket["portfolio"][0]["shares"], 0.0)
-        self.assertEqual(basket["portfolio"][1]["shares"], 10.5)
-        self.assertEqual(basket["unallocated_cash_eur"], 0.0)
-        self.assertEqual(basket["unallocated_cash_usd"], 1500.75)
+        self.assertEqual(basket["portfolio"][0]["shares"], Decimal("0.0"))
+        self.assertEqual(basket["portfolio"][1]["shares"], Decimal("10.5"))
+        self.assertEqual(basket["unallocated_cash_eur"], Decimal("0.0"))
+        self.assertEqual(basket["unallocated_cash_usd"], Decimal("1500.75"))
         self.assertEqual(basket["eurusd_rate"], 1.085)
 
 
@@ -354,19 +368,19 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
     def test_save_and_get_portfolio_basket_atomic_unit_of_work(self):
         with execution_role_context("Terminal Orchestrator"):
             portfolio = [
-                {"ticker": "SPY", "shares": 10.0, "wac": 500.0},
-                {"ticker": "AAPL", "shares": 50.0, "wac": 220.0},
+                {"ticker": "SPY", "shares": Decimal("10"), "wac": Decimal("500.00")},
+                {"ticker": "AAPL", "shares": Decimal("50"), "wac": Decimal("220.00")},
             ]
             res = self.adapter.save_portfolio_basket(
                 portfolio=portfolio,
-                unallocated_cash_eur=2500.50,
-                unallocated_cash_usd=2700.54,
+                unallocated_cash_eur=Decimal("2500.50"),
+                unallocated_cash_usd=Decimal("2700.54"),
             )
             self.assertEqual(res["status"], "success")
 
             basket = self.adapter.get_portfolio_basket()
-            self.assertEqual(basket["unallocated_cash_eur"], 2500.50)
-            self.assertEqual(basket["unallocated_cash_usd"], 2700.54)
+            self.assertEqual(basket["unallocated_cash_eur"], Decimal("2500.50"))
+            self.assertEqual(basket["unallocated_cash_usd"], Decimal("2700.54"))
             self.assertEqual(len(basket["portfolio"]), 2)
             tickers = {p["ticker"] for p in basket["portfolio"]}
             self.assertEqual(tickers, {"SPY", "AAPL"})
@@ -376,49 +390,49 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
             # Step 1: save SPY and AAPL
             self.adapter.save_portfolio_basket(
                 portfolio=[
-                    {"ticker": "SPY", "shares": 10.0, "wac": 500.0},
-                    {"ticker": "AAPL", "shares": 50.0, "wac": 220.0},
+                    {"ticker": "SPY", "shares": Decimal("10"), "wac": Decimal("500.00")},
+                    {"ticker": "AAPL", "shares": Decimal("50"), "wac": Decimal("220.00")},
                 ],
-                unallocated_cash_eur=2000.0,
+                unallocated_cash_eur=Decimal("2000.00"),
             )
 
             # Step 2: update basket to ONLY contain AAPL (SPY sold)
             self.adapter.save_portfolio_basket(
-                portfolio=[{"ticker": "AAPL", "shares": 50.0, "wac": 220.0}],
-                unallocated_cash_eur=7000.0,
+                portfolio=[{"ticker": "AAPL", "shares": Decimal("50"), "wac": Decimal("220.00")}],
+                unallocated_cash_eur=Decimal("7000.00"),
             )
 
             basket = self.adapter.get_portfolio_basket()
             self.assertEqual(len(basket["portfolio"]), 1)
             self.assertEqual(basket["portfolio"][0]["ticker"], "AAPL")
-            self.assertEqual(basket["unallocated_cash_eur"], 7000.0)
+            self.assertEqual(basket["unallocated_cash_eur"], Decimal("7000.00"))
 
     def test_sqlite_rollback_on_failure_preserves_initial_state(self):
         with execution_role_context("Terminal Orchestrator"):
             self.adapter.save_portfolio_basket(
-                portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
-                unallocated_cash_eur=2000.0,
+                portfolio=[{"ticker": "SPY", "shares": Decimal("10"), "wac": Decimal("500.00")}],
+                unallocated_cash_eur=Decimal("2000.00"),
             )
 
             # Attempt a basket save that fails validation (negative shares)
             with self.assertRaises(Exception):
                 self.adapter.save_portfolio_basket(
-                    portfolio=[{"ticker": "BAD", "shares": -10.0, "wac": 100.0}],
-                    unallocated_cash_eur=1000.0,
+                    portfolio=[{"ticker": "BAD", "shares": Decimal("-10"), "wac": Decimal("100.00")}],
+                    unallocated_cash_eur=Decimal("1000.00"),
                 )
 
             # Confirm original state remains intact
             basket = self.adapter.get_portfolio_basket()
             self.assertEqual(len(basket["portfolio"]), 1)
             self.assertEqual(basket["portfolio"][0]["ticker"], "SPY")
-            self.assertEqual(basket["unallocated_cash_eur"], 2000.0)
+            self.assertEqual(basket["unallocated_cash_eur"], Decimal("2000.00"))
 
     def test_sqlite_financial_mutation_authorization_denial(self):
         with execution_role_context("Python Engineer"):
             with self.assertRaises(PermissionError):
                 self.adapter.save_portfolio_basket(
-                    portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
-                    unallocated_cash_eur=2000.0,
+                    portfolio=[{"ticker": "SPY", "shares": Decimal("10"), "wac": Decimal("500.00")}],
+                    unallocated_cash_eur=Decimal("2000.00"),
                 )
 
     def test_sqlite_watchlist_and_trade_lessons(self):
@@ -436,8 +450,8 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
         """Empty SQLite database returns valid empty basket contract matching JSON first-run."""
         basket = self.adapter.get_portfolio_basket()
         self.assertEqual(basket["portfolio"], [])
-        self.assertEqual(basket["unallocated_cash_eur"], 0.0)
-        self.assertEqual(basket["unallocated_cash_usd"], 0.0)
+        self.assertEqual(basket["unallocated_cash_eur"], Decimal("0.00"))
+        self.assertEqual(basket["unallocated_cash_usd"], Decimal("0.00"))
         self.assertEqual(basket["eurusd_rate"], 1.08)
 
         ssot = self.adapter.get_ssot_data()
@@ -447,35 +461,35 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
 
     def test_sqlite_rejects_non_finite_financial_values(self):
         """Reject non-finite shares, wac, and cash on SQLite adapter with PersistenceValidationError."""
-        non_finite_values = [float("nan"), float("inf"), float("-inf")]
+        non_finite_values = [float("nan"), float("inf"), float("-inf"), Decimal("NaN"), Decimal("Infinity")]
 
         for nf in non_finite_values:
             with execution_role_context("Terminal Orchestrator"):
                 with self.assertRaises(PersistenceValidationError, msg=f"SQLite should reject non-finite shares: {nf}"):
                     self.adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": nf, "wac": 500.0}],
-                        unallocated_cash_eur=1000.0,
+                        portfolio=[{"ticker": "SPY", "shares": nf, "wac": Decimal("500.00")}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
                 with self.assertRaises(PersistenceValidationError, msg=f"SQLite should reject non-finite wac: {nf}"):
                     self.adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": nf}],
-                        unallocated_cash_eur=1000.0,
+                        portfolio=[{"ticker": "SPY", "shares": Decimal("10"), "wac": nf}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
                 with self.assertRaises(PersistenceValidationError, msg=f"SQLite should reject non-finite cash: {nf}"):
                     self.adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
+                        portfolio=[{"ticker": "SPY", "shares": Decimal("10"), "wac": Decimal("500.00")}],
                         unallocated_cash_eur=nf,
                     )
 
     def test_sqlite_validates_wac_on_zero_shares_parity(self):
-        """SQLite save_portfolio_basket validates wac even when shares=0.0 before omitting."""
+        """SQLite save_portfolio_basket validates wac even when shares=0 before omitting."""
         invalid_wac_values = [float("nan"), float("inf"), float("-inf"), "invalid_str", True, False, 10**500]
         for bad_wac in invalid_wac_values:
             with execution_role_context("Terminal Orchestrator"):
                 with self.assertRaises(PersistenceValidationError, msg=f"Should reject zero-share position with bad wac {bad_wac}"):
                     self.adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": 0.0, "wac": bad_wac}],
-                        unallocated_cash_eur=1000.0,
+                        portfolio=[{"ticker": "SPY", "shares": Decimal("0"), "wac": bad_wac}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
 
     def test_sqlite_get_portfolio_validates_corrupt_non_finite_records(self):
@@ -683,33 +697,43 @@ class TestJsonAndSqliteValidationParity(unittest.TestCase):
             with execution_role_context("Terminal Orchestrator"):
                 with self.assertRaises(PersistenceValidationError):
                     adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": True, "wac": 500.0}],
-                        unallocated_cash_eur=1000.0,
+                        portfolio=[{"ticker": "SPY", "shares": True, "wac": Decimal("500.00")}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
                 with self.assertRaises(PersistenceValidationError):
                     adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": False}],
-                        unallocated_cash_eur=1000.0,
+                        portfolio=[{"ticker": "SPY", "shares": Decimal("10"), "wac": False}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
 
-    def test_parity_on_string_rejection(self):
-        """Both adapters reject string shares, wac, and cash."""
+    def test_parity_on_raw_float_and_malformed_string_rejection(self):
+        """Both adapters reject raw binary floats and malformed/whitespace/scientific strings."""
         for adapter in (self.json_adapter, self.sqlite_adapter):
             with execution_role_context("Terminal Orchestrator"):
                 with self.assertRaises(PersistenceValidationError):
                     adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": "10", "wac": 500.0}],
-                        unallocated_cash_eur=1000.0,
+                        portfolio=[{"ticker": "SPY", "shares": 10.5, "wac": Decimal("500.00")}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
                 with self.assertRaises(PersistenceValidationError):
                     adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": "500.0"}],
-                        unallocated_cash_eur=1000.0,
+                        portfolio=[{"ticker": "SPY", "shares": Decimal("10"), "wac": 500.25}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
                 with self.assertRaises(PersistenceValidationError):
                     adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
-                        unallocated_cash_eur="1000.0",
+                        portfolio=[{"ticker": "SPY", "shares": Decimal("10"), "wac": Decimal("500.00")}],
+                        unallocated_cash_eur=1000.5,
+                    )
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": " 10 ", "wac": Decimal("500.00")}],
+                        unallocated_cash_eur=Decimal("1000.00"),
+                    )
+                with self.assertRaises(PersistenceValidationError):
+                    adapter.save_portfolio_basket(
+                        portfolio=[{"ticker": "SPY", "shares": "1e2", "wac": Decimal("500.00")}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
 
     def test_parity_on_zero_share_wac_validation(self):
@@ -718,13 +742,13 @@ class TestJsonAndSqliteValidationParity(unittest.TestCase):
             with execution_role_context("Terminal Orchestrator"):
                 with self.assertRaises(PersistenceValidationError):
                     adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": 0.0, "wac": float("nan")}],
-                        unallocated_cash_eur=1000.0,
+                        portfolio=[{"ticker": "SPY", "shares": Decimal("0"), "wac": float("nan")}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
                 with self.assertRaises(PersistenceValidationError):
                     adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": 0.0, "wac": "corrupt"}],
-                        unallocated_cash_eur=1000.0,
+                        portfolio=[{"ticker": "SPY", "shares": Decimal("0"), "wac": "corrupt"}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
 
     def test_parity_on_custom_object_rejection(self):
@@ -737,19 +761,246 @@ class TestJsonAndSqliteValidationParity(unittest.TestCase):
             with execution_role_context("Terminal Orchestrator"):
                 with self.assertRaises(PersistenceValidationError):
                     adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": CustomFloat(), "wac": 500.0}],
-                        unallocated_cash_eur=1000.0,
+                        portfolio=[{"ticker": "SPY", "shares": CustomFloat(), "wac": Decimal("500.00")}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
                 with self.assertRaises(PersistenceValidationError):
                     adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": CustomFloat()}],
-                        unallocated_cash_eur=1000.0,
+                        portfolio=[{"ticker": "SPY", "shares": Decimal("10"), "wac": CustomFloat()}],
+                        unallocated_cash_eur=Decimal("1000.00"),
                     )
                 with self.assertRaises(PersistenceValidationError):
                     adapter.save_portfolio_basket(
-                        portfolio=[{"ticker": "SPY", "shares": 10.0, "wac": 500.0}],
+                        portfolio=[{"ticker": "SPY", "shares": Decimal("10"), "wac": Decimal("500.00")}],
                         unallocated_cash_eur=CustomFloat(),
                     )
+
+
+class TestStage37FinancialPrecisionAndCompositeAtomicity(unittest.TestCase):
+    """Regression suite covering Stage 3.7 R2 (Decimal boundaries) and R4 (composite atomicity)."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        os.makedirs(os.path.join(self.temp_dir.name, "context"), exist_ok=True)
+        self.json_adapter = JsonPersistenceAdapter(base_dir=self.temp_dir.name)
+
+        self.db_path = os.path.join(self.temp_dir.name, "stage37.db")
+        self.db_manager = DatabaseManager(self.db_path, profile=PRIMARY_FINANCIAL_PROFILE)
+        with self.db_manager.connection() as conn:
+            SchemaMigrator.initialize_core_schema(conn)
+        self.sqlite_adapter = SqlitePersistenceAdapter(self.db_manager)
+
+    def tearDown(self):
+        self.sqlite_adapter.close()
+        self.temp_dir.cleanup()
+
+    def test_validate_financial_decimal_exactness_and_rejections(self):
+        """validate_financial_decimal enforces Decimal/int/canonical-str and rejects float, bool, scientific, scale overflow, and non-finite inputs."""
+        self.assertEqual(validate_financial_decimal(Decimal("12.3456"), "shares", max_scale=4), Decimal("12.3456"))
+        self.assertEqual(validate_financial_decimal("12.3456", "shares", max_scale=4), Decimal("12.3456"))
+        self.assertEqual(validate_financial_decimal(42, "shares", max_scale=4), Decimal("42"))
+        self.assertEqual(validate_financial_decimal(Decimal("-0.00"), "shares", max_scale=4), Decimal("0.00"))
+
+        invalid_inputs = [
+            (True, 4),
+            (False, 4),
+            (12.34, 4),
+            (float("nan"), 4),
+            (float("inf"), 4),
+            (Decimal("NaN"), 4),
+            (Decimal("Infinity"), 4),
+            (Decimal("-Infinity"), 4),
+            (Decimal("-0.01"), 4),
+            (Decimal("0.12345"), 4),
+            (Decimal("10.999"), 2),
+            ("0.12345", 4),
+            (" 10.5", 4),
+            ("10.5 ", 4),
+            ("1e-3", 4),
+            ("007.5", 4),
+            (".5", 4),
+            ("5.", 4),
+            ("NaN", 4),
+            ("", 4),
+            (None, 4),
+            (Decimal("1" * 29), 4),
+        ]
+        for bad_val, scale in invalid_inputs:
+            with self.assertRaises(PersistenceValidationError, msg=f"Should reject {bad_val!r} at scale={scale}"):
+                validate_financial_decimal(bad_val, "test_field", max_scale=scale)
+
+        with self.assertRaises(PersistenceValidationError):
+            validate_financial_decimal("0", "shares", max_scale=4, allow_zero=False)
+
+        raw_json = serialize_json_with_exact_decimals({
+            "shares": Decimal("12.3456"),
+            "wac": Decimal("123.4567"),
+            "unallocated_cash_eur": Decimal("1000.55"),
+        })
+        parsed = json.loads(raw_json, parse_float=Decimal)
+        self.assertEqual(parsed["shares"], Decimal("12.3456"))
+        self.assertEqual(parsed["wac"], Decimal("123.4567"))
+        self.assertEqual(parsed["unallocated_cash_eur"], Decimal("1000.55"))
+
+    def test_exact_decimal_round_trip_both_adapters(self):
+        """Both adapters preserve exact 4-decimal share/WAC and 2-decimal cash values without float drift."""
+        for adapter in (self.json_adapter, self.sqlite_adapter):
+            with execution_role_context("Terminal Orchestrator"):
+                adapter.save_portfolio_basket(
+                    portfolio=[{"ticker": "NVDA", "shares": Decimal("12.3456"), "wac": Decimal("123.4567")}],
+                    unallocated_cash_eur=Decimal("1000.55"),
+                    unallocated_cash_usd=Decimal("1080.59"),
+                )
+                basket = adapter.get_portfolio_basket()
+                self.assertEqual(basket["portfolio"][0]["shares"], Decimal("12.3456"))
+                self.assertEqual(basket["portfolio"][0]["wac"], Decimal("123.4567"))
+                self.assertEqual(basket["unallocated_cash_eur"], Decimal("1000.55"))
+                self.assertEqual(basket["unallocated_cash_usd"], Decimal("1080.59"))
+
+    def test_sqlite_composite_ssot_update_single_uow_rolls_back_all_on_substep_failure(self):
+        """Failure in decision_log or trade_lessons during SQLite update_ssot_payload rolls back portfolio/cash and earlier writes."""
+        with execution_role_context("Terminal Orchestrator"):
+            self.sqlite_adapter.save_portfolio_basket(
+                portfolio=[{"ticker": "SPY", "shares": Decimal("5"), "wac": Decimal("500.00")}],
+                unallocated_cash_eur=Decimal("2000.00"),
+                unallocated_cash_usd=Decimal("2160.00"),
+            )
+
+            composite_payload = {
+                "mutable_state": {
+                    "portfolio_snapshot": [
+                        {"ticker": "NVDA", "shares": "12.3456", "wac": "123.4567", "trade_state": "BUY"}
+                    ],
+                    "unallocated_cash_eur": "500.25",
+                    "unallocated_cash_usd": "540.27",
+                },
+                "decision_log_entry": {
+                    "session_id": "sess_composite_fail",
+                    "ticker": "NVDA",
+                    "action_proposed": "BUY",
+                    "decision_outcome": "APPROVED",
+                    "timestamp_utc": "2026-11-16T12:00:00Z",
+                },
+                "trade_lessons": [{"rule": "L-777: Never split composite transactions"}],
+            }
+
+            # 1. Decision log failure rolls back portfolio/cash update
+            with patch(
+                "python.database.repositories.governance.DecisionLogRepository.append_decision",
+                side_effect=RuntimeError("Simulated decision_log failure"),
+            ):
+                with self.assertRaises(PersistenceError):
+                    self.sqlite_adapter.update_ssot_payload(composite_payload)
+
+            basket_after_dl_fail = self.sqlite_adapter.get_portfolio_basket()
+            self.assertEqual(basket_after_dl_fail["portfolio"][0]["ticker"], "SPY")
+            self.assertEqual(basket_after_dl_fail["unallocated_cash_eur"], Decimal("2000.00"))
+            self.assertEqual(self.sqlite_adapter.get_decision_log(), [])
+            self.assertEqual(self.sqlite_adapter.get_trade_lessons(), [])
+
+            # 2. Trade lessons failure rolls back BOTH portfolio/cash AND decision_log insert
+            with patch(
+                "python.database.repositories.governance.TradeLessonRepository.upsert_lesson",
+                side_effect=RuntimeError("Simulated trade_lesson failure"),
+            ):
+                with self.assertRaises(PersistenceError):
+                    self.sqlite_adapter.update_ssot_payload(composite_payload)
+
+            basket_after_tl_fail = self.sqlite_adapter.get_portfolio_basket()
+            self.assertEqual(basket_after_tl_fail["portfolio"][0]["ticker"], "SPY")
+            self.assertEqual(basket_after_tl_fail["unallocated_cash_eur"], Decimal("2000.00"))
+            self.assertEqual(self.sqlite_adapter.get_decision_log(), [])
+            self.assertEqual(self.sqlite_adapter.get_trade_lessons(), [])
+
+            # 3. Valid composite update commits portfolio/cash, decision_log, and trade_lessons atomically
+            res = self.sqlite_adapter.update_ssot_payload(composite_payload)
+            self.assertEqual(res["status"], "success")
+            basket_ok = self.sqlite_adapter.get_portfolio_basket()
+            self.assertEqual(basket_ok["portfolio"][0]["ticker"], "NVDA")
+            self.assertEqual(basket_ok["portfolio"][0]["shares"], Decimal("12.3456"))
+            self.assertEqual(basket_ok["unallocated_cash_eur"], Decimal("500.25"))
+            self.assertEqual(len(self.sqlite_adapter.get_decision_log()), 1)
+            self.assertEqual(self.sqlite_adapter.get_decision_log()[0]["ticker"], "NVDA")
+            self.assertEqual(len(self.sqlite_adapter.get_trade_lessons()), 1)
+            self.assertEqual(self.sqlite_adapter.get_trade_lessons()[0]["rule_code"], "L-777")
+
+    def test_json_composite_ssot_update_rolls_back_earlier_files_on_failure(self):
+        """Failure in decision_log or trade_lessons during JSON update_ssot_payload restores all prior file bytes."""
+        initial_ssot = {
+            "mutable_state": {
+                "portfolio_snapshot": [{"ticker": "SPY", "shares": "5", "wac": "500.00"}],
+                "unallocated_cash_eur": "2000.00",
+                "unallocated_cash_usd": "2160.00",
+            }
+        }
+        initial_decisions = [{"session_id": "orig", "ticker": "SPY"}]
+        initial_lessons = [{"id": 1, "rule": "L-001: Baseline rule"}]
+        with open(self.json_adapter.ssot_path, "w", encoding="utf-8") as f:
+            json.dump(initial_ssot, f)
+        with open(self.json_adapter.decision_log_path, "w", encoding="utf-8") as f:
+            json.dump(initial_decisions, f)
+        with open(self.json_adapter.trade_lessons_path, "w", encoding="utf-8") as f:
+            json.dump(initial_lessons, f)
+
+        with open(self.json_adapter.ssot_path, "rb") as f:
+            ssot_bytes_before = f.read()
+        with open(self.json_adapter.decision_log_path, "rb") as f:
+            dl_bytes_before = f.read()
+        with open(self.json_adapter.trade_lessons_path, "rb") as f:
+            tl_bytes_before = f.read()
+
+        composite_payload = {
+            "mutable_state": {
+                "portfolio_snapshot": [
+                    {"ticker": "NVDA", "shares": "12.3456", "wac": "123.4567", "trade_state": "BUY"}
+                ],
+                "unallocated_cash_eur": "500.25",
+                "unallocated_cash_usd": "540.27",
+            },
+            "trade_lessons": [{"rule": "L-888: Atomic rollback works"}],
+        }
+
+        with execution_role_context("Terminal Orchestrator"):
+            # 1. Inject failure in decision log after ssot.json was updated -> ssot.json must be restored byte-for-byte
+            with patch.object(
+                self.json_adapter,
+                "append_decision_log",
+                side_effect=PersistenceError("Simulated JSON decision log failure"),
+            ):
+                with self.assertRaises(PersistenceError):
+                    self.json_adapter.update_ssot_payload(composite_payload)
+
+            with open(self.json_adapter.ssot_path, "rb") as f:
+                self.assertEqual(f.read(), ssot_bytes_before)
+            with open(self.json_adapter.decision_log_path, "rb") as f:
+                self.assertEqual(f.read(), dl_bytes_before)
+            with open(self.json_adapter.trade_lessons_path, "rb") as f:
+                self.assertEqual(f.read(), tl_bytes_before)
+
+            # 2. Inject failure in trade_lessons after BOTH ssot.json and decision_log.json were updated -> BOTH must roll back
+            with patch.object(
+                self.json_adapter,
+                "save_trade_lessons",
+                side_effect=PersistenceError("Simulated JSON trade lessons failure"),
+            ):
+                with self.assertRaises(PersistenceError):
+                    self.json_adapter.update_ssot_payload(composite_payload)
+
+            with open(self.json_adapter.ssot_path, "rb") as f:
+                self.assertEqual(f.read(), ssot_bytes_before)
+            with open(self.json_adapter.decision_log_path, "rb") as f:
+                self.assertEqual(f.read(), dl_bytes_before)
+            with open(self.json_adapter.trade_lessons_path, "rb") as f:
+                self.assertEqual(f.read(), tl_bytes_before)
+
+            # 3. Valid composite payload updates all three files cleanly
+            res = self.json_adapter.update_ssot_payload(composite_payload)
+            self.assertEqual(res["status"], "success")
+            basket = self.json_adapter.get_portfolio_basket()
+            self.assertEqual(basket["portfolio"][0]["ticker"], "NVDA")
+            self.assertEqual(basket["portfolio"][0]["shares"], Decimal("12.3456"))
+            self.assertEqual(len(self.json_adapter.get_decision_log()), 2)
+            self.assertEqual(len(self.json_adapter.get_trade_lessons()), 2)
 
 
 if __name__ == "__main__":
