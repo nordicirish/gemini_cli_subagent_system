@@ -36,3 +36,5 @@ Read this before acting. It records the current architecture, settled decisions,
 - Always declare `Live Browser Mode`, `Screenshot Mode` (`node scripts/verify_dashboard_ui.js --url http://127.0.0.1:8000`), or `Static Fallback Mode` (`npm run test:dashboard` + `npm run test:sanitizer`).
 ### design-subagent
 - Benchmark TradingView, Yahoo Finance, Finviz, Koyfin, and Linear; convert concepts into zero-dependency vanilla JS + CSS tokens without touching Protocol 06 trading logic.
+### rules-steward-subagent
+- ON-DEMAND, strictly read-only: audit `gem_trading_rules/rules.md` (~215 KB) and `engine_instructions/*.md` (~183 KB) against `MAX_AGY_STDIN_BYTES` (90 KB), `DATA_PACKET` schema parity, and top-loaded Alerts/Recommendations structure; return Class A / Class B proposals for explicit Owner approval.

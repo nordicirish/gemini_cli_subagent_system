@@ -31,6 +31,7 @@ The governance hierarchy is structured into three strictly isolated tiers:
 │ • Independent Reviewer          │             │ • Context & Review Engines      │
 │ • Browser Verification Auditor  │             └────────────────┬────────────────┘
 │ • Design / UI Proposer (Demand) │                              │
+│ • Rules & Instruction Steward   │                              │
 └────────────────┬────────────────┘                              │
                  │     STRICT SEPARATION: ZERO LEAKAGE           │
                  └───────────────────X───────────────────────────┘
@@ -55,7 +56,7 @@ A fundamental architectural boundary is enforced between **Engineering Agents** 
 
 | Domain | Allowed Agents | Authority Scope | Forbidden Actions |
 |---|---|---|---|
-| **Engineering & Maintenance** | Architecture Agent, Python Engineer, Security Agent, Testing Agent, Documentation Agent, Independent Reviewer, Browser Auditor, Design/UI Proposer | Code quality, tests, security boundaries, live UI verification, benchmarking mockups, documentation, bug fixes | **CANNOT** alter trading rules, portfolio allocations, position sizing, risk thresholds, or SSoT financial records. |
+| **Engineering & Maintenance** | Architecture Agent, Python Engineer, Security Agent, Testing Agent, Documentation Agent, Independent Reviewer, Browser Auditor, Design/UI Proposer, Rules Steward | Code quality, tests, security boundaries, live UI verification, benchmarking mockups, read-only rules/instruction audits, documentation | **CANNOT** alter trading rules, portfolio allocations, position sizing, risk thresholds, or SSoT financial records without explicit Owner approval. |
 | **Investment Council** | Terminal Orchestrator, Bullish Advocate, Red Team Pessimist, Macro Sentinel, etc. | Market analysis, regime detection, catalyst scrutiny, portfolio rebalancing proposals | **CANNOT** execute host shell commands, alter application code, or bypass runtime security controls. |
 
 ---
@@ -72,6 +73,7 @@ Canonical role rules live in `docs/agents/*.md`, and runtime metadata lives in [
 6. **Independent Reviewer (`docs/agents/independent-reviewer.md`):** Read-only diff audit, `Protocol 01-06` compliance, Two-Pass Acceptance Cap verdicts.
 7. **Browser & Visual Verification Auditor (`docs/agents/browser-agent.md`):** Read-only live/headless verification of `http://127.0.0.1:8000` (`Live Browser Mode`, `Screenshot Mode` via `scripts/verify_dashboard_ui.js`, or `Static Fallback Mode`).
 8. **Design / Trading UI Researcher (`docs/agents/design-agent.md`, ON-DEMAND ONLY):** Researches TradingView, Yahoo Finance, Finviz, Koyfin, and Linear UX patterns, producing sanitized vanilla HTML/CSS mockups for mandatory Human Owner approval.
+9. **Trading Rules & Council Instruction Steward (`docs/agents/rules-steward-agent.md`, ON-DEMAND ONLY):** Read-only auditor checking `gem_trading_rules/rules.md` and `engine_instructions/*.md` for contradictions, `DATA_PACKET` schema parity, 90 KB stdin compaction survival, and top-loaded output formatting, returning Class A / Class B proposals for explicit Owner sign-off.
 
 ---
 

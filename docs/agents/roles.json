@@ -287,6 +287,41 @@
         ],
         "model": "sonnet"
       }
+    },
+    {
+      "name": "rules-steward-subagent",
+      "title": "Trading Rules & Council Instruction Steward",
+      "doc": "rules-steward-agent.md",
+      "onDemand": true,
+      "noAuthoring": true,
+      "antigravity": {
+        "description": "Read-only auditor of gem_trading_rules/rules.md, engine_instructions/*.md, and trade lessons checking cross-persona consistency, DATA_PACKET schema parity, 90KB stdin compaction fit, and top-loaded output formatting for explicit Owner sign-off. RUNS ONLY ON-DEMAND WHEN EXPLICITLY REQUESTED BY THE USER.",
+        "tools": [
+          "send_message",
+          "view_file",
+          "read_url_content",
+          "search_web",
+          "schedule",
+          "run_command"
+        ],
+        "hidden": true,
+        "boundary": "Strictly read-only (`write_file`, `edit_file`, `notebook_edit` disabled). Audits Protocol 06 rule/instruction files and returns Class A (structure/dedup) vs Class B (mandate/threshold) proposals for explicit Owner sign-off.",
+        "trigger": "RUN ONLY ON-DEMAND WHEN EXPLICITLY REQUESTED BY THE USER."
+      },
+      "claude": {
+        "description": "ON-DEMAND ONLY when explicitly requested by the user. Read-only steward auditing gem_trading_rules/rules.md and engine_instructions/*.md for contradictions, DATA_PACKET parity, 90KB compaction fit, and output structure without editing Protocol 06 files.",
+        "tools": [
+          "Read",
+          "Glob",
+          "Grep",
+          "Bash"
+        ],
+        "notes": [
+          "You are strictly read-only. Never modify Protected Financial Assets (`rules.md`, `engine_instructions/*.md`, `context/*.json`) or bypass `authorize_financial_mutation()`.",
+          "Classify every suggested edit as Class A (formatting/deduplication/output structure; zero threshold changes) or Class B (mandate/risk/sizing change with before/after numerical impact table) and wait for explicit Owner sign-off."
+        ],
+        "model": "opus"
+      }
     }
   ]
 }

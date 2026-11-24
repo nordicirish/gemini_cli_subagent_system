@@ -42,7 +42,13 @@ class TestAgenticManifestsAndCeilings(unittest.TestCase):
     def test_no_authoring_roles_expose_zero_write_tools_in_both_runtimes(self):
         registry = sync_agent_manifests.load_registry(ROOT)
         by_name = {r["name"]: r for r in registry["roles"]}
-        for ro_role in ("architecture-subagent", "security-subagent", "independent-reviewer-subagent", "browser-subagent"):
+        for ro_role in (
+            "architecture-subagent",
+            "security-subagent",
+            "independent-reviewer-subagent",
+            "browser-subagent",
+            "rules-steward-subagent",
+        ):
             self.assertIn(ro_role, by_name)
             self.assertTrue(by_name[ro_role]["noAuthoring"])
             for rt, forbidden in sync_agent_manifests.AUTHORING_TOOLS.items():
@@ -56,6 +62,21 @@ class TestAgenticManifestsAndCeilings(unittest.TestCase):
         self.assertTrue(design["onDemand"])
         self.assertIn("ON-DEMAND", design["antigravity"]["description"])
         self.assertIn("ON-DEMAND", design["claude"]["description"])
+
+    def test_rules_steward_subagent_is_read_only_and_on_demand(self):
+        registry = sync_agent_manifests.load_registry(ROOT)
+        by_name = {r["name"]: r for r in registry["roles"]}
+        steward = by_name["rules-steward-subagent"]
+        self.assertTrue(steward["noAuthoring"])
+        self.assertTrue(steward["onDemand"])
+        self.assertIn("ON-DEMAND", steward["antigravity"]["description"])
+        self.assertIn("ON-DEMAND", steward["claude"]["description"])
+        ag_manifest = (ROOT / ".agents" / "agents" / "rules-steward-subagent" / "agent.md").read_text(encoding="utf-8")
+        cl_manifest = (ROOT / ".claude" / "agents" / "rules-steward-subagent.md").read_text(encoding="utf-8")
+        for forbidden in ("write_file", "edit_file", "notebook_edit", "Edit", "Write", "NotebookEdit"):
+            self.assertNotIn(f"- {forbidden}", ag_manifest)
+        self.assertNotIn("Edit", cl_manifest.split("---")[1])
+        self.assertNotIn("Write", cl_manifest.split("---")[1])
 
     def test_directive_byte_ceilings_and_project_state_line_limit(self):
         files = stage_gate.directive_files_to_check(ROOT)
