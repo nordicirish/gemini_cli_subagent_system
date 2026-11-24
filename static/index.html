@@ -6,7 +6,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.64">
+    <link rel="stylesheet" href="styles.css?v=18.65">
     <link rel="stylesheet" href="modern_ui.css?v=18.59">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
@@ -226,8 +226,8 @@
                 <!-- Key-Level Triggers & Free-Tier Sentinel Panel -->
                 <div class="sidebar-card glass-panel manager-card desktop-only">
                     <div class="header-row">
-                        <h3 onclick="toggleSection('alerts-manager-content', this)">
-                            <span class="icon">🔔</span> Key-Level Triggers <span id="alerts-active-count" class="alerts-count-pill">0</span> <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block;">▼</span>
+                        <h3 onclick="toggleSection('alerts-manager-content', this)" style="white-space: nowrap;">
+                            <span class="icon">🔔</span> Key Triggers <span id="alerts-active-count" class="alerts-count-pill">0</span> <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block;">▼</span>
                         </h3>
                     </div>
                     <div id="alerts-manager-content">
@@ -235,21 +235,25 @@
                             <span class="empty-msg">No active triggers armed.</span>
                         </div>
                         <div class="alert-quick-add">
-                            <input type="text" id="alert-ticker-input" placeholder="TICKER" maxlength="10" style="width: 64px; text-transform: uppercase;">
-                            <select id="alert-metric-select" title="Metric">
-                                <option value="price">Price</option>
-                                <option value="rsi">RSI</option>
-                                <option value="rvol">rVol</option>
-                                <option value="session_change_pct">Chg%</option>
-                            </select>
-                            <select id="alert-op-select" title="Condition">
-                                <option value="crosses_above">Cross ↑</option>
-                                <option value="crosses_below">Cross ↓</option>
-                                <option value=">=">&gt;=</option>
-                                <option value="<=">&lt;=</option>
-                            </select>
-                            <input type="number" id="alert-target-input" placeholder="Level" step="0.01" style="flex: 1; min-width: 60px;">
-                            <button id="add-alert-rule-btn" type="button" class="glow-btn outline mini" title="Arm Trigger">+</button>
+                            <div class="alert-quick-row">
+                                <input type="text" id="alert-ticker-input" placeholder="TICKER" maxlength="10" style="width: 68px; flex: 0 0 auto; text-transform: uppercase;">
+                                <select id="alert-metric-select" title="Metric" style="flex: 1; min-width: 0;">
+                                    <option value="price">Price</option>
+                                    <option value="rsi">RSI</option>
+                                    <option value="rvol">rVol</option>
+                                    <option value="session_change_pct">Chg%</option>
+                                </select>
+                                <select id="alert-op-select" title="Condition" style="flex: 1; min-width: 0;">
+                                    <option value="crosses_above">Cross ↑</option>
+                                    <option value="crosses_below">Cross ↓</option>
+                                    <option value=">=">&gt;=</option>
+                                    <option value="<=">&lt;=</option>
+                                </select>
+                            </div>
+                            <div class="alert-quick-row">
+                                <input type="number" id="alert-target-input" placeholder="Target level" step="0.01" style="flex: 1; min-width: 0;">
+                                <button id="add-alert-rule-btn" type="button" class="alert-action-btn" title="Arm Trigger">+ Arm</button>
+                            </div>
                         </div>
 
                         <div class="sentinel-control-box">
@@ -258,18 +262,18 @@
                                 <button id="sentinel-toggle-btn" type="button" class="sentinel-toggle-btn" aria-pressed="false">OFF</button>
                             </div>
                             <div class="sentinel-config-row">
-                                <select id="sentinel-provider-select" title="Model Provider">
+                                <select id="sentinel-provider-select" title="Model Provider" style="flex: 1; min-width: 0;">
                                     <option value="gemini_free">Gemini Free Tier</option>
                                     <option value="auto">Auto (Free → Local)</option>
                                     <option value="antigravity">Local Antigravity</option>
                                 </select>
-                                <select id="sentinel-interval-select" title="Check Cadence">
+                                <select id="sentinel-interval-select" title="Check Cadence" style="width: 64px; flex: 0 0 auto;">
                                     <option value="300">5m</option>
                                     <option value="600" selected>10m</option>
                                     <option value="900">15m</option>
                                 </select>
-                                <button id="sentinel-run-now-btn" type="button" class="glow-btn outline mini" title="Run Sentinel Trigger Tune Now">Tune</button>
                             </div>
+                            <button id="sentinel-run-now-btn" type="button" class="alert-action-btn full" title="Run Sentinel Trigger Tune Now">⚡ Tune Triggers Now</button>
                             <div id="sentinel-status-text" class="sentinel-status-meta">Sentinel idle (Free Tier fallback ready)</div>
                         </div>
                         <div id="alerts-panel-status" class="status-message inline-feedback" style="margin-top: 6px;"></div>
@@ -413,6 +417,7 @@
                         </div>
                     </div>
 
+                    <button id="update-analysis-btn" title="Run fresh Council market & portfolio analysis" style="background:rgba(56,189,248,0.14);border:1px solid rgba(56,189,248,0.38);color:#7dd3fc;padding:0 12px;height:34px;border-radius:8px;cursor:pointer;font-size:0.78rem;font-weight:600;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span>🔄</span> UPDATE ANALYSIS</button>
                     <button id="new-chat-btn" title="New Conversation" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:white;padding:0 14px;height:34px;border-radius:8px;cursor:pointer;font-size:0.78rem;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span>+</span> NEW</button>
                     <button id="history-chat-btn" title="History" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:white;padding:0 14px;height:34px;border-radius:8px;cursor:pointer;font-size:0.78rem;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span>📂</span> SESSIONS</button>
                     <button class="modern-ctrl-btn" id="chat-close-btn">×</button>
@@ -489,7 +494,7 @@
     <div id="offscreen-chart-container" style="position: fixed; left: -9999px; top: -9999px; width: 920px; height: 500px; opacity: 0; pointer-events: none;"></div>
 
     <script src="portfolio.js?v=18.61"></script>
-    <script src="app.js?v=18.66"></script>
-    <script src="modern_ui.js?v=18.62"></script>
+    <script src="app.js?v=18.67"></script>
+    <script src="modern_ui.js?v=18.63"></script>
 </body>
 </html>

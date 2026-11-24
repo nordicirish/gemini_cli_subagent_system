@@ -147,9 +147,16 @@ class TestAlertMonitor(unittest.TestCase):
         ### Actionable Recommendations
         - Watch UMAC breakout above $9.48 on volume.
         - Hold AMZN unless stop below $250.50 hits; keep $1000 cash buffer.
+        - Rule L-01 and P/L stop below $8.75 or SL below $8.75 should never arm bogus symbols.
         """
         inferred = extract_triggers_from_chat(prose, known_tickers={"UMAC", "AMZN"})
         self.assertEqual({(t["ticker"], t["op"], t["target"]) for t in inferred}, {("UMAC", ">=", 9.48), ("AMZN", "<=", 250.5)})
+
+        inferred_no_whitelist = extract_triggers_from_chat(
+            "Rule L-01 and P/L stop below $8.75 or SL below $8.75",
+            known_tickers=None,
+        )
+        self.assertEqual(inferred_no_whitelist, [])
 
 
 class TestAlertSentinelFallbackAndPrivacy(unittest.TestCase):

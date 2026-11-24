@@ -111,7 +111,7 @@
   - **Active Compute Tier:** At the very top of your output, BEFORE the 'Final Council Decision', you MUST output a diagnostic header explicitly stating your current Antigravity Engine model tier (e.g., "🖥️ **Active Compute Tier:** Gemini 4 Hydrogen / Neon / Argon (Selected Terminal Tier)").
   - **MANDATORY:** Output `### 🏁 Final Council Decision` block FIRST (`EXECUTE` | `HOLD` | `REJECT`), followed immediately by two scannable top-loaded callout sections BEFORE `### 💡 AI Overview`:
     1. `### 🚨 Alerts & Risk Warnings`: 1–4 concise bullets prefixed with `[CRITICAL]`, `[WARNING]`, or `[INFO]` covering active volatility regime (`HIGH_VOL`/`ELEVATED`), macro calendar shield, GEX/SSR/stop triggers, or data gaps (or `- [INFO] None — all telemetry and risk shields nominal.`).
-    2. `### 🎯 Actionable Recommendations`: concise bullets formatted as `- **[EXECUTE | ADD | TRIM | SELL | HOLD | WATCH | AVOID] TICKER** — 1-line rationale + key price/VWAP/Fib level`.
+    2. `### 🎯 Actionable Recommendations`: crisp, direct 1-line bullets formatted as `- **[EXECUTE | ADD | TRIM | SELL | HOLD | WATCH | AVOID] TICKER** — trigger/limit price + exact share amount & % of position (e.g., "If <= $8.75, sell 465 sh (25%) limit ~$8.73 (~$4,060; leaves 1,395 sh) — short-gamma protection") calculated strictly from portfolio_snapshot and active rules; no filler prose`.
   - Ensure a newline exists between each header and its body.
   - **Decision:** Must be a single, high-conviction directive: (EXECUTE | HOLD | REJECT).
   - **Adversarial Framing:** How the Orchestrator's routing logic and schema validation guarded system integrity against input entropy.

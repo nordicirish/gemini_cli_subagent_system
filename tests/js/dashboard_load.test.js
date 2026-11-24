@@ -193,9 +193,16 @@ async function main() {
         assert(pltrFib.textContent.includes('HOD Cap: $144.00'), `expected HOD Cap subtitle, got: ${pltrFib.textContent}`);
         assert(pltrFib.textContent.includes('Pullback'), 'expected Pullback status pill');
     });
-    check('chat boots and market table polls', () => {
-        assert(calls.includes('POST /api/chat'), 'boot chat turn not sent');
+    check('chat skips auto-boot on load and market table polls', () => {
+        assert(!calls.includes('POST /api/chat'), 'chat should not auto-boot on page load');
         assert(calls.includes('GET /api/data'), 'market data not polled');
+    });
+    const updateAnalysisBtn = window.document.getElementById('update-analysis-btn');
+    if (updateAnalysisBtn) updateAnalysisBtn.click();
+    await new Promise((r) => setTimeout(r, 80));
+    check('Update Analysis button runs Council briefing on demand', () => {
+        assert(updateAnalysisBtn, 'update-analysis-btn missing');
+        assert(calls.includes('POST /api/chat'), 'Update Analysis click did not trigger POST /api/chat');
     });
     check('Package A: regime pill, ticker-first macro HUD, and collapsible tools sidebar', () => {
         const pill = window.document.getElementById('volatility-regime-pill');

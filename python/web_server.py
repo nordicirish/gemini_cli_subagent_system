@@ -1270,13 +1270,18 @@ def chat_endpoint(req: ChatRequest):
             # Auto-arm AI-identified key-level alert triggers (never from halted/vetoed turns)
             if payload_result is None or payload_result.get("state") != "skipped":
                 try:
-                    from fetch_stocks import get_global_state_snapshot
-                    snap_tickers = get_global_state_snapshot().get("tickers", [])
+                    import fetch_stocks
+                    snap_tickers = fetch_stocks.get_global_state_snapshot().get("tickers", [])
                     known_tickers = {
                         str(t.get("ticker")).strip().upper()
                         for t in snap_tickers
                         if isinstance(t, dict) and t.get("ticker")
                     }
+                    known_tickers.update(
+                        str(t).strip().upper()
+                        for t in (list(getattr(fetch_stocks, "ALL_TICKERS", []) or []) + list(getattr(fetch_stocks, "TICKERS", []) or []))
+                        if str(t).strip()
+                    )
                     extracted_triggers = extract_triggers_from_chat(
                         full_response_original,
                         raw_payload_json=raw_payload_json,

@@ -518,6 +518,13 @@ def _extract_json_triggers(parsed: Any, out: List[Dict[str, Any]]) -> None:
                         out.append(item)
 
 
+_PROSE_NON_TICKERS: Set[str] = {
+    "A", "I", "L", "P", "S", "T", "SL", "TP", "PT", "VWAP", "RSI", "ATR", "HOD", "LOD",
+    "USD", "EUR", "GEX", "MACD", "RVOL", "EMA", "SMA", "HOLD", "BUY", "SELL", "TRIM",
+    "EXIT", "WAIT", "STOP",
+}
+
+
 def extract_triggers_from_chat(
     response_text: str,
     raw_payload_json: Optional[str] = None,
@@ -572,7 +579,7 @@ def extract_triggers_from_chat(
     if allowed_tickers:
         sym_pat = "|".join(re.escape(s) for s in sorted(allowed_tickers, key=len, reverse=True))
     else:
-        sym_pat = r"[A-Z]{1,6}"
+        sym_pat = r"[A-Z]{2,5}"
 
     up_re = re.compile(
         rf"\b(?P<sym>{sym_pat})\b[^\n]{{0,60}}?(?i:reclaim|breakout(?:\s+above)?|above|resistance(?:\s+near|\s+at)?|trim[^\n]{{0,20}}?near)\s*(?i:>=|>|at|near)?\s*\$(?P<price>\d+(?:\.\d{{1,2}})?)",
@@ -589,6 +596,8 @@ def extract_triggers_from_chat(
         ):
             for m in regex.finditer(clean_line):
                 sym = m.group("sym").upper()
+                if sym in _PROSE_NON_TICKERS and (allowed_tickers is None or sym not in allowed_tickers):
+                    continue
                 if allowed_tickers is not None and sym not in allowed_tickers:
                     continue
                 price_val = _safe_float(m.group("price"))

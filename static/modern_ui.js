@@ -54,7 +54,7 @@ const ModernChat = {
     messages: null,
     sendBtn: null,
     
-    BOOT_PROMPT: 'SYSTEM BOOT: Execute the full Stage 0 Council Boot Sequence. Using the live DATA_PACKET just injected: (1) Baseline sync — ground all portfolio prices. (2) Cash reconciliation. (3) Regime classification. (4) Portfolio health audit. (5) Market posture assessment. Output structure: open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE detailed analysis.',
+    BOOT_PROMPT: 'SYSTEM BOOT: Execute the full Stage 0 Council Boot Sequence. Using the live DATA_PACKET just injected: (1) Baseline sync — ground all portfolio prices. (2) Cash reconciliation. (3) Regime classification. (4) Portfolio health audit. (5) Market posture assessment. Output structure: open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE detailed analysis. For every TRIM/SELL/BUY/STOP recommendation, keep it to 1 direct line stating exact trigger/limit price, exact share count and % of position to trade (plus remaining shares and est. USD value), computed from portfolio_snapshot.',
 
     // Quick-prompt definitions (6 core actions — log/execute handled automatically)
     QUICK_PROMPTS: [
@@ -70,21 +70,21 @@ const ModernChat = {
             label: 'Market Analysis',
             id: 'qp-analysis',
             tooltip: 'Evaluate risk regime, dealer posture, and macro signals to determine top priorities.',
-            prompt: 'SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION. Using the live DATA_PACKET just injected, evaluate risk regime, dealer posture shifts, VIX/VIXY/IEF signals, and score movements. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations (top-3 priority actions) BEFORE detailed analysis.'
+            prompt: 'SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION. Using the live DATA_PACKET just injected, evaluate risk regime, dealer posture shifts, VIX/VIXY/IEF signals, and score movements. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations (top-3 priority actions) BEFORE detailed analysis. For every TRIM/SELL/BUY/STOP recommendation, keep it to 1 direct line stating exact trigger/limit price, exact share count and % of position to trade (plus remaining shares and est. USD value), computed from portfolio_snapshot.'
         },
         {
             icon: '🔍',
             label: 'Audit Portfolio',
             id: 'qp-audit-portfolio',
             tooltip: 'Deep audit of all active positions against trading rules, limits, and cash allocation.',
-            prompt: 'SYSTEM DIRECTIVE: AUDIT & PORTFOLIO REVIEW. Using the live DATA_PACKET just injected, perform a full portfolio audit: (1) Check all positions against gem_trading_rules, concentration limits, and cash allocation. (2) Conduct a deep portfolio analysis and provide Trim/Hold/Add recommendations for each held ticker with supporting evidence. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE detailed audit commentary.'
+            prompt: 'SYSTEM DIRECTIVE: AUDIT & PORTFOLIO REVIEW. Using the live DATA_PACKET just injected, perform a full portfolio audit: (1) Check all positions against gem_trading_rules, concentration limits, and cash allocation. (2) Conduct a deep portfolio analysis and provide Trim/Hold/Add recommendations for each held ticker with supporting evidence. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE detailed audit commentary. For every TRIM/SELL/BUY/STOP recommendation, keep it to 1 direct line stating exact trigger/limit price, exact share count and % of position to trade (plus remaining shares and est. USD value), computed from portfolio_snapshot.'
         },
         {
             icon: '⚖️',
             label: 'Risk Regime',
             id: 'qp-risk',
             tooltip: 'Assess macro risk indicators to declare the current regime and risk posture.',
-            prompt: 'SYSTEM DIRECTIVE: RISK REGIME ASSESSMENT. Using the live DATA_PACKET just injected, run a full macro risk assessment based on VIX, VIXY, IEF, and SPY. Declare the current regime and risk posture with entry/exit implications. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE supporting commentary.'
+            prompt: 'SYSTEM DIRECTIVE: RISK REGIME ASSESSMENT. Using the live DATA_PACKET just injected, run a full macro risk assessment based on VIX, VIXY, IEF, and SPY. Declare the current regime and risk posture with entry/exit implications. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE supporting commentary. For every TRIM/SELL/BUY/STOP recommendation, keep it to 1 direct line stating exact trigger/limit price, exact share count and % of position to trade (plus remaining shares and est. USD value), computed from portfolio_snapshot.'
         },
         {
             icon: '🎯',
@@ -92,7 +92,7 @@ const ModernChat = {
             id: 'qp-scout',
             tooltip: 'Deep dive research on all tickers in your Watchlist — entry signals, risk/reward, and regime alignment.',
             watchlistOnly: true,  // hidden when watchlist is empty
-            prompt: 'SYSTEM DIRECTIVE: DEEP DIVE WATCHLIST RESEARCH. Using the live DATA_PACKET just injected, perform a deep-dive research analysis on ALL tickers currently in the Watchlist section. For each ticker: (1) Assess technical setup, RSI, ATR%, GEX posture and trend. (2) Score risk/reward vs. current regime. (3) Provide a clear entry/avoid recommendation with supporting evidence. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE per-ticker breakdown.'
+            prompt: 'SYSTEM DIRECTIVE: DEEP DIVE WATCHLIST RESEARCH. Using the live DATA_PACKET just injected, perform a deep-dive research analysis on ALL tickers currently in the Watchlist section. For each ticker: (1) Assess technical setup, RSI, ATR%, GEX posture and trend. (2) Score risk/reward vs. current regime. (3) Provide a clear entry/avoid recommendation with supporting evidence. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE per-ticker breakdown. For every TRIM/SELL/BUY/STOP recommendation, keep it to 1 direct line stating exact trigger/limit price, exact share count and % of position to trade (plus remaining shares and est. USD value), computed from portfolio_snapshot.'
         },
         {
             icon: '📝',
@@ -113,6 +113,7 @@ const ModernChat = {
         this.stopBtn = document.getElementById('stop-chat-btn');
         this.newChatBtn = document.getElementById('new-chat-btn');
         this.historyBtn = document.getElementById('history-chat-btn');
+        this.updateAnalysisBtn = document.getElementById('update-analysis-btn');
         this.currentLogElement = null;
         this.currentThinkingId = null;
         this.activeTurnId = null;
@@ -127,6 +128,7 @@ const ModernChat = {
         if (this.stopBtn) this.stopBtn.onclick = () => this.stopMessage();
         if (this.newChatBtn) this.newChatBtn.onclick = () => this.startNewChat();
         if (this.historyBtn) this.historyBtn.onclick = () => this.showHistory();
+        if (this.updateAnalysisBtn) this.updateAnalysisBtn.onclick = () => this.runUpdateAnalysis();
 
         // --- Settings gear popover ---
         const gearBtn = document.getElementById('settings-gear-btn');
@@ -690,8 +692,7 @@ const ModernChat = {
             try {
                 await fetch('/api/reset_chat', { method: 'POST' });
             } catch (e) {}
-            // Automatically trigger boot
-            await this.triggerAutoBoot();
+            this._renderStandbyMessage();
         }
     },
 
@@ -793,25 +794,37 @@ const ModernChat = {
         }
     },
 
+    _renderStandbyMessage() {
+        this.messages.innerHTML = '';
+        this._renderedProposalIds = new Set();
+        this.appendMessage(
+            'ai',
+            'Council standing by. Click **🔄 UPDATE ANALYSIS** above (or a quick action below) to run a live briefing.',
+            false
+        );
+    },
+
     loadHistory() {
         // Always start clean — wipe any stale session from localStorage.
         // Old sessions are accessible via the SESSIONS archive button.
         localStorage.removeItem('gem_chat_history');
         this.saveHistory();
         this.updateTotalSessionCost();
-        this.triggerAutoBoot();
+        this._renderStandbyMessage();
         // Pending proposals live server-side and survive a page reload.
         this.loadPendingProposals();
     },
 
-    async triggerAutoBoot() {
-        this.messages.innerHTML = '';
-        this._renderedProposalIds = new Set();
-        this.appendMessage('ai', '⚡ **System Booting...** Running Stage 0 Council Sequence...', false);
-        
-        this._pendingDisplayLabel = '⚡ Session Auto-Boot';
-        this.input.value = this.BOOT_PROMPT;
+    async runUpdateAnalysis() {
+        if (this.activeAbortController || (this.sendBtn && this.sendBtn.disabled)) return;
+        this._renderedProposalIds = this._renderedProposalIds || new Set();
+        this._pendingDisplayLabel = '🔄 Update Analysis';
+        if (this.input) this.input.value = this.BOOT_PROMPT;
         await this.sendMessage();
+    },
+
+    async triggerAutoBoot() {
+        await this.runUpdateAnalysis();
     },
 
     saveHistory() {

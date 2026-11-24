@@ -1401,7 +1401,7 @@ function renderAlertRules(rules) {
         return `
             <div class="alert-rule-row${enabled ? '' : ' disabled'}" data-rule-id="${id}">
                 <div class="alert-rule-meta">
-                    <div class="alert-rule-title">
+                    <div class="alert-rule-title" title="${label}">
                         <span>${ticker}</span>
                         <span class="alert-source-pill ${src}">${src}</span>
                         <span>${label}</span>
