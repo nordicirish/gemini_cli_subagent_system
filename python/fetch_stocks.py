@@ -60,6 +60,13 @@ from types import MappingProxyType
 from atomic_io import atomic_write_json, atomic_read_json, atomic_update_json
 from audit_logger import redact_secrets
 from tool_registry import authorize_financial_mutation
+try:
+    from alert_monitor import ALERT_MONITOR
+except ImportError:
+    try:
+        from python.alert_monitor import ALERT_MONITOR
+    except ImportError:
+        ALERT_MONITOR = None
 from background_intelligence import (
     BackgroundIntelligenceCoordinator,
     BackgroundResultApplicator,
@@ -1106,7 +1113,10 @@ def sanitize_json_payload(obj):
 
 @app.get("/api/data")
 def get_data():
-    return JSONResponse(sanitize_json_payload(get_global_state_snapshot()))
+    snap = sanitize_json_payload(get_global_state_snapshot())
+    if ALERT_MONITOR is not None and isinstance(snap, dict):
+        snap["alerts"] = sanitize_json_payload(ALERT_MONITOR.get_dashboard_payload())
+    return JSONResponse(snap)
 
 @app.get("/api/tickers")
 def get_tickers():
@@ -7525,6 +7535,12 @@ def run_daemon():
                 status=status,
                 authoritative_state_error=authoritative_state_error,
             )
+            try:
+                if ALERT_MONITOR is not None:
+                    ALERT_MONITOR.evaluate_snapshot(data, market_status=status)
+                    final_output["alerts"] = ALERT_MONITOR.get_dashboard_payload()
+            except Exception as alert_err:
+                logger.warning(f"[AlertMonitor] Tick evaluation skipped: {alert_err}")
             publish_global_state_snapshot(final_output)
 
             wait_start = t_time.time()

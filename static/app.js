@@ -259,6 +259,7 @@ async function init() {
     await fetchWatchlist();
     await fetchScoutCategories();
     await fetchScoutConfig();
+    await fetchAlertsAndSentinel();
     // Google Drive sync disabled in this repo
     pollData();
     setInterval(pollData, 3000); // 3 sec polling
@@ -1051,18 +1052,33 @@ async function pollData() {
                 if(ief && ief.gap_percent < -0.15) {
                     alertsHtml += `<div class="alert-item warning">📉 BOND ALERT: YIELDS RISING</div>`;
                 }
+
+                const alertState = state.alerts || {};
+                const unackedEvents = Array.isArray(alertState.unacknowledged_events) ? alertState.unacknowledged_events : [];
+                unackedEvents.forEach((ev) => {
+                    const sev = (ev.severity === 'critical' || ev.severity === 'warning') ? ev.severity : 'info';
+                    const icon = sev === 'critical' ? '🚨' : (sev === 'warning' ? '⚠️' : '🔔');
+                    const evId = _escAlertHtml(ev.event_id || '');
+                    const evMsg = _escAlertHtml(ev.message || `${ev.ticker || ''} triggered`);
+                    alertsHtml += `<div class="alert-item ${sev}" data-event-id="${evId}"><span>${icon} ${evMsg}</span><button type="button" class="alert-dismiss-btn" onclick="ackAlertEvent('${evId}')" title="Acknowledge alert">&times;</button></div>`;
+                    _notifyNewAlertEvent(ev);
+                });
+
+                if (Array.isArray(alertState.rules)) {
+                    renderAlertRules(alertState.rules);
+                }
                 
                 if(alertsHtml) {
-                    if (alertsContent.innerHTML !== alertsHtml) {
+                    if (alertsContent && alertsContent.innerHTML !== alertsHtml) {
                         alertsContent.innerHTML = alertsHtml;
                     }
-                    topBar.classList.add('has-alerts');
+                    if (topBar) topBar.classList.add('has-alerts');
                 } else {
                     const emptyState = '<span class="empty-state">NO ACTIVE ALERTS</span>';
-                    if (alertsContent.innerHTML !== emptyState) {
+                    if (alertsContent && alertsContent.innerHTML !== emptyState) {
                         alertsContent.innerHTML = emptyState;
                     }
-                    topBar.classList.remove('has-alerts');
+                    if (topBar) topBar.classList.remove('has-alerts');
                 }
             }
 
@@ -1320,6 +1336,255 @@ window.toggleSection = toggleSection;
 window.toggleSidebarPanel = toggleSidebarPanel;
 window.copySessionReviewPayload = copySessionReviewPayload;
 window.runScout = runScout;
+
+// ─── Key-Level Triggers & Low-Power Sentinel Controllers ───
+const _seenAlertEventIds = new Set();
+let _alertRulesCache = [];
+let _sentinelStateCache = null;
+
+function _escAlertHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function _notifyNewAlertEvent(ev) {
+    if (!ev || !ev.event_id || _seenAlertEventIds.has(ev.event_id)) return;
+    _seenAlertEventIds.add(ev.event_id);
+    try {
+        if (typeof window.Notification === 'function' && window.Notification.permission === 'granted') {
+            new window.Notification(`GEM Alert: ${ev.ticker || 'Level'}`, { body: ev.message || ev.label || '' });
+        }
+    } catch (_) { /* ignore headless/jsdom notification errors */ }
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+            const ctx = new AudioCtx();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = ev.severity === 'critical' ? 880 : 660;
+            gain.gain.value = 0.04;
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.14);
+        }
+    } catch (_) { /* ignore audio context restrictions */ }
+}
+
+function renderAlertRules(rules) {
+    const container = document.getElementById('alerts-rules-container');
+    const countPill = document.getElementById('alerts-active-count');
+    const list = Array.isArray(rules) ? rules : [];
+    _alertRulesCache = list;
+    const activeCount = list.filter((r) => r.enabled !== false).length;
+    if (countPill) countPill.textContent = String(activeCount);
+    if (!container) return;
+    if (!list.length) {
+        container.innerHTML = '<span class="empty-msg">No active triggers armed.</span>';
+        return;
+    }
+    container.innerHTML = list.map((r) => {
+        const id = _escAlertHtml(r.rule_id || '');
+        const ticker = _escAlertHtml(r.ticker || '');
+        const label = _escAlertHtml(r.label || '');
+        const src = (r.source === 'council' || r.source === 'sentinel') ? r.source : 'manual';
+        const metric = _escAlertHtml(r.metric || 'price');
+        const op = _escAlertHtml(r.op || '>=');
+        const tgt = r.target_ref ? _escAlertHtml(String(r.target_ref).toUpperCase()) : (r.target != null ? Number(r.target).toFixed(2) : '—');
+        const enabled = r.enabled !== false;
+        const toggleLabel = enabled ? 'Pause' : 'Arm';
+        return `
+            <div class="alert-rule-row${enabled ? '' : ' disabled'}" data-rule-id="${id}">
+                <div class="alert-rule-meta">
+                    <div class="alert-rule-title">
+                        <span>${ticker}</span>
+                        <span class="alert-source-pill ${src}">${src}</span>
+                        <span>${label}</span>
+                    </div>
+                    <div class="alert-rule-sub">${metric} ${op} ${tgt}${r.trigger_count ? ` · fired ${r.trigger_count}x` : ''}</div>
+                </div>
+                <div class="alert-rule-actions">
+                    <button type="button" class="alert-mini-btn" onclick="toggleAlertRule('${id}')">${toggleLabel}</button>
+                    <button type="button" class="alert-mini-btn" onclick="deleteAlertRule('${id}')" title="Delete trigger">&times;</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderSentinelStatus(sentinel) {
+    if (!sentinel || typeof sentinel !== 'object') return;
+    _sentinelStateCache = sentinel;
+    const toggleBtn = document.getElementById('sentinel-toggle-btn');
+    const providerSel = document.getElementById('sentinel-provider-select');
+    const intervalSel = document.getElementById('sentinel-interval-select');
+    const statusText = document.getElementById('sentinel-status-text');
+
+    const enabled = Boolean(sentinel.enabled);
+    if (toggleBtn) {
+        toggleBtn.textContent = enabled ? 'ON' : 'OFF';
+        toggleBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        toggleBtn.classList.toggle('active', enabled);
+    }
+    if (providerSel && sentinel.provider) providerSel.value = sentinel.provider;
+    if (intervalSel && sentinel.interval_sec) intervalSel.value = String(sentinel.interval_sec);
+    if (statusText) {
+        const last = sentinel.last_run || {};
+        const chainTop = Array.isArray(sentinel.model_chain) && sentinel.model_chain.length ? sentinel.model_chain[0] : 'gemini-2.5-flash-lite';
+        const activeModel = last.model_used || chainTop;
+        const keyNote = (sentinel.provider === 'gemini_free' && !sentinel.api_key_configured)
+            ? 'GEMINI_API_KEY not set'
+            : (last.error ? `Degraded: ${last.error}` : (last.skipped_reason ? `Idle (${last.skipped_reason})` : `Model: ${activeModel}`));
+        const fbSuffix = last.fallback_count ? ` · ${last.fallback_count} fallback(s)` : '';
+        statusText.textContent = `${keyNote}${fbSuffix}`;
+    }
+}
+
+async function fetchAlertsAndSentinel() {
+    try {
+        const res = await fetch(`${API_BASE}/alerts`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data.rules)) renderAlertRules(data.rules);
+        if (data.sentinel) renderSentinelStatus(data.sentinel);
+    } catch (e) { console.error('Failed to load alerts & sentinel status:', e); }
+}
+
+async function addManualAlertRule() {
+    const tickerEl = document.getElementById('alert-ticker-input');
+    const metricEl = document.getElementById('alert-metric-select');
+    const opEl = document.getElementById('alert-op-select');
+    const targetEl = document.getElementById('alert-target-input');
+    const statusEl = document.getElementById('alerts-panel-status');
+    const ticker = tickerEl ? tickerEl.value.trim().toUpperCase() : '';
+    const target = targetEl ? Number(targetEl.value) : NaN;
+    if (!ticker || !Number.isFinite(target)) {
+        showFeedback(null, '', 'Enter ticker and numeric target.', true, statusEl);
+        return;
+    }
+    try {
+        const res = await fetch(`${API_BASE}/alerts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ticker,
+                metric: metricEl ? metricEl.value : 'price',
+                op: opEl ? opEl.value : 'crosses_above',
+                target,
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        if (tickerEl) tickerEl.value = '';
+        if (targetEl) targetEl.value = '';
+        if (data.alerts && Array.isArray(data.alerts.rules)) renderAlertRules(data.alerts.rules);
+        showFeedback(null, '', `Armed trigger for ${ticker}`, false, statusEl);
+        pollData();
+    } catch (e) {
+        showFeedback(null, '', e.message || 'Failed to arm trigger', true, statusEl);
+    }
+}
+
+async function deleteAlertRule(ruleId) {
+    try {
+        const res = await fetch(`${API_BASE}/alerts/${encodeURIComponent(ruleId)}`, { method: 'DELETE' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.alerts && Array.isArray(data.alerts.rules)) renderAlertRules(data.alerts.rules);
+        pollData();
+    } catch (e) { console.error('Delete alert rule failed:', e); }
+}
+
+async function toggleAlertRule(ruleId) {
+    try {
+        const res = await fetch(`${API_BASE}/alerts/${encodeURIComponent(ruleId)}/toggle`, { method: 'POST' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.alerts && Array.isArray(data.alerts.rules)) renderAlertRules(data.alerts.rules);
+        pollData();
+    } catch (e) { console.error('Toggle alert rule failed:', e); }
+}
+
+async function ackAlertEvent(eventId) {
+    try {
+        const res = await fetch(`${API_BASE}/alerts/events/${encodeURIComponent(eventId)}/ack`, { method: 'POST' });
+        if (!res.ok) return;
+        const el = document.querySelector(`.alert-item[data-event-id="${CSS.escape(eventId)}"]`);
+        if (el) el.remove();
+        pollData();
+    } catch (e) { console.error('Ack alert failed:', e); }
+}
+
+async function saveSentinelConfig(overrides = {}) {
+    const providerSel = document.getElementById('sentinel-provider-select');
+    const intervalSel = document.getElementById('sentinel-interval-select');
+    const statusEl = document.getElementById('alerts-panel-status');
+    const payload = {
+        provider: providerSel ? providerSel.value : 'gemini_free',
+        interval_sec: intervalSel ? Number(intervalSel.value) : 600,
+        ...overrides,
+    };
+    try {
+        const res = await fetch(`${API_BASE}/alert_sentinel/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        if (data.sentinel) renderSentinelStatus(data.sentinel);
+    } catch (e) {
+        showFeedback(null, '', e.message || 'Failed to update Sentinel', true, statusEl);
+    }
+}
+
+async function toggleSentinelEnabled() {
+    const currentlyEnabled = Boolean(_sentinelStateCache && _sentinelStateCache.enabled);
+    await saveSentinelConfig({ enabled: !currentlyEnabled });
+}
+
+async function runSentinelNow() {
+    const btn = document.getElementById('sentinel-run-now-btn');
+    const statusEl = document.getElementById('alerts-panel-status');
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/alert_sentinel/run`, { method: 'POST' });
+        const data = await res.json();
+        if (data.sentinel) renderSentinelStatus(data.sentinel);
+        if (data.alerts && Array.isArray(data.alerts.rules)) renderAlertRules(data.alerts.rules);
+        const out = data.outcome || {};
+        if (out.status === 'OK') {
+            showFeedback(null, '', `Sentinel (${out.model_used}) armed ${out.armed_count} trigger(s).`, false, statusEl);
+        } else {
+            showFeedback(null, '', out.error || out.skipped_reason || 'Sentinel run did not update.', true, statusEl);
+        }
+        pollData();
+    } catch (e) {
+        showFeedback(null, '', e.message || 'Sentinel run failed.', true, statusEl);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+const _addAlertBtn = document.getElementById('add-alert-rule-btn');
+if (_addAlertBtn) _addAlertBtn.addEventListener('click', addManualAlertRule);
+const _sentinelToggleBtn = document.getElementById('sentinel-toggle-btn');
+if (_sentinelToggleBtn) _sentinelToggleBtn.addEventListener('click', toggleSentinelEnabled);
+const _sentinelProviderSel = document.getElementById('sentinel-provider-select');
+if (_sentinelProviderSel) _sentinelProviderSel.addEventListener('change', () => saveSentinelConfig());
+const _sentinelIntervalSel = document.getElementById('sentinel-interval-select');
+if (_sentinelIntervalSel) _sentinelIntervalSel.addEventListener('change', () => saveSentinelConfig());
+const _sentinelRunNowBtn = document.getElementById('sentinel-run-now-btn');
+if (_sentinelRunNowBtn) _sentinelRunNowBtn.addEventListener('click', runSentinelNow);
+
+window.ackAlertEvent = ackAlertEvent;
+window.deleteAlertRule = deleteAlertRule;
+window.toggleAlertRule = toggleAlertRule;
 
 initSidebarToggle();
 

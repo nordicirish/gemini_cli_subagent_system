@@ -6,7 +6,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.63">
+    <link rel="stylesheet" href="styles.css?v=18.64">
     <link rel="stylesheet" href="modern_ui.css?v=18.59">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
@@ -223,6 +223,59 @@
                     </div>
                 </div>
 
+                <!-- Key-Level Triggers & Free-Tier Sentinel Panel -->
+                <div class="sidebar-card glass-panel manager-card desktop-only">
+                    <div class="header-row">
+                        <h3 onclick="toggleSection('alerts-manager-content', this)">
+                            <span class="icon">🔔</span> Key-Level Triggers <span id="alerts-active-count" class="alerts-count-pill">0</span> <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block;">▼</span>
+                        </h3>
+                    </div>
+                    <div id="alerts-manager-content">
+                        <div id="alerts-rules-container" class="alerts-rules-list">
+                            <span class="empty-msg">No active triggers armed.</span>
+                        </div>
+                        <div class="alert-quick-add">
+                            <input type="text" id="alert-ticker-input" placeholder="TICKER" maxlength="10" style="width: 64px; text-transform: uppercase;">
+                            <select id="alert-metric-select" title="Metric">
+                                <option value="price">Price</option>
+                                <option value="rsi">RSI</option>
+                                <option value="rvol">rVol</option>
+                                <option value="session_change_pct">Chg%</option>
+                            </select>
+                            <select id="alert-op-select" title="Condition">
+                                <option value="crosses_above">Cross ↑</option>
+                                <option value="crosses_below">Cross ↓</option>
+                                <option value=">=">&gt;=</option>
+                                <option value="<=">&lt;=</option>
+                            </select>
+                            <input type="number" id="alert-target-input" placeholder="Level" step="0.01" style="flex: 1; min-width: 60px;">
+                            <button id="add-alert-rule-btn" type="button" class="glow-btn outline mini" title="Arm Trigger">+</button>
+                        </div>
+
+                        <div class="sentinel-control-box">
+                            <div class="sentinel-header-row">
+                                <span class="sentinel-title">⚡ Low-Power Sentinel</span>
+                                <button id="sentinel-toggle-btn" type="button" class="sentinel-toggle-btn" aria-pressed="false">OFF</button>
+                            </div>
+                            <div class="sentinel-config-row">
+                                <select id="sentinel-provider-select" title="Model Provider">
+                                    <option value="gemini_free">Gemini Free Tier</option>
+                                    <option value="auto">Auto (Free → Local)</option>
+                                    <option value="antigravity">Local Antigravity</option>
+                                </select>
+                                <select id="sentinel-interval-select" title="Check Cadence">
+                                    <option value="300">5m</option>
+                                    <option value="600" selected>10m</option>
+                                    <option value="900">15m</option>
+                                </select>
+                                <button id="sentinel-run-now-btn" type="button" class="glow-btn outline mini" title="Run Sentinel Trigger Tune Now">Tune</button>
+                            </div>
+                            <div id="sentinel-status-text" class="sentinel-status-meta">Sentinel idle (Free Tier fallback ready)</div>
+                        </div>
+                        <div id="alerts-panel-status" class="status-message inline-feedback" style="margin-top: 6px;"></div>
+                    </div>
+                </div>
+
                 <!-- System Admin Panel -->
                 <div class="sidebar-card glass-panel manager-card minimized desktop-only">
                     <div class="header-row">
@@ -436,7 +489,7 @@
     <div id="offscreen-chart-container" style="position: fixed; left: -9999px; top: -9999px; width: 920px; height: 500px; opacity: 0; pointer-events: none;"></div>
 
     <script src="portfolio.js?v=18.61"></script>
-    <script src="app.js?v=18.65"></script>
+    <script src="app.js?v=18.66"></script>
     <script src="modern_ui.js?v=18.62"></script>
 </body>
 </html>

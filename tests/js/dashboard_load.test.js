@@ -55,7 +55,27 @@ const API = {
             },
             // TSLA is on the watchlist but not scanned yet: must still get a row.
         ],
+        alerts: {
+            rules: [
+                { rule_id: 'trg-1', ticker: 'NVDA', metric: 'price', op: 'crosses_above', target: 122.0, label: 'HOD Break', source: 'sentinel', enabled: true, trigger_count: 1 },
+            ],
+            unacknowledged_events: [
+                { event_id: 'evt-1', rule_id: 'trg-1', ticker: 'NVDA', severity: 'warning', label: 'HOD Break', message: 'NVDA: HOD Break (price=122.10 crosses_above 122.00)' },
+            ],
+            active_rules_count: 1,
+            unacknowledged_count: 1,
+        },
     },
+    '/api/alerts': {
+        rules: [
+            { rule_id: 'trg-1', ticker: 'NVDA', metric: 'price', op: 'crosses_above', target: 122.0, label: 'HOD Break', source: 'sentinel', enabled: true, trigger_count: 1 },
+        ],
+        unacknowledged_events: [
+            { event_id: 'evt-1', rule_id: 'trg-1', ticker: 'NVDA', severity: 'warning', label: 'HOD Break', message: 'NVDA: HOD Break (price=122.10 crosses_above 122.00)' },
+        ],
+        sentinel: { enabled: false, provider: 'gemini_free', interval_sec: 600, model_chain: ['gemini-2.5-flash-lite'], api_key_configured: true, last_run: { model_used: 'gemini-2.0-flash-lite', fallback_count: 1 } },
+    },
+    '/api/alert_sentinel': { enabled: false, provider: 'gemini_free', interval_sec: 600, model_chain: ['gemini-2.5-flash-lite'], api_key_configured: true, last_run: { model_used: 'gemini-2.0-flash-lite', fallback_count: 1 } },
     '/api/proposals': { status: 'success', proposals: [] },
     '/api/list_models': { status: 'success', models: [], current_model: 'test-model' },
     '/api/chat': { status: 'success', response: 'Boot complete.', proposals: [], turn_id: 't1' },
@@ -249,6 +269,14 @@ async function main() {
         assert.strictEqual(pressedAfterOff, 'false', 'clicking active sector button should toggle it off');
         assert.strictEqual(activeClassAfterOff, false);
         assert.strictEqual(postScoutCalls, 2, `expected 2 POST /api/scout_categories calls, got ${postScoutCalls}`);
+    });
+    check('Key-Level Triggers & Sentinel: renders fired alert banner, armed rule row, and fallback status', () => {
+        const alertBanner = window.document.getElementById('alerts-content');
+        assert(alertBanner && alertBanner.textContent.includes('NVDA: HOD Break'), 'triggered alert missing from top alert bar');
+        const rulesList = window.document.getElementById('alerts-rules-container');
+        assert(rulesList && rulesList.textContent.includes('NVDA') && rulesList.textContent.includes('sentinel'), 'armed trigger missing from sidebar');
+        const sentinelStatus = window.document.getElementById('sentinel-status-text');
+        assert(sentinelStatus && sentinelStatus.textContent.includes('gemini-2.0-flash-lite'), 'sentinel fallback model status missing');
     });
 
     window.close();

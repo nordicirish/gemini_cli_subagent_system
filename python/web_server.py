@@ -55,6 +55,12 @@ from portfolio_proposals import (
     ProposalNotFoundError,
     ProposalStateError,
 )
+try:
+    from alert_monitor import ALERT_MONITOR, extract_triggers_from_chat
+    from alert_sentinel import ALERT_SENTINEL
+except ImportError:
+    from python.alert_monitor import ALERT_MONITOR, extract_triggers_from_chat
+    from python.alert_sentinel import ALERT_SENTINEL
 
 # Import the existing FastAPI app from fetch_stocks
 from fetch_stocks import app, run_daemon, GLOBAL_STATE, CHART_SCREENSHOTS_BUFFER
@@ -1174,6 +1180,7 @@ def chat_endpoint(req: ChatRequest):
             full_response_original = full_response
             cleaned_response = full_response
             payload_result: Optional[Dict[str, Any]] = None
+            raw_payload_json: Optional[str] = None
 
             # 1. Fenced code block (```json ... ``` or ``` ... ```), tolerating a truncated closing fence
             idx = full_response.find("```json")
@@ -1195,6 +1202,7 @@ def chat_endpoint(req: ChatRequest):
                     if not is_truncated:
                         inner_json = inner_json[:-3]
                     inner_json = inner_json.strip()
+                    raw_payload_json = inner_json
 
                     payload_result = _process_execution_payload(inner_json, turn_id)
                     cleaned_response = (
@@ -1224,6 +1232,7 @@ def chat_endpoint(req: ChatRequest):
                             if rel_idx != -1:
                                 clean_end_idx = end_idx + 1 + rel_idx + 3
 
+                        raw_payload_json = candidate
                         payload_result = _process_execution_payload(candidate, turn_id)
                         cleaned_response = (
                             full_response[:clean_start_idx]
@@ -1257,6 +1266,35 @@ def chat_endpoint(req: ChatRequest):
                     tools.intercept_and_log_decision(full_response)
                 except Exception as ie:
                     framework.log(f"[System Warning] Decision interception inside chat_endpoint failed: {redact_secrets(str(ie))}")
+
+            # Auto-arm AI-identified key-level alert triggers (never from halted/vetoed turns)
+            if payload_result is None or payload_result.get("state") != "skipped":
+                try:
+                    from fetch_stocks import get_global_state_snapshot
+                    snap_tickers = get_global_state_snapshot().get("tickers", [])
+                    known_tickers = {
+                        str(t.get("ticker")).strip().upper()
+                        for t in snap_tickers
+                        if isinstance(t, dict) and t.get("ticker")
+                    }
+                    extracted_triggers = extract_triggers_from_chat(
+                        full_response_original,
+                        raw_payload_json=raw_payload_json,
+                        known_tickers=known_tickers or None,
+                    )
+                    if extracted_triggers:
+                        arm_res = ALERT_MONITOR.upsert_rules(
+                            extracted_triggers,
+                            source="council",
+                            replace_source=False,
+                        )
+                        armed_list = arm_res.get("armed", [])
+                        if armed_list:
+                            summary_labels = ", ".join(r.get("label", r.get("ticker", "")) for r in armed_list[:4])
+                            framework.log(f"[AlertMonitor] Auto-armed {len(armed_list)} trigger(s) from Council reply.")
+                            full_response += f"\n\n*🔔 Auto-armed {len(armed_list)} key-level trigger(s): {summary_labels}*"
+                except Exception as trig_err:
+                    framework.log(f"[System Warning] Alert trigger extraction skipped: {redact_secrets(str(trig_err))}")
                 
             import re
             full_response = re.sub(
@@ -1865,6 +1903,82 @@ def save_scout_categories(categories: List[str], background_tasks: BackgroundTas
             status_code=503,
         )
 
+@app.get("/api/alerts")
+def get_alerts():
+    payload = ALERT_MONITOR.get_dashboard_payload()
+    payload["sentinel"] = ALERT_SENTINEL.get_status()
+    return payload
+
+
+@app.post("/api/alerts")
+async def create_alert_rule(req: Request):
+    try:
+        body = await req.json()
+    except Exception:
+        return JSONResponse({"status": "error", "detail": "Invalid JSON alert rule payload"}, status_code=422)
+    try:
+        rule = ALERT_MONITOR.add_rule(body, source="manual")
+        return {"status": "success", "rule": rule, "alerts": ALERT_MONITOR.get_dashboard_payload()}
+    except ValueError as ve:
+        return JSONResponse({"status": "error", "detail": str(ve)}, status_code=422)
+
+
+@app.delete("/api/alerts/{rule_id}")
+def delete_alert_rule(rule_id: str):
+    if not ALERT_MONITOR.delete_rule(rule_id):
+        raise HTTPException(status_code=404, detail=f"Alert rule '{rule_id}' not found")
+    return {"status": "success", "alerts": ALERT_MONITOR.get_dashboard_payload()}
+
+
+@app.post("/api/alerts/{rule_id}/toggle")
+def toggle_alert_rule(rule_id: str):
+    updated = ALERT_MONITOR.toggle_rule(rule_id)
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Alert rule '{rule_id}' not found")
+    return {"status": "success", "rule": updated, "alerts": ALERT_MONITOR.get_dashboard_payload()}
+
+
+@app.post("/api/alerts/events/{event_id}/ack")
+def acknowledge_alert_event(event_id: str):
+    if not ALERT_MONITOR.acknowledge_event(event_id):
+        raise HTTPException(status_code=404, detail=f"Alert event '{event_id}' not found")
+    return {"status": "success", "alerts": ALERT_MONITOR.get_dashboard_payload()}
+
+
+@app.post("/api/alerts/events/clear")
+def clear_alert_events():
+    cleared = ALERT_MONITOR.clear_events()
+    return {"status": "success", "cleared": cleared, "alerts": ALERT_MONITOR.get_dashboard_payload()}
+
+
+@app.get("/api/alert_sentinel")
+def get_alert_sentinel_status():
+    return ALERT_SENTINEL.get_status()
+
+
+@app.post("/api/alert_sentinel/config")
+async def update_alert_sentinel_config(req: Request):
+    try:
+        body = await req.json()
+    except Exception:
+        return JSONResponse({"status": "error", "detail": "Invalid Sentinel config JSON"}, status_code=422)
+    ALERT_SENTINEL.update_config(body, persist=True)
+    return {"status": "success", "sentinel": ALERT_SENTINEL.get_status()}
+
+
+@app.post("/api/alert_sentinel/run")
+def run_alert_sentinel_now():
+    from fetch_stocks import get_global_state_snapshot
+    snap = get_global_state_snapshot()
+    outcome = ALERT_SENTINEL.run_once(snapshot=snap, force=True)
+    return {
+        "status": "success" if outcome.get("status") == "OK" else outcome.get("status", "DEGRADED"),
+        "outcome": outcome,
+        "sentinel": ALERT_SENTINEL.get_status(),
+        "alerts": ALERT_MONITOR.get_dashboard_payload(),
+    }
+
+
 @app.get("/api/system_logs")
 async def system_logs_endpoint():
     """SSE endpoint to stream system logs to the frontend."""
@@ -1922,6 +2036,9 @@ if __name__ == "__main__":
     try:
         import fetch_stocks
         fetch_stocks.compile_master_document()
+        ALERT_SENTINEL.set_snapshot_provider(fetch_stocks.get_global_state_snapshot)
+        ALERT_SENTINEL.set_log_callback(framework.log)
+        ALERT_SENTINEL.start()
         # Cloud sync daemon removed — GDrive Decoupling Guardrail (ANTIGRAVITY v11.03)
     except Exception as e:
         print(f"Failed to compile master document: {e}")
