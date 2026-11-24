@@ -169,6 +169,7 @@ class AlertMonitor:
         self._lock = threading.RLock()
         self._rules: List[Dict[str, Any]] = []
         self._events: List[Dict[str, Any]] = []
+        self._mandate_cooldowns: Dict[str, float] = {}
         self._load()
 
     def _load(self) -> None:
@@ -483,6 +484,84 @@ class AlertMonitor:
                 self._persist()
 
         return fired_events
+
+    def record_mandate_alerts(
+        self,
+        positions_analytics: List[Dict[str, Any]],
+        market_status: Optional[str] = None,
+        cooldown_sec: int = 900,
+        now_ts: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Auto-surfaces critical/warning deterministic rule breaches into top alert bar."""
+        if not isinstance(positions_analytics, list) or not positions_analytics:
+            return []
+
+        ts = time.time() if now_ts is None else float(now_ts)
+        now_iso = _utc_now_iso(ts)
+        emitted: List[Dict[str, Any]] = []
+
+        with self._lock:
+            for pos in positions_analytics:
+                if not isinstance(pos, dict) or not pos.get("valid_telemetry"):
+                    continue
+                ticker = _normalize_ticker(pos.get("ticker"))
+                if not ticker:
+                    continue
+                price = _safe_float(pos.get("price"))
+                tranches = pos.get("tranches") if isinstance(pos.get("tranches"), dict) else {}
+
+                for m in pos.get("triggered_mandates") or []:
+                    if not isinstance(m, dict):
+                        continue
+                    rule_id = str(m.get("rule_id") or "").strip()
+                    severity = str(m.get("severity") or "info").strip().lower()
+                    trim_pct = m.get("trim_pct")
+                    if severity not in ("critical", "warning"):
+                        continue
+                    if trim_pct is None and rule_id not in ("ENH_16_E", "ENH_17_B", "ENH_111"):
+                        continue
+
+                    cd_key = f"{ticker}|{rule_id}"
+                    last_ts = self._mandate_cooldowns.get(cd_key)
+                    if last_ts is not None and (ts - last_ts) < max(0, int(cooldown_sec)):
+                        continue
+
+                    sizing_note = ""
+                    if trim_pct is not None:
+                        t_info = tranches.get(f"{int(trim_pct)}pct")
+                        if isinstance(t_info, dict):
+                            sell_sh = t_info.get("sell_shares")
+                            lim = t_info.get("sweep_limit_usd") if "SWEEP" in str(m.get("action", "")) else t_info.get("front_run_limit_usd")
+                            if sell_sh is not None and lim is not None:
+                                sizing_note = f"sell {sell_sh} sh ({int(trim_pct)}%) limit ~${lim:.2f} — "
+
+                    detail = str(m.get("detail") or m.get("action") or rule_id).strip()
+                    msg = f"{ticker} {rule_id}: {sizing_note}{detail}"
+                    event = {
+                        "event_id": f"evt-{uuid.uuid4().hex[:10]}",
+                        "rule_id": f"mandate:{rule_id}",
+                        "ticker": ticker,
+                        "label": f"{rule_id} ({m.get('action', '')})",
+                        "severity": severity,
+                        "source": "analytics",
+                        "metric": "mandate",
+                        "op": rule_id,
+                        "observed_value": round(price, 4) if price is not None else None,
+                        "target_value": None,
+                        "market_status": market_status or "UNKNOWN",
+                        "message": msg[:220],
+                        "triggered_at_utc": now_iso,
+                        "acknowledged": False,
+                    }
+                    self._mandate_cooldowns[cd_key] = ts
+                    self._events.insert(0, event)
+                    self._events = self._events[:MAX_EVENTS]
+                    emitted.append(dict(event))
+
+            if emitted:
+                self._persist()
+
+        return emitted
 
     def get_dashboard_payload(self) -> Dict[str, Any]:
         with self._lock:

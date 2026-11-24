@@ -516,3 +516,58 @@ GLOBAL_TOOL_REGISTRY.register(
     parameters={"query": str},
     target_resource="web_search",
 )
+
+
+def run_decision_backtest(limit: int = 25) -> str:
+    """Runs deterministic forward-return & MAE backtesting across decision_log entries."""
+    try:
+        from decision_backtester import backtest_decision_log
+    except ImportError:
+        from python.decision_backtester import backtest_decision_log
+
+    try:
+        raw_log = get_persistence_service().get_decision_log()
+    except Exception:
+        raw_log = []
+    if not isinstance(raw_log, list):
+        raw_log = []
+    res = backtest_decision_log(raw_log, max_entries=max(1, min(100, int(limit or 25))))
+    return json.dumps(res, indent=2, default=str)
+
+
+def fetch_sec_filings(ticker: str, limit: int = 6) -> str:
+    """Fetches verified SEC EDGAR recent filings & 72h dilution flags for a ticker."""
+    try:
+        from sec_edgar import fetch_recent_sec_filings
+    except ImportError:
+        from python.sec_edgar import fetch_recent_sec_filings
+
+    res = fetch_recent_sec_filings(ticker=ticker, limit=max(1, min(20, int(limit or 6))))
+    return json.dumps(res, indent=2, default=str)
+
+
+GLOBAL_TOOL_REGISTRY.register(
+    name="run_decision_backtest",
+    func=run_decision_backtest,
+    description="Deterministically evaluates historical decision_log entries against OHLCV forward returns and MAE.",
+    classification="READ",
+    required_permission="read_decision_log",
+    requires_human_approval=False,
+    allowed_roles=ALL_VALID_ROLES,
+    affects_financial_state=False,
+    parameters={"limit": int},
+    target_resource="context/decision_log.json",
+)
+
+GLOBAL_TOOL_REGISTRY.register(
+    name="fetch_sec_filings",
+    func=fetch_sec_filings,
+    description="Retrieves verified SEC EDGAR recent filings (8-K, S-3, 424B5, 10-Q/K) and 72h dilution warnings.",
+    classification="READ",
+    required_permission="read_market",
+    requires_human_approval=False,
+    allowed_roles=ALL_VALID_ROLES,
+    affects_financial_state=False,
+    parameters={"ticker": str, "limit": int},
+    target_resource="sec_edgar",
+)

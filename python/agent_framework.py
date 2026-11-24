@@ -1842,6 +1842,43 @@ class AgentFramework:
         )
         return call_subagent
 
+    def create_deterministic_agent_tool(
+        self,
+        name: str,
+        handler_fn: Callable[[str], str],
+        description: Optional[str] = None,
+    ):
+        """Registers a zero-LLM deterministic Python replacement matching a sub-agent tool contract."""
+        tool_name = f"ask_{name.lower().replace(' ', '_')}"
+
+        def call_deterministic(query: str = "") -> str:
+            cancel_fn = getattr(self, "cancel_check", None)
+            if cancel_fn and cancel_fn():
+                return "[OFFLINE] Session terminated by user interrupt."
+            with execution_role_context(name):
+                self.log(f"\n[Orchestrator -> {name}] Deterministic Python execution (<1ms)...")
+                return str(handler_fn(str(query or "")))
+
+        call_deterministic.__name__ = tool_name
+        call_deterministic.__doc__ = description or f"Ask the {name} deterministic Python analyzer."
+        call_deterministic._agent_role = name
+        call_deterministic._agent_tools = []
+        call_deterministic._is_read_only_deliberative = name in APPROVED_PARALLEL_COUNCIL_ROLES
+        call_deterministic._is_deterministic_python = True
+        GLOBAL_TOOL_REGISTRY.register(
+            name=tool_name,
+            func=call_deterministic,
+            description=call_deterministic.__doc__,
+            classification="READ",
+            required_permission="delegate_agent",
+            requires_human_approval=False,
+            allowed_roles={"Terminal Orchestrator"} | TRUSTED_SYSTEM_ROLES,
+            affects_financial_state=False,
+            parameters={"query": str},
+            target_resource=f"subagent:{name}",
+        )
+        return call_deterministic
+
     def execute_ephemeral_batch(self, parallel_tasks: dict) -> dict:
         """
         Executes a validated batch of strictly read-only deliberative sub-agent tasks concurrently

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP
+import json
 import math
 import threading
 from typing import Any, Dict, List, Optional, Tuple
@@ -704,6 +705,87 @@ class AnalyticsEngine:
             "positions": positions_out,
             "watchlist_signals": watchlist_out,
         }
+
+    def format_regime_engine_response(
+        self,
+        live_state: Dict[str, Any],
+        ssot: Optional[Dict[str, Any]] = None,
+        fx_info: Optional[Dict[str, Any]] = None,
+        ny_dt: Optional[datetime] = None,
+    ) -> str:
+        """Zero-LLM deterministic response matching engine_instructions/regime_engine.md."""
+        bundle = self.evaluate(live_state, ssot=ssot, fx_info=fx_info, ny_dt=ny_dt)
+        reg = bundle["regime"]
+        payload = {
+            "source": "python_deterministic",
+            "as_of_ny": bundle["as_of_ny"],
+            "Volatility_State": reg["volatility_state"],
+            "Volatility_Regime": reg["volatility_regime"],
+            "Strategy_Permissibility": reg["strategy_permissibility"],
+            "VIX": reg["vix"],
+            "VVIX": reg["vvix"],
+            "SPY_Dealer_Posture": reg["spy_dealer_posture"],
+            "SPY_Net_GEX": reg["spy_net_gex"],
+            "Global_Vetoes": bundle["global_vetoes"],
+            "Rationale": reg["rationale"],
+        }
+        return json.dumps(payload, indent=2)
+
+    def format_gex_engine_response(
+        self,
+        live_state: Dict[str, Any],
+        ssot: Optional[Dict[str, Any]] = None,
+        ny_dt: Optional[datetime] = None,
+    ) -> str:
+        """Zero-LLM deterministic response matching engine_instructions/gex_engine.md."""
+        bundle = self.evaluate(live_state, ssot=ssot, ny_dt=ny_dt)
+        tickers = live_state.get("tickers", []) if isinstance(live_state, dict) else []
+        gex_rows: List[Dict[str, Any]] = []
+        for item in (tickers or []):
+            if not isinstance(item, dict) or not item.get("ticker"):
+                continue
+            sym = str(item["ticker"]).strip().upper()
+            tracker = self._get_tracker_snapshot(sym)
+            chg_pct = _safe_float(item.get("session_change_pct")) or 0.0
+            ssr_override = bool(item.get("ssr_active")) or chg_pct <= -10.0
+            gex_rows.append({
+                "ticker": sym,
+                "dealer_posture": str(item.get("dealer_posture") or "NEUTRAL").upper(),
+                "net_gex_total": _safe_float(item.get("net_gex_total")),
+                "gamma_flip_price": _safe_float(item.get("gamma_flip_price")),
+                "flip_proximity_percent": _safe_float(item.get("flip_proximity_percent")),
+                "ssr_override": ssr_override,
+                "gamma_whiplash_lock": tracker["gamma_whiplash_lock"],
+                "gamma_flicker_overbought": tracker["gamma_flicker_overbought"],
+            })
+        payload = {
+            "source": "python_deterministic",
+            "as_of_ny": bundle["as_of_ny"],
+            "spy_dealer_posture": bundle["regime"]["spy_dealer_posture"],
+            "spy_short_gamma": bundle["regime"]["spy_dealer_posture"] == "SHORT_GAMMA",
+            "global_vetoes": bundle["global_vetoes"],
+            "tickers": gex_rows,
+        }
+        return json.dumps(payload, indent=2)
+
+    def format_technical_validator_response(
+        self,
+        live_state: Dict[str, Any],
+        ssot: Optional[Dict[str, Any]] = None,
+        fx_info: Optional[Dict[str, Any]] = None,
+        ny_dt: Optional[datetime] = None,
+    ) -> str:
+        """Zero-LLM deterministic response matching engine_instructions/technical_validator.md."""
+        bundle = self.evaluate(live_state, ssot=ssot, fx_info=fx_info, ny_dt=ny_dt)
+        payload = {
+            "source": "python_deterministic",
+            "as_of_ny": bundle["as_of_ny"],
+            "friction_hurdles": bundle["friction_hurdles"],
+            "global_vetoes": bundle["global_vetoes"],
+            "positions": bundle["positions"],
+            "watchlist_signals": bundle["watchlist_signals"],
+        }
+        return json.dumps(payload, indent=2)
 
 
 ANALYTICS_ENGINE = AnalyticsEngine()

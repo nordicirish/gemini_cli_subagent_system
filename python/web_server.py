@@ -59,10 +59,14 @@ try:
     from alert_monitor import ALERT_MONITOR, extract_triggers_from_chat
     from alert_sentinel import ALERT_SENTINEL
     from analytics_engine import ANALYTICS_ENGINE
+    from decision_backtester import backtest_decision_log
+    from sec_edgar import fetch_recent_sec_filings
 except ImportError:
     from python.alert_monitor import ALERT_MONITOR, extract_triggers_from_chat
     from python.alert_sentinel import ALERT_SENTINEL
     from python.analytics_engine import ANALYTICS_ENGINE
+    from python.decision_backtester import backtest_decision_log
+    from python.sec_edgar import fetch_recent_sec_filings
 
 # Import the existing FastAPI app from fetch_stocks
 from fetch_stocks import app, run_daemon, GLOBAL_STATE, CHART_SCREENSHOTS_BUFFER
@@ -306,11 +310,27 @@ macro_sentinel = framework.create_agent_tool(
     agent_tools=[tools.read_ssot, tools.perform_web_forensic_search]
 )
 
+def _load_live_analytics_context() -> tuple:
+    try:
+        from fetch_stocks import get_global_state_snapshot
+        live_state = get_global_state_snapshot()
+    except Exception:
+        live_state = {}
+    ssot_data = live_state.get("local_storage_state") if isinstance(live_state, dict) else None
+    if not isinstance(ssot_data, dict):
+        try:
+            ssot_data = get_persistence_service().get_ssot_data()
+        except Exception:
+            ssot_data = {}
+    fx_snapshot = fx_rates.fx_public(fx_rates.get_eurusd())
+    return live_state, ssot_data, fx_snapshot, agent_framework.ny_now()
+
+
 research_engine = framework.create_agent_tool(
     name="Research Engine", 
     file_path="engine_instructions/research.md", 
     mode="THINKING", 
-    agent_tools=[tools.perform_web_forensic_search]
+    agent_tools=[tools.perform_web_forensic_search, tools.fetch_sec_filings]
 )
 
 macro_narrative_engine = framework.create_agent_tool(
@@ -324,7 +344,7 @@ data_analyst = framework.create_agent_tool(
     name="Data Analyst",
     file_path="engine_instructions/data_analyst.md",
     mode="PRO",
-    agent_tools=[tools.perform_web_forensic_search, tools.get_market_data]
+    agent_tools=[tools.perform_web_forensic_search, tools.get_market_data, tools.fetch_sec_filings]
 )
 
 state_validation_router = framework.create_agent_tool(
@@ -348,18 +368,16 @@ execution = framework.create_agent_tool(
     agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
 )
 
-gex_engine = framework.create_agent_tool(
+gex_engine = framework.create_deterministic_agent_tool(
     name="GEX Engine",
-    file_path="engine_instructions/gex_engine.md",
-    mode="GEMMA",
-    agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
+    handler_fn=lambda _q: ANALYTICS_ENGINE.format_gex_engine_response(*_load_live_analytics_context()[:2], ny_dt=_load_live_analytics_context()[3]),
+    description="Deterministic Python GEX dealer posture, gamma flip proximity, SSR override, and ENH_17_B whiplash analyzer.",
 )
 
-regime_engine = framework.create_agent_tool(
+regime_engine = framework.create_deterministic_agent_tool(
     name="Regime Engine",
-    file_path="engine_instructions/regime_engine.md",
-    mode="GEMMA",
-    agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
+    handler_fn=lambda _q: ANALYTICS_ENGINE.format_regime_engine_response(*_load_live_analytics_context()),
+    description="Deterministic Python Volatility State & Strategy Permissibility routing matrix.",
 )
 
 strategy_engine = framework.create_agent_tool(
@@ -380,7 +398,7 @@ structural_engine = framework.create_agent_tool(
     name="Structural Engine", 
     file_path="engine_instructions/structural_engine.md", 
     mode="GEMMA",
-    agent_tools=[tools.read_ssot, tools.get_market_data, tools.perform_web_forensic_search]
+    agent_tools=[tools.read_ssot, tools.get_market_data, tools.perform_web_forensic_search, tools.fetch_sec_filings]
 )
 
 context_engine = framework.create_agent_tool(
@@ -390,18 +408,17 @@ context_engine = framework.create_agent_tool(
     agent_tools=[tools.read_ssot, tools.update_ssot, tools.read_trade_lessons, tools.update_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search, tools.update_rules]
 )
 
-technical_validator = framework.create_agent_tool(
+technical_validator = framework.create_deterministic_agent_tool(
     name="Technical Validator",
-    file_path="engine_instructions/technical_validator.md",
-    mode="GEMMA",
-    agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search]
+    handler_fn=lambda _q: ANALYTICS_ENGINE.format_technical_validator_response(*_load_live_analytics_context()),
+    description="Deterministic Python technical alignment, MANDATE_06 Decimal math/FX proofs, and trim tranche validator.",
 )
 
 post_trade_review = framework.create_agent_tool(
     name="Post-Trade Review Engine",
     file_path="engine_instructions/post_trade_review.md",
     mode="FAST",
-    agent_tools=[tools.read_decision_log, tools.read_trade_lessons, tools.update_trade_lessons, tools.perform_web_forensic_search]
+    agent_tools=[tools.read_decision_log, tools.run_decision_backtest, tools.read_trade_lessons, tools.update_trade_lessons, tools.perform_web_forensic_search]
 )
 
 # Council Members
@@ -457,6 +474,8 @@ terminal_tools = [
     tools.update_trade_lessons,
     tools.get_market_data,
     tools.read_decision_log,
+    tools.run_decision_backtest,
+    tools.fetch_sec_filings,
     macro_sentinel,
     research_engine,
     macro_narrative_engine,
@@ -2002,24 +2021,25 @@ def run_alert_sentinel_now():
 @app.get("/api/analytics")
 def get_precomputed_analytics():
     """Read-only deterministic Regime, Veto, Mandate, and Trim Sizer analytics."""
+    return ANALYTICS_ENGINE.evaluate(*_load_live_analytics_context())
+
+
+@app.get("/api/analytics/backtest")
+def get_decision_backtest(limit: int = 25):
+    """Read-only deterministic forward-return & MAE backtest over decision_log."""
     try:
-        from fetch_stocks import get_global_state_snapshot
-        live_state = get_global_state_snapshot()
+        raw_log = get_persistence_service().get_decision_log()
     except Exception:
-        live_state = {}
-    ssot_data = live_state.get("local_storage_state") if isinstance(live_state, dict) else None
-    if not isinstance(ssot_data, dict):
-        try:
-            ssot_data = get_persistence_service().get_ssot_data()
-        except Exception:
-            ssot_data = {}
-    fx_snapshot = fx_rates.fx_public(fx_rates.get_eurusd())
-    return ANALYTICS_ENGINE.evaluate(
-        live_state,
-        ssot=ssot_data,
-        fx_info=fx_snapshot,
-        ny_dt=agent_framework.ny_now(),
-    )
+        raw_log = []
+    if not isinstance(raw_log, list):
+        raw_log = []
+    return backtest_decision_log(raw_log, max_entries=max(1, min(100, int(limit or 25))))
+
+
+@app.get("/api/analytics/sec/{ticker}")
+def get_sec_filings_endpoint(ticker: str, limit: int = 8):
+    """Read-only SEC EDGAR recent filings & 72h dilution warning lookup."""
+    return fetch_recent_sec_filings(ticker=ticker, limit=max(1, min(20, int(limit or 8))))
 
 
 @app.get("/api/system_logs")

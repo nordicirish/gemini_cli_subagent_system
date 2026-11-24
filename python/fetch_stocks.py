@@ -7552,6 +7552,17 @@ def run_daemon():
             try:
                 if ANALYTICS_ENGINE is not None:
                     ANALYTICS_ENGINE.record_tick(data, market_status=status)
+                    if ALERT_MONITOR is not None:
+                        analytics_snap = ANALYTICS_ENGINE.evaluate(
+                            final_output,
+                            ssot=final_output.get("local_storage_state"),
+                        )
+                        mandate_events = ALERT_MONITOR.record_mandate_alerts(
+                            analytics_snap.get("positions", []),
+                            market_status=status,
+                        )
+                        if mandate_events:
+                            final_output["alerts"] = ALERT_MONITOR.get_dashboard_payload()
             except Exception as analytics_err:
                 logger.warning(f"[AnalyticsEngine] Tick tracking skipped: {analytics_err}")
             publish_global_state_snapshot(final_output)
