@@ -18,15 +18,45 @@ import tools
 
 class TestInvestmentRegression(unittest.TestCase):
     def test_fibonacci_forecast_calculation_invariance(self):
-        """Verifies Fibonacci extension calculations against standard mathematical benchmarks."""
-        hist_df = fetch_stocks.cache.history.get("UMAC")
-        if hist_df is None or (hasattr(hist_df, "empty") and hist_df.empty):
-            import pandas as pd
-            hist_df = pd.DataFrame(
-                {"Open": [25.71], "High": [26.70], "Low": [24.25], "Close": [24.39], "Volume": [100000]},
-                index=[pd.Timestamp("2026-06-15 04:00:00+00:00", tz="UTC")],
-            )
-        res = fetch_stocks.calculate_fib_forecast(
+        """Verifies Fibonacci extension calculations against standard mathematical benchmarks.
+
+        Uses a fixed price history only, with UMAC isolated from every live cache the forecast
+        reads (history and today's session high/low/open). It previously read UMAC from the live
+        on-disk cache, and other tests populate the session caches, so the result followed real
+        prices (e.g. 40.09 / 40.12 instead of 26.84) and depended on cache contents and test order.
+        """
+        import pandas as pd
+        from unittest.mock import patch
+
+        hist_df = pd.DataFrame(
+            {"Open": [25.71], "High": [26.70], "Low": [24.25], "Close": [24.39], "Volume": [100000]},
+            index=[pd.Timestamp("2026-06-15 04:00:00+00:00", tz="UTC")],
+        )
+        # Unrelated UMAC prices in the live cache must not influence the benchmark.
+        unrelated_live_history = pd.DataFrame(
+            {"Open": [40.0, 55.0], "High": [60.0, 70.0], "Low": [35.0, 50.0], "Close": [58.0, 65.0], "Volume": [1, 1]},
+            index=pd.to_datetime(["2026-11-20", "2026-11-21"], utc=True),
+        )
+        cache = fetch_stocks.cache
+        with (
+            patch.dict(cache.history, {"UMAC": unrelated_live_history}),
+            patch.dict(cache.day_high), patch.dict(cache.day_low), patch.dict(cache.day_open),
+        ):
+            # No live session values for UMAC: anchors come from the fixed history (restored on exit)
+            for session_cache in (cache.day_high, cache.day_low, cache.day_open):
+                session_cache.pop("UMAC", None)
+            res = self._fib_forecast(hist_df)
+        self.assertIsNotNone(res)
+        self.assertIn("t1_100", res)
+        self.assertIn("t2_1618", res)
+        self.assertIn("t3_2618", res)
+        self.assertAlmostEqual(res["t1_100"], 26.84, places=2)
+        self.assertAlmostEqual(res["t2_1618"], 28.35, places=2)
+        self.assertAlmostEqual(res["t3_2618"], 30.80, places=2)
+
+    @staticmethod
+    def _fib_forecast(hist_df):
+        return fetch_stocks.calculate_fib_forecast(
             symbol="UMAC",
             current_price=24.39,
             hist_df=hist_df,
@@ -36,13 +66,6 @@ class TestInvestmentRegression(unittest.TestCase):
             rvol=0.97,
             vwap=24.38,
         )
-        self.assertIsNotNone(res)
-        self.assertIn("t1_100", res)
-        self.assertIn("t2_1618", res)
-        self.assertIn("t3_2618", res)
-        self.assertAlmostEqual(res["t1_100"], 26.84, places=2)
-        self.assertAlmostEqual(res["t2_1618"], 28.35, places=2)
-        self.assertAlmostEqual(res["t3_2618"], 30.80, places=2)
 
     def test_ssot_structure_invariance(self):
         """Verifies that context/ssot.json remains structurally intact and valid JSON."""
