@@ -1042,6 +1042,65 @@ MAX_SUBAGENT_TOOL_TURNS = 3
 ORCHESTRATOR_TURN_TIMEOUT_SECONDS = 300
 SUBAGENT_TURN_TIMEOUT_SECONDS = 180
 
+# Conversation replay budgets (UTF-8 bytes) for the stateless agy CLI; the prompt body stays
+# well inside MAX_AGY_STDIN_BYTES so system instructions keep room after compaction.
+REPLAY_PROMPT_MAX_BYTES = 60_000
+REPLAY_STEP_MAX_BYTES = 8_000
+REPLAY_PRIOR_EXCHANGES = 4
+REPLAY_PRIOR_ENTRY_MAX_BYTES = 1_500
+_DATA_PACKET_BLOCK_RE = re.compile(r"```json\n.*?\n```\n\[END_DATA_PACKET\]", re.DOTALL)
+
+
+def _utf8_len(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+def _clip_utf8(text: str, max_bytes: int) -> str:
+    """Clips text to max_bytes on a UTF-8 boundary, marking how much was dropped."""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    marker = f"\n...[truncated {len(encoded) - max_bytes} bytes]"
+    keep = max(0, max_bytes - _utf8_len(marker))
+    return encoded[:keep].decode("utf-8", errors="ignore") + marker
+
+
+def _is_tool_result_message(message: Any) -> bool:
+    return isinstance(message, list) and bool(message) and all(
+        getattr(item, "function_response", None) is not None for item in message
+    )
+
+
+def _render_message_text(message: Any) -> str:
+    """Flattens a str / Part list into the text the CLI receives."""
+    if not isinstance(message, list):
+        return str(message)
+    parts: List[str] = []
+    for item in message:
+        fn_resp = getattr(item, "function_response", None)
+        if fn_resp is not None:
+            parts.append(f"Tool Result [{fn_resp.name}]: {fn_resp.response}")
+        elif getattr(item, "inline_data", None) is not None:
+            mime = getattr(item.inline_data, "mime_type", "binary")
+            parts.append(f"[Attachment omitted ({mime}): the local agy CLI runtime receives text only]")
+        elif isinstance(item, str):
+            parts.append(item)
+        elif getattr(item, "text", None):
+            parts.append(item.text)
+        else:
+            parts.append(str(item))
+    return "\n\n".join(parts)
+
+
+def _condense_prior_request(text: str) -> str:
+    """Earlier requests drop their stale DATA_PACKET and keep the user's query."""
+    text = _DATA_PACKET_BLOCK_RE.sub("[DATA_PACKET omitted: the current request carries a fresh one]", text)
+    marker = "[USER_QUERY]:"
+    pos = text.rfind(marker)
+    if pos != -1:
+        text = text[pos + len(marker):].strip()
+    return _clip_utf8(text, REPLAY_PRIOR_ENTRY_MAX_BYTES)
+
 
 class AntigravityChatSession:
     """Session adapter allowing the Orchestrator and Subagents to run natively on Antigravity with bounded multi-turn tool dispatch."""
@@ -1070,6 +1129,7 @@ class AntigravityChatSession:
             else (SUBAGENT_TURN_TIMEOUT_SECONDS if is_subagent else ORCHESTRATOR_TURN_TIMEOUT_SECONDS)
         )
         self.history = []
+        self._exchanges: List[Dict[str, Any]] = []
 
     def get_history(self):
         return self.history
@@ -1082,30 +1142,32 @@ class AntigravityChatSession:
             tool_desc.append(f"- {name}: {doc.strip()}")
         tools_block = "Available Tools:\n" + "\n".join(tool_desc) if tool_desc else ""
 
-        # Format incoming user prompt or function returns
-        if isinstance(message, list):
-            res_parts = []
-            for item in message:
-                if hasattr(item, "function_response"):
-                    res_parts.append(f"Tool Result [{item.function_response.name}]: {item.function_response.response}")
-                elif hasattr(item, "text"):
-                    res_parts.append(item.text)
-                else:
-                    res_parts.append(str(item))
+        # The agy CLI is stateless per invocation, so every call replays the context it needs:
+        # the original request, earlier steps on it, and a condensed recap of earlier exchanges.
+        if _is_tool_result_message(message):
+            results_text = _render_message_text(message)
             if self.is_subagent:
-                user_input = (
+                latest_block = (
                     "Sub-tool execution results:\n"
-                    + "\n\n".join(res_parts)
+                    + results_text
                     + "\n\nPlease synthesize these results into your final analysis, or request additional tools if required."
                 )
             else:
-                user_input = (
+                latest_block = (
                     "Tool execution results:\n"
-                    + "\n\n".join(res_parts)
+                    + results_text
                     + "\n\nPlease synthesize these results into the final Markdown report and EXECUTION_PAYLOAD, or request additional tools."
                 )
+            if self._exchanges:
+                exchange = self._exchanges[-1]
+                user_input = self._render_replay(exchange, latest_block=latest_block)
+                exchange["steps"].append(("TOOL RESULTS", results_text))
+            else:
+                exchange = self._start_exchange(latest_block)
+                user_input = self._render_replay(exchange)
         else:
-            user_input = str(message)
+            exchange = self._start_exchange(_render_message_text(message))
+            user_input = self._render_replay(exchange)
 
         closing_instruction = (
             "Otherwise, output your synthesized text analysis directly."
@@ -1167,8 +1229,75 @@ class AntigravityChatSession:
             except Exception:
                 pass
 
+        exchange["steps"].append(("ASSISTANT", text))
         self.history.append(SimpleNamespace(parts=[SimpleNamespace(text=text)]))
         return resp
+
+    def _start_exchange(self, request_text: str) -> Dict[str, Any]:
+        exchange = {"request": request_text, "steps": []}
+        self._exchanges.append(exchange)
+        del self._exchanges[:-(REPLAY_PRIOR_EXCHANGES + 1)]
+        return exchange
+
+    def _render_replay(self, exchange: Dict[str, Any], latest_block: Optional[str] = None) -> str:
+        """
+        Builds the prompt body for one CLI call within REPLAY_PROMPT_MAX_BYTES. Priority:
+        current request (kept whole: it carries the live DATA_PACKET and user query) and the
+        latest tool results, then earlier steps on this request (newest first), then a recap
+        of earlier exchanges (newest first).
+        """
+        prior = self._exchanges[:-1] if self._exchanges and self._exchanges[-1] is exchange else list(self._exchanges)
+        if not prior and not exchange["steps"] and latest_block is None:
+            return exchange["request"]
+
+        budget = REPLAY_PROMPT_MAX_BYTES
+        request_section = f"[CURRENT REQUEST]\n{exchange['request']}\n[END CURRENT REQUEST]"
+        used = _utf8_len(request_section)
+        latest = latest_block or ""
+        if latest and used + _utf8_len(latest) > budget:
+            latest = _clip_utf8(latest, max(REPLAY_STEP_MAX_BYTES, budget - used))
+        used += _utf8_len(latest)
+
+        step_entries: List[str] = []
+        omitted_steps = 0
+        steps = exchange["steps"]
+        for pos in range(len(steps) - 1, -1, -1):
+            label, text = steps[pos]
+            entry = f"{label}:\n{_clip_utf8(text, REPLAY_STEP_MAX_BYTES)}"
+            size = _utf8_len(entry) + 2
+            if used + size > budget:
+                omitted_steps = pos + 1
+                break
+            step_entries.insert(0, entry)
+            used += size
+
+        prior_entries: List[str] = []
+        for past in reversed(prior):
+            replies = [t for label, t in past["steps"] if label == "ASSISTANT" and t.strip()]
+            reply = _clip_utf8(replies[-1], REPLAY_PRIOR_ENTRY_MAX_BYTES) if replies else "(no reply recorded)"
+            entry = f"USER: {_condense_prior_request(past['request'])}\nASSISTANT: {reply}"
+            size = _utf8_len(entry) + 2
+            if used + size > budget:
+                break
+            prior_entries.insert(0, entry)
+            used += size
+
+        sections: List[str] = []
+        if prior_entries:
+            sections.append(
+                "[EARLIER IN THIS SESSION: condensed recap for continuity]\n"
+                + "\n\n".join(prior_entries)
+                + "\n[END EARLIER IN THIS SESSION]"
+            )
+        sections.append(request_section)
+        if step_entries or omitted_steps:
+            header = "[YOUR PREVIOUS STEPS ON THIS REQUEST]"
+            if omitted_steps:
+                header += f"\n[{omitted_steps} earlier step(s) omitted for length]"
+            sections.append(header + ("\n" + "\n\n".join(step_entries) if step_entries else "") + "\n[END PREVIOUS STEPS]")
+        if latest:
+            sections.append(latest)
+        return "\n\n".join(sections)
 
 # ---------------------------------------------------------------------------
 # Rolling LLM Handshake Logger (5 Days Rolling)
