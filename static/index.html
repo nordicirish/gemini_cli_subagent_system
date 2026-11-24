@@ -6,7 +6,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.66">
+    <link rel="stylesheet" href="styles.css?v=18.67">
     <link rel="stylesheet" href="modern_ui.css?v=18.59">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
@@ -41,6 +41,10 @@
                     <div class="status-item" id="regime-status-container">
                         <span class="label">Regime:</span>
                         <span id="volatility-regime-pill" class="regime-pill regime-unknown">—</span>
+                    </div>
+                    <div class="status-item" id="macro-calendar-container">
+                        <span class="label">Macro:</span>
+                        <span id="macro-calendar-pill" class="macro-cal-pill macro-cal-clear" title="Upcoming Tier-1 Macro Economic Events (ENH_47 / ENH_259)">📅 —</span>
                     </div>
                     <div class="status-item" id="refresh-status-container" style="display: none;">
                         <span id="refresh-status" class="value text-yellow" style="font-weight: bold;">⚡ HEAVY REFRESH</span>
@@ -334,6 +338,20 @@
         </div>
     </div>
 
+    <!-- ─── Execution & Risk Ticket Modal (Phase 4) ─── -->
+    <div class="modal-overlay" id="execution-plan-modal-overlay">
+        <div class="modal modal-wide">
+            <div class="modal-header">
+                <h3>⚡ Execution &amp; Risk Ticket — <span id="exec-modal-ticker">—</span></h3>
+                <button class="modal-close" id="close-exec-modal">&times;</button>
+            </div>
+            <div id="exec-modal-body" class="exec-modal-body">
+                <div class="empty-msg">Loading deterministic execution ticket...</div>
+            </div>
+            <div id="exec-modal-feedback" class="status-message inline-feedback" style="margin-top: 8px;"></div>
+        </div>
+    </div>
+
 
 
     <!-- Modern Chat Overlay -->
@@ -509,7 +527,7 @@
     <div id="offscreen-chart-container" style="position: fixed; left: -9999px; top: -9999px; width: 920px; height: 500px; opacity: 0; pointer-events: none;"></div>
 
     <script src="portfolio.js?v=18.61"></script>
-    <script src="app.js?v=18.68"></script>
+    <script src="app.js?v=18.69"></script>
     <script src="modern_ui.js?v=18.63"></script>
 </body>
 </html>

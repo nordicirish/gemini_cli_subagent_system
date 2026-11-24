@@ -60,12 +60,14 @@ try:
     from alert_sentinel import ALERT_SENTINEL
     from analytics_engine import ANALYTICS_ENGINE
     from decision_backtester import backtest_decision_log
+    from macro_calendar import get_macro_calendar_status
     from sec_edgar import fetch_recent_sec_filings
 except ImportError:
     from python.alert_monitor import ALERT_MONITOR, extract_triggers_from_chat
     from python.alert_sentinel import ALERT_SENTINEL
     from python.analytics_engine import ANALYTICS_ENGINE
     from python.decision_backtester import backtest_decision_log
+    from python.macro_calendar import get_macro_calendar_status
     from python.sec_edgar import fetch_recent_sec_filings
 
 # Import the existing FastAPI app from fetch_stocks
@@ -347,11 +349,10 @@ data_analyst = framework.create_agent_tool(
     agent_tools=[tools.perform_web_forensic_search, tools.get_market_data, tools.fetch_sec_filings]
 )
 
-state_validation_router = framework.create_agent_tool(
+state_validation_router = framework.create_deterministic_agent_tool(
     name="State Validation Router",
-    file_path="engine_instructions/state_validation_router.md",
-    mode="PRO",
-    agent_tools=[tools.read_ssot, tools.update_ssot, tools.get_market_data]
+    handler_fn=lambda _q: ANALYTICS_ENGINE.format_state_validation_router_response(*_load_live_analytics_context()),
+    description="Deterministic Python State & Validation Router enforcing ENH_32 schema integrity, ENH_99 zero-share pruning, MANDATE_36 trailing stop audits, and canonical EXECUTION_PAYLOAD emission.",
 )
 
 rule_enforcer_engine = framework.create_deterministic_agent_tool(
@@ -363,11 +364,10 @@ rule_enforcer_engine = framework.create_deterministic_agent_tool(
     description="Deterministic Python Rule Enforcer evaluating global vetoes, position trim mandates, friction hurdles, and 72h SEC EDGAR dilution filings.",
 )
 
-execution = framework.create_agent_tool(
+execution = framework.create_deterministic_agent_tool(
     name="Execution Engine",
-    file_path="engine_instructions/execution.md",
-    mode="GEMMA",
-    agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
+    handler_fn=lambda _q: ANALYTICS_ENGINE.format_execution_engine_response(*_load_live_analytics_context()),
+    description="Deterministic Python Execution Engine computing MANDATE_36 trailing stop audits, ENH_96 Fib front-run ladders, Decimal FX/cash proofs, and sweep trim tickets.",
 )
 
 gex_engine = framework.create_deterministic_agent_tool(
@@ -2041,6 +2041,18 @@ def get_decision_backtest(limit: int = 25):
 def get_sec_filings_endpoint(ticker: str, limit: int = 8):
     """Read-only SEC EDGAR recent filings & 72h dilution warning lookup."""
     return fetch_recent_sec_filings(ticker=ticker, limit=max(1, min(20, int(limit or 8))))
+
+
+@app.get("/api/analytics/execution")
+def get_execution_plan_endpoint():
+    """Read-only deterministic execution plan (trailing stops, Fib ladders, cash proof)."""
+    return ANALYTICS_ENGINE.build_execution_plan(*_load_live_analytics_context())
+
+
+@app.get("/api/analytics/calendar")
+def get_macro_calendar_endpoint():
+    """Read-only Tier-1 Macro Economic Calendar Shield status (ENH_47 / ENH_259)."""
+    return get_macro_calendar_status(now_ny=agent_framework.ny_now())
 
 
 @app.get("/api/system_logs")

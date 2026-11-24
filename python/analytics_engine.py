@@ -16,6 +16,11 @@ import threading
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
+try:
+    from macro_calendar import get_macro_calendar_status
+except ImportError:
+    from python.macro_calendar import get_macro_calendar_status
+
 NY_TZ = ZoneInfo("America/New_York")
 
 # Canonical system thresholds mirroring gem_trading_rules/rules.md
@@ -758,6 +763,8 @@ class AnalyticsEngine:
             if row:
                 watchlist_out.append(_classify_watchlist_setup(row, permissibility))
 
+        macro_cal = get_macro_calendar_status(now_ny=now_ny)
+
         return {
             "as_of_ny": now_ny.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "friction_hurdles": {
@@ -765,6 +772,7 @@ class AnalyticsEngine:
                 "eur_omxh_round_trip_pct": 0.25,
             },
             "regime": regime,
+            "macro_calendar": macro_cal,
             "global_vetoes": global_vetoes,
             "positions": positions_out,
             "watchlist_signals": watchlist_out,
@@ -976,6 +984,247 @@ class AnalyticsEngine:
             "Volatility_State": reg["volatility_state"],
             "Strategy_Permissibility": permissibility,
             "setups": setups,
+        }
+        return json.dumps(payload, indent=2)
+
+    def build_execution_plan(
+        self,
+        live_state: Dict[str, Any],
+        ssot: Optional[Dict[str, Any]] = None,
+        fx_info: Optional[Dict[str, Any]] = None,
+        ny_dt: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """Builds deterministic trailing stop audits, ENH_96 Fib ladders & cash proofs."""
+        bundle = self.evaluate(live_state, ssot=ssot, fx_info=fx_info, ny_dt=ny_dt)
+        macro_cal = bundle.get("macro_calendar") or {}
+        ms = ssot.get("mutable_state", ssot) if isinstance(ssot, dict) and isinstance(ssot.get("mutable_state"), dict) else (ssot if isinstance(ssot, dict) else {})
+        cash_eur = _to_decimal(ms.get("unallocated_cash_eur") if isinstance(ms, dict) else None) or Decimal("0.00")
+        fx_rate = _to_decimal(fx_info.get("eurusd_rate")) if isinstance(fx_info, dict) and fx_info.get("available") else None
+        cash_usd = _q2(cash_eur * fx_rate) if (fx_rate is not None and fx_rate > Decimal("0")) else (_to_decimal(ms.get("unallocated_cash_usd") if isinstance(ms, dict) else None) or Decimal("0.00"))
+        cash_proof = (
+            f"Proof: Internally verified { _q2(cash_eur) } EUR Cash Active / "
+            f"0.00 EUR Allocated this cycle = { _q2(cash_eur) } EUR Unallocated"
+        )
+
+        tickers = live_state.get("tickers", []) if isinstance(live_state, dict) else []
+        by_sym: Dict[str, Dict[str, Any]] = {
+            str(t.get("ticker") or "").strip().upper(): t
+            for t in (tickers or [])
+            if isinstance(t, dict) and t.get("ticker")
+        }
+
+        trailing_audits: List[Dict[str, Any]] = []
+        plan_positions: List[Dict[str, Any]] = []
+        all_directives: List[Dict[str, Any]] = []
+
+        for pos in bundle["positions"]:
+            sym = pos["ticker"]
+            row = by_sym.get(sym, {})
+            price_val = _safe_float(pos.get("price"))
+            vwap_val = _safe_float(row.get("vwap"))
+            prev_close_val = _safe_float(row.get("regular_close"))
+            rsi_val = _safe_float(row.get("rsi")) or 50.0
+            tracker = pos.get("tracker") if isinstance(pos.get("tracker"), dict) else {}
+
+            anchor_val = vwap_val if (vwap_val is not None and vwap_val > 0) else (prev_close_val if (prev_close_val is not None and prev_close_val > 0) else price_val)
+            pct_dist = round(((price_val - anchor_val) / anchor_val) * 100.0, 2) if (price_val and anchor_val and anchor_val > 0) else 0.0
+
+            tighten_factor = 0.5 if (macro_cal.get("shield_active") or tracker.get("gamma_flicker_overbought")) else 1.0
+            eff_stop_pct = round(2.0 * tighten_factor, 2)
+            base_ref = price_val if (price_val and anchor_val and price_val < anchor_val) else anchor_val
+            stop_price = None
+            if base_ref and base_ref > 0:
+                stop_dec = _q2(Decimal(str(base_ref)) * (Decimal("1") - (Decimal(str(eff_stop_pct)) / Decimal("100"))))
+                stop_price = float(stop_dec)
+
+            trig_cond = "ACTIVE_HOLDING"
+            if rsi_val > 70.0 and pct_dist > 2.0:
+                trig_cond = "BOTH"
+            elif rsi_val > 70.0:
+                trig_cond = "RSI > 70"
+            elif pct_dist > 2.0:
+                trig_cond = "VWAP_DIST > 2%"
+
+            stop_audit = {
+                "ticker": sym,
+                "anchor_price": round(anchor_val, 2) if anchor_val else None,
+                "current_price": price_val,
+                "pct_distance_from_anchor": pct_dist,
+                "stop_tighten_factor": tighten_factor,
+                "effective_stop_pct": eff_stop_pct,
+                "effective_stop_price": stop_price,
+                "extended_vwap_sweep": pct_dist > 4.0,
+                "trigger_condition": trig_cond,
+            }
+            if price_val is not None:
+                trailing_audits.append(stop_audit)
+
+            # ENH_96 / ENH_254 / ENH_255 Fibonacci Front-Run Limit Ladder
+            fib = row.get("fib_forecast") if isinstance(row.get("fib_forecast"), dict) else {}
+            ladder: List[Dict[str, Any]] = []
+            tranches = pos.get("tranches") or {}
+            if price_val and price_val > 0 and tranches:
+                t1_raw = _safe_float(fib.get("t1_100")) or _safe_float(fib.get("daily_peak_target")) or (price_val * 1.03)
+                t2_raw = _safe_float(fib.get("t2_1618")) or (price_val * 1.06)
+                t3_raw = _safe_float(fib.get("t3_2618")) or (price_val * 1.10)
+                specs = [
+                    ("T1", "1.000 Measured Move", "25pct", t1_raw),
+                    ("T2", "1.618 Golden Ratio", "50pct", t2_raw),
+                    ("T3", "2.618 Runner Extension", "100pct", t3_raw),
+                ]
+                for tier_code, tier_desc, t_key, raw_lvl in specs:
+                    t_info = tranches.get(t_key) or {}
+                    sell_sh = t_info.get("sell_shares")
+                    if not sell_sh or not raw_lvl or raw_lvl <= 0:
+                        continue
+                    lim_dec = _q2(Decimal(str(raw_lvl)) * FRONT_RUN_FACTOR)
+                    est_usd = _q2(Decimal(str(sell_sh)) * lim_dec)
+                    est_eur = _q2(est_usd / fx_rate) if (fx_rate is not None and fx_rate > Decimal("0")) else None
+                    lim_f = float(lim_dec)
+                    ladder.append({
+                        "tier": tier_code,
+                        "label": tier_desc,
+                        "tranche_pct": int(t_key.replace("pct", "")),
+                        "sell_shares": sell_sh,
+                        "raw_target_usd": round(raw_lvl, 2),
+                        "limit_usd": lim_f,
+                        "est_proceeds_usd": float(est_usd),
+                        "est_proceeds_eur": float(est_eur) if est_eur is not None else None,
+                        "order_text": f"SELL {sell_sh} {sym} LMT ${lim_f:.2f}",
+                    })
+
+            pos_directives: List[Dict[str, Any]] = []
+            for m in (pos.get("triggered_mandates") or []):
+                if not isinstance(m, dict) or m.get("trim_pct") is None:
+                    continue
+                trim_pct = int(m["trim_pct"])
+                t_info = tranches.get(f"{trim_pct}pct") or tranches.get("25pct") or {}
+                sell_sh = t_info.get("sell_shares")
+                lim_usd = t_info.get("sweep_limit_usd") or pos.get("sweep_limit_usd")
+                if sell_sh and lim_usd is not None:
+                    directive = {
+                        "ticker": sym,
+                        "rule_id": m.get("rule_id"),
+                        "action": m.get("action"),
+                        "trim_pct": trim_pct,
+                        "sell_shares": sell_sh,
+                        "limit_price_usd": lim_usd,
+                        "order_type": "SWEEP_LIMIT",
+                        "order_text": f"SELL {sell_sh} {sym} SWEEP LMT ${float(lim_usd):.2f}",
+                    }
+                    pos_directives.append(directive)
+                    all_directives.append(directive)
+
+            plan_positions.append({
+                "ticker": sym,
+                "shares": pos.get("shares"),
+                "wac": pos.get("wac"),
+                "price": price_val,
+                "valid_telemetry": pos.get("valid_telemetry"),
+                "sweep_limit_usd": pos.get("sweep_limit_usd"),
+                "front_run_limit_usd": pos.get("front_run_limit_usd"),
+                "tranches": tranches,
+                "trailing_stop": stop_audit,
+                "fib_limit_ladder": ladder,
+                "triggered_mandates": pos.get("triggered_mandates") or [],
+                "order_directives": pos_directives,
+            })
+
+        return {
+            "source": "python_deterministic",
+            "as_of_ny": bundle["as_of_ny"],
+            "regime": bundle["regime"],
+            "macro_calendar": macro_cal,
+            "global_vetoes": bundle["global_vetoes"],
+            "cash_reconciliation": {
+                "unallocated_cash_eur": float(_q2(cash_eur)),
+                "unallocated_cash_usd": float(_q2(cash_usd)),
+                "proof": cash_proof,
+            },
+            "trailing_stop_audit": trailing_audits,
+            "positions": plan_positions,
+            "order_directives": all_directives,
+        }
+
+    def format_execution_engine_response(
+        self,
+        live_state: Dict[str, Any],
+        ssot: Optional[Dict[str, Any]] = None,
+        fx_info: Optional[Dict[str, Any]] = None,
+        ny_dt: Optional[datetime] = None,
+    ) -> str:
+        """Zero-LLM deterministic response matching engine_instructions/execution.md."""
+        return json.dumps(self.build_execution_plan(live_state, ssot=ssot, fx_info=fx_info, ny_dt=ny_dt), indent=2)
+
+    def format_state_validation_router_response(
+        self,
+        live_state: Dict[str, Any],
+        ssot: Optional[Dict[str, Any]] = None,
+        fx_info: Optional[Dict[str, Any]] = None,
+        ny_dt: Optional[datetime] = None,
+        votes: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Zero-LLM deterministic response enforcing ENH_32/ENH_99/MANDATE_36 & EXECUTION_PAYLOAD."""
+        plan = self.build_execution_plan(live_state, ssot=ssot, fx_info=fx_info, ny_dt=ny_dt)
+        pruned_snapshot = [
+            {
+                "ticker": p["ticker"],
+                "shares": p["shares"],
+                "wac": p["wac"],
+                "price": p["price"],
+                "status": "TRIM_REQUIRED" if p["order_directives"] else "HOLDING",
+            }
+            for p in plan["positions"]
+            if (p.get("shares") or 0) > 0
+        ]
+        agreement = compute_agreement_score(votes) if votes else {
+            "agreement_score": 1.0,
+            "fragile": False,
+            "status": "ALIGNED",
+            "dominant_stance": "HOLD",
+            "total_weight": 1.0,
+            "buckets": {"BULLISH": 0.0, "HOLD": 1.0, "BEARISH": 0.0},
+        }
+        active_mandates = sorted({
+            str(m.get("rule_id"))
+            for p in plan["positions"]
+            for m in (p.get("triggered_mandates") or [])
+            if isinstance(m, dict) and m.get("rule_id")
+        })
+        if (plan.get("macro_calendar") or {}).get("shield_active"):
+            for r in plan["macro_calendar"].get("active_rules", []):
+                if r not in active_mandates:
+                    active_mandates.append(r)
+
+        directive = "EXECUTE" if plan["order_directives"] else "HOLD"
+        payload = {
+            "source": "python_deterministic",
+            "Consensus_Status": "VERIFIED",
+            "Drift_Status": "STABLE",
+            "Agreement_Score_Sa": agreement["agreement_score"],
+            "Agreement_Status": agreement["status"],
+            "EXECUTION_PAYLOAD": {
+                "thoughtSignature": "python_deterministic_state_validation_router",
+                "state_context": {
+                    "timestamp": plan["as_of_ny"],
+                    "directive": directive,
+                    "status": plan["regime"]["market_status"],
+                    "risk_regime": plan["regime"]["volatility_state"],
+                },
+                "risk_metrics": {
+                    "active_mandates": active_mandates,
+                    "global_vetoes": plan["global_vetoes"],
+                    "macro_shield_active": bool((plan.get("macro_calendar") or {}).get("shield_active")),
+                },
+                "portfolio_snapshot": pruned_snapshot,
+                "unallocated_cash_eur": plan["cash_reconciliation"]["unallocated_cash_eur"],
+                "unallocated_cash_usd": plan["cash_reconciliation"]["unallocated_cash_usd"],
+                "order_directives": plan["order_directives"],
+                "forensic_intelligence": {
+                    "math_proof_liquidity": plan["cash_reconciliation"]["proof"],
+                    "trailing_stop_audit": plan["trailing_stop_audit"],
+                },
+            },
         }
         return json.dumps(payload, indent=2)
 

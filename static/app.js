@@ -1648,16 +1648,52 @@ function prefetchSecDilutionBadges(symbols) {
     });
 }
 
+function updateMacroCalendarPill(macroCal) {
+    const pill = document.getElementById('macro-calendar-pill');
+    if (!pill || !macroCal || typeof macroCal !== 'object') return;
+    const nextEv = macroCal.next_event;
+    if (!nextEv || !nextEv.name) {
+        pill.className = 'macro-cal-pill macro-cal-clear';
+        pill.textContent = '📅 Clear';
+        pill.title = 'No upcoming Tier-1 macro releases queued';
+        return;
+    }
+    const shortName = String(nextEv.name)
+        .replace(' Rate Decision', '')
+        .replace('Non-Farm Payrolls', 'NFP')
+        .replace('US ', '');
+    const hrs = Number(nextEv.hours_away);
+    const timeTag = Number.isFinite(hrs)
+        ? (hrs < 48 ? `${hrs.toFixed(0)}h` : `${Math.round(hrs / 24)}d`)
+        : '';
+    if (macroCal.shield_active) {
+        pill.className = 'macro-cal-pill macro-cal-shield';
+        pill.textContent = `🛡️ ${shortName} ${timeTag} (-50% stops)`.trim();
+    } else {
+        pill.className = 'macro-cal-pill macro-cal-clear';
+        pill.textContent = `📅 ${shortName} ${timeTag}`.trim();
+    }
+    const upcomingLines = (Array.isArray(macroCal.upcoming_events) ? macroCal.upcoming_events : [])
+        .map((e) => `${e.name}: ${e.date} ${e.time_et} ET (${e.hours_away}h)`)
+        .join(' | ');
+    pill.title = `${macroCal.shield_active ? 'ENH_259 Shield ACTIVE (-50% stops) · ' : ''}${upcomingLines}`;
+}
+
 function renderQuantAnalyticsPanel(analytics, backtest) {
     const panel = document.getElementById('analytics-quant-panel');
-    if (!panel) return;
     const data = analytics && typeof analytics === 'object' ? analytics : {};
+    if (data.macro_calendar) {
+        updateMacroCalendarPill(data.macro_calendar);
+    }
+    if (!panel) return;
     const regime = data.regime && typeof data.regime === 'object' ? data.regime : {};
     const perm = regime.strategy_permissibility && typeof regime.strategy_permissibility === 'object'
         ? regime.strategy_permissibility
         : {};
     const vetoes = Array.isArray(data.global_vetoes) ? data.global_vetoes : [];
     const positions = Array.isArray(data.positions) ? data.positions : [];
+    const watchlistSignals = Array.isArray(data.watchlist_signals) ? data.watchlist_signals : [];
+    const macroCal = data.macro_calendar && typeof data.macro_calendar === 'object' ? data.macro_calendar : null;
 
     const volState = _escAlertHtml(regime.volatility_state || 'UNKNOWN');
     const permTags = [
@@ -1666,6 +1702,14 @@ function renderQuantAnalyticsPanel(analytics, backtest) {
         ['Pullback', Boolean(perm.Pullback_Continuations)],
         ['Mean-Rev', Boolean(perm.Mean_Reversion)],
     ].map(([label, ok]) => `<span class="quant-perm-tag ${ok ? 'allowed' : 'blocked'}">${ok ? '✓' : '✕'} ${label}</span>`).join('');
+
+    let macroRowHtml = '';
+    if (macroCal && macroCal.next_event) {
+        const ne = macroCal.next_event;
+        const cls = macroCal.shield_active ? 'quant-veto-item' : 'quant-ok-line';
+        const prefix = macroCal.shield_active ? '🛡️ Shield Active (-50% stops)' : '📅 Clear';
+        macroRowHtml = `<div class="${cls}" style="margin-top: 4px;">${prefix} · ${_escAlertHtml(ne.name)} (${_escAlertHtml(String(ne.hours_away))}h)</div>`;
+    }
 
     const vetoesHtml = vetoes.length
         ? vetoes.map((v) => {
@@ -1685,15 +1729,27 @@ function renderQuantAnalyticsPanel(analytics, backtest) {
             const mandBadge = mand.length
                 ? ` <span class="quant-mandate-pill">${mand.map(m => _escAlertHtml(m.rule_id || '')).join(', ')}</span>`
                 : '';
+            const planBtn = `<button type="button" class="quant-plan-btn" onclick="openExecutionPlanModal('${sym}')" title="Open Execution &amp; Risk Ticket">📋 Plan</button>`;
             if (!t25 && !t50) {
-                return `<div class="quant-tranche-row"><strong>${sym}</strong>${mandBadge}: awaiting live price</div>`;
+                return `<div class="quant-tranche-row"><span><strong>${sym}</strong>${mandBadge}: awaiting live price</span>${planBtn}</div>`;
             }
             const s25 = t25 ? `${t25.sell_shares}sh` : '—';
             const s50 = t50 ? `${t50.sell_shares}sh` : '—';
             const lim = p.sweep_limit_usd != null ? `$${Number(p.sweep_limit_usd).toFixed(2)}` : '—';
-            return `<div class="quant-tranche-row"><strong>${sym}</strong>${mandBadge} · 25%: ${s25} · 50%: ${s50} · Sweep ${lim}</div>`;
+            return `<div class="quant-tranche-row"><span><strong>${sym}</strong>${mandBadge} · 25%: ${s25} · 50%: ${s50} · Sweep ${lim}</span>${planBtn}</div>`;
         }).join('')
         : '<div class="empty-msg">No held positions</div>';
+
+    const setupsHtml = watchlistSignals.length
+        ? watchlistSignals.map((w) => {
+            const sym = _escAlertHtml(w.ticker || '');
+            const rawSetup = String(w.setup || 'RANGE_WAIT');
+            const shortSetup = _escAlertHtml(rawSetup.replace('PULLBACK_CONTINUATION', 'PULLBACK').replace('MOMENTUM_BREAKOUT', 'BREAKOUT').replace('EPISODIC_PIVOT', 'EP').replace('MEAN_REVERSION', 'MEAN_REV').replace('RANGE_WAIT', 'WAIT'));
+            const ok = Boolean(w.strategy_permissible);
+            const rvolTxt = w.rvol != null ? ` · ${Number(w.rvol).toFixed(1)}x` : '';
+            return `<div class="quant-setup-row"><strong>${sym}</strong><span class="quant-setup-pill ${ok ? 'ok' : 'blocked'}">${shortSetup}${rvolTxt}</span></div>`;
+        }).join('')
+        : '<div class="empty-msg">No watchlist telemetry yet</div>';
 
     const bt = backtest && typeof backtest === 'object' ? backtest : null;
     const btHtml = bt
@@ -1709,14 +1765,19 @@ function renderQuantAnalyticsPanel(analytics, backtest) {
         <div class="quant-section">
             <div class="quant-section-title">Regime: <strong>${volState}</strong></div>
             <div class="quant-perm-grid">${permTags}</div>
+            ${macroRowHtml}
         </div>
         <div class="quant-section">
             <div class="quant-section-title">Global Vetoes</div>
             ${vetoesHtml}
         </div>
         <div class="quant-section">
-            <div class="quant-section-title">Position Trim Sizing</div>
+            <div class="quant-section-title">Position Trim &amp; Execution</div>
             ${tranchesHtml}
+        </div>
+        <div class="quant-section">
+            <div class="quant-section-title">Watchlist Setups</div>
+            ${setupsHtml}
         </div>
         <div class="quant-section">
             <div class="quant-section-title">Decision Backtest</div>
@@ -1724,6 +1785,167 @@ function renderQuantAnalyticsPanel(analytics, backtest) {
         </div>
     `;
 }
+
+async function copyExecutionOrderText(orderText, btn) {
+    try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(orderText);
+        }
+        if (btn) {
+            const orig = btn.textContent;
+            btn.textContent = '✓ Copied';
+            setTimeout(() => { btn.textContent = orig; }, 1200);
+        }
+    } catch (_) { /* clipboard optional in headless/http contexts */ }
+}
+
+async function armQuickTriggerFromPlan(ticker, op, target, label) {
+    const fb = document.getElementById('exec-modal-feedback');
+    try {
+        const res = await fetch(`${API_BASE}/alerts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker, metric: 'price', op, target: Number(target), label }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        if (data.alerts && Array.isArray(data.alerts.rules)) renderAlertRules(data.alerts.rules);
+        showFeedback(null, '', `Armed alert: ${ticker} ${op} $${Number(target).toFixed(2)}`, false, fb);
+        pollData();
+    } catch (e) {
+        showFeedback(null, '', e.message || 'Failed to arm trigger', true, fb);
+    }
+}
+
+function closeExecutionPlanModal() {
+    const overlay = document.getElementById('execution-plan-modal-overlay');
+    if (overlay) closeModal(overlay);
+}
+
+async function openExecutionPlanModal(ticker) {
+    const overlay = document.getElementById('execution-plan-modal-overlay');
+    const titleSym = document.getElementById('exec-modal-ticker');
+    const bodyEl = document.getElementById('exec-modal-body');
+    const fbEl = document.getElementById('exec-modal-feedback');
+    if (!overlay || !bodyEl) return;
+
+    const sym = String(ticker || '').trim().toUpperCase();
+    if (titleSym) titleSym.textContent = sym || 'PORTFOLIO';
+    if (fbEl) { fbEl.textContent = ''; fbEl.className = 'status-message inline-feedback'; }
+    bodyEl.innerHTML = '<div class="empty-msg">Computing deterministic execution plan...</div>';
+    openModal(overlay);
+
+    try {
+        const res = await fetch(`${API_BASE}/analytics/execution`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const plan = await res.json();
+        const positions = Array.isArray(plan.positions) ? plan.positions : [];
+        const pos = positions.find((p) => String(p.ticker || '').toUpperCase() === sym) || positions[0];
+        const cash = plan.cash_reconciliation || {};
+        const macroCal = plan.macro_calendar || {};
+        if (!pos) {
+            bodyEl.innerHTML = `<div class="empty-msg">No active position sizing for ${_escAlertHtml(sym)}.</div>`;
+            return;
+        }
+
+        const pSym = _escAlertHtml(pos.ticker || '');
+        const stop = pos.trailing_stop || {};
+        const ladder = Array.isArray(pos.fib_limit_ladder) ? pos.fib_limit_ladder : [];
+        const directives = Array.isArray(pos.order_directives) ? pos.order_directives : [];
+
+        const stopPriceStr = stop.effective_stop_price != null ? `$${Number(stop.effective_stop_price).toFixed(2)}` : '—';
+        const anchorStr = stop.anchor_price != null ? `$${Number(stop.anchor_price).toFixed(2)}` : '—';
+        const armStopBtn = stop.effective_stop_price != null
+            ? `<button type="button" class="exec-mini-btn arm" onclick="armQuickTriggerFromPlan('${pSym}', '<=', ${Number(stop.effective_stop_price)}, 'MANDATE_36 Trailing Stop')">🔔 Arm Stop (${stopPriceStr})</button>`
+            : '';
+
+        const ladderRows = ladder.length
+            ? ladder.map((lvl) => {
+                const ordTxt = _escAlertHtml(lvl.order_text || '');
+                const limF = Number(lvl.limit_usd).toFixed(2);
+                const proc = lvl.est_proceeds_eur != null
+                    ? `$${Number(lvl.est_proceeds_usd).toFixed(0)} / €${Number(lvl.est_proceeds_eur).toFixed(0)}`
+                    : `$${Number(lvl.est_proceeds_usd).toFixed(0)}`;
+                return `
+                    <tr>
+                        <td><strong>${_escAlertHtml(lvl.tier)}</strong> (${lvl.tranche_pct}%)</td>
+                        <td>${lvl.sell_shares} sh</td>
+                        <td>$${limF}</td>
+                        <td>${proc}</td>
+                        <td class="exec-actions-cell">
+                            <button type="button" class="exec-mini-btn arm" onclick="armQuickTriggerFromPlan('${pSym}', '>=', ${Number(lvl.limit_usd)}, '${_escAlertHtml(lvl.tier)} Fib Limit')">🔔 Arm</button>
+                            <button type="button" class="exec-mini-btn" onclick="copyExecutionOrderText('${ordTxt}', this)">📋 Copy</button>
+                        </td>
+                    </tr>`;
+            }).join('')
+            : '<tr><td colspan="5" class="empty-msg">Awaiting live price for Fib ladder</td></tr>';
+
+        const t25 = (pos.tranches || {})['25pct'];
+        const t50 = (pos.tranches || {})['50pct'];
+        const sweepLim = pos.sweep_limit_usd != null ? Number(pos.sweep_limit_usd).toFixed(2) : null;
+        const sweepRows = (t25 || t50) && sweepLim
+            ? [ ['25% Defensive Trim', t25], ['50% Heavy Trim', t50] ]
+                .filter(([, t]) => t && t.sell_shares)
+                .map(([lbl, t]) => {
+                    const ordTxt = `SELL ${t.sell_shares} ${pSym} LMT $${sweepLim}`;
+                    return `
+                        <div class="exec-sweep-row">
+                            <span><strong>${lbl}:</strong> ${t.sell_shares} sh @ $${sweepLim} (Sweep -0.50%)</span>
+                            <button type="button" class="exec-mini-btn" onclick="copyExecutionOrderText('${_escAlertHtml(ordTxt)}', this)">📋 Copy Order</button>
+                        </div>`;
+                }).join('')
+            : '<div class="empty-msg">Awaiting live price for sweep trims</div>';
+
+        const directivesBanner = directives.length
+            ? `<div class="exec-ticket-section alert">
+                    <div class="quant-section-title">🚨 Triggered Risk Directives</div>
+                    ${directives.map(d => `<div class="quant-veto-item"><strong>${_escAlertHtml(d.rule_id)}</strong>: ${_escAlertHtml(d.order_text)}</div>`).join('')}
+               </div>`
+            : '';
+
+        bodyEl.innerHTML = `
+            ${directivesBanner}
+            <div class="exec-ticket-section">
+                <div class="quant-section-title">🛡️ MANDATE_36 Trailing Stop Audit${macroCal.shield_active ? ' (ENH_259 -50% Active)' : ''}</div>
+                <div class="exec-kv-row">
+                    <span>Anchor: <strong>${anchorStr}</strong></span>
+                    <span>Dist: <strong>${stop.pct_distance_from_anchor != null ? `${Number(stop.pct_distance_from_anchor).toFixed(2)}%` : '—'}</strong></span>
+                    <span>Stop (${stop.effective_stop_pct || 2.0}%): <strong>${stopPriceStr}</strong></span>
+                    ${armStopBtn}
+                </div>
+            </div>
+            <div class="exec-ticket-section">
+                <div class="quant-section-title">🎯 ENH_96 Fibonacci Front-Run Limit Ladder (-0.25%)</div>
+                <table class="exec-ticket-table">
+                    <thead><tr><th>Tier</th><th>Shares</th><th>Limit</th><th>Est. Proceeds</th><th>Actions</th></tr></thead>
+                    <tbody>${ladderRows}</tbody>
+                </table>
+            </div>
+            <div class="exec-ticket-section">
+                <div class="quant-section-title">⚡ Defensive Sweep Trim Tickets</div>
+                ${sweepRows}
+            </div>
+            <div class="exec-ticket-section">
+                <div class="quant-section-title">💶 MANDATE_06 Cash Reconciliation</div>
+                <div class="quant-tranche-row">${_escAlertHtml(cash.proof || 'Cash proof unavailable')}</div>
+            </div>
+        `;
+    } catch (e) {
+        bodyEl.innerHTML = `<div class="quant-veto-item">Failed to load execution ticket: ${_escAlertHtml(e.message || 'error')}</div>`;
+    }
+}
+
+const _closeExecModalBtn = document.getElementById('close-exec-modal');
+if (_closeExecModalBtn) _closeExecModalBtn.addEventListener('click', closeExecutionPlanModal);
+const _execModalOverlay = document.getElementById('execution-plan-modal-overlay');
+if (_execModalOverlay) {
+    _execModalOverlay.addEventListener('click', (e) => {
+        if (e.target === _execModalOverlay) closeExecutionPlanModal();
+    });
+}
+window.openExecutionPlanModal = openExecutionPlanModal;
+window.armQuickTriggerFromPlan = armQuickTriggerFromPlan;
+window.copyExecutionOrderText = copyExecutionOrderText;
 
 async function fetchAnalyticsAndBacktest() {
     const btn = document.getElementById('refresh-analytics-btn');

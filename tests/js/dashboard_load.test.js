@@ -87,6 +87,13 @@ const API = {
                 Mean_Reversion: true,
             },
         },
+        macro_calendar: {
+            shield_active: true,
+            stop_tighten_factor: 0.5,
+            sizing_dampener: 0.5,
+            next_event: { name: 'FOMC Rate Decision', date: '2026-12-09', time_et: '14:00', tier: 'TIER_1', hours_away: 18.5 },
+            upcoming_events: [{ name: 'FOMC Rate Decision', date: '2026-12-09', time_et: '14:00', tier: 'TIER_1', hours_away: 18.5 }],
+        },
         global_vetoes: [{ rule_id: 'ENH_72', reason: 'VIX >= 20 new-risk long veto' }],
         positions: [
             {
@@ -96,6 +103,35 @@ const API = {
                 triggered_mandates: [],
             },
         ],
+        watchlist_signals: [
+            { ticker: 'PLTR', setup: 'PULLBACK_CONTINUATION', strategy_permissible: false, rvol: 0.62 },
+        ],
+    },
+    '/api/analytics/execution': {
+        source: 'python_deterministic',
+        macro_calendar: { shield_active: true, stop_tighten_factor: 0.5 },
+        cash_reconciliation: { proof: 'Proof: Internally verified 1000.00 EUR Cash Active / 0.00 EUR Allocated this cycle = 1000.00 EUR Unallocated' },
+        positions: [
+            {
+                ticker: 'NVDA',
+                shares: 10,
+                price: 120.5,
+                sweep_limit_usd: 119.90,
+                tranches: { '25pct': { sell_shares: 2 }, '50pct': { sell_shares: 5 }, '100pct': { sell_shares: 10 } },
+                trailing_stop: {
+                    anchor_price: 119.0,
+                    pct_distance_from_anchor: 1.26,
+                    effective_stop_pct: 1.0,
+                    effective_stop_price: 117.81,
+                },
+                fib_limit_ladder: [
+                    { tier: 'T1', label: '1.000 Measured Move', tranche_pct: 25, sell_shares: 2, limit_usd: 123.19, est_proceeds_usd: 246.38, est_proceeds_eur: 224.45, order_text: 'SELL 2 NVDA LMT $123.19' },
+                    { tier: 'T2', label: '1.618 Golden Ratio', tranche_pct: 50, sell_shares: 5, limit_usd: 125.65, est_proceeds_usd: 628.25, est_proceeds_eur: 572.33, order_text: 'SELL 5 NVDA LMT $125.65' },
+                ],
+                order_directives: [],
+            },
+        ],
+        order_directives: [],
     },
     '/api/analytics/backtest': {
         total_logged: 8,
@@ -340,6 +376,29 @@ async function main() {
         assert(nvdaBadge, 'SEC 72h dilution badge missing on NVDA row');
         assert(nvdaBadge.textContent.includes('SEC 424B3'), `unexpected badge text: ${nvdaBadge.textContent}`);
         assert.strictEqual(nvdaBadge.getAttribute('href'), 'https://www.sec.gov/Archives/edgar/data/1045810/test_424b3.htm');
+    });
+
+    const planBtn = window.document.querySelector('.quant-plan-btn');
+    if (planBtn) planBtn.click();
+    await new Promise((r) => setTimeout(r, 80));
+    const armStopBtn = window.document.querySelector('#exec-modal-body .exec-mini-btn.arm');
+    if (armStopBtn) armStopBtn.click();
+    await new Promise((r) => setTimeout(r, 80));
+    check('Phase 4 UI: Macro Shield pill, Watchlist Setup tags, and Execution Ticket modal with 1-click alert arming', () => {
+        const macroPill = window.document.getElementById('macro-calendar-pill');
+        assert(macroPill && macroPill.classList.contains('macro-cal-shield'), 'expected active macro-cal-shield class');
+        assert(macroPill.textContent.includes('FOMC'), `expected FOMC in macro pill, got ${macroPill.textContent}`);
+
+        const quantPanel = window.document.getElementById('analytics-quant-panel');
+        assert(quantPanel.textContent.includes('PLTR') && quantPanel.textContent.includes('PULLBACK'), 'watchlist setup tag missing');
+        assert(planBtn, 'Execution Plan button missing in Quant panel');
+
+        const execOverlay = window.document.getElementById('execution-plan-modal-overlay');
+        const execBody = window.document.getElementById('exec-modal-body');
+        assert(execOverlay && execOverlay.classList.contains('active'), 'Execution Ticket modal did not open');
+        assert(execBody && execBody.textContent.includes('$117.81') && execBody.textContent.includes('$123.19'), 'trailing stop or T1 fib limit missing');
+        assert(execBody.textContent.includes('1000.00 EUR'), 'cash reconciliation proof missing');
+        assert(calls.includes('POST /api/alerts'), '1-click Arm Stop did not POST /api/alerts');
     });
 
     window.close();
