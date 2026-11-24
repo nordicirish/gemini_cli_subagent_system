@@ -762,10 +762,13 @@ const ModernChat = {
         this.saveHistory();
         this.updateTotalSessionCost();
         this.triggerAutoBoot();
+        // Pending proposals live server-side and survive a page reload.
+        this.loadPendingProposals();
     },
 
     async triggerAutoBoot() {
         this.messages.innerHTML = '';
+        this._renderedProposalIds = new Set();
         this.appendMessage('ai', '⚡ **System Booting...** Running Stage 0 Council Sequence...', false);
         
         this._pendingDisplayLabel = '⚡ Session Auto-Boot';
@@ -854,7 +857,11 @@ const ModernChat = {
                     details.addEventListener('toggle', () => {
                         const isOpened = details.open;
                         const text = summaryText.textContent;
-                        if (text.includes('SSoT Synchronization Failed')) {
+                        if (text.includes('Pending Your Approval')) {
+                            summaryText.textContent = isOpened
+                                ? '⏳ SSoT Execution Payload (Pending Your Approval — Expanded)'
+                                : '⏳ SSoT Execution Payload (Pending Your Approval)';
+                        } else if (text.includes('SSoT Synchronization Failed')) {
                             summaryText.textContent = isOpened
                                 ? '⚠️ System Execution Payload (SSoT Synchronization Failed — Expanded)'
                                 : '⚠️ System Execution Payload (SSoT Synchronization Failed)';
@@ -1312,7 +1319,8 @@ const ModernChat = {
                     cost = this.calculateCost(data.usage, data.model);
                 }
                 this.appendMessage('ai', data.response, true, cost, data.usage, data.model);
-                
+                this.renderProposals(data.proposals);
+
                 // Auto-save every Council response silently to the decision log
                 this.autoSaveDecisionLog(data.response);
             } else if (data.code === 'quota_exhausted') {
@@ -1330,6 +1338,150 @@ const ModernChat = {
                 this.activeAbortController = null;
             }
             this._cleanupPendingTurnUI(thinkingId, turnId);
+        }
+    },
+
+    // --- Owner-approved portfolio proposals -------------------------------------------
+    // Model-proposed position/cash changes are never written until the owner clicks Apply.
+    // All model-derived values are inserted with textContent (never innerHTML).
+
+    async loadPendingProposals() {
+        try {
+            const res = await fetch('/api/proposals');
+            if (!res.ok) return;
+            const data = await res.json();
+            this.renderProposals(data.proposals);
+        } catch (e) {
+            console.warn('[Proposals] Failed to load pending proposals:', e);
+        }
+    },
+
+    renderProposals(proposals) {
+        if (!Array.isArray(proposals) || proposals.length === 0) return;
+        if (!this._renderedProposalIds) this._renderedProposalIds = new Set();
+        // Newer proposals supersede older ones server-side; retire their cards.
+        this.messages.querySelectorAll('.proposal-card[data-state="pending"]').forEach(card => {
+            if (!proposals.some(p => p.proposal_id === card.dataset.proposalId)) {
+                this._setProposalCardState(card, 'superseded', 'Superseded by a newer proposal. Nothing was written.');
+            }
+        });
+        proposals.forEach(p => {
+            if (this._renderedProposalIds.has(p.proposal_id)) return;
+            this._renderedProposalIds.add(p.proposal_id);
+            this.messages.appendChild(this._buildProposalCard(p));
+        });
+        this.messages.scrollTop = this.messages.scrollHeight;
+    },
+
+    _buildProposalCard(p) {
+        const card = document.createElement('div');
+        card.className = 'proposal-card';
+        card.dataset.proposalId = p.proposal_id;
+        card.dataset.state = 'pending';
+
+        const title = document.createElement('div');
+        title.className = 'proposal-title';
+        title.textContent = '⏳ Proposed portfolio change: not applied yet';
+        card.appendChild(title);
+
+        const meta = document.createElement('div');
+        meta.className = 'proposal-meta';
+        meta.textContent = `From ${p.source || 'the council'}. Review the changes, then apply or discard.`;
+        card.appendChild(meta);
+
+        const table = document.createElement('table');
+        table.className = 'proposal-diff';
+        const head = table.createTHead().insertRow();
+        ['Ticker', 'Change', 'Shares', 'WAC'].forEach(h => {
+            const th = document.createElement('th');
+            th.textContent = h;
+            head.appendChild(th);
+        });
+        const body = table.createTBody();
+        const arrow = (before, after) => `${before ?? '–'} → ${after ?? '–'}`;
+        const kindLabel = { open: 'Open', modify: 'Modify', close: 'Close' };
+        (p.positions || []).forEach(c => {
+            const row = body.insertRow();
+            row.className = `proposal-row-${c.kind}`;
+            [c.ticker, kindLabel[c.kind] || c.kind,
+             c.kind === 'close' ? arrow(c.shares_before, '0') : arrow(c.shares_before, c.shares_after),
+             c.kind === 'close' ? (c.wac_before ?? '–') : arrow(c.wac_before, c.wac_after)
+            ].forEach(val => { row.insertCell().textContent = val; });
+        });
+        (p.cash || []).forEach(c => {
+            const row = body.insertRow();
+            row.className = 'proposal-row-cash';
+            [`Cash ${c.currency}`, 'Set', arrow(c.before, c.after), ''].forEach(val => { row.insertCell().textContent = val; });
+        });
+        card.appendChild(table);
+
+        const actions = document.createElement('div');
+        actions.className = 'proposal-actions';
+        const applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.className = 'glow-btn proposal-apply';
+        applyBtn.textContent = 'Apply to portfolio';
+        const discardBtn = document.createElement('button');
+        discardBtn.type = 'button';
+        discardBtn.className = 'glow-btn outline proposal-discard';
+        discardBtn.textContent = 'Discard';
+        const status = document.createElement('span');
+        status.className = 'proposal-status';
+        status.setAttribute('role', 'status');
+        actions.append(applyBtn, discardBtn, status);
+        card.appendChild(actions);
+
+        applyBtn.addEventListener('click', () => this._resolveProposal(card, 'apply'));
+        discardBtn.addEventListener('click', () => this._resolveProposal(card, 'discard'));
+        return card;
+    },
+
+    _setProposalCardState(card, state, message) {
+        card.dataset.state = state;
+        const status = card.querySelector('.proposal-status');
+        if (status) status.textContent = message;
+        const title = card.querySelector('.proposal-title');
+        if (title) {
+            title.textContent = {
+                applied: '✅ Portfolio change applied',
+                discarded: '✖ Proposal discarded',
+                superseded: '↺ Proposal superseded',
+                stale: '⚠️ Proposal is out of date',
+                expired: '⚠️ Proposal no longer available',
+            }[state] || title.textContent;
+        }
+        const terminal = state !== 'stale';
+        card.querySelectorAll('button').forEach(btn => {
+            btn.disabled = terminal || btn.classList.contains('proposal-apply');
+        });
+    },
+
+    async _resolveProposal(card, action) {
+        const id = card.dataset.proposalId;
+        const status = card.querySelector('.proposal-status');
+        card.querySelectorAll('button').forEach(btn => { btn.disabled = true; });
+        if (status) status.textContent = action === 'apply' ? 'Applying…' : 'Discarding…';
+        try {
+            const res = await fetch(`/api/proposals/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.status === 'success') {
+                if (action === 'apply') {
+                    this._setProposalCardState(card, 'applied', 'Your portfolio has been updated.');
+                    if (typeof window.fetchPortfolio === 'function') window.fetchPortfolio(true);
+                } else {
+                    this._setProposalCardState(card, 'discarded', 'Nothing was written.');
+                }
+            } else if (res.status === 409 && action === 'apply' && /changed since/i.test(data.detail || '')) {
+                this._setProposalCardState(card, 'stale', data.detail);
+            } else if (res.status === 404 || res.status === 409) {
+                this._setProposalCardState(card, 'expired', data.detail || 'This proposal is no longer pending.');
+            } else {
+                card.querySelectorAll('button').forEach(btn => { btn.disabled = false; });
+                if (status) status.textContent = `Failed: ${data.detail || `HTTP ${res.status}`}. Nothing was written.`;
+            }
+        } catch (e) {
+            card.querySelectorAll('button').forEach(btn => { btn.disabled = false; });
+            if (status) status.textContent = 'Connection failed. Nothing was written.';
         }
     },
 

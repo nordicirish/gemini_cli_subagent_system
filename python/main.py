@@ -247,6 +247,8 @@ def main():
             print("\n[Terminal Orchestrator] Response:")
             print(final_text)
 
+            _review_pending_proposals()
+
             turn_cost = framework.turn_usage['estimated_cost']
             session_cost = framework.session_cost
             print(f"[Diagnostics] Turn Cost: ${turn_cost:.4f} | Total Session Cost: ${session_cost:.4f}")
@@ -256,6 +258,31 @@ def main():
             break
         except Exception as e:
             print(f"\n[Error] {str(e)}")
+
+
+def _review_pending_proposals():
+    """Asks the owner to apply or discard portfolio changes the agents proposed this turn."""
+    from portfolio_proposals import PROPOSAL_STORE
+
+    for proposal in PROPOSAL_STORE.list(status="pending"):
+        print(f"\n[Proposal {proposal['proposal_id']}] from {proposal['source']}:")
+        for change in proposal["positions"]:
+            print(
+                f"   {change['kind'].upper():6} {change['ticker']:8} shares {change['shares_before'] or '-'} -> "
+                f"{change['shares_after']} | wac {change['wac_before'] or '-'} -> {change['wac_after']}"
+            )
+        for change in proposal["cash"]:
+            print(f"   CASH   {change['currency']:8} {change['before']} -> {change['after']}")
+        answer = input("Apply this portfolio change? [y/N] > ").strip().lower()
+        try:
+            if answer in ("y", "yes"):
+                PROPOSAL_STORE.apply(proposal["proposal_id"], approver_role="Owner")
+                print("   Applied.")
+            else:
+                PROPOSAL_STORE.discard(proposal["proposal_id"])
+                print("   Discarded. Nothing was written.")
+        except Exception as e:
+            print(f"   Not applied: {e}")
 
 
 if __name__ == "__main__":

@@ -347,24 +347,37 @@ class TestToolDispatcher(unittest.TestCase):
         from decimal import Decimal
         from persistence import PersistenceError, PersistenceValidationError
 
-        with patch("tools.get_persistence_service") as mock_get_service:
-            mock_service = MagicMock()
-            mock_service.update_ssot_payload.side_effect = PersistenceError("Simulated composite write failure")
-            mock_get_service.return_value = mock_service
+        mock_service = MagicMock()
+        mock_service.update_ssot_payload.side_effect = PersistenceError("Simulated composite write failure")
+        mock_service.get_portfolio_basket.return_value = {
+            "portfolio": [],
+            "unallocated_cash_eur": Decimal("100.55"),
+            "unallocated_cash_usd": Decimal("0.00"),
+        }
+        with (
+            patch("tools.get_persistence_service", return_value=mock_service),
+            patch.object(tools.PROPOSAL_STORE, "_service_factory", lambda: mock_service),
+        ):
+            # 1. Trusted direct call raises instead of returning "Exception in update_ssot: ..."
+            with self.assertRaises(PersistenceError):
+                tools.update_ssot('{"mutable_state": {"unallocated_cash_eur": "100.55"}}')
 
-            # 1. Direct call raises instead of returning "Exception in update_ssot: ..."
+            # Verify JSON parsing used parse_float=Decimal (no float leakage)
+            passed_payload = mock_service.update_ssot_payload.call_args[0][0]
+            self.assertEqual(passed_payload["mutable_state"]["unallocated_cash_eur"], "100.55")
+
             with execution_role_context("Terminal Orchestrator"):
-                with self.assertRaises(PersistenceError):
-                    tools.update_ssot('{"mutable_state": {"unallocated_cash_eur": "100.55"}}')
-
-                # Verify JSON parsing used parse_float=Decimal (no float leakage)
-                passed_payload = mock_service.update_ssot_payload.call_args[0][0]
-                self.assertEqual(passed_payload["mutable_state"]["unallocated_cash_eur"], "100.55")
-
                 with self.assertRaises(PersistenceValidationError):
                     tools.update_ssot("{bad json")
 
+                # Agent-proposed financial changes are staged for owner approval, never written
+                mock_service.update_ssot_payload.reset_mock()
+                staged = tools.update_ssot('{"mutable_state": {"unallocated_cash_eur": "250.00"}}')
+                self.assertIn("NOT been applied", staged)
+                mock_service.update_ssot_payload.assert_not_called()
+
             # 2. Dispatch through ToolDispatcher marks tool execution as FAILED in result and AuditLogger
+            #    (a payload with no financial change records immediately, so the write failure surfaces)
             res = GLOBAL_TOOL_DISPATCHER.dispatch_single_tool(
                 tool_name="update_ssot",
                 args={"payload_json": '{"mutable_state": {"unallocated_cash_eur": 100.55}}'},

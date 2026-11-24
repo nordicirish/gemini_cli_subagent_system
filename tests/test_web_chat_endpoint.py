@@ -2799,12 +2799,12 @@ chatUI.init();
     @patch("web_server.get_chart_parts", return_value=([], []))
     @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
     def test_r4_chat_endpoint_reports_honest_failure_on_slice_and_brace_payload_sync_errors(self, mock_dispatch, mock_charts):
-        """R4: Both slice-extracted and brace-extracted SSoT sync failures report failure without claiming SSoT Shadow State synchronized successfully."""
+        """R4: Both slice-extracted and brace-extracted payload rejections report failure without claiming SSoT Shadow State synchronized successfully."""
         valid_state = {"financial_state_valid": True, "local_storage_state": {}, "tickers": []}
 
         with (
             patch_global_state(valid_state),
-            patch("tools.update_ssot", side_effect=PersistenceError("Disk rollback triggered")),
+            patch.object(web_server.PROPOSAL_STORE, "submit", side_effect=PersistenceError("Disk rollback triggered")),
         ):
             # 1. Slice-extracted fenced JSON payload
             mock_dispatch.return_value = {
@@ -2870,7 +2870,7 @@ chatUI.init();
     @patch("web_server.get_chart_parts", return_value=([], []))
     @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
     def test_chat_endpoint_skips_ssot_update_on_halted_veto_payload(self, mock_dispatch, mock_charts):
-        """CRITICAL_SYNC_ALERT / halt_active / ENH_12_STATE_ABSENCE_VETO payloads must NOT invoke tools.update_ssot."""
+        """CRITICAL_SYNC_ALERT / halt_active / ENH_12_STATE_ABSENCE_VETO payloads must NOT be staged or written."""
         valid_state = {"financial_state_valid": True, "local_storage_state": {}, "tickers": []}
         halted_payload = json.dumps({
             "EXECUTION_PAYLOAD": {
@@ -2892,6 +2892,7 @@ chatUI.init();
         with (
             patch_global_state(valid_state),
             patch("tools.update_ssot") as mock_update,
+            patch.object(web_server.PROPOSAL_STORE, "submit") as mock_submit,
         ):
             # 1. Slice-extracted halted payload
             mock_dispatch.return_value = {
@@ -2902,6 +2903,7 @@ chatUI.init();
             res_slice = web_server.chat_endpoint(web_server.ChatRequest(message="Analyze SPY"))
             self.assertEqual(res_slice["status"], "success")
             mock_update.assert_not_called()
+            mock_submit.assert_not_called()
             self.assertNotIn("synchronized successfully", res_slice["response"])
             self.assertIn("SSoT update skipped", res_slice["response"])
 
@@ -2914,6 +2916,7 @@ chatUI.init();
             res_brace = web_server.chat_endpoint(web_server.ChatRequest(message="Analyze SPY"))
             self.assertEqual(res_brace["status"], "success")
             mock_update.assert_not_called()
+            mock_submit.assert_not_called()
             self.assertNotIn("synchronized successfully", res_brace["response"])
             self.assertIn("SSoT update skipped", res_brace["response"])
 

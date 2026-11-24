@@ -15,8 +15,11 @@ from atomic_io import (
 from tool_registry import (
     GLOBAL_TOOL_REGISTRY,
     ALL_VALID_ROLES,
+    TRUSTED_SYSTEM_ROLES,
     authorize_financial_mutation,
+    get_active_caller_role,
 )
+from portfolio_proposals import PROPOSAL_STORE
 
 try:
     from persistence import get_persistence_service, PersistenceError, PersistenceValidationError
@@ -83,15 +86,27 @@ def read_ssot() -> str:
 
 def update_ssot(payload_json: str) -> str:
     """
-    Takes an EXECUTION_PAYLOAD JSON string and merges it into the local SSoT.
-    Enforces financial-state mutation authorization (Stage 1.1 R3) and propagates
-    persistence/validation failures fail-closed without returning misleading success text.
+    Proposes an EXECUTION_PAYLOAD (JSON string) as a portfolio change. Position and cash
+    changes are staged for owner approval and are NOT written until the owner applies them;
+    tickers you omit are left unchanged, and a position closes only if you set its shares to 0.
     """
     authorize_financial_mutation(
         operation_name="update_ssot",
         target_resource="context/ssot.json",
         payload=payload_json,
     )
+
+    # Agent-originated payloads are staged as owner-approved proposals, never written directly.
+    caller_role = get_active_caller_role()
+    if caller_role not in TRUSTED_SYSTEM_ROLES:
+        outcome = PROPOSAL_STORE.submit(payload_json, source_role=caller_role)
+        if outcome.get("status") == "pending":
+            proposal = outcome["proposal"]
+            return (
+                f"Portfolio change proposal {proposal['proposal_id']} staged for owner approval "
+                f"({proposal['summary']}). It has NOT been applied; the owner reviews and applies it in the dashboard."
+            )
+        return "Payload recorded. It contained no portfolio or cash changes."
 
     if isinstance(payload_json, str):
         try:
@@ -414,7 +429,7 @@ GLOBAL_TOOL_REGISTRY.register(
 GLOBAL_TOOL_REGISTRY.register(
     name="update_ssot",
     func=update_ssot,
-    description="Takes an EXECUTION_PAYLOAD JSON string and merges it into the local SSoT.",
+    description="Proposes an EXECUTION_PAYLOAD JSON string as a portfolio change for owner approval.",
     classification="WRITE",
     required_permission="write_portfolio",
     requires_human_approval=False,
