@@ -54,7 +54,7 @@ const ModernChat = {
     messages: null,
     sendBtn: null,
     
-    BOOT_PROMPT: 'SYSTEM BOOT: Execute the full Stage 0 Council Boot Sequence. Using the live DATA_PACKET just injected: (1) Baseline sync — ground all portfolio prices. (2) Cash reconciliation. (3) Regime classification. (4) Portfolio health audit. (5) Market posture assessment. Output a clear, human-readable summary of your findings.',
+    BOOT_PROMPT: 'SYSTEM BOOT: Execute the full Stage 0 Council Boot Sequence. Using the live DATA_PACKET just injected: (1) Baseline sync — ground all portfolio prices. (2) Cash reconciliation. (3) Regime classification. (4) Portfolio health audit. (5) Market posture assessment. Output structure: open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE detailed analysis.',
 
     // Quick-prompt definitions (6 core actions — log/execute handled automatically)
     QUICK_PROMPTS: [
@@ -63,28 +63,28 @@ const ModernChat = {
             label: 'News Scan',
             id: 'qp-news-scan',
             tooltip: 'Search for macroeconomic, political, and stock-specific news.',
-            prompt: 'SYSTEM DIRECTIVE: MACRO & STOCK NEWS SCAN. Perform a search for macroeconomic/political events and stock-specific news.'
+            prompt: 'SYSTEM DIRECTIVE: MACRO & STOCK NEWS SCAN. Perform a search for macroeconomic/political events and stock-specific news. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations.'
         },
         {
             icon: '📊',
             label: 'Market Analysis',
             id: 'qp-analysis',
             tooltip: 'Evaluate risk regime, dealer posture, and macro signals to determine top priorities.',
-            prompt: 'SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION. Using the live DATA_PACKET just injected, evaluate risk regime, dealer posture shifts, VIX/VIXY/IEF signals, and score movements. Provide a clear, readable summary of your analysis and top-3 priority actions.'
+            prompt: 'SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION. Using the live DATA_PACKET just injected, evaluate risk regime, dealer posture shifts, VIX/VIXY/IEF signals, and score movements. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations (top-3 priority actions) BEFORE detailed analysis.'
         },
         {
             icon: '🔍',
             label: 'Audit Portfolio',
             id: 'qp-audit-portfolio',
             tooltip: 'Deep audit of all active positions against trading rules, limits, and cash allocation.',
-            prompt: 'SYSTEM DIRECTIVE: AUDIT & PORTFOLIO REVIEW. Using the live DATA_PACKET just injected, perform a full portfolio audit: (1) Check all positions against gem_trading_rules, concentration limits, and cash allocation. (2) Conduct a deep portfolio analysis and provide Trim/Hold/Add recommendations for each held ticker with supporting evidence. Output a structured, human-readable compliance and review report.'
+            prompt: 'SYSTEM DIRECTIVE: AUDIT & PORTFOLIO REVIEW. Using the live DATA_PACKET just injected, perform a full portfolio audit: (1) Check all positions against gem_trading_rules, concentration limits, and cash allocation. (2) Conduct a deep portfolio analysis and provide Trim/Hold/Add recommendations for each held ticker with supporting evidence. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE detailed audit commentary.'
         },
         {
             icon: '⚖️',
             label: 'Risk Regime',
             id: 'qp-risk',
             tooltip: 'Assess macro risk indicators to declare the current regime and risk posture.',
-            prompt: 'SYSTEM DIRECTIVE: RISK REGIME ASSESSMENT. Using the live DATA_PACKET just injected, run a full macro risk assessment based on VIX, VIXY, IEF, and SPY. Declare the current regime and risk posture with entry/exit implications. Output a clear, human-readable summary.'
+            prompt: 'SYSTEM DIRECTIVE: RISK REGIME ASSESSMENT. Using the live DATA_PACKET just injected, run a full macro risk assessment based on VIX, VIXY, IEF, and SPY. Declare the current regime and risk posture with entry/exit implications. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE supporting commentary.'
         },
         {
             icon: '🎯',
@@ -92,14 +92,14 @@ const ModernChat = {
             id: 'qp-scout',
             tooltip: 'Deep dive research on all tickers in your Watchlist — entry signals, risk/reward, and regime alignment.',
             watchlistOnly: true,  // hidden when watchlist is empty
-            prompt: 'SYSTEM DIRECTIVE: DEEP DIVE WATCHLIST RESEARCH. Using the live DATA_PACKET just injected, perform a deep-dive research analysis on ALL tickers currently in the Watchlist section. For each ticker: (1) Assess technical setup, RSI, ATR%, GEX posture and trend. (2) Score risk/reward vs. current regime. (3) Provide a clear entry/avoid recommendation with supporting evidence. Output a structured, human-readable summary.'
+            prompt: 'SYSTEM DIRECTIVE: DEEP DIVE WATCHLIST RESEARCH. Using the live DATA_PACKET just injected, perform a deep-dive research analysis on ALL tickers currently in the Watchlist section. For each ticker: (1) Assess technical setup, RSI, ATR%, GEX posture and trend. (2) Score risk/reward vs. current regime. (3) Provide a clear entry/avoid recommendation with supporting evidence. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE per-ticker breakdown.'
         },
         {
             icon: '📝',
             label: 'Review Log',
             id: 'qp-review-log',
             tooltip: 'Forensically audit past decisions to generate corrective trade lessons.',
-            prompt: 'SYSTEM DIRECTIVE: EXECUTE [MANDATE_26_POST_TRADE_REVIEW]. Invoke the Post-Trade Review Engine to forensically audit the complete decision_log.json. Perform a decision log backtest and trade lessons permanency audit: (1) Grade historical agreement scores and trade state assumptions against realized price action. (2) Identify technical drift, liquidity errors, and rebalancing misfires. (3) Generate corrective trade lessons and save them using update_trade_lessons. Output a clear, human-readable forensic summary of your review.'
+            prompt: 'SYSTEM DIRECTIVE: EXECUTE [MANDATE_26_POST_TRADE_REVIEW]. Invoke the Post-Trade Review Engine to forensically audit the complete decision_log.json. Perform a decision log backtest and trade lessons permanency audit: (1) Grade historical agreement scores and trade state assumptions against realized price action. (2) Identify technical drift, liquidity errors, and rebalancing misfires. (3) Generate corrective trade lessons and save them using update_trade_lessons. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE forensic notes.'
         },
     ],
 
@@ -886,6 +886,7 @@ const ModernChat = {
 
         if (role === 'ai') {
             renderSanitizedMarkdown(msgDiv, text);
+            this.enhanceAiMessageStructure(msgDiv, model);
 
             // Collapsible SSoT Payload dynamic text toggling (v10.46)
             const payloadDetails = msgDiv.querySelectorAll('.execution-payload-details');
@@ -1069,6 +1070,175 @@ const ModernChat = {
             this.messages.scrollTop = this.messages.scrollHeight;
         }
         if (save) this.saveHistory();
+    },
+
+    _extractHeadingSection(msgDiv, headingRegex) {
+        const headers = Array.from(msgDiv.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+        const target = headers.find((h) => !h.closest('details, .chat-top-brief') && headingRegex.test(h.textContent || ''));
+        if (!target) return null;
+
+        const nodes = [];
+        let cursor = target.nextSibling;
+        while (cursor) {
+            const next = cursor.nextSibling;
+            if (cursor.nodeType === 1) {
+                const tag = cursor.tagName;
+                if (/^H[1-6]$/.test(tag) || tag === 'HR' || cursor.classList.contains('execution-payload-details') || cursor.classList.contains('council-debate-details')) {
+                    break;
+                }
+            }
+            nodes.push(cursor);
+            cursor = next;
+        }
+        const title = (target.textContent || '').trim();
+        target.remove();
+        nodes.forEach((n) => n.remove());
+        const nonEmpty = nodes.some((n) => (n.textContent || '').trim().length > 0);
+        return nonEmpty ? { title, nodes } : null;
+    },
+
+    _decorateRecommendationItems(container) {
+        const actionClass = (word) => {
+            const w = word.toUpperCase();
+            if (['BUY', 'ADD', 'EXECUTE'].includes(w)) return 'action-buy';
+            if (['TRIM', 'SELL'].includes(w)) return 'action-trim';
+            if (['AVOID', 'REJECT'].includes(w)) return 'action-avoid';
+            return 'action-hold';
+        };
+        const tokenRe = /^\s*\[?(BUY|ADD|EXECUTE|TRIM|SELL|HOLD|WATCH|WAIT|AVOID|REJECT)\]?(?=\s|$|:|—|-)/i;
+
+        container.querySelectorAll('li').forEach((li) => {
+            const firstStrong = li.firstElementChild && ['STRONG', 'B'].includes(li.firstElementChild.tagName)
+                ? li.firstElementChild
+                : null;
+            const targetNode = firstStrong && firstStrong.previousSibling === null ? firstStrong : li;
+            const firstText = targetNode.firstChild && targetNode.firstChild.nodeType === 3 ? targetNode.firstChild : null;
+            if (!firstText) return;
+            const m = firstText.textContent.match(tokenRe);
+            if (!m) return;
+
+            const action = m[1].toUpperCase();
+            firstText.textContent = firstText.textContent.slice(m[0].length).replace(/^\s+/, '');
+            const pill = document.createElement('span');
+            pill.className = `action-pill ${actionClass(action)}`;
+            pill.textContent = action;
+            li.insertBefore(pill, li.firstChild);
+        });
+    },
+
+    enhanceAiMessageStructure(msgDiv, model = null) {
+        if (!msgDiv || msgDiv.classList.contains('thinking-msg')) return;
+
+        // 1. Detect verdict under "Final Council Decision" if present
+        let verdict = null;
+        const headers = Array.from(msgDiv.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+        const decisionHeader = headers.find((h) => /final council decision/i.test(h.textContent || ''));
+        if (decisionHeader) {
+            let cur = decisionHeader.nextElementSibling;
+            while (cur && !/^H[1-6]$/.test(cur.tagName)) {
+                const m = (cur.textContent || '').match(/\b(EXECUTE|HOLD|REJECT)\b/i);
+                if (m) {
+                    verdict = m[1].toUpperCase();
+                    break;
+                }
+                cur = cur.nextElementSibling;
+            }
+        }
+
+        // 2. Extract Alerts & Recommendations sections (or fallback critical bullets)
+        let alertSection = this._extractHeadingSection(msgDiv, /alerts?|risk warnings?|warnings?|halt/i);
+        if (!alertSection) {
+            const alertNodes = Array.from(msgDiv.children).filter((el) => {
+                if (el.tagName !== 'P') return false;
+                return /^\s*(?:⚠️|🚨|\[?(?:CRITICAL|WARNING|HALT|VETO)\b)/i.test(el.textContent || '');
+            });
+            if (alertNodes.length > 0) {
+                alertNodes.forEach((n) => n.remove());
+                alertSection = { title: '🚨 Alerts & Risk Warnings', nodes: alertNodes };
+            }
+        }
+        const recoSection = this._extractHeadingSection(
+            msgDiv,
+            /actionable recommendations?|recommendations?|priority actions?|suggested actions?/i
+        );
+
+        // 3. Auto-collapse Source Index
+        const sourcesSection = this._extractHeadingSection(msgDiv, /source index/i);
+        if (sourcesSection) {
+            const details = document.createElement('details');
+            details.className = 'chat-sources-details';
+            details.open = false;
+            const summary = document.createElement('summary');
+            summary.textContent = '📚 Source Index (Hidden)';
+            details.appendChild(summary);
+            details.addEventListener('toggle', () => {
+                summary.textContent = details.open ? '📚 Source Index' : '📚 Source Index (Hidden)';
+            });
+            const body = document.createElement('div');
+            body.className = 'chat-sources-details-body';
+            sourcesSection.nodes.forEach((n) => body.appendChild(n));
+            details.appendChild(body);
+            msgDiv.appendChild(details);
+        }
+
+        if (!verdict && !alertSection && !recoSection) return;
+
+        // 4. Assemble and prepend top brief
+        const topBrief = document.createElement('div');
+        topBrief.className = 'chat-top-brief';
+
+        if (verdict || model) {
+            const bar = document.createElement('div');
+            bar.className = 'chat-verdict-bar';
+            const pill = document.createElement('span');
+            const vClass = verdict === 'EXECUTE' ? 'verdict-execute'
+                : verdict === 'HOLD' ? 'verdict-hold'
+                : verdict === 'REJECT' ? 'verdict-reject'
+                : 'verdict-neutral';
+            pill.className = `verdict-pill ${vClass}`;
+            pill.textContent = verdict ? `VERDICT: ${verdict}` : 'COUNCIL RESPONSE';
+            bar.appendChild(pill);
+            if (model) {
+                const mSpan = document.createElement('span');
+                mSpan.className = 'verdict-model';
+                mSpan.textContent = model;
+                bar.appendChild(mSpan);
+            }
+            topBrief.appendChild(bar);
+        }
+
+        if (alertSection) {
+            const box = document.createElement('section');
+            box.className = 'chat-callout chat-callout-alert';
+            const title = document.createElement('div');
+            title.className = 'chat-callout-title';
+            title.textContent = alertSection.title.includes('Alert') || alertSection.title.includes('Warning')
+                ? alertSection.title
+                : `🚨 ${alertSection.title}`;
+            const body = document.createElement('div');
+            body.className = 'chat-callout-body';
+            alertSection.nodes.forEach((n) => body.appendChild(n));
+            box.append(title, body);
+            topBrief.appendChild(box);
+        }
+
+        if (recoSection) {
+            const box = document.createElement('section');
+            box.className = 'chat-callout chat-callout-reco';
+            const title = document.createElement('div');
+            title.className = 'chat-callout-title';
+            title.textContent = recoSection.title.includes('Recommendation') || recoSection.title.includes('Action')
+                ? recoSection.title
+                : `🎯 ${recoSection.title}`;
+            const body = document.createElement('div');
+            body.className = 'chat-callout-body';
+            recoSection.nodes.forEach((n) => body.appendChild(n));
+            this._decorateRecommendationItems(body);
+            box.append(title, body);
+            topBrief.appendChild(box);
+        }
+
+        msgDiv.insertBefore(topBrief, msgDiv.firstChild);
     },
 
     shouldCaptureCharts(text, options = {}) {
@@ -1403,12 +1573,22 @@ const ModernChat = {
                 this._setProposalCardState(card, 'superseded', 'Superseded by a newer proposal. Nothing was written.');
             }
         });
+        const aiMessages = Array.from(this.messages.querySelectorAll('.modern-message.ai:not(.thinking-msg)'));
+        const latestAi = aiMessages.length ? aiMessages[aiMessages.length - 1] : null;
+        const anchorTopBrief = latestAi ? latestAi.querySelector('.chat-top-brief') : null;
         proposals.forEach(p => {
             if (this._renderedProposalIds.has(p.proposal_id)) return;
             this._renderedProposalIds.add(p.proposal_id);
-            this.messages.appendChild(this._buildProposalCard(p));
+            const card = this._buildProposalCard(p);
+            if (anchorTopBrief) {
+                anchorTopBrief.after(card);
+            } else {
+                this.messages.appendChild(card);
+            }
         });
-        this.messages.scrollTop = this.messages.scrollHeight;
+        if (!anchorTopBrief) {
+            this.messages.scrollTop = this.messages.scrollHeight;
+        }
     },
 
     _buildProposalCard(p) {

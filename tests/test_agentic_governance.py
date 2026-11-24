@@ -127,12 +127,34 @@ class TestStageGateAndStopHook(unittest.TestCase):
         self.assertEqual(hygiene["unauthorized_stage_reports"], ["docs/engineering/STAGE_99_UNSOLICITED_REPORT.md"])
         self.assertEqual(hygiene["untracked_forbidden"], ["context/rogue.db"])
 
-    def test_protected_asset_check_passes_on_live_repo_and_flags_touched_paths(self):
-        clean = stage_gate.check_protected_assets(ROOT, ["scripts/stage_gate.py"])
-        self.assertTrue(clean["ok"])
-        dirty = stage_gate.check_protected_assets(ROOT, ["engine_instructions/orchestrator.md"])
-        self.assertFalse(dirty["ok"])
-        self.assertEqual(dirty["touched"], ["engine_instructions/orchestrator.md"])
+    def test_protected_asset_check_passes_on_clean_repo_and_flags_touched_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            (tmp_root / "engine_instructions").mkdir()
+            (tmp_root / "scripts").mkdir()
+            (tmp_root / "engine_instructions" / "terminal.md").write_text("# clean\n", encoding="utf-8")
+            (tmp_root / "scripts" / "stage_gate.py").write_text("# clean\n", encoding="utf-8")
+            for args in (
+                ["git", "init"],
+                ["git", "config", "user.email", "test@example.com"],
+                ["git", "config", "user.name", "Test"],
+                ["git", "add", "."],
+                ["git", "commit", "-m", "init"],
+            ):
+                subprocess.run(args, cwd=str(tmp_root), check=True, capture_output=True, text=True)
+
+            clean = stage_gate.check_protected_assets(tmp_root, ["scripts/stage_gate.py"])
+            self.assertTrue(clean["ok"])
+
+            # Explicit path argument triggers Protocol 06 block
+            dirty_arg = stage_gate.check_protected_assets(tmp_root, ["engine_instructions/terminal.md"])
+            self.assertFalse(dirty_arg["ok"])
+            self.assertEqual(dirty_arg["touched"], ["engine_instructions/terminal.md"])
+
+            # Live git diff modification on protected asset also fails closed
+            (tmp_root / "engine_instructions" / "terminal.md").write_text("# modified\n", encoding="utf-8")
+            dirty_diff = stage_gate.check_protected_assets(tmp_root, [])
+            self.assertFalse(dirty_diff["ok"])
 
     def test_stop_hook_contracts_and_loop_guards(self):
         self.assertEqual(

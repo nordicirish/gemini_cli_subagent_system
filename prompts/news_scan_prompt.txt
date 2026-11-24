@@ -26,6 +26,7 @@ EFFICIENCY & LATENCY DIRECTIVE: Consolidate your searches into at most 2–3 foc
 
 3. RIGID OUTPUT SCHEMA ENFORCEMENT:
    - Ensure the updated events and news are synchronized back to the active state.
+   - Open your Markdown analysis with `### 🚨 Alerts & Risk Warnings` (macro shield & Torque >= 7 alerts) and `### 🎯 Actionable Recommendations` (actionable ticker bullets) BEFORE detailed commentary.
    - Conclude your response with a single formatted Markdown analysis followed by the single, untruncated JSON `EXECUTION_PAYLOAD` block containing:
      * `EXECUTION_PAYLOAD`
      * `thoughtSignature`: "context_engineering_is_the_way to_go"

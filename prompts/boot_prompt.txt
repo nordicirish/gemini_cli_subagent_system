@@ -14,4 +14,5 @@ Execute the following Stage 0 Boot Sequence:
 5. MARKET POSTURE: Provide a top-level posture assessment (RISK_ON/RISK_OFF/
    NEUTRAL) with supporting forensic evidence.
 
+OUTPUT STRUCTURE: Open your Markdown response with `### 🚨 Alerts & Risk Warnings` and `### 🎯 Actionable Recommendations` (bulleted `[ACTION] TICKER — rationale + key level`) BEFORE detailed analysis.
 Emit the full EXECUTION_PAYLOAD with updated state_context upon completion.

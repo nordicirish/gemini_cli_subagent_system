@@ -14,3 +14,5 @@ RETAIN: The lesson is tactically relevant but not yet proven permanent.
 DEPRECATE: The lesson is stale, contradicted by newer data, or already encoded.
 For PROMOTED lessons, output a suggested Antigravity patch in this format:
 ANTIGRAVITY PATCH REQUEST: Target: rules.md > [section] Action: ADD / MODIFY Proposed Rule ID: [ENH_XX or MANDATE_XX] Content: [exact rule text] Justification: [forensic evidence strictly derived from the Council's logic failures in the decision log]
+
+OUTPUT STRUCTURE: Open your review with `### 🚨 Alerts & Risk Warnings` (detected failure patterns / rule drifts) and `### 🎯 Actionable Recommendations` (promoted rules & action bullets) BEFORE detailed backtest notes.

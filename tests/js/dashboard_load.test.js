@@ -154,6 +154,35 @@ async function main() {
         btn.click();
         assert(main.classList.contains('sidebar-collapsed'), 'clicking TOOLS again should collapse sidebar');
     });
+    check('Chat Structure: hoists verdict, Alerts & Recommendations above prose and collapses Source Index', () => {
+        const sampleReply = [
+            '### 🏁 Final Council Decision',
+            'HOLD',
+            '',
+            '### 💡 AI Overview',
+            'Broad indices remain choppy under negative dealer gamma.',
+            '',
+            '### 🚨 Alerts & Risk Warnings',
+            '- [CRITICAL] VIX elevated above 25; tighten trailing VWAP stops.',
+            '',
+            '### 🎯 Actionable Recommendations',
+            '- **[TRIM] NVDA** — Trim 25% into resistance near $125.00.',
+            '- **[HOLD] AMD** — Wait for rVol > 1.5x confirmation.',
+            '',
+            '### 📚 Source Index',
+            '- [SEC EDGAR](https://www.sec.gov/)',
+        ].join('\n');
+        window.chatUI.appendMessage('ai', sampleReply, false, 0, null, 'gemini-4-hydrogen');
+        const aiMsgs = [...window.document.querySelectorAll('.modern-message.ai')];
+        const msg = aiMsgs[aiMsgs.length - 1];
+        assert(msg.firstElementChild && msg.firstElementChild.classList.contains('chat-top-brief'), '.chat-top-brief should be prepended first');
+        assert.strictEqual(msg.querySelector('.verdict-pill').textContent.trim(), 'VERDICT: HOLD');
+        assert(msg.querySelector('.chat-callout-alert').textContent.includes('VIX elevated'));
+        const pills = [...msg.querySelectorAll('.chat-callout-reco .action-pill')].map((p) => p.textContent.trim());
+        assert.deepStrictEqual(pills, ['TRIM', 'HOLD']);
+        const srcDetails = msg.querySelector('details.chat-sources-details');
+        assert(srcDetails && srcDetails.open === false, 'Source Index should auto-collapse');
+    });
 
     window.close();
     console.log(results.join('\n'));
