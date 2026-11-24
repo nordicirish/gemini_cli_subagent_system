@@ -366,18 +366,18 @@ h1 {
 
 .macro-hud {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
     align-items: stretch;
 }
 
 .macro-hud .macro-card {
-    min-height: 100px;
+    min-height: 96px;
 }
 
 .macro-card {
     min-width: 0;
-    padding: 14px 16px;
+    padding: 12px 10px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -385,7 +385,7 @@ h1 {
     justify-content: space-between;
     position: relative;
     overflow: hidden;
-    gap: 6px;
+    gap: 5px;
 }
 
 .macro-card::before {
@@ -407,6 +407,36 @@ h1 {
     background: linear-gradient(90deg, var(--purple), transparent);
 }
 
+.macro-card-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    max-width: 100%;
+}
+
+.macro-ticker {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-main);
+    font-family: var(--font-mono);
+    letter-spacing: 0.4px;
+    line-height: 1.1;
+}
+
+.macro-subtitle {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    font-weight: 600;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
 .macro-card h3 {
     font-size: 0.68rem;
     color: var(--text-muted);
@@ -422,17 +452,19 @@ h1 {
 }
 
 .macro-val {
-    font-size: 1.8rem;
+    font-size: 1.65rem;
     font-weight: 700;
     font-family: var(--font-mono);
-    letter-spacing: -1px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.8px;
     line-height: 1.1;
     margin: 0;
 }
 
 .macro-gap {
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
     font-weight: 500;
     line-height: 1.3;
     display: flex;
@@ -457,12 +489,60 @@ h1 {
     color: var(--red);
 }
 
+/* ─── Volatility Regime Pill & Tools Toggle ─── */
+.regime-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-muted);
+}
+.regime-pill.regime-normal {
+    color: var(--green);
+    background: var(--green-dim);
+    border-color: rgba(63, 185, 80, 0.35);
+}
+.regime-pill.regime-elevated {
+    color: var(--yellow);
+    background: var(--yellow-dim);
+    border-color: rgba(210, 153, 34, 0.4);
+}
+.regime-pill.regime-crisis {
+    color: var(--red);
+    background: var(--red-dim);
+    border-color: rgba(248, 81, 73, 0.45);
+}
+.regime-pill.regime-unknown {
+    color: var(--text-muted);
+}
+
+#toggle-sidebar-btn.active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--text-main);
+}
+
 /* ─── Main Grid ─── */
 .main-content {
     display: grid;
-    grid-template-columns: 1fr 260px;
-    gap: 20px;
+    grid-template-columns: minmax(0, 1fr) 260px;
+    gap: 16px;
     align-items: start;
+}
+
+.main-content.sidebar-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.main-content.sidebar-collapsed .sidebar {
+    display: none;
 }
 
 .sidebar {
@@ -481,11 +561,12 @@ h1 {
 
 .table-container table {
     width: 100%;
-    min-width: 900px;
+    min-width: 0;
     border-collapse: collapse;
     text-align: left;
     font-family: var(--font-mono);
-    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.80rem;
 }
 
 thead {
@@ -495,19 +576,19 @@ thead {
 }
 
 th {
-    padding: 12px 14px;
+    padding: 10px 8px;
     font-family: var(--font-sans);
-    font-size: 0.65rem;
+    font-size: 0.62rem;
     color: var(--text-muted);
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 1.2px;
+    letter-spacing: 0.9px;
     border-bottom: 1px solid var(--panel-border);
     background: var(--panel-bg-solid);
     white-space: nowrap;
 }
 
-/* Sticky Ticker Column (Main Table Only) */
+/* Sticky Ticker & Score Columns (Main Table Only) */
 .table-container th:first-child, 
 .table-container td:first-child {
     position: sticky;
@@ -518,8 +599,19 @@ th {
     box-shadow: 4px 0 8px rgba(0,0,0,0.3);
 }
 
-/* Header Tickers should be top-most */
-.table-container th:first-child {
+.table-container th.score-col,
+.table-container td.score-col {
+    position: sticky;
+    right: 0;
+    z-index: 15;
+    background: var(--panel-bg-solid) !important;
+    border-left: 1px solid var(--panel-border);
+    box-shadow: -4px 0 8px rgba(0,0,0,0.28);
+}
+
+/* Header Tickers & Score should be top-most */
+.table-container th:first-child,
+.table-container th.score-col {
     z-index: 40; 
 }
 
@@ -527,21 +619,19 @@ th {
 .table-container .table-section-header td,
 .table-container .table-sub-header td {
     position: relative;
+    left: auto;
+    right: auto;
     z-index: 2;
-    padding: 14px 24px !important;
+    padding: 12px 20px !important;
     background: var(--panel-bg-solid) !important;
     text-align: center;
     border-right: none;
+    border-left: none;
     box-shadow: none;
 }
 
-/* Header Tickers should be top-most */
-.table-container th:first-child {
-    z-index: 20; 
-}
-
 td {
-    padding: 12px 14px;
+    padding: 9px 8px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     white-space: nowrap;
     background: transparent;

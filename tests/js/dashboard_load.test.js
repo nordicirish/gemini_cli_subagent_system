@@ -29,7 +29,8 @@ const API = {
         // Watchlist comes from the SSoT (the only place /api/data publishes it)
         local_storage_state: { mutable_state: { portfolio_snapshot: [{ ticker: 'NVDA', shares: 10, wac: 100 }], watched_tickers: ['AMD', 'TSLA'] } },
         tickers: [
-            { ticker: 'NVDA', price: 120.5, session_change_pct: 1.2, gap_percent: 0.1, atr_percent: 2.5, rsi: 55, vwap: 119 },
+            { ticker: 'NVDA', price: 120.5, session_change_pct: 1.2, gap_percent: 0.1, atr_percent: 2.5, rsi: 55, vwap: 119, volatility_regime: 'ELEVATED', vix_price: 24.5 },
+            { ticker: 'SPY', price: 718.68, session_change_pct: -0.5, gap_percent: -0.2, atr_percent: 1.1, rsi: 48, vwap: 719.0, net_gex_total: -0.013 },
             // Warm-up row: no numbers yet. Used to throw in renderRow and blank the whole table.
             { ticker: 'AMD', price: null, session_change_pct: null, gap_percent: null, atr_percent: null, rsi: null },
             // TSLA is on the watchlist but not scanned yet: must still get a row.
@@ -131,6 +132,27 @@ async function main() {
     check('chat boots and market table polls', () => {
         assert(calls.includes('POST /api/chat'), 'boot chat turn not sent');
         assert(calls.includes('GET /api/data'), 'market data not polled');
+    });
+    check('Package A: regime pill, ticker-first macro HUD, and collapsible tools sidebar', () => {
+        const pill = window.document.getElementById('volatility-regime-pill');
+        assert(pill, 'volatility-regime-pill missing');
+        assert.strictEqual(pill.textContent.trim(), 'ELEVATED');
+        assert(pill.classList.contains('regime-elevated'), 'expected regime-elevated class');
+
+        const macroTicker = window.document.querySelector('#macro-card-SPY .macro-ticker');
+        const macroSubtitle = window.document.querySelector('#macro-card-SPY .macro-subtitle');
+        assert(macroTicker && macroTicker.textContent.trim() === 'SPY', 'macro card ticker header missing');
+        assert(macroSubtitle && macroSubtitle.textContent.trim() === 'S&P 500', 'macro card subtitle missing');
+
+        const main = window.document.getElementById('main-content');
+        const btn = window.document.getElementById('toggle-sidebar-btn');
+        assert(main && main.classList.contains('sidebar-collapsed'), 'sidebar should default to collapsed');
+        assert(btn && btn.getAttribute('aria-expanded') === 'false', 'aria-expanded should start false');
+        btn.click();
+        assert(!main.classList.contains('sidebar-collapsed'), 'clicking TOOLS should expand sidebar');
+        assert.strictEqual(btn.getAttribute('aria-expanded'), 'true');
+        btn.click();
+        assert(main.classList.contains('sidebar-collapsed'), 'clicking TOOLS again should collapse sidebar');
     });
 
     window.close();

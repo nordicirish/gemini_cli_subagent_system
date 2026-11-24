@@ -32,7 +32,82 @@ let MACRO_LABELS = {
     'QQQ': 'NASDAQ 100',
     'GDX': 'GOLD MINERS'
 };
+const MACRO_SUBTITLES = {
+    '^VIX': 'Fear Index',
+    '^VVIX': 'Vol of Vol',
+    'VIXY': 'Short VIX',
+    'IEF': '7-10Y Bond',
+    'UUP': 'US Dollar',
+    'SPY': 'S&P 500',
+    'QQQ': 'Nasdaq 100',
+    'IWM': 'Russell 2000',
+    'DIA': 'Dow 30',
+    'GDX': 'Gold Miners'
+};
 let latestTickersMap = {};
+
+function updateVolatilityRegimePill(state) {
+    const pill = document.getElementById('volatility-regime-pill');
+    if (!pill) return;
+    const tickers = Array.isArray(state && state.tickers) ? state.tickers : [];
+    const regimeSample = tickers.find(t => t && t.volatility_regime) || null;
+    const rawRegime = String((state && state.volatility_regime) || (regimeSample && regimeSample.volatility_regime) || '').trim();
+    const upper = rawRegime.toUpperCase();
+
+    let cls = 'regime-unknown';
+    if (/CRISIS|EXTREME|PANIC|STRESS|HIGH/.test(upper)) {
+        cls = 'regime-crisis';
+    } else if (/ELEVATED|CAUTION|MODERATE|GUARDED/.test(upper)) {
+        cls = 'regime-elevated';
+    } else if (/NORMAL|LOW|CALM|STABLE/.test(upper)) {
+        cls = 'regime-normal';
+    }
+
+    pill.textContent = upper || '—';
+    pill.className = `regime-pill ${cls}`;
+    const vixVal = regimeSample && Number.isFinite(Number(regimeSample.vix_price))
+        ? `VIX: ${Number(regimeSample.vix_price).toFixed(2)}`
+        : '';
+    const vixyRoc = regimeSample && Number.isFinite(Number(regimeSample.vixy_roc))
+        ? `VIXY RoC: ${Number(regimeSample.vixy_roc).toFixed(2)}%`
+        : '';
+    const tooltip = ['Volatility Regime', rawRegime || 'Pending', vixVal, vixyRoc].filter(Boolean).join(' · ');
+    pill.title = tooltip;
+}
+
+function setSidebarCollapsed(collapsed) {
+    const main = document.getElementById('main-content');
+    const btn = document.getElementById('toggle-sidebar-btn');
+    if (main) {
+        main.classList.toggle('sidebar-collapsed', Boolean(collapsed));
+    }
+    if (btn) {
+        btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        btn.classList.toggle('active', !collapsed);
+    }
+    try {
+        localStorage.setItem('gem_sidebar_open', collapsed ? 'false' : 'true');
+    } catch (_) {}
+}
+
+function toggleSidebarPanel() {
+    const main = document.getElementById('main-content');
+    const isCollapsed = main ? main.classList.contains('sidebar-collapsed') : true;
+    setSidebarCollapsed(!isCollapsed);
+}
+
+function initSidebarToggle() {
+    const btn = document.getElementById('toggle-sidebar-btn');
+    let savedOpen = false;
+    try {
+        savedOpen = localStorage.getItem('gem_sidebar_open') === 'true';
+    } catch (_) {}
+    setSidebarCollapsed(!savedOpen);
+    if (btn && !btn._gemSidebarBound) {
+        btn.addEventListener('click', toggleSidebarPanel);
+        btn._gemSidebarBound = true;
+    }
+}
 
 const dCopyBtn = document.getElementById('copy-json-btn');
 const dCopySessionBtn = document.getElementById('copy-session-btn');
@@ -833,6 +908,9 @@ async function pollData() {
             const ts = new Date(state._meta?.timestamp_iso || Date.now());
             dUpdated.textContent = ts.toLocaleTimeString();
 
+            // Volatility Regime pill
+            updateVolatilityRegimePill(state);
+
             // Heavy Refresh indicator
             const refreshContainer = document.getElementById('refresh-status-container');
             if (refreshContainer) {
@@ -859,8 +937,17 @@ async function pollData() {
                 
                 currentMacroTickers.forEach(tickerStr => {
                     const row = state.tickers.find(t => t.ticker === tickerStr);
+                    const displayTicker = tickerStr.replace(/^\^/, '');
                     const label = MACRO_LABELS[tickerStr] || tickerStr;
-                    const title = label === tickerStr ? tickerStr : `${label} (${tickerStr})`;
+                    const subtitleRaw = MACRO_SUBTITLES[tickerStr] || (label !== tickerStr ? label : '');
+                    const subtitle = subtitleRaw && subtitleRaw.toUpperCase() !== displayTicker.toUpperCase() ? subtitleRaw : '';
+                    const title = subtitle ? `${subtitle} (${tickerStr})` : tickerStr;
+                    const headerHtml = `
+                        <div class="macro-card-header" title="${title}">
+                            <span class="macro-ticker">${displayTicker}</span>
+                            ${subtitle ? `<span class="macro-subtitle">${subtitle}</span>` : ''}
+                        </div>
+                    `;
                     
                     if (row) {
                         latestMacroData[tickerStr] = row;
@@ -896,7 +983,7 @@ async function pollData() {
 
                         hudHtml += `
                             <div class="macro-card glass-panel" id="macro-card-${tickerStr.replace(/[^a-zA-Z0-9]/g, '')}">
-                                <h3>${title}</h3>
+                                ${headerHtml}
                                 <div class="macro-val">${(row.price || 0).toFixed(2)}</div>
                                 <div class="macro-gap ${changeColor}"><span>${changeStr}</span>${gexLine}</div>
                             </div>
@@ -904,7 +991,7 @@ async function pollData() {
                     } else {
                         hudHtml += `
                             <div class="macro-card glass-panel empty-card" id="macro-card-${tickerStr.replace(/[^a-zA-Z0-9]/g, '')}">
-                                <h3>${title}</h3>
+                                ${headerHtml}
                                 <div class="macro-val text-muted" style="font-size: 1.2rem; color: #666; margin: 4px 0;">—</div>
                                 <div class="macro-gap text-muted" style="color: #666; font-size: 0.9rem;">Awaiting data...</div>
                             </div>
@@ -1162,8 +1249,11 @@ if (dAiScoutMaxRsiSelect) {
 window.deleteFromWatchlist = deleteFromWatchlist;
 window.toggleScoutCategory = toggleScoutCategory;
 window.toggleSection = toggleSection;
+window.toggleSidebarPanel = toggleSidebarPanel;
 window.copySessionReviewPayload = copySessionReviewPayload;
 window.runScout = runScout;
+
+initSidebarToggle();
 
 if (dAddWatchlistTicker) {
     dAddWatchlistTicker.addEventListener('keydown', (e) => {

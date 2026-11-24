@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
-    <link rel="stylesheet" href="styles.css?v=18.55">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="styles.css?v=18.62">
     <link rel="stylesheet" href="modern_ui.css?v=18.58">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
@@ -37,6 +38,10 @@
                         <span class="label">Status:</span>
                         <span id="market-status" class="value waiting">AWAITING CONNECTION...</span>
                     </div>
+                    <div class="status-item" id="regime-status-container">
+                        <span class="label">Regime:</span>
+                        <span id="volatility-regime-pill" class="regime-pill regime-unknown">—</span>
+                    </div>
                     <div class="status-item" id="refresh-status-container" style="display: none;">
                         <span id="refresh-status" class="value text-yellow" style="font-weight: bold;">⚡ HEAVY REFRESH</span>
                     </div>
@@ -44,6 +49,7 @@
                         <span class="label">Updated:</span>
                         <span id="last-updated" class="value">—</span>
                     </div>
+                    <button id="toggle-sidebar-btn" class="glow-btn outline" type="button" aria-expanded="false" aria-controls="dashboard-sidebar" title="Toggle Portfolio, Watchlist & Scout tools panel" style="width: auto; padding: 4px 12px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; gap: 6px; margin-left: 10px; line-height: 1;">🧰 TOOLS</button>
                     <button id="open-indices-modal-btn" class="glow-btn outline" style="width: auto; padding: 4px 12px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; gap: 6px; margin-left: 10px; line-height: 1;">⚙️ INDICES</button>
                     <button id="launch-chat-btn" class="glow-btn chat-launcher" style="width: auto; padding: 4px 12px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; gap: 6px; margin-left: 10px; line-height: 1;">💬 CONSULT AI COUNCIL</button>
                 </div>
@@ -60,7 +66,7 @@
 
 
         <!-- ─── Main Content ─── -->
-        <main class="main-content">
+        <main class="main-content sidebar-collapsed" id="main-content">
             <div class="left-content-wrapper" style="display: grid; grid-template-columns: 1fr; align-items: start; gap: 16px;">
                 <!-- Initial Fetch Progress Container -->
                 <div id="initial-fetch-progress-container" class="glass-panel progress-panel" style="display: none; grid-area: 1 / 1; align-self: start; z-index: 100;">
@@ -108,7 +114,7 @@
             </div>
 
             <!-- Sidebar -->
-            <aside class="sidebar">
+            <aside class="sidebar" id="dashboard-sidebar">
 
 
 
@@ -430,7 +436,7 @@
     <div id="offscreen-chart-container" style="position: fixed; left: -9999px; top: -9999px; width: 920px; height: 500px; opacity: 0; pointer-events: none;"></div>
 
     <script src="portfolio.js?v=18.61"></script>
-    <script src="app.js?v=18.62"></script>
+    <script src="app.js?v=18.63"></script>
     <script src="modern_ui.js?v=18.61"></script>
 </body>
 </html>
