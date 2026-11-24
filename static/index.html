@@ -6,7 +6,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.65">
+    <link rel="stylesheet" href="styles.css?v=18.66">
     <link rel="stylesheet" href="modern_ui.css?v=18.59">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
@@ -280,6 +280,21 @@
                     </div>
                 </div>
 
+                <!-- Quant Analytics & Decision Backtest Panel -->
+                <div class="sidebar-card glass-panel manager-card desktop-only">
+                    <div class="header-row">
+                        <h3 onclick="toggleSection('analytics-quant-content', this)" style="white-space: nowrap;">
+                            <span class="icon">📊</span> Quant &amp; Backtest <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block;">▼</span>
+                        </h3>
+                    </div>
+                    <div id="analytics-quant-content">
+                        <div id="analytics-quant-panel" class="quant-panel">
+                            <span class="empty-msg">Loading quant analytics...</span>
+                        </div>
+                        <button id="refresh-analytics-btn" type="button" class="alert-action-btn full" title="Refresh Quant Analytics & Decision Backtest">↻ Refresh Quant &amp; Backtest</button>
+                    </div>
+                </div>
+
                 <!-- System Admin Panel -->
                 <div class="sidebar-card glass-panel manager-card minimized desktop-only">
                     <div class="header-row">
@@ -494,7 +509,7 @@
     <div id="offscreen-chart-container" style="position: fixed; left: -9999px; top: -9999px; width: 920px; height: 500px; opacity: 0; pointer-events: none;"></div>
 
     <script src="portfolio.js?v=18.61"></script>
-    <script src="app.js?v=18.67"></script>
+    <script src="app.js?v=18.68"></script>
     <script src="modern_ui.js?v=18.63"></script>
 </body>
 </html>

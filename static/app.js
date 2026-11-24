@@ -260,6 +260,7 @@ async function init() {
     await fetchScoutCategories();
     await fetchScoutConfig();
     await fetchAlertsAndSentinel();
+    await fetchAnalyticsAndBacktest();
     // Google Drive sync disabled in this repo
     pollData();
     setInterval(pollData, 3000); // 3 sec polling
@@ -701,6 +702,7 @@ function renderTable(tickers, state) {
         }
 
         const scoutIndicator = row._isScout ? `<span class="scout-dot"></span>` : '';
+        const secBadgeHtml = _buildSecBadgeHtml(sym);
         const rvolNum = Number(row.rvol);
         const hasRvol = Number(row.volume) > 0 && Number.isFinite(rvolNum) && rvolNum > 0;
         let rvolClass = 'text-muted';
@@ -720,9 +722,9 @@ function renderTable(tickers, state) {
         const rvolDisplay = hasRvol ? `${rvolNum.toFixed(2)}x` : '—';
         return `
             <tr class="chart-clickable" onclick="openChartModal('${sym}')" title="Click to view 1m TradingView chart">
-                <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}">
+                <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}" data-sec-ticker="${_escAlertHtml(sym)}">
                     <span class="ticker-symbol ${dayColor}">${sym}</span>
-                    ${scoutIndicator}
+                    ${scoutIndicator}${secBadgeHtml}
                 </td>
                 <td class="${pClass}">${p}</td>
                 <td class="${dayColor}">${fmtSigned(row.session_change_pct, 2)}</td>
@@ -803,6 +805,7 @@ function renderTable(tickers, state) {
     }
 
     dTableBody.innerHTML = html;
+    prefetchSecDilutionBadges([...groups.held, ...groups.watchlist, ...groups.scouts].map(r => r && r.ticker));
 }
 
 async function pollData() {
@@ -948,6 +951,11 @@ async function pollData() {
 
             // Volatility Regime pill
             updateVolatilityRegimePill(state);
+
+            if (state.precomputed_analytics && typeof state.precomputed_analytics === 'object') {
+                _lastQuantAnalytics = state.precomputed_analytics;
+                renderQuantAnalyticsPanel(_lastQuantAnalytics, _lastBacktestSummary);
+            }
 
             // Heavy Refresh indicator
             const refreshContainer = document.getElementById('refresh-status-container');
@@ -1581,6 +1589,168 @@ const _sentinelIntervalSel = document.getElementById('sentinel-interval-select')
 if (_sentinelIntervalSel) _sentinelIntervalSel.addEventListener('change', () => saveSentinelConfig());
 const _sentinelRunNowBtn = document.getElementById('sentinel-run-now-btn');
 if (_sentinelRunNowBtn) _sentinelRunNowBtn.addEventListener('click', runSentinelNow);
+
+// ─── Phase 3: Quant Analytics, Decision Backtest & SEC 72h Dilution Badges ───
+const secDilutionCache = {};
+const secDilutionInFlight = new Set();
+const _SEC_ETF_SKIP = new Set(['SPY', 'QQQ', 'IWM', 'DIA', 'VIXY', 'IEF', 'UUP', 'GDX']);
+let _lastQuantAnalytics = null;
+let _lastBacktestSummary = null;
+
+function _buildSecBadgeHtml(sym) {
+    const key = String(sym || '').trim().toUpperCase();
+    const info = secDilutionCache[key];
+    if (!info || !info.dilution_warning_72h) return '';
+    const filings = Array.isArray(info.filings) ? info.filings : [];
+    const dil = filings.find(f => f && f.is_dilution_form) || filings[0] || {};
+    const form = _escAlertHtml(info.latest_dilution_form || dil.form || 'DILUTION');
+    const fdate = _escAlertHtml(info.latest_dilution_date || dil.filing_date || '');
+    const rawUrl = String(dil.url || '');
+    const safeUrl = /^https:\/\/[^\s"'<>]+$/i.test(rawUrl)
+        ? rawUrl
+        : `https://www.sec.gov/edgar/searchedgar/companysearch`;
+    const title = fdate
+        ? `SEC 72h dilution filing (${form} filed ${fdate}) — opens EDGAR`
+        : `SEC 72h dilution filing (${form}) — opens EDGAR`;
+    return `<a class="sec-dilution-badge" href="${_escAlertHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="${title}">⚠️ SEC ${form}</a>`;
+}
+
+function _injectSecBadgeForSymbol(sym) {
+    const key = String(sym || '').trim().toUpperCase();
+    const badgeHtml = _buildSecBadgeHtml(key);
+    if (!badgeHtml) return;
+    document.querySelectorAll(`td.ticker-cell[data-sec-ticker="${CSS.escape(key)}"]`).forEach((cell) => {
+        const existing = cell.querySelector('.sec-dilution-badge');
+        if (existing) existing.remove();
+        cell.insertAdjacentHTML('beforeend', badgeHtml);
+    });
+}
+
+function prefetchSecDilutionBadges(symbols) {
+    if (!Array.isArray(symbols)) return;
+    symbols.forEach((rawSym) => {
+        const sym = String(rawSym || '').trim().toUpperCase();
+        if (!sym || sym.startsWith('^') || _SEC_ETF_SKIP.has(sym)) return;
+        if (Object.prototype.hasOwnProperty.call(secDilutionCache, sym) || secDilutionInFlight.has(sym)) return;
+        secDilutionInFlight.add(sym);
+        fetch(`${API_BASE}/analytics/sec/${encodeURIComponent(sym)}`)
+            .then((res) => (res && res.ok ? res.json() : null))
+            .then((data) => {
+                if (data && typeof data === 'object') {
+                    secDilutionCache[sym] = data;
+                    if (data.dilution_warning_72h) _injectSecBadgeForSymbol(sym);
+                }
+            })
+            .catch(() => { /* fail-open quietly if SEC lookup offline */ })
+            .finally(() => {
+                secDilutionInFlight.delete(sym);
+            });
+    });
+}
+
+function renderQuantAnalyticsPanel(analytics, backtest) {
+    const panel = document.getElementById('analytics-quant-panel');
+    if (!panel) return;
+    const data = analytics && typeof analytics === 'object' ? analytics : {};
+    const regime = data.regime && typeof data.regime === 'object' ? data.regime : {};
+    const perm = regime.strategy_permissibility && typeof regime.strategy_permissibility === 'object'
+        ? regime.strategy_permissibility
+        : {};
+    const vetoes = Array.isArray(data.global_vetoes) ? data.global_vetoes : [];
+    const positions = Array.isArray(data.positions) ? data.positions : [];
+
+    const volState = _escAlertHtml(regime.volatility_state || 'UNKNOWN');
+    const permTags = [
+        ['Breakout', Boolean(perm.Momentum_Breakouts)],
+        ['EP', Boolean(perm.Episodic_Pivots)],
+        ['Pullback', Boolean(perm.Pullback_Continuations)],
+        ['Mean-Rev', Boolean(perm.Mean_Reversion)],
+    ].map(([label, ok]) => `<span class="quant-perm-tag ${ok ? 'allowed' : 'blocked'}">${ok ? '✓' : '✕'} ${label}</span>`).join('');
+
+    const vetoesHtml = vetoes.length
+        ? vetoes.map((v) => {
+            const rid = _escAlertHtml(v.rule_id || 'VETO');
+            const msg = _escAlertHtml(v.reason || v.action || '');
+            return `<div class="quant-veto-item"><strong>${rid}</strong> ${msg}</div>`;
+        }).join('')
+        : '<div class="quant-ok-line">✓ No active global vetoes</div>';
+
+    const tranchesHtml = positions.length
+        ? positions.map((p) => {
+            const sym = _escAlertHtml(p.ticker || '');
+            const tr = p.tranches || {};
+            const t25 = tr['25pct'];
+            const t50 = tr['50pct'];
+            const mand = Array.isArray(p.triggered_mandates) ? p.triggered_mandates : [];
+            const mandBadge = mand.length
+                ? ` <span class="quant-mandate-pill">${mand.map(m => _escAlertHtml(m.rule_id || '')).join(', ')}</span>`
+                : '';
+            if (!t25 && !t50) {
+                return `<div class="quant-tranche-row"><strong>${sym}</strong>${mandBadge}: awaiting live price</div>`;
+            }
+            const s25 = t25 ? `${t25.sell_shares}sh` : '—';
+            const s50 = t50 ? `${t50.sell_shares}sh` : '—';
+            const lim = p.sweep_limit_usd != null ? `$${Number(p.sweep_limit_usd).toFixed(2)}` : '—';
+            return `<div class="quant-tranche-row"><strong>${sym}</strong>${mandBadge} · 25%: ${s25} · 50%: ${s50} · Sweep ${lim}</div>`;
+        }).join('')
+        : '<div class="empty-msg">No held positions</div>';
+
+    const bt = backtest && typeof backtest === 'object' ? backtest : null;
+    const btHtml = bt
+        ? `<div class="quant-backtest-grid">
+                <div><span>Logged</span><strong>${Number(bt.total_logged || 0)}</strong></div>
+                <div><span>Eval</span><strong>${Number(bt.evaluated_count || 0)}</strong></div>
+                <div><span>Hit%</span><strong>${bt.hit_rate_pct != null ? `${Number(bt.hit_rate_pct).toFixed(1)}%` : '—'}</strong></div>
+                <div><span>5D Avg</span><strong>${bt.avg_ret_5d_pct != null ? `${Number(bt.avg_ret_5d_pct) > 0 ? '+' : ''}${Number(bt.avg_ret_5d_pct).toFixed(2)}%` : '—'}</strong></div>
+           </div>`
+        : '<div class="empty-msg">Backtest awaiting logged trades</div>';
+
+    panel.innerHTML = `
+        <div class="quant-section">
+            <div class="quant-section-title">Regime: <strong>${volState}</strong></div>
+            <div class="quant-perm-grid">${permTags}</div>
+        </div>
+        <div class="quant-section">
+            <div class="quant-section-title">Global Vetoes</div>
+            ${vetoesHtml}
+        </div>
+        <div class="quant-section">
+            <div class="quant-section-title">Position Trim Sizing</div>
+            ${tranchesHtml}
+        </div>
+        <div class="quant-section">
+            <div class="quant-section-title">Decision Backtest</div>
+            ${btHtml}
+        </div>
+    `;
+}
+
+async function fetchAnalyticsAndBacktest() {
+    const btn = document.getElementById('refresh-analytics-btn');
+    if (btn) btn.disabled = true;
+    try {
+        const [aRes, bRes] = await Promise.allSettled([
+            fetch(`${API_BASE}/analytics`),
+            fetch(`${API_BASE}/analytics/backtest`),
+        ]);
+        if (aRes.status === 'fulfilled' && aRes.value && aRes.value.ok) {
+            _lastQuantAnalytics = await aRes.value.json();
+        }
+        if (bRes.status === 'fulfilled' && bRes.value && bRes.value.ok) {
+            _lastBacktestSummary = await bRes.value.json();
+        }
+        if (_lastQuantAnalytics || _lastBacktestSummary) {
+            renderQuantAnalyticsPanel(_lastQuantAnalytics, _lastBacktestSummary);
+        }
+    } catch (_) {
+        /* ignore offline quant refresh errors */
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+const _refreshAnalyticsBtn = document.getElementById('refresh-analytics-btn');
+if (_refreshAnalyticsBtn) _refreshAnalyticsBtn.addEventListener('click', fetchAnalyticsAndBacktest);
 
 window.ackAlertEvent = ackAlertEvent;
 window.deleteAlertRule = deleteAlertRule;

@@ -77,6 +77,47 @@ const API = {
     },
     '/api/alert_sentinel': { enabled: false, provider: 'gemini_free', interval_sec: 600, model_chain: ['gemini-2.5-flash-lite'], api_key_configured: true, last_run: { model_used: 'gemini-2.0-flash-lite', fallback_count: 1 } },
     '/api/proposals': { status: 'success', proposals: [] },
+    '/api/analytics': {
+        regime: {
+            volatility_state: 'ELEVATED_VOLATILITY',
+            strategy_permissibility: {
+                Momentum_Breakouts: false,
+                Episodic_Pivots: false,
+                Pullback_Continuations: false,
+                Mean_Reversion: true,
+            },
+        },
+        global_vetoes: [{ rule_id: 'ENH_72', reason: 'VIX >= 20 new-risk long veto' }],
+        positions: [
+            {
+                ticker: 'NVDA',
+                sweep_limit_usd: 119.90,
+                tranches: { '25pct': { sell_shares: 2 }, '50pct': { sell_shares: 5 } },
+                triggered_mandates: [],
+            },
+        ],
+    },
+    '/api/analytics/backtest': {
+        total_logged: 8,
+        evaluated_count: 5,
+        hit_rate_pct: 60.0,
+        avg_ret_5d_pct: 2.45,
+    },
+    '/api/analytics/sec/NVDA': {
+        status: 'ok',
+        ticker: 'NVDA',
+        dilution_warning_72h: true,
+        latest_dilution_form: '424B3',
+        latest_dilution_date: '2026-11-23',
+        filings: [
+            {
+                form: '424B3',
+                filing_date: '2026-11-23',
+                is_dilution_form: true,
+                url: 'https://www.sec.gov/Archives/edgar/data/1045810/test_424b3.htm',
+            },
+        ],
+    },
     '/api/list_models': { status: 'success', models: [], current_model: 'test-model' },
     '/api/chat': { status: 'success', response: 'Boot complete.', proposals: [], turn_id: 't1' },
 };
@@ -172,16 +213,18 @@ async function main() {
         const rows = [...window.document.querySelectorAll('#data-table tbody tr')];
         const sections = rows.filter((r) => r.querySelector('td[colspan="14"]')).map((r) => r.textContent.trim());
         assert.deepStrictEqual(sections, ['Your Portfolio', 'Strategic Watchlist']);
-        const symbols = rows.filter((r) => !r.querySelector('td[colspan="14"]')).map((r) => r.cells[0].textContent.trim());
+        const symOf = (r) => (r.querySelector('.ticker-symbol') || r.cells[0]).textContent.trim();
+        const symbols = rows.filter((r) => !r.querySelector('td[colspan="14"]')).map(symOf);
         assert.deepStrictEqual(symbols, ['NVDA', 'AMD', 'PLTR', 'TSLA']);
-        const amd = rows.find((r) => r.cells[0].textContent.trim() === 'AMD');
+        const amd = rows.find((r) => symOf(r) === 'AMD');
         assert.strictEqual(amd.cells[1].textContent.trim(), '—', 'null price should render as —');
-        assert(rows.find((r) => r.cells[0].textContent.trim() === 'TSLA').textContent.includes('Pending scan'));
+        assert(rows.find((r) => symOf(r) === 'TSLA').textContent.includes('Pending scan'));
     });
     check('Fib Target UI separates Extension vs Retracement without dual Peak ambiguity', () => {
         const rows = [...window.document.querySelectorAll('#data-table tbody tr')];
-        const nvda = rows.find((r) => r.cells[0].textContent.trim() === 'NVDA');
-        const pltr = rows.find((r) => r.cells[0].textContent.trim() === 'PLTR');
+        const symOf = (r) => (r.querySelector('.ticker-symbol') || r.cells[0]).textContent.trim();
+        const nvda = rows.find((r) => symOf(r) === 'NVDA');
+        const pltr = rows.find((r) => symOf(r) === 'PLTR');
         assert(nvda && pltr, 'NVDA and PLTR rows missing');
         const nvdaFib = nvda.cells[11];
         assert(nvdaFib.textContent.includes('HOD $122.00'), `expected HOD tag, got: ${nvdaFib.textContent}`);
@@ -284,6 +327,19 @@ async function main() {
         assert(rulesList && rulesList.textContent.includes('NVDA') && rulesList.textContent.includes('sentinel'), 'armed trigger missing from sidebar');
         const sentinelStatus = window.document.getElementById('sentinel-status-text');
         assert(sentinelStatus && sentinelStatus.textContent.includes('gemini-2.0-flash-lite'), 'sentinel fallback model status missing');
+    });
+    check('Phase 3 UI: Quant & Backtest panel and SEC 72h dilution badge render cleanly', () => {
+        const quantPanel = window.document.getElementById('analytics-quant-panel');
+        assert(quantPanel, 'analytics-quant-panel missing');
+        assert(quantPanel.textContent.includes('ELEVATED_VOLATILITY'), 'regime missing from quant panel');
+        assert(quantPanel.textContent.includes('ENH_72'), 'global veto missing from quant panel');
+        assert(quantPanel.textContent.includes('NVDA') && quantPanel.textContent.includes('2sh'), 'NVDA trim sizing missing from quant panel');
+        assert(quantPanel.textContent.includes('60.0%'), 'backtest hit rate missing from quant panel');
+
+        const nvdaBadge = window.document.querySelector('td.ticker-cell[data-sec-ticker="NVDA"] .sec-dilution-badge');
+        assert(nvdaBadge, 'SEC 72h dilution badge missing on NVDA row');
+        assert(nvdaBadge.textContent.includes('SEC 424B3'), `unexpected badge text: ${nvdaBadge.textContent}`);
+        assert.strictEqual(nvdaBadge.getAttribute('href'), 'https://www.sec.gov/Archives/edgar/data/1045810/test_424b3.htm');
     });
 
     window.close();

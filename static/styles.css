@@ -2484,3 +2484,142 @@ tr.chart-clickable:hover {
     line-height: 1.35;
 }
 
+/* ─── Phase 3: Quant & Backtest Card & SEC 72h Dilution Badge ─── */
+.sec-dilution-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(248, 81, 73, 0.16);
+    border: 1px solid rgba(248, 81, 73, 0.55);
+    color: #ff7b72;
+    font-size: 0.6rem;
+    font-weight: 700;
+    font-family: var(--font-mono, monospace);
+    letter-spacing: 0.2px;
+    text-decoration: none;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.sec-dilution-badge:hover {
+    background: rgba(248, 81, 73, 0.28);
+    border-color: #ff7b72;
+    color: #ffffff;
+}
+
+.quant-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 0.66rem;
+    box-sizing: border-box;
+    width: 100%;
+    overflow: hidden;
+}
+
+.quant-section {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    box-sizing: border-box;
+    width: 100%;
+    overflow: hidden;
+}
+
+.quant-section-title {
+    font-size: 0.61rem;
+    color: var(--text-dim, #8b949e);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 4px;
+}
+
+.quant-section-title strong {
+    color: #e6edf3;
+}
+
+.quant-perm-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.quant-perm-tag {
+    font-size: 0.6rem;
+    font-family: var(--font-mono, monospace);
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--panel-border);
+}
+
+.quant-perm-tag.allowed {
+    color: #3fb950;
+    background: rgba(63, 185, 80, 0.12);
+    border-color: rgba(63, 185, 80, 0.35);
+}
+
+.quant-perm-tag.blocked {
+    color: #8b949e;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.quant-veto-item {
+    font-size: 0.62rem;
+    color: #ff7b72;
+    line-height: 1.35;
+    margin-top: 2px;
+    word-break: break-word;
+}
+
+.quant-ok-line {
+    font-size: 0.62rem;
+    color: #3fb950;
+}
+
+.quant-tranche-row {
+    font-size: 0.62rem;
+    font-family: var(--font-mono, monospace);
+    color: #c9d1d9;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.quant-mandate-pill {
+    display: inline-block;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: rgba(248, 81, 73, 0.16);
+    color: #ff7b72;
+    font-size: 0.58rem;
+}
+
+.quant-backtest-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    text-align: center;
+}
+
+.quant-backtest-grid div {
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 4px;
+    padding: 4px 2px;
+}
+
+.quant-backtest-grid span {
+    display: block;
+    font-size: 0.56rem;
+    color: var(--text-dim, #8b949e);
+}
+
+.quant-backtest-grid strong {
+    font-size: 0.66rem;
+    font-family: var(--font-mono, monospace);
+    color: #e6edf3;
+}
+
+

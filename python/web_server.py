@@ -354,11 +354,13 @@ state_validation_router = framework.create_agent_tool(
     agent_tools=[tools.read_ssot, tools.update_ssot, tools.get_market_data]
 )
 
-rule_enforcer_engine = framework.create_agent_tool(
+rule_enforcer_engine = framework.create_deterministic_agent_tool(
     name="Rule Enforcer Engine",
-    file_path="engine_instructions/rule_enforcer_engine.md",
-    mode="GEMMA",
-    agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
+    handler_fn=lambda _q: ANALYTICS_ENGINE.format_rule_enforcer_response(
+        *_load_live_analytics_context(),
+        sec_fetcher=lambda sym: fetch_recent_sec_filings(sym, limit=3),
+    ),
+    description="Deterministic Python Rule Enforcer evaluating global vetoes, position trim mandates, friction hurdles, and 72h SEC EDGAR dilution filings.",
 )
 
 execution = framework.create_agent_tool(
@@ -380,11 +382,10 @@ regime_engine = framework.create_deterministic_agent_tool(
     description="Deterministic Python Volatility State & Strategy Permissibility routing matrix.",
 )
 
-strategy_engine = framework.create_agent_tool(
+strategy_engine = framework.create_deterministic_agent_tool(
     name="Strategy Engine",
-    file_path="engine_instructions/strategy_engine.md",
-    mode="GEMMA",
-    agent_tools=[tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
+    handler_fn=lambda _q: ANALYTICS_ENGINE.format_strategy_engine_response(*_load_live_analytics_context()),
+    description="Deterministic Python setup classifier and Volatility Regime strategy permissibility validator.",
 )
 
 sentiment_engine = framework.create_agent_tool(

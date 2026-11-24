@@ -303,12 +303,73 @@ def compute_position_tranches(
     }
 
 
+def compute_agreement_score(votes: Dict[str, Any]) -> Dict[str, Any]:
+    """Deterministic ENH_16_C weighted consensus score (S_A) and <0.51 fragility flag."""
+    if not isinstance(votes, dict) or not votes:
+        return {
+            "agreement_score": 0.0,
+            "fragile": True,
+            "status": "FRAGILE",
+            "dominant_stance": "SPLIT",
+            "total_weight": 0.0,
+            "buckets": {"BULLISH": 0.0, "HOLD": 0.0, "BEARISH": 0.0},
+        }
+
+    buckets = {"BULLISH": 0.0, "HOLD": 0.0, "BEARISH": 0.0}
+    total_weight = 0.0
+
+    for entry in votes.values():
+        if isinstance(entry, dict):
+            raw_stance = str(entry.get("stance") or entry.get("action") or "HOLD").strip().upper()
+            weight = _safe_float(entry.get("weight"))
+            w = weight if (weight is not None and weight > 0) else 1.0
+        else:
+            raw_stance = str(entry or "HOLD").strip().upper()
+            w = 1.0
+
+        if any(k in raw_stance for k in ("BUY", "ADD", "ACCUMULATE", "LONG", "BULL")):
+            bucket = "BULLISH"
+        elif any(k in raw_stance for k in ("TRIM", "SELL", "REDUCE", "EXIT", "SHORT", "BEAR")):
+            bucket = "BEARISH"
+        else:
+            bucket = "HOLD"
+
+        buckets[bucket] += w
+        total_weight += w
+
+    if total_weight <= 0.0:
+        return {
+            "agreement_score": 0.0,
+            "fragile": True,
+            "status": "FRAGILE",
+            "dominant_stance": "SPLIT",
+            "total_weight": 0.0,
+            "buckets": {k: round(v, 4) for k, v in buckets.items()},
+        }
+
+    max_weight = max(buckets.values())
+    winners = [k for k, v in buckets.items() if math.isclose(v, max_weight, rel_tol=1e-9, abs_tol=1e-9)]
+    dominant = winners[0] if len(winners) == 1 else "SPLIT"
+    s_a = max_weight / total_weight
+    fragile = s_a < 0.51
+
+    return {
+        "agreement_score": round(s_a, 4),
+        "fragile": fragile,
+        "status": "FRAGILE" if fragile else "ALIGNED",
+        "dominant_stance": dominant,
+        "total_weight": round(total_weight, 4),
+        "buckets": {k: round(v, 4) for k, v in buckets.items()},
+    }
+
+
 def _classify_watchlist_setup(row: Dict[str, Any], permissibility: Dict[str, bool]) -> Dict[str, Any]:
     sym = str(row.get("ticker") or "").strip().upper()
     valid = _is_ticker_valid_and_fresh(row)
     price = _safe_float(row.get("price"))
     vwap = _safe_float(row.get("vwap"))
     dist_vwap = _safe_float(row.get("distance_from_vwap"))
+    gap_pct = _safe_float(row.get("gap_percent")) or 0.0
     rvol = _safe_float(row.get("rvol"))
     rsi = _safe_float(row.get("rsi"))
     trend = str(row.get("trend") or "FLAT").strip().upper()
@@ -316,7 +377,10 @@ def _classify_watchlist_setup(row: Dict[str, Any], permissibility: Dict[str, boo
 
     setup = "RANGE_WAIT"
     perm_key = "Mean_Reversion"
-    if valid and trend == "UP" and vwap and price and price >= vwap:
+    if valid and (gap_pct >= 10.0 or (gap_pct >= 5.0 and (rvol or 0.0) >= 3.0)):
+        setup = "EPISODIC_PIVOT"
+        perm_key = "Episodic_Pivots"
+    elif valid and trend == "UP" and vwap and price and price >= vwap:
         if fib.get("mode") == "EXTENSION" and (rvol or 0.0) >= RVOL_CONFIRMATION:
             setup = "MOMENTUM_BREAKOUT"
             perm_key = "Momentum_Breakouts"
@@ -784,6 +848,134 @@ class AnalyticsEngine:
             "global_vetoes": bundle["global_vetoes"],
             "positions": bundle["positions"],
             "watchlist_signals": bundle["watchlist_signals"],
+        }
+        return json.dumps(payload, indent=2)
+
+    def format_rule_enforcer_response(
+        self,
+        live_state: Dict[str, Any],
+        ssot: Optional[Dict[str, Any]] = None,
+        fx_info: Optional[Dict[str, Any]] = None,
+        ny_dt: Optional[datetime] = None,
+        sec_fetcher: Optional[Any] = None,
+    ) -> str:
+        """Zero-LLM deterministic response matching engine_instructions/rule_enforcer_engine.md."""
+        bundle = self.evaluate(live_state, ssot=ssot, fx_info=fx_info, ny_dt=ny_dt)
+
+        sec_dilution_vetoes: List[Dict[str, Any]] = []
+        if callable(sec_fetcher):
+            macro_skip = {"SPY", "QQQ", "IWM", "DIA", "VIXY", "IEF", "UUP", "GDX"}
+            candidate_syms: List[str] = []
+            seen = set()
+            for item in bundle["positions"] + bundle["watchlist_signals"]:
+                sym = str(item.get("ticker") or "").strip().upper()
+                if not sym or sym.startswith("^") or sym in macro_skip or sym in seen:
+                    continue
+                seen.add(sym)
+                candidate_syms.append(sym)
+                if len(candidate_syms) >= 10:
+                    break
+
+            for sym in candidate_syms:
+                try:
+                    sec_res = sec_fetcher(sym)
+                except Exception:
+                    continue
+                if not isinstance(sec_res, dict) or not sec_res.get("dilution_warning_72h"):
+                    continue
+                filings = sec_res.get("filings") if isinstance(sec_res.get("filings"), list) else []
+                dil_filing = next((f for f in filings if isinstance(f, dict) and f.get("is_dilution_form")), None)
+                sec_dilution_vetoes.append({
+                    "ticker": sym,
+                    "rule_id": "ENH_117",
+                    "action": "VETO_NEW_LONGS_72H_DILUTION",
+                    "severity": "critical",
+                    "form": sec_res.get("latest_dilution_form") or (dil_filing.get("form") if dil_filing else "DILUTION"),
+                    "filing_date": sec_res.get("latest_dilution_date") or (dil_filing.get("filing_date") if dil_filing else None),
+                    "url": dil_filing.get("url") if dil_filing else None,
+                })
+
+        has_trim_mandate = any(
+            isinstance(m, dict) and m.get("trim_pct") is not None
+            for p in bundle["positions"]
+            for m in (p.get("triggered_mandates") or [])
+        )
+        if has_trim_mandate:
+            verdict = "TRIM_REQUIRED"
+        elif bundle["global_vetoes"] or sec_dilution_vetoes:
+            verdict = "VETO"
+        else:
+            verdict = "CLEAR"
+
+        payload = {
+            "source": "python_deterministic",
+            "as_of_ny": bundle["as_of_ny"],
+            "verdict": verdict,
+            "has_global_vetoes": bool(bundle["global_vetoes"]),
+            "has_sec_dilution_vetoes": bool(sec_dilution_vetoes),
+            "friction_hurdles": bundle["friction_hurdles"],
+            "global_vetoes": bundle["global_vetoes"],
+            "sec_dilution_vetoes": sec_dilution_vetoes,
+            "positions": bundle["positions"],
+        }
+        return json.dumps(payload, indent=2)
+
+    def format_strategy_engine_response(
+        self,
+        live_state: Dict[str, Any],
+        ssot: Optional[Dict[str, Any]] = None,
+        fx_info: Optional[Dict[str, Any]] = None,
+        ny_dt: Optional[datetime] = None,
+    ) -> str:
+        """Zero-LLM deterministic response matching engine_instructions/strategy_engine.md."""
+        bundle = self.evaluate(live_state, ssot=ssot, fx_info=fx_info, ny_dt=ny_dt)
+        reg = bundle["regime"]
+        permissibility = reg["strategy_permissibility"]
+        tickers = live_state.get("tickers", []) if isinstance(live_state, dict) else []
+        by_sym: Dict[str, Dict[str, Any]] = {
+            str(t.get("ticker") or "").strip().upper(): t
+            for t in (tickers or [])
+            if isinstance(t, dict) and t.get("ticker")
+        }
+
+        target_syms: List[str] = []
+        seen = set()
+        for entry in bundle["positions"] + bundle["watchlist_signals"]:
+            sym = str(entry.get("ticker") or "").strip().upper()
+            if sym and sym not in seen:
+                seen.add(sym)
+                target_syms.append(sym)
+
+        setups: List[Dict[str, Any]] = []
+        for sym in target_syms:
+            row = by_sym.get(sym, {"ticker": sym})
+            sig = _classify_watchlist_setup(row, permissibility)
+            target_setup = "UNKNOWN" if sig["setup"] == "RANGE_WAIT" else sig["setup"]
+            if not sig["valid_telemetry"] or target_setup == "UNKNOWN":
+                status = "INVALID_SETUP"
+            elif sig["strategy_permissible"]:
+                status = "PERMITTED"
+            else:
+                status = "BLOCKED_BY_REGIME"
+            justification = (
+                f"Setup={target_setup}, rVol={sig['rvol']}x, dist_VWAP={sig['distance_from_vwap']}%, "
+                f"Regime={reg['volatility_state']}."
+            )
+            setups.append({
+                "Ticker": sym,
+                "Target_Setup": target_setup,
+                "Strategy_Status": status,
+                "Setup_Justification": justification,
+                "rvol_confirmed": sig["rvol_confirmed"],
+                "vwap_execution_blocked": sig["vwap_execution_blocked"],
+            })
+
+        payload = {
+            "source": "python_deterministic",
+            "as_of_ny": bundle["as_of_ny"],
+            "Volatility_State": reg["volatility_state"],
+            "Strategy_Permissibility": permissibility,
+            "setups": setups,
         }
         return json.dumps(payload, indent=2)
 
