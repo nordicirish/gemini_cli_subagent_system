@@ -15,6 +15,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, JSONResponse
 import threading
 import glob
+
+# `python python/web_server.py` puts only python/ on sys.path, but the database package imports
+# `python.database...`, which also needs the repo root (tests get it from running in the root).
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(1, _REPO_ROOT)
+
 from agent_framework import types, Part
 
 from agent_framework import AgentFramework

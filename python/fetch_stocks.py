@@ -37,6 +37,12 @@ import os
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 import time as t_time
 import sys
+
+# `python python/fetch_stocks.py` puts only python/ on sys.path, but the database package imports
+# `python.database...`, which also needs the repo root (tests get it from running in the root).
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(1, _REPO_ROOT)
 import json
 import pyperclip
 import re
