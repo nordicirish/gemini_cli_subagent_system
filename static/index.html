@@ -6,7 +6,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.67">
+    <link rel="stylesheet" href="styles.css?v=18.68">
     <link rel="stylesheet" href="modern_ui.css?v=18.59">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
@@ -53,9 +53,9 @@
                         <span class="label">Updated:</span>
                         <span id="last-updated" class="value">—</span>
                     </div>
-                    <button id="toggle-sidebar-btn" class="glow-btn outline" type="button" aria-expanded="false" aria-controls="dashboard-sidebar" title="Toggle Portfolio, Watchlist & Scout tools panel" style="width: auto; padding: 4px 12px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; gap: 6px; margin-left: 10px; line-height: 1;">🧰 TOOLS</button>
-                    <button id="open-indices-modal-btn" class="glow-btn outline" style="width: auto; padding: 4px 12px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; gap: 6px; margin-left: 10px; line-height: 1;">⚙️ INDICES</button>
-                    <button id="launch-chat-btn" class="glow-btn chat-launcher" style="width: auto; padding: 4px 12px; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; gap: 6px; margin-left: 10px; line-height: 1;">💬 CONSULT AI COUNCIL</button>
+                    <button id="toggle-sidebar-btn" class="glow-btn outline header-action-btn" type="button" aria-expanded="false" aria-controls="dashboard-sidebar" title="Toggle Portfolio, Watchlist &amp; Scout tools panel">🧰 TOOLS</button>
+                    <button id="open-indices-modal-btn" class="glow-btn outline header-action-btn" type="button" title="Manage tracked macro indices">⚙️ INDICES</button>
+                    <button id="launch-chat-btn" class="glow-btn chat-launcher header-action-btn" type="button" title="Consult Gemini AI Council">💬 AI COUNCIL</button>
                 </div>
             </div>
         </header>
@@ -67,7 +67,16 @@
             </div>
         </section>
 
-
+        <!-- ─── Portfolio & Risk Command Strip ─── -->
+        <section class="portfolio-command-strip glass-panel" id="portfolio-command-strip">
+            <div class="cmd-strip-metrics" id="cmd-strip-metrics">
+                <span class="cmd-metric"><span class="cmd-label">Equity</span><strong id="cmd-equity-val">—</strong></span>
+                <span class="cmd-metric"><span class="cmd-label">Unrealized P&amp;L</span><strong id="cmd-pnl-val">—</strong></span>
+                <span class="cmd-metric"><span class="cmd-label">Cash</span><strong id="cmd-cash-val">—</strong></span>
+                <span class="cmd-metric"><span class="cmd-label">Vetoes</span><strong id="cmd-vetoes-val">0</strong></span>
+            </div>
+            <div class="cmd-strip-actions" id="cmd-strip-actions"></div>
+        </section>
 
         <!-- ─── Main Content ─── -->
         <main class="main-content sidebar-collapsed" id="main-content">
@@ -95,14 +104,14 @@
                         <thead>
                             <tr>
                                 <th>Ticker</th>
-                                <th>Price</th>
-                                <th>Day %</th>
-                                <th>Gap %</th>
-                                <th>Volume</th>
-                                <th title="Relative Volume vs 20-day average (time-paced)">rVol</th>
-                                <th>ATR %</th>
-                                <th>RSI</th>
-                                <th>VWAP</th>
+                                <th class="num-col">Price</th>
+                                <th class="num-col">Day %</th>
+                                <th class="num-col">Gap %</th>
+                                <th class="num-col">Volume</th>
+                                <th class="num-col" title="Relative Volume vs 20-day average (time-paced)">rVol</th>
+                                <th class="num-col">ATR %</th>
+                                <th class="num-col">RSI</th>
+                                <th class="num-col">VWAP</th>
                                 <th>MACD</th>
                                 <th>Trend</th>
                                 <th>Fib Target</th>
@@ -515,6 +524,7 @@
                 <span id="chart-modal-meta" class="chart-meta-label">Loading chart data...</span>
                 <div style="display:flex;align-items:center;gap:10px;">
                     <span class="chart-meta-label" style="color:var(--text-dim, #8b949e);">1m · US/Eastern (NYSE/NASDAQ)</span>
+                    <button id="chart-exec-plan-btn" type="button" class="chart-copy-btn" style="display:none;" title="Open Execution &amp; Risk Ticket">⚡ Execution Ticket</button>
                     <button id="chart-copy-img-btn" class="chart-copy-btn" title="Copy chart image to clipboard — paste directly into Gemini">
                         📋 Copy Image
                     </button>
@@ -527,7 +537,7 @@
     <div id="offscreen-chart-container" style="position: fixed; left: -9999px; top: -9999px; width: 920px; height: 500px; opacity: 0; pointer-events: none;"></div>
 
     <script src="portfolio.js?v=18.61"></script>
-    <script src="app.js?v=18.69"></script>
+    <script src="app.js?v=18.70"></script>
     <script src="modern_ui.js?v=18.63"></script>
 </body>
 </html>

@@ -400,6 +400,28 @@ async function main() {
         assert(execBody.textContent.includes('1000.00 EUR'), 'cash reconciliation proof missing');
         assert(calls.includes('POST /api/alerts'), '1-click Arm Stop did not POST /api/alerts');
     });
+    check('Design Packages 1-3: Command Strip, numeric alignment, held-row Plan button, Regime fallback & Chart-to-Ticket link', () => {
+        const eqEl = window.document.getElementById('cmd-equity-val');
+        const vetoesEl = window.document.getElementById('cmd-vetoes-val');
+        const cmdPlanBtn = window.document.querySelector('#cmd-strip-actions .cmd-plan-btn');
+        assert(eqEl && eqEl.textContent.trim().length > 0, 'cmd-equity-val missing');
+        assert(vetoesEl && vetoesEl.textContent.trim() === '1', `expected 1 global veto, got ${vetoesEl && vetoesEl.textContent}`);
+        assert(cmdPlanBtn && cmdPlanBtn.textContent.includes('NVDA Plan'), 'NVDA Plan button missing from command strip');
+
+        assert.strictEqual(window.document.querySelectorAll('#data-table thead th').length, 14);
+        assert.strictEqual(window.document.querySelectorAll('#data-table thead th.num-col').length, 8);
+        const nvdaRowPlanBtn = window.document.querySelector('td.ticker-cell[data-sec-ticker="NVDA"] .row-plan-btn');
+        assert(nvdaRowPlanBtn, 'inline Execution Ticket button missing on held NVDA row');
+
+        window.updateVolatilityRegimePill({
+            volatility_regime: 'UNAVAILABLE',
+            precomputed_analytics: { regime: { volatility_state: 'BEAR_VOLATILE' } },
+        });
+        const pill = window.document.getElementById('volatility-regime-pill');
+        assert.strictEqual(pill.textContent.trim(), 'BEAR_VOLATILE');
+        assert(pill.classList.contains('regime-crisis'), 'BEAR_VOLATILE should map to regime-crisis');
+        assert(window.document.getElementById('chart-exec-plan-btn'), 'chart-exec-plan-btn missing from chart modal');
+    });
 
     window.close();
     console.log(results.join('\n'));

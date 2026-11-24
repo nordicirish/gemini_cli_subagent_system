@@ -51,15 +51,22 @@ function updateVolatilityRegimePill(state) {
     if (!pill) return;
     const tickers = Array.isArray(state && state.tickers) ? state.tickers : [];
     const regimeSample = tickers.find(t => t && t.volatility_regime) || null;
-    const rawRegime = String((state && state.volatility_regime) || (regimeSample && regimeSample.volatility_regime) || '').trim();
+    const analyticsRegime =
+        (state && state.precomputed_analytics && state.precomputed_analytics.regime && state.precomputed_analytics.regime.volatility_state) ||
+        (_lastQuantAnalytics && _lastQuantAnalytics.regime && _lastQuantAnalytics.regime.volatility_state) ||
+        '';
+    let rawRegime = String((state && state.volatility_regime) || (regimeSample && regimeSample.volatility_regime) || '').trim();
+    if (!rawRegime || /^UNAVAILABLE$|^UNKNOWN$/i.test(rawRegime)) {
+        rawRegime = String(analyticsRegime || rawRegime).trim();
+    }
     const upper = rawRegime.toUpperCase();
 
     let cls = 'regime-unknown';
-    if (/CRISIS|EXTREME|PANIC|STRESS|HIGH/.test(upper)) {
+    if (/CRISIS|EXTREME|PANIC|STRESS|HIGH|BEAR_VOLATILE/.test(upper)) {
         cls = 'regime-crisis';
-    } else if (/ELEVATED|CAUTION|MODERATE|GUARDED/.test(upper)) {
+    } else if (/ELEVATED|CAUTION|MODERATE|GUARDED|BEAR_QUIET|BULL_VOLATILE/.test(upper)) {
         cls = 'regime-elevated';
-    } else if (/NORMAL|LOW|CALM|STABLE/.test(upper)) {
+    } else if (/NORMAL|LOW|CALM|STABLE|BULL_QUIET/.test(upper)) {
         cls = 'regime-normal';
     }
 
@@ -703,6 +710,23 @@ function renderTable(tickers, state) {
 
         const scoutIndicator = row._isScout ? `<span class="scout-dot"></span>` : '';
         const secBadgeHtml = _buildSecBadgeHtml(sym);
+        const heldPlanHtml = row._isHeld
+            ? `<button type="button" class="row-plan-btn" onclick="event.stopPropagation(); openExecutionPlanModal('${_escAlertHtml(sym)}')" title="Open Execution &amp; Risk Ticket for ${_escAlertHtml(sym)}">⚡</button>`
+            : '';
+        const vwapNum = Number(row.vwap);
+        const hasVwap = isNum(row.vwap) && vwapNum > 0;
+        let vwapClass = 'num-col text-muted';
+        let vwapTitle = '';
+        if (hasVwap) {
+            if (isNum(row.price)) {
+                const px = Number(row.price);
+                const vwapDist = ((px - vwapNum) / vwapNum) * 100;
+                vwapClass = px >= vwapNum ? 'num-col text-green' : 'num-col text-red';
+                vwapTitle = ` title="${vwapDist >= 0 ? '+' : ''}${vwapDist.toFixed(2)}% vs VWAP"`;
+            } else {
+                vwapClass = 'num-col text-white';
+            }
+        }
         const rvolNum = Number(row.rvol);
         const hasRvol = Number(row.volume) > 0 && Number.isFinite(rvolNum) && rvolNum > 0;
         let rvolClass = 'text-muted';
@@ -724,16 +748,16 @@ function renderTable(tickers, state) {
             <tr class="chart-clickable" onclick="openChartModal('${sym}')" title="Click to view 1m TradingView chart">
                 <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}" data-sec-ticker="${_escAlertHtml(sym)}">
                     <span class="ticker-symbol ${dayColor}">${sym}</span>
-                    ${scoutIndicator}${secBadgeHtml}
+                    ${scoutIndicator}${heldPlanHtml}${secBadgeHtml}
                 </td>
-                <td class="${pClass}">${p}</td>
-                <td class="${dayColor}">${fmtSigned(row.session_change_pct, 2)}</td>
-                <td class="${gapColor}">${fmtSigned(row.gap_percent, 2)}</td>
-                <td>${formatVol(row.volume)}</td>
-                <td class="${rvolClass}"${rvolStyle} title="Relative Volume vs 20d avg (time-paced)">${rvolDisplay}</td>
-                <td>${isNum(row.atr_percent) ? `${fmt(row.atr_percent, 2)}%` : '—'}</td>
-                <td class="${rsiColor}">${fmt(row.rsi, 1)}</td>
-                <td>${isNum(row.vwap) && Number(row.vwap) > 0 ? fmt(row.vwap, 2) : '—'}</td>
+                <td class="num-col ${pClass}">${p}</td>
+                <td class="num-col ${dayColor}">${fmtSigned(row.session_change_pct, 2)}</td>
+                <td class="num-col ${gapColor}">${fmtSigned(row.gap_percent, 2)}</td>
+                <td class="num-col">${formatVol(row.volume)}</td>
+                <td class="num-col ${rvolClass}"${rvolStyle} title="Relative Volume vs 20d avg (time-paced)">${rvolDisplay}</td>
+                <td class="num-col">${isNum(row.atr_percent) ? `${fmt(row.atr_percent, 2)}%` : '—'}</td>
+                <td class="num-col ${rsiColor}">${fmt(row.rsi, 1)}</td>
+                <td class="${vwapClass}"${vwapTitle}>${hasVwap ? fmt(row.vwap, 2) : '—'}</td>
                 <td>${macdHtml}</td>
                 <td>${trendHtml}</td>
                 <td>${fibTargetHtml}</td>
@@ -780,7 +804,10 @@ function renderTable(tickers, state) {
 
     if (groups.held.length > 0) {
         html += renderHeader('Your Portfolio', 'portfolio-header');
-        groups.held.forEach(t => html += renderRow(t));
+        groups.held.forEach(t => {
+            t._isHeld = true;
+            html += renderRow(t);
+        });
     }
 
     if (groups.watchlist.length > 0 || groups.scouts.length > 0) {
@@ -984,13 +1011,21 @@ async function pollData() {
                 currentMacroTickers.forEach(tickerStr => {
                     const row = state.tickers.find(t => t.ticker === tickerStr);
                     const displayTicker = tickerStr.replace(/^\^/, '');
+                    const symUpper = tickerStr.toUpperCase();
+                    const isMacroVeto = Boolean(
+                        row && (
+                            (symUpper === '^VIX' && Number(row.price) > 20) ||
+                            (symUpper === '^VVIX' && Number(row.price) > 105)
+                        )
+                    );
                     const label = MACRO_LABELS[tickerStr] || tickerStr;
                     const subtitleRaw = MACRO_SUBTITLES[tickerStr] || (label !== tickerStr ? label : '');
                     const subtitle = subtitleRaw && subtitleRaw.toUpperCase() !== displayTicker.toUpperCase() ? subtitleRaw : '';
                     const title = subtitle ? `${subtitle} (${tickerStr})` : tickerStr;
+                    const vetoChip = isMacroVeto ? `<span class="macro-veto-chip" title="Threshold breach — active long-risk veto">VETO</span>` : '';
                     const headerHtml = `
                         <div class="macro-card-header" title="${title}">
-                            <span class="macro-ticker">${displayTicker}</span>
+                            <span class="macro-ticker">${displayTicker}${vetoChip}</span>
                             ${subtitle ? `<span class="macro-subtitle">${subtitle}</span>` : ''}
                         </div>
                     `;
@@ -1002,33 +1037,34 @@ async function pollData() {
                         const changeColor = changeVal > 0 ? 'text-green' : 'text-red';
                         
                         const INDEX_GEX_TICKERS = new Set(['SPY', 'QQQ', 'IWM', 'DIA']);
-                        const symUpper = tickerStr.toUpperCase();
                         let gexLine = '';
                         const rawGex = Number(row.net_gex_total);
-                        if (Number.isFinite(rawGex) && rawGex !== 0) {
-                            const gexSign = rawGex > 0 ? '+' : '';
-                            const gexVal = `${gexSign}${rawGex.toFixed(3)}`;
-                            let gexColor = 'text-muted';
-                            if (rawGex > 0.005) {
-                                gexColor = 'text-green';
-                            } else if (rawGex < -0.005) {
-                                gexColor = 'text-red';
+                        if (INDEX_GEX_TICKERS.has(symUpper)) {
+                            if (Number.isFinite(rawGex) && rawGex !== 0) {
+                                const gexSign = rawGex > 0 ? '+' : '';
+                                const gexVal = `${gexSign}${rawGex.toFixed(3)}`;
+                                let gexColor = 'text-muted';
+                                if (rawGex > 0.005) {
+                                    gexColor = 'text-green';
+                                } else if (rawGex < -0.005) {
+                                    gexColor = 'text-red';
+                                }
+                                
+                                const diff = row.gex_diff || 0;
+                                let chevron = '';
+                                if (diff > 0.005) {
+                                    chevron = `<span class="text-green" style="margin-left: 2px; font-weight: bold;">▲</span>`;
+                                } else if (diff < -0.005) {
+                                    chevron = `<span class="text-red" style="margin-left: 2px; font-weight: bold;">▼</span>`;
+                                }
+                                gexLine = `<div class="macro-gex ${gexColor}">GEX: ${gexVal}${chevron}</div>`;
+                            } else {
+                                gexLine = `<div class="macro-gex text-muted">GEX: —</div>`;
                             }
-                            
-                            const diff = row.gex_diff || 0;
-                            let chevron = '';
-                            if (diff > 0.005) {
-                                chevron = `<span class="text-green" style="margin-left: 2px; font-weight: bold;">▲</span>`;
-                            } else if (diff < -0.005) {
-                                chevron = `<span class="text-red" style="margin-left: 2px; font-weight: bold;">▼</span>`;
-                            }
-                            gexLine = `<div class="macro-gex ${gexColor}">GEX: ${gexVal}${chevron}</div>`;
-                        } else if (INDEX_GEX_TICKERS.has(symUpper)) {
-                            gexLine = `<div class="macro-gex text-muted">GEX: —</div>`;
                         }
 
                         hudHtml += `
-                            <div class="macro-card glass-panel" id="macro-card-${tickerStr.replace(/[^a-zA-Z0-9]/g, '')}">
+                            <div class="macro-card glass-panel${isMacroVeto ? ' macro-card-alert' : ''}" id="macro-card-${tickerStr.replace(/[^a-zA-Z0-9]/g, '')}">
                                 ${headerHtml}
                                 <div class="macro-val">${(row.price || 0).toFixed(2)}</div>
                                 <div class="macro-gap ${changeColor}"><span>${changeStr}</span>${gexLine}</div>
@@ -1679,12 +1715,110 @@ function updateMacroCalendarPill(macroCal) {
     pill.title = `${macroCal.shield_active ? 'ENH_259 Shield ACTIVE (-50% stops) · ' : ''}${upcomingLines}`;
 }
 
+function renderPortfolioCommandStrip(analytics) {
+    const strip = document.getElementById('portfolio-command-strip');
+    if (!strip) return;
+    const eqEl = document.getElementById('cmd-equity-val');
+    const pnlEl = document.getElementById('cmd-pnl-val');
+    const cashEl = document.getElementById('cmd-cash-val');
+    const vetoEl = document.getElementById('cmd-vetoes-val');
+    const actionsEl = document.getElementById('cmd-strip-actions');
+
+    const data = analytics && typeof analytics === 'object' ? analytics : (_lastQuantAnalytics || {});
+    const positions = Array.isArray(data.positions) ? data.positions : [];
+    const vetoes = Array.isArray(data.global_vetoes) ? data.global_vetoes : [];
+
+    let totalMvUsd = 0;
+    let totalMvEur = 0;
+    let totalCostUsd = 0;
+    let hasMvUsd = false;
+    let hasMvEur = false;
+    let hasPnl = false;
+    let totalPnlUsd = 0;
+
+    positions.forEach((p) => {
+        if (Number.isFinite(Number(p.market_value_usd)) && p.market_value_usd !== null) {
+            totalMvUsd += Number(p.market_value_usd);
+            hasMvUsd = true;
+        }
+        if (Number.isFinite(Number(p.market_value_eur)) && p.market_value_eur !== null) {
+            totalMvEur += Number(p.market_value_eur);
+            hasMvEur = true;
+        }
+        if (Number.isFinite(Number(p.unrealized_pnl_usd)) && p.unrealized_pnl_usd !== null) {
+            totalPnlUsd += Number(p.unrealized_pnl_usd);
+            hasPnl = true;
+            if (Number.isFinite(Number(p.shares)) && Number.isFinite(Number(p.wac))) {
+                totalCostUsd += Number(p.shares) * Number(p.wac);
+            }
+        }
+    });
+
+    if (eqEl) {
+        if (hasMvUsd && hasMvEur) {
+            eqEl.textContent = `$${totalMvUsd.toFixed(0)} (€${totalMvEur.toFixed(0)})`;
+        } else if (hasMvUsd) {
+            eqEl.textContent = `$${totalMvUsd.toFixed(2)}`;
+        } else if (positions.length > 0) {
+            eqEl.textContent = `${positions.length} Held`;
+        } else {
+            eqEl.textContent = '—';
+        }
+    }
+
+    if (pnlEl) {
+        if (hasPnl) {
+            const pct = totalCostUsd > 0 ? (totalPnlUsd / totalCostUsd) * 100 : null;
+            const sign = totalPnlUsd >= 0 ? '+' : '';
+            const arrow = totalPnlUsd >= 0 ? '▲' : '▼';
+            const pctTxt = pct !== null ? ` (${sign}${pct.toFixed(1)}%)` : '';
+            pnlEl.textContent = `${arrow} ${sign}$${totalPnlUsd.toFixed(0)}${pctTxt}`;
+            pnlEl.className = totalPnlUsd >= 0 ? 'text-green' : 'text-red';
+        } else {
+            pnlEl.textContent = '—';
+            pnlEl.className = 'text-muted';
+        }
+    }
+
+    if (cashEl) {
+        const cashEurEl = document.getElementById('cash-val-eur');
+        const cashUsdEl = document.getElementById('cash-val-usd');
+        const eurTxt = cashEurEl ? cashEurEl.textContent.trim() : '';
+        const usdTxt = cashUsdEl ? cashUsdEl.textContent.trim() : '';
+        if (eurTxt && eurTxt !== '—') {
+            cashEl.textContent = usdTxt && usdTxt !== '—' ? `${eurTxt} (${usdTxt})` : eurTxt;
+        } else if (usdTxt && usdTxt !== '—') {
+            cashEl.textContent = usdTxt;
+        } else {
+            cashEl.textContent = '€0.00';
+        }
+    }
+
+    if (vetoEl) {
+        vetoEl.textContent = String(vetoes.length);
+        vetoEl.className = vetoes.length > 0 ? 'cmd-veto-badge active' : 'cmd-veto-badge clear';
+        vetoEl.title = vetoes.length > 0 ? vetoes.map(v => `${v.rule_id}: ${v.reason || ''}`).join(' | ') : 'No global risk vetoes active';
+    }
+
+    if (actionsEl) {
+        const planBtns = positions.map((p) => {
+            const sym = _escAlertHtml(p.ticker || '');
+            return `<button type="button" class="cmd-plan-btn" onclick="openExecutionPlanModal('${sym}')" title="Open Execution &amp; Risk Ticket for ${sym}">⚡ ${sym} Plan</button>`;
+        }).join('');
+        actionsEl.innerHTML = planBtns;
+    }
+}
+
 function renderQuantAnalyticsPanel(analytics, backtest) {
     const panel = document.getElementById('analytics-quant-panel');
     const data = analytics && typeof analytics === 'object' ? analytics : {};
     if (data.macro_calendar) {
         updateMacroCalendarPill(data.macro_calendar);
     }
+    if (data.regime && data.regime.volatility_state) {
+        updateVolatilityRegimePill({ precomputed_analytics: data });
+    }
+    renderPortfolioCommandStrip(data);
     if (!panel) return;
     const regime = data.regime && typeof data.regime === 'object' ? data.regime : {};
     const perm = regime.strategy_permissibility && typeof regime.strategy_permissibility === 'object'
@@ -2398,6 +2532,23 @@ async function openChartModal(symbol) {
     dChartModalTicker.textContent = symbol;
     dChartModalMeta.textContent = 'Loading chart data...';
     dChartContainer.innerHTML = '<div class="chart-loading">Fetching 1m bars...</div>';
+    const dChartExecBtn = document.getElementById('chart-exec-plan-btn');
+    if (dChartExecBtn) {
+        const heldPositions = (_lastQuantAnalytics && Array.isArray(_lastQuantAnalytics.positions))
+            ? _lastQuantAnalytics.positions
+            : [];
+        const isHeldChart = heldPositions.some((p) => String(p.ticker || '').toUpperCase() === symbol.toUpperCase());
+        if (isHeldChart) {
+            dChartExecBtn.style.display = 'inline-flex';
+            dChartExecBtn.onclick = () => {
+                closeChartModal();
+                openExecutionPlanModal(symbol);
+            };
+        } else {
+            dChartExecBtn.style.display = 'none';
+            dChartExecBtn.onclick = null;
+        }
+    }
     openModal(dChartModalOverlay);
 
     try {
