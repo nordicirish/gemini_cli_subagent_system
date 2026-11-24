@@ -1,4 +1,51 @@
 /* MODERN UI LOGIC — Gemini CLI Edition */
+// --- Chat HTML sanitization -------------------------------------------------------------
+// Model replies can carry text from web searches (prompt injection), so rendered Markdown is
+// sanitized before it reaches the DOM. Fails closed: without DOMPurify + marked the reply is
+// shown as plain text. Blocked on top of DOMPurify's defaults:
+//   * inline style   -> no fake overlays / spoofed Apply buttons (payload blocks use CSS classes)
+//   * images & media -> no remote fetches that could leak data through a URL
+//   * forms/controls -> no injected buttons or inputs
+const CHAT_SANITIZE_CONFIG = {
+    FORBID_TAGS: [
+        'style', 'img', 'picture', 'source', 'video', 'audio', 'svg', 'math',
+        'form', 'input', 'button', 'textarea', 'select', 'option',
+        'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base',
+    ],
+    FORBID_ATTR: ['style', 'srcset', 'formaction', 'action', 'onerror', 'onload'],
+    ALLOW_UNKNOWN_PROTOCOLS: false,
+};
+
+let chatSanitizerHooked = false;
+
+function sanitizeChatHtml(html) {
+    if (!chatSanitizerHooked) {
+        // External links open in a new tab without handing this page a window.opener reference.
+        DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+            if (node.tagName === 'A' && node.hasAttribute('href')) {
+                node.setAttribute('target', '_blank');
+                node.setAttribute('rel', 'noopener noreferrer nofollow');
+            }
+        });
+        chatSanitizerHooked = true;
+    }
+    return DOMPurify.sanitize(html, CHAT_SANITIZE_CONFIG);
+}
+
+function renderSanitizedMarkdown(el, text) {
+    if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function' || typeof marked === 'undefined') {
+        el.textContent = text;
+        return;
+    }
+    el.innerHTML = sanitizeChatHtml(marked.parse(String(text ?? '')));
+}
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+    ));
+}
+
 const ModernChat = {
     overlay: null,
     launcher: null,
@@ -648,7 +695,7 @@ const ModernChat = {
         if (confirm('Archive current session and start a new conversation?')) {
             try { this.archiveCurrentSession(); } catch(e) { console.error('Archive failed', e); }
             this.messages.innerHTML = '';
-            this.restoreHtml = null;
+            this.restoreNodes = null;
             localStorage.removeItem('gem_chat_history');
             this.saveHistory();
             try {
@@ -690,25 +737,27 @@ const ModernChat = {
         }
         let historyHtml = '<div style="padding: 10px;"><h3>Archived Sessions</h3>';
         sessions.forEach(s => {
-            const displayCost = s.totalCost !== undefined ? s.totalCost : 0.0;
+            const displayCost = Number(s.totalCost) || 0.0;
+            const sid = Number(s.id) || 0;
             historyHtml += `
-                <div onclick="window.chatUI.loadSession(${s.id})" style="padding: 10px; margin-bottom: 8px; background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
+                <div onclick="window.chatUI.loadSession(${sid})" style="padding: 10px; margin-bottom: 8px; background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                        <div style="font-size: 0.75rem; color: #8b949e;">${s.date}</div>
-                        <div style="font-weight: 500; margin-top: 4px;">${s.preview}</div>
+                        <div style="font-size: 0.75rem; color: #8b949e;">${escapeHtml(s.date)}</div>
+                        <div style="font-weight: 500; margin-top: 4px;">${escapeHtml(s.preview)}</div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent-blue); text-align: right; flex-shrink: 0; padding-left: 10px;">
                             Est. Cost: $${displayCost.toFixed(2)}
                         </div>
-                        <button onclick="event.stopPropagation(); window.chatUI.deleteSession(${s.id})" style="background: rgba(255, 68, 68, 0.15); border: 1px solid rgba(255, 68, 68, 0.3); color: #ff6b6b; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.75rem;" title="Delete Session">&times;</button>
+                        <button onclick="event.stopPropagation(); window.chatUI.deleteSession(${sid})" style="background: rgba(255, 68, 68, 0.15); border: 1px solid rgba(255, 68, 68, 0.3); color: #ff6b6b; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.75rem;" title="Delete Session">&times;</button>
                     </div>
                 </div>
             `;
         });
         historyHtml += '</div>';
-        if (!this.restoreHtml) {
-            this.restoreHtml = this.messages.innerHTML;
+        if (!this.restoreNodes) {
+            // Park the live chat nodes (keeps their event listeners, e.g. proposal Apply buttons)
+            this.restoreNodes = Array.from(this.messages.childNodes);
         }
         this.messages.innerHTML = historyHtml + `<div style="display: flex; justify-content: center;"><button onclick="window.chatUI.restoreCurrentView()" style="margin: 10px; padding: 8px 16px; background: #238636; border: none; color: white; border-radius: 6px; cursor: pointer; width: fit-content;">← Back to Chat</button></div>`;
     },
@@ -727,7 +776,7 @@ const ModernChat = {
                         <div style="font-size: 0.85rem;">Start a new chat to create your first archived session.</div>
                         <button onclick="window.chatUI.restoreCurrentView()" style="margin-top: 16px; padding: 8px 16px; background: #238636; border: none; color: white; border-radius: 6px; cursor: pointer;">← Back to Chat</button>
                     </div>`;
-                this.restoreHtml = null;
+                this.restoreNodes = null;
             } else {
                 this.showHistory();
             }
@@ -741,7 +790,7 @@ const ModernChat = {
             if (confirm('Load this archived session? (Current session will be archived)')) {
                 try { this.archiveCurrentSession(); } catch(e) {}
                 localStorage.setItem('gem_chat_history', JSON.stringify(session.messages));
-                this.restoreHtml = null;
+                this.restoreNodes = null;
                 try { fetch('/api/reset_chat', { method: 'POST' }); } catch(e) {} // Force backend LLM hydration next message
                 this.loadHistory();
             }
@@ -749,9 +798,9 @@ const ModernChat = {
     },
 
     restoreCurrentView() {
-        if (this.restoreHtml) {
-            this.messages.innerHTML = this.restoreHtml;
-            this.restoreHtml = null;
+        if (this.restoreNodes) {
+            this.messages.replaceChildren(...this.restoreNodes);
+            this.restoreNodes = null;
         }
     },
 
@@ -847,7 +896,7 @@ const ModernChat = {
         }
 
         if (role === 'ai') {
-            msgDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(text) : text;
+            renderSanitizedMarkdown(msgDiv, text);
 
             // Collapsible SSoT Payload dynamic text toggling (v10.46)
             const payloadDetails = msgDiv.querySelectorAll('.execution-payload-details');
