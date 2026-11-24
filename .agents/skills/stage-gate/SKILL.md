@@ -7,47 +7,28 @@ description: Execute the mandatory read-only pre-commit verification gate, prote
 
 Run this workflow automatically before issuing any stage completion report or Argon acceptance verdict, or whenever invoked via `/stage-gate`.
 
-## Step 1: Read-Only Git & Scope Inspection
-1. Run `git branch --show-current` and `git rev-parse HEAD`.
-2. Run `git status --short` and `git diff --name-only` to list all modified, untracked, or deleted files in the working tree.
-3. Verify that every modified or untracked file falls strictly within the active stage's Authorised File Scope. Flag any out-of-scope file immediately as a blocker.
+## Automated Runner (Preferred)
+Execute the machine-enforced gate first:
+```powershell
+.\.venv\Scripts\python.exe scripts/stage_gate.py --scoped
+```
+(Add `--all` for final milestone closeout, or `--json` for machine-readable output. Also run `.\.venv\Scripts\python.exe scripts/audit_security.py` when modifying security-sensitive files in `python/` or `static/index.html`.)
 
-## Step 2: Protected Financial Asset Invariance Gate (Protocol 06)
-1. Run:
-   `git diff --exit-code -- engine_instructions/ gem_trading_rules/rules.md context/ssot.json context/trade_lessons.json context/decision_log.json context/config.json`
-2. If the exit code is non-zero (unless explicitly authorised by the Human Owner for that specific stage), STOP and report a **CRITICAL PROTOCOL 06 VIOLATION**.
-
-## Step 3: Repository Hygiene & Forbidden Artifact Gate
-Distinguish tracked Git index violations from untracked local runtime files on disk:
-1. Run:
-   `git ls-files -- "context/*.db" "cache/*.db" "*.lock" "**/*.lock" "*.restore_lock" "**/*.restore_lock" "*.cutover_lock" "**/*.cutover_lock"`
-   If any file is returned as tracked in the Git index, flag it immediately and provide `git rm --cached <paths>` in the Owner Git commands.
-2. Inspect `git status --short` and verify:
-   - Zero new report files exist under `docs/engineering/STAGE_*.md`.
-   - Zero stray unignored prohibited artifacts (`context/*.db`, `cache/*.db`, `*.lock`, `*.restore_lock`, `*.cutover_lock`) appear as untracked/modified in `git status --short` (untracked gitignored local runtime files outside `git status --short` and `git ls-files` are ignored by design).
-
-## Step 4: Scope-Proportional Test Routing (Protocol 05)
-Select and execute ONLY the test suites matching the modified paths in `git diff --name-only` (unless final milestone closeout is requested):
-
-1. **Fast Core Gate (Run whenever any `python/` file is modified):**
-   `python -m unittest tests.test_investment_regression tests.test_permissions tests.test_tool_dispatch`
-2. **Agent, Council & Web Server Gate (Run when `python/agent_framework.py`, `python/web_server.py`, `python/tools.py`, or `static/` is modified):**
-   `python -m unittest tests.test_agent_framework tests.test_web_chat_endpoint tests.test_watchlist_endpoints`
-3. **Persistence & Database Gate (Run ONLY when `python/database/**` or `python/persistence/**` is modified):**
-   `python -m unittest tests.test_database_core tests.test_database_repositories tests.test_persistence_service tests.test_runtime_persistence_cutover tests.test_atomic_io tests.test_audit_logger`
-4. **Market Data & Background Daemon Gate (Run ONLY when `python/fetch_stocks.py` or `python/background_intelligence.py` is modified):**
-   `python -m unittest tests.test_market_data_integrity tests.test_market_data_acquisition tests.test_heavy_market_data_separation tests.test_market_data_pipeline_integration tests.test_background_intelligence`
-5. **Final Milestone Closeout Gate (Run ONLY when closing a major stage):**
-   `python -m unittest discover tests`
-6. **Compilation & Dependency Gate:**
-   `python -m compileall -q python tests`
-   `python -m pip check`
+`scripts/stage_gate.py` automates all four manual gates below:
+1. **Read-Only Git & Scope Inspection:** `git branch --show-current`, `git rev-parse HEAD`, `git status --porcelain -uall`.
+2. **Protected Financial Asset Invariance Gate (`Protocol 06`):** `git diff --exit-code` against `engine_instructions/`, `gem_trading_rules/rules.md`, `context/ssot.json`, `context/trade_lessons.json`, `context/decision_log.json`, `context/config.json`.
+3. **Artifact Hygiene, Manifest Parity & Directive Size Gate:** Rejects tracked `.db`/`.lock`/secret files, rejects unauthorized `docs/engineering/STAGE_*.md` files, validates `docs/agents/roles.json` parity via `scripts/sync_agent_manifests.py`, and verifies `< 23,500`-byte directive ceilings and `< 150`-line `docs/governance/project-state.md`.
+4. **Scope-Proportional Test Routing (`Protocol 05` + JS Tests):**
+   - `python/` edits -> fast core gate (`test_investment_regression`, `test_permissions`, `test_tool_dispatch`) + module-matched suites (`test_database_*` only for `python/database/`, `test_market_data_*` / `test_heavy_market_data_separation` only for `fetch_stocks.py` / `background_intelligence.py`, `test_agent_framework` / `test_web_chat_endpoint` / `test_watchlist_endpoints` / `test_api_routes` for web/agent edits).
+   - `static/` or `tests/js/` edits -> `test_dashboard_scripts`, `test_chat_sanitizer`, plus `node tests/js/dashboard_load.test.js` and `node tests/js/sanitize_chat_html.test.js` (when `node` + `node_modules` are present); run `node scripts/verify_dashboard_ui.js` when a local server is active or visual layout is changed.
+   - `.agents/`, `.claude/`, `docs/agents/`, `docs/governance/`, or `scripts/` edits -> `tests.test_agentic_governance`.
+   - Compilation (`python -m compileall -q python tests scripts`) and dependency check (`python -m pip check`).
 
 ## Step 5: Structured Gate Output
 Output a concise **Stage-Gate Report** in chat containing:
 1. **Branch & HEAD SHA**
 2. **Scope & Protected Asset Check:** `PASS` / `FAIL` (with exact files touched)
-3. **Artifact Hygiene Check:** `PASS` / `FAIL`
+3. **Artifact Hygiene & Manifest Parity Check:** `PASS` / `FAIL`
 4. **Scoped Tests Executed:** Exact commands, test counts, duration, and exit codes
 5. **Argon Acceptance Verdict:** `ACCEPTED`, `ACCEPTED WITH LIMITATIONS`, or `REMEDIATION REQUIRED`
 6. **Owner Git Commands:** Exact `git add` and `git commit -m "..."` commands ready for the Human Owner to copy-paste.

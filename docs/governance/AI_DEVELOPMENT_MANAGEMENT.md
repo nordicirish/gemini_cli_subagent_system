@@ -20,7 +20,7 @@ This document defines the **Native Orchestrator Governance Framework** operating
    - `.agents/protocols/04-review-gates.md`
    - `.agents/protocols/05-testing-policy.md`
 3. **Domain Role Definitions (Strictly Isolated):**
-   - **Engineering & Maintenance:** `.agents/agents/*.md`
+   - **Engineering & Maintenance:** Canonical directives in `docs/agents/*.md`, registry in `docs/agents/roles.json`, generated manifests in `.agents/agents/` and `.claude/agents/`, plus shared brief in `docs/governance/project-state.md`.
    - **Investment Council (Protected Domain):** `engine_instructions/*.md` and `gem_trading_rules/rules.md`
 4. **Implementation Instructions & Stage Scope:**
    - Subordinate to `.agents/AGENTS.md` and protocols. Zero authority over trading rules, financial state, dependencies, database state, or git history.

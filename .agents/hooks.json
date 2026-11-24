@@ -1,0 +1,12 @@
+{
+  "verify-on-stop": {
+    "enabled": true,
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python -c \"import os,subprocess,sys; r=os.getcwd(); py=os.path.join(r,'.venv','Scripts','python.exe'); exe=py if os.path.exists(py) else sys.executable; p=os.path.join(r,'scripts','hook_stop_verify.py'); raise SystemExit(subprocess.call([exe,p]) if os.path.exists(p) else 0)\"",
+        "timeout": 75
+      }
+    ]
+  }
+}

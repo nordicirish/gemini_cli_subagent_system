@@ -65,3 +65,7 @@ cache/daily_history_cache.json
 
 # Node test-only dependencies (see package.json)
 node_modules/
+
+# Ephemeral agentic verification receipts, screenshots & logs
+.agents/state/
+.agents/logs/
