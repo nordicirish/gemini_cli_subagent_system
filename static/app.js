@@ -64,12 +64,7 @@ const dAiScoutStatus = document.getElementById('ai-scout-status');
 
 // Helper for consistent UI feedback on copy/paste actions
 function showFeedback(btn, btnText, statusMsg, isError = false, statusEl = null) {
-    if (btn.dataset.isFeedback === "true") return; // Prevent re-triggering during active feedback
-    
-    btn.dataset.isFeedback = "true";
-    const originalHtml = btn.innerHTML;
-    btn.innerHTML = btnText;
-    btn.classList.add(isError ? 'btn-error' : 'btn-success');
+    if (btn && btn.dataset && btn.dataset.isFeedback === "true") return; // Prevent re-triggering during active feedback
     
     // Use per-button inline feedback if available, otherwise fallback
     const target = statusEl || dDataStatus;
@@ -77,6 +72,21 @@ function showFeedback(btn, btnText, statusMsg, isError = false, statusEl = null)
         target.textContent = statusMsg;
         target.className = `status-message inline-feedback active ${isError ? 'text-red' : 'text-green'}`;
     }
+
+    if (!btn) {
+        if (target) {
+            setTimeout(() => {
+                target.textContent = '';
+                target.className = 'status-message inline-feedback';
+            }, 2500);
+        }
+        return;
+    }
+
+    btn.dataset.isFeedback = "true";
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = btnText;
+    btn.classList.add(isError ? 'btn-error' : 'btn-success');
     
     setTimeout(() => {
         btn.innerHTML = originalHtml;
@@ -877,7 +887,27 @@ async function pollData() {
 init();
 
 // Portfolio Logic
+function getPortfolioFeedbackEl() {
+    return document.getElementById('portfolio-feedback');
+}
+
+function setPortfolioHint(message, colorClass = 'text-yellow') {
+    const feedbackEl = getPortfolioFeedbackEl();
+    if (!feedbackEl) return;
+    if (!message) {
+        feedbackEl.textContent = '';
+        feedbackEl.className = 'status-message inline-feedback';
+        return;
+    }
+    feedbackEl.textContent = message;
+    feedbackEl.className = `status-message inline-feedback active ${colorClass}`;
+}
+
 async function fetchPortfolio(force = false) {
+    const hasDraft = dPortfolioBody
+        && typeof dPortfolioBody.querySelector === 'function'
+        && Boolean(dPortfolioBody.querySelector('tr.portfolio-item-row[data-draft="true"]'));
+    if (!force && hasDraft) return;
     if (!force && document.activeElement && document.activeElement.classList.contains('portfolio-input')) return;
     try {
         const res = await fetch(`${API_BASE}/basket`);
@@ -923,13 +953,19 @@ function renderPortfolio(data) {
     
     let totalUsd = cash * rate;
     portfolio.forEach((item, index) => {
-        const livePrice = (latestTickersMap[item.ticker] && latestTickersMap[item.ticker].price) || item.wac || 0;
+        const isDraft = Boolean(item._draft);
+        const wacNum = Number(item.wac) || 0;
+        const showEmptyWac = isDraft && !(wacNum > 0);
+        const livePrice = (latestTickersMap[item.ticker] && latestTickersMap[item.ticker].price) || (wacNum > 0 ? wacNum : 0);
         totalUsd += (item.shares || 0) * livePrice;
+        const draftAttr = isDraft ? ' data-draft="true"' : '';
+        const wacInputVal = showEmptyWac ? '' : (item.wac || 0);
+        const wacPlaceholderAttr = showEmptyWac ? ' placeholder="WAC > 0" style="border-color: var(--yellow, #d29922);"' : '';
         html += `
-            <tr data-index="${index}" class="portfolio-item-row">
+            <tr data-index="${index}"${draftAttr} class="portfolio-item-row">
                 <td style="color: var(--accent); font-weight: 700; font-size: 0.8rem;">${item.ticker}</td>
                 <td><input type="number" class="portfolio-input" data-key="shares" value="${item.shares || 0}" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
-                <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${item.wac || 0}" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
+                <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${wacInputVal}"${wacPlaceholderAttr} oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
                 <td><button class="delete-btn" onclick="deleteFromPortfolio(${index})">&times;</button></td>
             </tr>
         `;
@@ -957,16 +993,50 @@ async function addToPortfolio() {
     const ticker = dAddPortfolioTicker.value.trim().toUpperCase();
     if (!ticker) return;
     const portfolio = getCurrentPortfolio();
-    if (portfolio.find(i => i.ticker === ticker)) return;
-    portfolio.push({ ticker, shares: 1, wac: 0 });
+    if (portfolio.find(i => i.ticker === ticker)) {
+        setPortfolioHint(`${ticker} is already in your portfolio.`, 'text-yellow');
+        return;
+    }
+
+    const livePriceRaw = latestTickersMap[ticker] && Number(latestTickersMap[ticker].price);
+    const hasLivePrice = Number.isFinite(livePriceRaw) && livePriceRaw > 0;
     dAddPortfolioTicker.value = '';
+
+    if (hasLivePrice) {
+        portfolio.push({
+            ticker,
+            shares: 1,
+            wac: Number(livePriceRaw.toFixed(2)),
+            _draft: false
+        });
+        const hasDraft = portfolio.some(i => Boolean(i._draft));
+        renderPortfolio({
+            portfolio: portfolio,
+            unallocated_cash_eur: getCurrentCash(),
+            eurusd_rate: currentEurUsdRate,
+            _hasDraft: hasDraft
+        });
+        if (!hasDraft) setPortfolioHint('');
+        updatePortfolioTotals();
+        await savePortfolio(portfolio, { explicit: true });
+        return;
+    }
+
+    portfolio.push({ ticker, shares: 1, wac: 0, _draft: true });
     renderPortfolio({
         portfolio: portfolio,
         unallocated_cash_eur: getCurrentCash(),
-        eurusd_rate: currentEurUsdRate
+        eurusd_rate: currentEurUsdRate,
+        _hasDraft: true
     });
     updatePortfolioTotals();
-    await savePortfolio(portfolio);
+    setPortfolioHint(`Enter WAC (> 0) for ${ticker} and press Enter or SYNC to save.`, 'text-yellow');
+    if (dPortfolioBody) {
+        const draftRow = dPortfolioBody.querySelector('tr.portfolio-item-row[data-draft="true"]:last-of-type')
+            || dPortfolioBody.querySelector('tr.portfolio-item-row[data-draft="true"]');
+        const wacInput = draftRow && draftRow.querySelector('[data-key="wac"]');
+        if (wacInput) wacInput.focus();
+    }
 }
 
 function getCurrentPortfolio() {
@@ -976,7 +1046,8 @@ function getCurrentPortfolio() {
         portfolio.push({
             ticker: (row.cells[0].textContent || '').trim().toUpperCase(),
             shares: parseFloat(row.querySelector('[data-key="shares"]').value) || 0,
-            wac: parseFloat(row.querySelector('[data-key="wac"]').value) || 0
+            wac: parseFloat(row.querySelector('[data-key="wac"]').value) || 0,
+            _draft: row.getAttribute('data-draft') === 'true'
         });
     });
     return portfolio;
@@ -990,23 +1061,48 @@ function getCurrentCash() {
 let isSavingPortfolio = false;
 let pendingPortfolioSave = null;
 
-async function savePortfolio(portfolioArr) {
+async function savePortfolio(portfolioArr, options = {}) {
+    const pArray = portfolioArr || getCurrentPortfolio();
+    const missingWac = pArray.find(i => (Number(i.shares) || 0) > 0 && !(Number(i.wac) > 0));
+    const btn = dSavePortfolioBtn;
+    const feedbackEl = getPortfolioFeedbackEl();
+
+    if (missingWac) {
+        const msg = `Enter a positive WAC (> 0) for ${missingWac.ticker} to save.`;
+        if (options.explicit && btn) {
+            showFeedback(btn, "WAC?", msg, true, feedbackEl);
+        } else {
+            setPortfolioHint(msg, 'text-yellow');
+        }
+        if (dPortfolioBody) {
+            const rows = dPortfolioBody.querySelectorAll('tr.portfolio-item-row');
+            for (const row of rows) {
+                const rowTicker = (row.cells[0].textContent || '').trim().toUpperCase();
+                if (rowTicker === missingWac.ticker) {
+                    const wacInput = row.querySelector('[data-key="wac"]');
+                    if (wacInput) wacInput.focus();
+                    break;
+                }
+            }
+        }
+        return;
+    }
+
     if (isSavingPortfolio) {
-        pendingPortfolioSave = portfolioArr || getCurrentPortfolio();
+        pendingPortfolioSave = pArray;
         return;
     }
     isSavingPortfolio = true;
-    const btn = dSavePortfolioBtn;
     if (btn) {
         btn.innerHTML = "WAIT...";
         btn.disabled = true;
     }
     try {
-        const pArray = portfolioArr || getCurrentPortfolio();
         const cVal = getCurrentCash();
         const rate = currentEurUsdRate || 1.08;
+        const cleanPortfolio = pArray.map(({ ticker, shares, wac }) => ({ ticker, shares, wac }));
         const payload = {
-            portfolio: pArray,
+            portfolio: cleanPortfolio,
             unallocated_cash_eur: cVal,
             unallocated_cash_usd: parseFloat((cVal * rate).toFixed(2))
         };
@@ -1017,33 +1113,55 @@ async function savePortfolio(portfolioArr) {
         });
         if (res.ok) {
             const resData = await res.json();
-            if (btn) {
-                btn.innerHTML = "SYNC ✅";
-                showFeedback(btn, "✅ Synced!", "Portfolio successfully updated!");
-            }
             if (resData && resData.portfolio) {
                 renderPortfolio({
                     portfolio: resData.portfolio,
-                    unallocated_cash_eur: cVal,
+                    unallocated_cash_eur: resData.unallocated_cash_eur !== undefined ? resData.unallocated_cash_eur : cVal,
                     eurusd_rate: rate
                 });
+            }
+            setPortfolioHint('');
+            if (btn) {
+                btn.innerHTML = "SYNC";
+                btn.disabled = false;
+                showFeedback(btn, "SYNC ✅", "Portfolio saved!", false, feedbackEl);
             }
             updatePortfolioTotals();
             // Trigger an immediate background poll to update the main dashboard table
             await pollData();
         } else {
-            if (btn) btn.innerHTML = "SYNC ❌";
+            let detail = `Failed to save portfolio (HTTP ${res.status})`;
+            try {
+                const errBody = await res.json();
+                if (errBody && (errBody.detail || errBody.message)) {
+                    detail = errBody.detail || errBody.message;
+                }
+            } catch (_) {}
+            if (btn) {
+                btn.innerHTML = "SYNC";
+                btn.disabled = false;
+                showFeedback(btn, "SYNC ❌", detail, true, feedbackEl);
+            } else {
+                setPortfolioHint(detail, 'text-red');
+            }
         }
     } catch (e) { 
         console.error("Portfolio update failed", e); 
-        if (btn) btn.innerHTML = "SYNC ❌";
+        const msg = (e && e.message) || "Portfolio update failed";
+        if (btn) {
+            btn.innerHTML = "SYNC";
+            btn.disabled = false;
+            showFeedback(btn, "SYNC ❌", msg, true, feedbackEl);
+        } else {
+            setPortfolioHint(msg, 'text-red');
+        }
     } finally {
         isSavingPortfolio = false;
         if (btn) {
-            setTimeout(() => {
+            btn.disabled = false;
+            if (btn.dataset.isFeedback !== "true") {
                 btn.innerHTML = "SYNC";
-                btn.disabled = false;
-            }, 1000);
+            }
         }
         if (pendingPortfolioSave) {
             const next = pendingPortfolioSave;
@@ -1057,11 +1175,14 @@ async function deleteFromPortfolio(index) {
     const portfolio = getCurrentPortfolio();
     if (index >= 0 && index < portfolio.length) {
         portfolio.splice(index, 1);
+        const hasDraft = portfolio.some(i => Boolean(i._draft));
         renderPortfolio({
             portfolio: portfolio,
             unallocated_cash_eur: getCurrentCash(),
-            eurusd_rate: currentEurUsdRate
+            eurusd_rate: currentEurUsdRate,
+            _hasDraft: hasDraft
         });
+        if (!hasDraft) setPortfolioHint('');
         updatePortfolioTotals();
         await savePortfolio(portfolio);
     }
@@ -1277,7 +1398,7 @@ if (dAddWatchlistTicker) {
 }
 
 if (dAddToPortfolioBtn) dAddToPortfolioBtn.addEventListener('click', addToPortfolio);
-if (dSavePortfolioBtn) dSavePortfolioBtn.addEventListener('click', () => savePortfolio());
+if (dSavePortfolioBtn) dSavePortfolioBtn.addEventListener('click', () => savePortfolio(null, { explicit: true }));
 if (dAddToWatchlistBtn) dAddToWatchlistBtn.addEventListener('click', addToWatchlist);
 
 // Shared scout runner — mode: 'sectors' | 'watchlist'
@@ -1344,10 +1465,11 @@ dPortfolioBody.addEventListener('input', (e) => {
     }
 });
 
-// Auto-save on change/blur of portfolio inputs
-dPortfolioBody.addEventListener('change', async (e) => {
-    if (e.target.classList.contains('portfolio-input')) {
-        await savePortfolio();
+// Save immediately on Enter inside portfolio table inputs (replaces duplicate change listener)
+dPortfolioBody.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('portfolio-input')) {
+        e.preventDefault();
+        await savePortfolio(null, { explicit: true });
     }
 });
 

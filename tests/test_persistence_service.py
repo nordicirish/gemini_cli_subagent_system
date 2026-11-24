@@ -493,6 +493,24 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
                         unallocated_cash_eur=Decimal("1000.00"),
                     )
 
+    def test_sqlite_rejects_zero_wac_for_active_position_with_validation_error(self):
+        """SQLite save_portfolio_basket raises PersistenceValidationError (not generic PersistenceError) for shares > 0 with wac == 0."""
+        with execution_role_context("Terminal Orchestrator"):
+            with self.assertRaises(PersistenceValidationError) as ctx:
+                self.adapter.save_portfolio_basket(
+                    portfolio=[{"ticker": "NVDA", "shares": Decimal("1"), "wac": Decimal("0")}],
+                    unallocated_cash_eur=Decimal("0"),
+                )
+            self.assertIn("greater than 0", str(ctx.exception))
+
+            # Zero-share zero-WAC positions remain omitted cleanly
+            res = self.adapter.save_portfolio_basket(
+                portfolio=[{"ticker": "NVDA", "shares": Decimal("0"), "wac": Decimal("0")}],
+                unallocated_cash_eur=Decimal("0"),
+            )
+            self.assertEqual(res["status"], "success")
+            self.assertEqual(res["portfolio"], [])
+
     def test_sqlite_get_portfolio_validates_corrupt_non_finite_records(self):
         """SQLite get_portfolio_basket rejects corrupted non-finite database records fail-closed."""
         with patch("persistence.sqlite_adapter.UnitOfWork") as mock_uow_cls:

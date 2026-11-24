@@ -135,6 +135,10 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
                 wac_val, f"wac for {t}", max_scale=4, allow_zero=True, non_negative=True
             )
             if shares_dec > Decimal("0"):
+                if wac_dec == Decimal("0"):
+                    raise PersistenceValidationError(
+                        f"Cost basis (WAC) must be greater than 0 for active position {t}"
+                    )
                 new_map[t] = {
                     "shares": shares_dec,
                     "wac": wac_dec,
@@ -461,6 +465,8 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
             raise PersistenceIntegrityError(f"Transaction integrity failure: {tie}") from tie
         except (PermissionError, PersistenceValidationError):
             raise
+        except ValidationError as ve:
+            raise PersistenceValidationError(str(ve)) from ve
         except Exception as e:
             raise PersistenceError(f"Failed to save portfolio basket in SQLite: {e}") from e
 

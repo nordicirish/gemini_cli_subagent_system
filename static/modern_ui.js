@@ -1420,6 +1420,12 @@ const ModernChat = {
     },
 
     async fetchPortfolio(force = false) {
+        const tbody = document.getElementById('portfolio-manager-body');
+        const hasDraft = tbody && typeof tbody.querySelector === 'function'
+            && Boolean(tbody.querySelector('tr.portfolio-item-row[data-draft="true"]'));
+        if (!force && hasDraft) {
+            return;
+        }
         if (
             !force
             && document.activeElement
@@ -1461,8 +1467,11 @@ const ModernChat = {
             return false;
         }
 
-        this.lastValidPortfolioBasket = JSON.parse(JSON.stringify(data));
-        this.clearPortfolioDegraded();
+        const hasDraft = Boolean(data._hasDraft);
+        if (!hasDraft) {
+            this.lastValidPortfolioBasket = JSON.parse(JSON.stringify(data));
+            this.clearPortfolioDegraded();
+        }
 
         const tbody = document.getElementById('portfolio-manager-body');
         if (!tbody) return true;
@@ -1482,13 +1491,19 @@ const ModernChat = {
         portfolio.forEach((item, index) => {
             const sharesVal = item.shares !== undefined && item.shares !== null ? item.shares : 0;
             const wacVal = item.wac !== undefined && item.wac !== null ? item.wac : 0;
-            const livePrice = (tickerMap[item.ticker] && tickerMap[item.ticker].price) || Number(wacVal) || 0;
+            const isDraft = Boolean(item._draft);
+            const wacNum = Number(wacVal);
+            const showEmptyWac = isDraft && !(wacNum > 0);
+            const livePrice = (tickerMap[item.ticker] && tickerMap[item.ticker].price) || (wacNum > 0 ? wacNum : 0);
             totalUsd += (Number(sharesVal) || 0) * livePrice;
+            const draftAttr = isDraft ? ' data-draft="true"' : '';
+            const wacInputVal = showEmptyWac ? '' : wacVal;
+            const wacPlaceholderAttr = showEmptyWac ? ' placeholder="WAC > 0" style="border-color: var(--yellow, #d29922);"' : '';
             html += `
-            <tr data-index="${index}" class="portfolio-item-row">
+            <tr data-index="${index}"${draftAttr} class="portfolio-item-row">
                 <td style="color: var(--accent); font-weight: 700; font-size: 0.8rem;">${item.ticker}</td>
                 <td><input type="number" class="portfolio-input" data-key="shares" value="${sharesVal}" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
-                <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${wacVal}" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
+                <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${wacInputVal}"${wacPlaceholderAttr} oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
                 <td><button class="delete-btn" onclick="deleteFromPortfolio(${index})">&times;</button></td>
             </tr>
         `;

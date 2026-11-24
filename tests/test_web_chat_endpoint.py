@@ -2390,6 +2390,8 @@ class TestStage37ConsolidatedTrustPrecisionAndPersistence(unittest.TestCase):
         with self.assertRaises((ValidationError, PersistenceValidationError)):
             web_server.BasketItem(ticker="NVDA", shares="12.34567", wac="100.00")
         with self.assertRaises((ValidationError, PersistenceValidationError)):
+            web_server.BasketItem(ticker="NVDA", shares=1, wac=0)
+        with self.assertRaises((ValidationError, PersistenceValidationError)):
             web_server.BasketSaveRequest(portfolio=[], unallocated_cash_eur=100.5)
         with self.assertRaises((ValidationError, PersistenceValidationError)):
             web_server.BasketSaveRequest(portfolio=[], unallocated_cash_eur="100.555")
@@ -2445,6 +2447,25 @@ class TestStage37ConsolidatedTrustPrecisionAndPersistence(unittest.TestCase):
                     headers={"Content-Type": "application/json", "Origin": "http://127.0.0.1:8000"},
                 )
                 self.assertEqual(bad_res.status_code, 422, f"Expected 422 for {bad_body}, got {bad_res.status_code}")
+
+            # Active position with shares > 0 and wac == 0 must return 422 (never 503) with clear WAC message
+            zero_wac_res = client.post(
+                "/api/basket",
+                content='{"portfolio":[{"ticker":"NVDA","shares":1,"wac":0}],"unallocated_cash_eur":0}',
+                headers={"Content-Type": "application/json", "Origin": "http://127.0.0.1:8000"},
+            )
+            self.assertEqual(zero_wac_res.status_code, 422)
+            zero_wac_detail = zero_wac_res.json().get("detail", "")
+            self.assertIn("WAC", zero_wac_detail)
+            self.assertIn("greater than 0", zero_wac_detail)
+
+            # Zero-share position with wac == 0 remains allowed and omitted cleanly
+            zero_share_res = client.post(
+                "/api/basket",
+                content='{"portfolio":[{"ticker":"NVDA","shares":0,"wac":0}],"unallocated_cash_eur":0}',
+                headers={"Content-Type": "application/json", "Origin": "http://127.0.0.1:8000"},
+            )
+            self.assertEqual(zero_share_res.status_code, 200)
 
     def test_r3_basket_endpoints_fail_closed_with_503_and_redact_secrets(self):
         """R3: /api/basket and /api/get_basket return HTTP 503 error (never empty/zero fallback) and redact secrets from error logs."""
@@ -2626,6 +2647,147 @@ chatUI.init();
     assert.strictEqual(tbody.getAttribute('data-portfolio-stale'), 'false');
     assert(tbody.innerHTML.includes('SPY'));
     assert.strictEqual(elementsById['portfolio-degraded-banner'].style.display, 'none');
+})().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});
+"""
+        proc = subprocess.run([node_bin, "-e", script, ui_path], capture_output=True, text=True, timeout=15)
+        self.assertEqual(proc.returncode, 0, f"Node test failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}")
+
+    def test_modern_ui_preserves_unsaved_draft_row_during_polling(self):
+        """modern_ui.js fetchPortfolio(false) skips polling overwrite when a draft row is present, while fetchPortfolio(true) refreshes."""
+        node_bin = shutil.which("node")
+        self.assertIsNotNone(node_bin, "node executable must be available")
+        ui_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "modern_ui.js"))
+
+        script = r"""
+const fs = require('fs');
+const vm = require('vm');
+const assert = require('assert');
+
+const uiCode = fs.readFileSync(process.argv[1], 'utf8');
+
+function makeElement(tag, id) {
+    const el = {
+        tagName: tag.toUpperCase(),
+        id: id || '',
+        innerHTML: '',
+        textContent: '',
+        style: {},
+        children: [],
+        attributes: {},
+        firstChild: null,
+        parentNode: null,
+        setAttribute(k, v) { this.attributes[k] = String(v); },
+        getAttribute(k) { return this.attributes[k]; },
+        appendChild(child) {
+            child.parentNode = this;
+            this.children.push(child);
+            this.firstChild = this.children[0] || null;
+            if (child.id) elementsById[child.id] = child;
+            return child;
+        },
+        insertBefore(newChild, refChild) { return this.appendChild(newChild); },
+        remove() {},
+        focus() {},
+        querySelector(sel) {
+            if (sel === 'tr.portfolio-item-row[data-draft="true"]' && this.innerHTML.includes('data-draft="true"')) {
+                return makeElement('tr');
+            }
+            return null;
+        },
+        querySelectorAll() { return []; },
+        addEventListener() {},
+        classList: { contains: () => false, add() {}, remove() {} },
+    };
+    if (id) elementsById[id] = el;
+    return el;
+}
+
+const elementsById = {};
+[
+    'portfolio-content', 'portfolio-manager-body',
+    'chat-window', 'launch-chat-btn', 'chat-close-btn', 'chat-input',
+    'chat-messages', 'send-chat-btn', 'stop-chat-btn', 'chat-model-select',
+    'new-chat-btn', 'history-chat-btn', 'model-selector'
+].forEach(id => makeElement('div', id));
+
+let fetchCalls = 0;
+const sandbox = {
+    console, Date, Math, JSON, Number, Boolean, Object, Array, String, Promise, AbortController,
+    EventSource: class MockEventSource { close() {} },
+    setTimeout, clearTimeout,
+    window: { addEventListener() {} },
+    document: {
+        body: makeElement('body'),
+        activeElement: null,
+        getElementById: (id) => elementsById[id] || null,
+        createElement: (tag) => makeElement(tag),
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        addEventListener() {},
+    },
+    localStorage: { _s: {}, getItem: () => null, setItem() {}, removeItem() {} },
+    marked: { parse: (s) => String(s) },
+    fetch: async (url) => {
+        if (url === '/api/basket') {
+            fetchCalls += 1;
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    portfolio: [{ ticker: 'SPY', shares: 5, wac: 500.0 }],
+                    unallocated_cash_eur: 1000.00,
+                    unallocated_cash_usd: 1080.00,
+                    eurusd_rate: 1.08,
+                }),
+            };
+        }
+        return { ok: true, status: 200, json: async () => ({}) };
+    },
+};
+
+vm.runInNewContext(uiCode, sandbox);
+const chatUI = sandbox.window.chatUI;
+chatUI.init();
+
+(async () => {
+    const tbody = elementsById['portfolio-manager-body'];
+
+    // 1. Authoritative initial load sets lastValidPortfolioBasket
+    await sandbox.window.fetchPortfolio(true);
+    assert.strictEqual(fetchCalls, 1);
+    assert.strictEqual(chatUI.lastValidPortfolioBasket.portfolio.length, 1);
+    assert.strictEqual(chatUI.lastValidPortfolioBasket.portfolio[0].ticker, 'SPY');
+
+    // 2. Render unsaved draft row (NVDA with wac=0)
+    const rendered = sandbox.window.renderPortfolio({
+        portfolio: [
+            { ticker: 'SPY', shares: 5, wac: 500.0 },
+            { ticker: 'NVDA', shares: 1, wac: 0, _draft: true },
+        ],
+        unallocated_cash_eur: 1000.00,
+        eurusd_rate: 1.08,
+        _hasDraft: true,
+    });
+    assert.strictEqual(rendered, true);
+    assert(tbody.innerHTML.includes('data-draft="true"'));
+    assert(tbody.innerHTML.includes('placeholder="WAC > 0"'));
+    // lastValidPortfolioBasket must NOT be polluted by the unsaved draft
+    assert.strictEqual(chatUI.lastValidPortfolioBasket.portfolio.length, 1);
+
+    // 3. Background polling fetchPortfolio(false) must NOT clobber draft row
+    await sandbox.window.fetchPortfolio(false);
+    assert.strictEqual(fetchCalls, 1);
+    assert(tbody.innerHTML.includes('NVDA'));
+    assert(tbody.innerHTML.includes('data-draft="true"'));
+
+    // 4. Explicit fetchPortfolio(true) DOES refresh authoritative basket
+    await sandbox.window.fetchPortfolio(true);
+    assert.strictEqual(fetchCalls, 2);
+    assert(!tbody.innerHTML.includes('data-draft="true"'));
+    assert(!tbody.innerHTML.includes('NVDA'));
 })().catch((err) => {
     console.error(err);
     process.exit(1);

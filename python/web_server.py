@@ -10,7 +10,7 @@ import collections.abc
 import uuid
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, ValidationError, field_validator, model_validator
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, JSONResponse
 import threading
@@ -94,6 +94,14 @@ class BasketItem(BaseModel):
         return validate_financial_decimal(
             v, "wac", max_scale=4, allow_zero=True, non_negative=True
         )
+
+    @model_validator(mode="after")
+    def _validate_active_position_wac(self) -> "BasketItem":
+        if self.shares > Decimal("0") and self.wac == Decimal("0"):
+            raise PersistenceValidationError(
+                f"Cost basis (WAC) must be greater than 0 for active position {self.ticker.strip().upper()}"
+            )
+        return self
 
 
 class BasketRequest(BaseModel):
