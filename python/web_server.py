@@ -58,9 +58,11 @@ from portfolio_proposals import (
 try:
     from alert_monitor import ALERT_MONITOR, extract_triggers_from_chat
     from alert_sentinel import ALERT_SENTINEL
+    from analytics_engine import ANALYTICS_ENGINE
 except ImportError:
     from python.alert_monitor import ALERT_MONITOR, extract_triggers_from_chat
     from python.alert_sentinel import ALERT_SENTINEL
+    from python.analytics_engine import ANALYTICS_ENGINE
 
 # Import the existing FastAPI app from fetch_stocks
 from fetch_stocks import app, run_daemon, GLOBAL_STATE, CHART_SCREENSHOTS_BUFFER
@@ -1073,14 +1075,27 @@ def chat_endpoint(req: ChatRequest):
                     decision_log = []
 
                 raw_meta = live_state.get("_meta", {})
+                fx_snapshot = fx_rates.fx_public(fx_rates.get_eurusd())
+                precomputed_analytics = None
+                try:
+                    precomputed_analytics = ANALYTICS_ENGINE.evaluate(
+                        live_state,
+                        ssot=ssot,
+                        fx_info=fx_snapshot,
+                        ny_dt=agent_framework.ny_now(),
+                    )
+                except Exception as ae:
+                    framework.log(f"[System Warning] Optional precomputed analytics failed: {redact_secrets(str(ae))}")
+
                 data_packet = {
                     "_meta": raw_meta if isinstance(raw_meta, (dict, collections.abc.Mapping)) else {},
                     "timestamp": live_state.get("timestamp", current_iso),
                     "market_status": live_state.get("status", "UNKNOWN"),
                     # Live EUR/USD (USD per EUR); available=false means no fresh quote
-                    "fx": fx_rates.fx_public(fx_rates.get_eurusd()),
+                    "fx": fx_snapshot,
                     "tickers": slim_tickers,
                     "ssot": ssot,
+                    "precomputed_analytics": precomputed_analytics,
                     "trade_lessons": trade_lessons_list[-10:],
                     "decision_log": decision_log[-10:],
                 }
@@ -1982,6 +1997,29 @@ def run_alert_sentinel_now():
         "sentinel": ALERT_SENTINEL.get_status(),
         "alerts": ALERT_MONITOR.get_dashboard_payload(),
     }
+
+
+@app.get("/api/analytics")
+def get_precomputed_analytics():
+    """Read-only deterministic Regime, Veto, Mandate, and Trim Sizer analytics."""
+    try:
+        from fetch_stocks import get_global_state_snapshot
+        live_state = get_global_state_snapshot()
+    except Exception:
+        live_state = {}
+    ssot_data = live_state.get("local_storage_state") if isinstance(live_state, dict) else None
+    if not isinstance(ssot_data, dict):
+        try:
+            ssot_data = get_persistence_service().get_ssot_data()
+        except Exception:
+            ssot_data = {}
+    fx_snapshot = fx_rates.fx_public(fx_rates.get_eurusd())
+    return ANALYTICS_ENGINE.evaluate(
+        live_state,
+        ssot=ssot_data,
+        fx_info=fx_snapshot,
+        ny_dt=agent_framework.ny_now(),
+    )
 
 
 @app.get("/api/system_logs")

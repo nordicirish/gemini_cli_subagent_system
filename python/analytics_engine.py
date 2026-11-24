@@ -1,0 +1,709 @@
+"""Deterministic Quantitative Analytics, Regime & Mandate Offload Engine (Phase 1).
+
+Read-only analytics layer offloading deterministic math, Decimal position/trim
+sizing, Volatility Regime Permissibility routing, GEX whiplash state tracking,
+and rule/veto threshold evaluation from the LLM Council into DATA_PACKET and
+GET /api/analytics. Zero mutations to SSoT, portfolio, or trading rules.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP
+import math
+import threading
+from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
+
+NY_TZ = ZoneInfo("America/New_York")
+
+# Canonical system thresholds mirroring gem_trading_rules/rules.md
+GLOBAL_ALPHA_FRICTION_HURDLE = Decimal("0.0085")
+EUR_OMXH_FRICTION_HURDLE = Decimal("0.0025")
+FRONT_RUN_FACTOR = Decimal("0.9975")
+SWEEP_LIMIT_FACTOR = Decimal("0.9950")
+
+VIX_NEW_RISK_VETO = 20.0
+VVIX_NEW_RISK_VETO = 105.0
+VIXY_VELOCITY_ALERT = 5.0
+IEF_YIELD_ALERT = -0.15
+RVOL_CONFIRMATION = 1.5
+VWAP_EXECUTION_BLOCK_PCT = 3.0
+
+TRIM_PCTS: Tuple[Tuple[str, Decimal], ...] = (
+    ("10pct", Decimal("0.10")),
+    ("15pct", Decimal("0.15")),
+    ("25pct", Decimal("0.25")),
+    ("50pct", Decimal("0.50")),
+    ("100pct", Decimal("1.00")),
+)
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(num):
+        return None
+    return num
+
+
+def _to_decimal(value: Any) -> Optional[Decimal]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        if isinstance(value, Decimal):
+            d = value
+        elif isinstance(value, int):
+            d = Decimal(value)
+        elif isinstance(value, float):
+            if not math.isfinite(value):
+                return None
+            d = Decimal(str(value))
+        else:
+            s = str(value).strip()
+            if not s:
+                return None
+            d = Decimal(s)
+        return d if d.is_finite() else None
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _q2(val: Decimal) -> Decimal:
+    return val.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _q4(val: Decimal) -> Decimal:
+    return val.quantize(Decimal("0.0001"), rounding=ROUND_FLOOR)
+
+
+def _is_ticker_valid_and_fresh(row: Dict[str, Any]) -> bool:
+    if not isinstance(row, dict):
+        return False
+    if row.get("price_validity") != "VALID":
+        return False
+    if row.get("freshness") not in ("CURRENT", "DELAYED"):
+        return False
+    price = _safe_float(row.get("price"))
+    return price is not None and price > 0
+
+
+def classify_regime(tickers: List[Dict[str, Any]], market_status: str = "UNKNOWN") -> Dict[str, Any]:
+    """Deterministic Volatility State & Strategy Permissibility routing matrix
+    mirroring engine_instructions/regime_engine.md.
+    """
+    by_sym: Dict[str, Dict[str, Any]] = {
+        str(t.get("ticker") or "").strip().upper(): t
+        for t in (tickers or [])
+        if isinstance(t, dict) and t.get("ticker")
+    }
+
+    vix_row = by_sym.get("^VIX", {})
+    vvix_row = by_sym.get("^VVIX", {})
+    vixy_row = by_sym.get("VIXY", {})
+    ief_row = by_sym.get("IEF", {})
+    spy_row = by_sym.get("SPY", {})
+    qqq_row = by_sym.get("QQQ", {})
+
+    vix = _safe_float(vix_row.get("price")) if _is_ticker_valid_and_fresh(vix_row) else _safe_float(vix_row.get("price"))
+    vvix = _safe_float(vvix_row.get("price"))
+    vixy_chg = _safe_float(vixy_row.get("session_change_pct"))
+    ief_chg = _safe_float(ief_row.get("session_change_pct"))
+
+    spy_price = _safe_float(spy_row.get("price"))
+    spy_ma20 = _safe_float(spy_row.get("ma_20"))
+    spy_ma50 = _safe_float(spy_row.get("ma_50"))
+    qqq_price = _safe_float(qqq_row.get("price"))
+    qqq_ma50 = _safe_float(qqq_row.get("ma_50"))
+
+    spy_posture = str(spy_row.get("dealer_posture") or "NEUTRAL").strip().upper()
+    spy_net_gex = _safe_float(spy_row.get("net_gex_total"))
+    if spy_net_gex is not None and spy_net_gex < 0 and spy_posture == "NEUTRAL":
+        spy_posture = "SHORT_GAMMA"
+
+    spy_above_50 = bool(spy_price and spy_ma50 and spy_price > spy_ma50)
+    spy_below_50 = bool(spy_price and spy_ma50 and spy_price < spy_ma50)
+    qqq_below_50 = bool(qqq_price and qqq_ma50 and qqq_price < qqq_ma50)
+
+    vol_regime_tag = "NORMAL"
+    for row in (spy_row, qqq_row, vix_row):
+        if row.get("volatility_regime"):
+            vol_regime_tag = str(row["volatility_regime"]).strip().upper()
+            break
+
+    if (vix is not None and vix > VIX_NEW_RISK_VETO) or (vixy_chg is not None and vixy_chg > VIXY_VELOCITY_ALERT):
+        vol_state = "BEAR_VOLATILE"
+    elif spy_below_50 and (qqq_below_50 or not qqq_ma50):
+        vol_state = "BEAR_QUIET"
+    elif spy_above_50 and (vix is not None and vix < 18.0):
+        vol_state = "BULL_QUIET"
+    elif spy_above_50 and (spy_ma20 is not None and spy_ma50 is not None and spy_ma20 > spy_ma50) and (vix is None or vix <= VIX_NEW_RISK_VETO):
+        vol_state = "BULL_VOLATILE"
+    else:
+        vol_state = "NEUTRAL"
+
+    if vol_state in ("BULL_QUIET", "BULL_VOLATILE"):
+        permissibility = {
+            "Momentum_Breakouts": True,
+            "High_Tight_Flags": True,
+            "Pullback_Continuations": True,
+            "Mean_Reversion": False,
+            "Episodic_Pivots": True,
+            "Parabolic_Shorts": False,
+        }
+    elif vol_state in ("BEAR_VOLATILE", "BEAR_QUIET"):
+        permissibility = {
+            "Momentum_Breakouts": False,
+            "High_Tight_Flags": False,
+            "Pullback_Continuations": False,
+            "Mean_Reversion": True,
+            "Episodic_Pivots": True,
+            "Parabolic_Shorts": True,
+        }
+    else:
+        permissibility = {
+            "Momentum_Breakouts": False,
+            "High_Tight_Flags": False,
+            "Pullback_Continuations": False,
+            "Mean_Reversion": True,
+            "Episodic_Pivots": True,
+            "Parabolic_Shorts": False,
+        }
+
+    parts = [f"State={vol_state} ({vol_regime_tag})"]
+    if vix is not None:
+        parts.append(f"VIX={vix:.2f}")
+    if vvix is not None:
+        parts.append(f"VVIX={vvix:.1f}")
+    if spy_posture != "NEUTRAL" or spy_net_gex is not None:
+        gex_s = f"{spy_net_gex:.3f}" if spy_net_gex is not None else "n/a"
+        parts.append(f"SPY_GEX={spy_posture} ({gex_s})")
+
+    return {
+        "market_status": str(market_status or "UNKNOWN").upper(),
+        "volatility_state": vol_state,
+        "volatility_regime": vol_regime_tag,
+        "strategy_permissibility": permissibility,
+        "vix": round(vix, 2) if vix is not None else None,
+        "vvix": round(vvix, 2) if vvix is not None else None,
+        "vixy_chg_pct": round(vixy_chg, 2) if vixy_chg is not None else None,
+        "ief_chg_pct": round(ief_chg, 2) if ief_chg is not None else None,
+        "spy_dealer_posture": spy_posture,
+        "spy_net_gex": round(spy_net_gex, 4) if spy_net_gex is not None else None,
+        "rationale": " | ".join(parts),
+    }
+
+
+def compute_position_tranches(
+    ticker: str,
+    shares_raw: Any,
+    wac_raw: Any,
+    price_raw: Any,
+    prev_close_raw: Any = None,
+    eurusd_rate_raw: Any = None,
+) -> Dict[str, Any]:
+    """Computes exact Decimal position valuation, 10/15/25/50/100% trim tranches,
+    front-run & sweep limits, and MANDATE_06 math/FX proof strings.
+    """
+    shares = _to_decimal(shares_raw) or Decimal("0")
+    wac = _to_decimal(wac_raw) or Decimal("0")
+    price = _to_decimal(price_raw)
+    prev_close = _to_decimal(prev_close_raw)
+    fx_rate = _to_decimal(eurusd_rate_raw)
+    has_fx = fx_rate is not None and fx_rate > Decimal("0")
+
+    is_integer_shares = shares == shares.to_integral_value()
+
+    tranches: Dict[str, Dict[str, Any]] = {}
+    if price is not None and price > Decimal("0") and shares > Decimal("0"):
+        mv_usd = _q2(shares * price)
+        cost_usd = _q2(shares * wac) if wac > Decimal("0") else None
+        pnl_usd = _q2(mv_usd - cost_usd) if cost_usd is not None else None
+        pnl_pct = (
+            float(((price - wac) / wac * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+            if wac > Decimal("0")
+            else None
+        )
+        mv_eur = _q2(mv_usd / fx_rate) if has_fx else None
+
+        front_run_limit = _q2(price * FRONT_RUN_FACTOR)
+        sweep_limit = _q2(price * SWEEP_LIMIT_FACTOR)
+
+        for key, pct in TRIM_PCTS:
+            if is_integer_shares:
+                total_int = int(shares)
+                sell_d = (shares * pct).to_integral_value(rounding=ROUND_FLOOR)
+                if total_int >= 1 and pct > Decimal("0") and sell_d < Decimal("1"):
+                    sell_d = Decimal("1")
+                sell_int = min(total_int, int(sell_d))
+                rem_int = total_int - sell_int
+                sell_val: Any = sell_int
+                rem_val: Any = rem_int
+                sell_dec = Decimal(sell_int)
+            else:
+                sell_dec = min(shares, _q4(shares * pct))
+                rem_dec = shares - sell_dec
+                sell_val = float(sell_dec)
+                rem_val = float(rem_dec)
+
+            proceeds_usd = _q2(sell_dec * price)
+            proceeds_eur = _q2(proceeds_usd / fx_rate) if has_fx else None
+            tranches[key] = {
+                "sell_shares": sell_val,
+                "remaining_shares": rem_val,
+                "front_run_limit_usd": float(front_run_limit),
+                "sweep_limit_usd": float(sweep_limit),
+                "est_proceeds_usd": float(proceeds_usd),
+                "est_proceeds_eur": float(proceeds_eur) if proceeds_eur is not None else None,
+            }
+
+        price_proof = None
+        if prev_close is not None and prev_close > Decimal("0"):
+            chg = ((price - prev_close) / prev_close * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            price_proof = f"Proof: ({_q2(price)} - {_q2(prev_close)}) / {_q2(prev_close)} = {chg:+.2f}%"
+        fx_proof = (
+            f"Proof: (${mv_usd} / {fx_rate}) = EUR {mv_eur}"
+            if (has_fx and mv_eur is not None)
+            else None
+        )
+
+        return {
+            "ticker": ticker,
+            "shares": int(shares) if is_integer_shares else float(shares),
+            "wac": float(_q2(wac)) if wac > Decimal("0") else None,
+            "price": float(_q2(price)),
+            "market_value_usd": float(mv_usd),
+            "market_value_eur": float(mv_eur) if mv_eur is not None else None,
+            "unrealized_pnl_usd": float(pnl_usd) if pnl_usd is not None else None,
+            "unrealized_pnl_pct": pnl_pct,
+            "front_run_limit_usd": float(front_run_limit),
+            "sweep_limit_usd": float(sweep_limit),
+            "tranches": tranches,
+            "math_proof": price_proof,
+            "fx_proof": fx_proof,
+        }
+
+    return {
+        "ticker": ticker,
+        "shares": int(shares) if is_integer_shares else float(shares),
+        "wac": float(_q2(wac)) if wac > Decimal("0") else None,
+        "price": None,
+        "market_value_usd": None,
+        "market_value_eur": None,
+        "unrealized_pnl_usd": None,
+        "unrealized_pnl_pct": None,
+        "tranches": {},
+        "math_proof": None,
+        "fx_proof": None,
+    }
+
+
+def _classify_watchlist_setup(row: Dict[str, Any], permissibility: Dict[str, bool]) -> Dict[str, Any]:
+    sym = str(row.get("ticker") or "").strip().upper()
+    valid = _is_ticker_valid_and_fresh(row)
+    price = _safe_float(row.get("price"))
+    vwap = _safe_float(row.get("vwap"))
+    dist_vwap = _safe_float(row.get("distance_from_vwap"))
+    rvol = _safe_float(row.get("rvol"))
+    rsi = _safe_float(row.get("rsi"))
+    trend = str(row.get("trend") or "FLAT").strip().upper()
+    fib = row.get("fib_forecast") if isinstance(row.get("fib_forecast"), dict) else {}
+
+    setup = "RANGE_WAIT"
+    perm_key = "Mean_Reversion"
+    if valid and trend == "UP" and vwap and price and price >= vwap:
+        if fib.get("mode") == "EXTENSION" and (rvol or 0.0) >= RVOL_CONFIRMATION:
+            setup = "MOMENTUM_BREAKOUT"
+            perm_key = "Momentum_Breakouts"
+        else:
+            setup = "PULLBACK_CONTINUATION"
+            perm_key = "Pullback_Continuations"
+    elif valid and ((rsi is not None and rsi < 38.0) or (dist_vwap is not None and dist_vwap <= -1.5)):
+        setup = "MEAN_REVERSION"
+        perm_key = "Mean_Reversion"
+
+    rvol_confirmed = bool(valid and rvol is not None and rvol >= RVOL_CONFIRMATION)
+    vwap_blocked = bool(valid and dist_vwap is not None and abs(dist_vwap) > VWAP_EXECUTION_BLOCK_PCT)
+
+    return {
+        "ticker": sym,
+        "valid_telemetry": valid,
+        "setup": setup,
+        "strategy_permissible": bool(permissibility.get(perm_key, False)),
+        "rvol": round(rvol, 2) if rvol is not None else None,
+        "rvol_confirmed": rvol_confirmed,
+        "distance_from_vwap": round(dist_vwap, 2) if dist_vwap is not None else None,
+        "vwap_execution_blocked": vwap_blocked,
+        "next_resistance": _safe_float(fib.get("next_resistance")),
+        "daily_peak_target": _safe_float(fib.get("daily_peak_target")),
+        "fib_status": fib.get("daily_peak_status"),
+    }
+
+
+class AnalyticsEngine:
+    """Stateful intraday tracker & deterministic rule/sizer evaluator."""
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._session_date: Optional[str] = None
+        self._ticker_state: Dict[str, Dict[str, Any]] = {}
+
+    def _ensure_session_date(self, ny_dt: datetime) -> None:
+        day_str = ny_dt.strftime("%Y-%m-%d")
+        if self._session_date != day_str:
+            self._session_date = day_str
+            self._ticker_state.clear()
+
+    def record_tick(
+        self,
+        tickers: List[Dict[str, Any]],
+        market_status: str = "UNKNOWN",
+        ny_dt: Optional[datetime] = None,
+    ) -> None:
+        if not isinstance(tickers, list):
+            return
+        now_ny = ny_dt or datetime.now(NY_TZ)
+        now_ts = now_ny.timestamp()
+        status_upper = str(market_status or "UNKNOWN").upper()
+
+        with self._lock:
+            self._ensure_session_date(now_ny)
+            for row in tickers:
+                if not _is_ticker_valid_and_fresh(row):
+                    continue
+                sym = str(row.get("ticker") or "").strip().upper()
+                if not sym:
+                    continue
+                st = self._ticker_state.setdefault(
+                    sym,
+                    {
+                        "gamma_history": [],
+                        "gamma_whiplash_lock": False,
+                        "gamma_flicker_overbought": False,
+                        "rsi_gt_75_since_ts": None,
+                        "rsi_overbought_minutes": 0.0,
+                        "rvol_window": [],
+                        "rvol_decelerating_3x": False,
+                    },
+                )
+
+                # ENH_17_B: Track intraday dealer posture flips (LONG_GAMMA -> SHORT_GAMMA -> LONG_GAMMA)
+                posture = str(row.get("dealer_posture") or "").strip().upper()
+                if posture in ("LONG_GAMMA", "SHORT_GAMMA"):
+                    hist = st["gamma_history"]
+                    if not hist or hist[-1] != posture:
+                        hist.append(posture)
+                        if len(hist) >= 3 and hist[-3:] == ["LONG_GAMMA", "SHORT_GAMMA", "LONG_GAMMA"]:
+                            st["gamma_whiplash_lock"] = True
+
+                # MANDATE_38 & ENH_111: Overbought RSI > 75 timer & gamma flicker stop tighten
+                rsi = _safe_float(row.get("rsi"))
+                if rsi is not None and rsi > 75.0:
+                    if st["rsi_gt_75_since_ts"] is None:
+                        st["rsi_gt_75_since_ts"] = now_ts
+                    st["rsi_overbought_minutes"] = max(0.0, (now_ts - float(st["rsi_gt_75_since_ts"])) / 60.0)
+                    if posture == "SHORT_GAMMA" or ("SHORT_GAMMA" in st["gamma_history"]):
+                        st["gamma_flicker_overbought"] = True
+                elif rsi is not None:
+                    st["rsi_gt_75_since_ts"] = None
+                    st["rsi_overbought_minutes"] = 0.0
+
+                # ENH_253: Track 3 consecutive decelerating rVol reads during OPEN
+                rvol = _safe_float(row.get("rvol"))
+                if status_upper == "OPEN" and rvol is not None and rvol > 0:
+                    win = st["rvol_window"]
+                    if not win or abs(win[-1] - rvol) >= 1e-4:
+                        win.append(rvol)
+                        if len(win) > 3:
+                            del win[:-3]
+                    if len(win) == 3 and win[0] > win[1] > win[2] and win[0] >= 2.0 and win[2] < 1.5:
+                        st["rvol_decelerating_3x"] = True
+                    else:
+                        st["rvol_decelerating_3x"] = False
+
+    def _get_tracker_snapshot(self, sym: str) -> Dict[str, Any]:
+        with self._lock:
+            st = self._ticker_state.get(sym, {})
+            return {
+                "gamma_whiplash_lock": bool(st.get("gamma_whiplash_lock", False)),
+                "gamma_flicker_overbought": bool(st.get("gamma_flicker_overbought", False)),
+                "rsi_overbought_minutes": round(float(st.get("rsi_overbought_minutes", 0.0)), 1),
+                "rvol_decelerating_3x": bool(st.get("rvol_decelerating_3x", False)),
+            }
+
+    @staticmethod
+    def _evaluate_global_vetoes(regime: Dict[str, Any]) -> List[Dict[str, Any]]:
+        vetoes: List[Dict[str, Any]] = []
+        vix = regime.get("vix")
+        vvix = regime.get("vvix")
+        ief_chg = regime.get("ief_chg_pct")
+        spy_posture = regime.get("spy_dealer_posture", "NEUTRAL")
+        spy_gex = regime.get("spy_net_gex")
+
+        if (vix is not None and vix > VIX_NEW_RISK_VETO) or (vvix is not None and vvix > VVIX_NEW_RISK_VETO):
+            vetoes.append({
+                "rule_id": "ENH_72",
+                "action": "VETO_NEW_RISK",
+                "reason": f"Volatility barrier breached (VIX={vix}, VVIX={vvix}); new non-hedge risk vetoed (ENH_57 exempts clinical biotechs).",
+            })
+        if spy_posture == "SHORT_GAMMA" or (spy_gex is not None and spy_gex < 0):
+            vetoes.append({
+                "rule_id": "MANDATE_48",
+                "action": "FREEZE_NEW_CAPITAL",
+                "reason": "SPY net GEX is SHORT_GAMMA; freeze unexempt capital deployment and scale defensive entries -25%.",
+            })
+        if ief_chg is not None and ief_chg < IEF_YIELD_ALERT:
+            vetoes.append({
+                "rule_id": "IEF_YIELD_ALERT",
+                "action": "YIELDS_RISING_RISK",
+                "reason": f"IEF down {ief_chg:.2f}% (< -0.15%); rising yields headwind active.",
+            })
+        return vetoes
+
+    @staticmethod
+    def _evaluate_position_mandates(
+        row: Dict[str, Any],
+        tracker: Dict[str, Any],
+        regime: Dict[str, Any],
+        market_status: str,
+        ny_dt: datetime,
+    ) -> List[Dict[str, Any]]:
+        if not _is_ticker_valid_and_fresh(row):
+            return []
+
+        mandates: List[Dict[str, Any]] = []
+        status_upper = str(market_status or "UNKNOWN").upper()
+        spy_short_gamma = regime.get("spy_dealer_posture") == "SHORT_GAMMA" or (
+            regime.get("spy_net_gex") is not None and regime["spy_net_gex"] < 0
+        )
+
+        price = float(row["price"])
+        vwap = _safe_float(row.get("vwap")) or 0.0
+        dist_vwap = _safe_float(row.get("distance_from_vwap"))
+        if dist_vwap is None and vwap > 0:
+            dist_vwap = ((price - vwap) / vwap) * 100.0
+        chg_pct = _safe_float(row.get("session_change_pct")) or 0.0
+        gap_pct = _safe_float(row.get("gap_percent")) or 0.0
+        rsi = _safe_float(row.get("rsi")) or 50.0
+        rvol = _safe_float(row.get("rvol")) or 1.0
+        trend = str(row.get("trend") or "FLAT").strip().upper()
+        trend_score = _safe_float(row.get("trend_score")) or 0.0
+        score = _safe_float(row.get("score")) or 0.0
+        posture = str(row.get("dealer_posture") or "NEUTRAL").strip().upper()
+        ssr_active = bool(row.get("ssr_active")) or chg_pct <= -10.0
+
+        fib = row.get("fib_forecast") if isinstance(row.get("fib_forecast"), dict) else {}
+        hod = _safe_float(fib.get("pB")) or 0.0
+
+        hhmm = ny_dt.hour * 100 + ny_dt.minute
+
+        if ssr_active:
+            mandates.append({
+                "rule_id": "ENH_16_E",
+                "action": "LONG_GAMMA_SHIELD_INVALIDATED",
+                "severity": "critical",
+                "detail": "SEC Rule 201 SSR active / <= -10% drop; LONG_GAMMA shield overridden.",
+            })
+        elif chg_pct <= -8.0:
+            mandates.append({
+                "rule_id": "MANDATE_54",
+                "action": "MANDATORY_50PCT_TRIM",
+                "trim_pct": 50,
+                "severity": "critical",
+                "detail": f"Intraday drawdown {chg_pct:.2f}% <= -8.0% pre-SSR floor.",
+            })
+
+        if status_upper == "PRE-MARKET":
+            gap_thresh = -2.50 if spy_short_gamma else -3.00
+            if gap_pct <= gap_thresh and (trend_score < 0 or score < 0):
+                mandates.append({
+                    "rule_id": "ENH_16_F",
+                    "action": "MANDATORY_50PCT_TRIM",
+                    "trim_pct": 50,
+                    "severity": "critical",
+                    "detail": f"Pre-market gap {gap_pct:.2f}% <= {gap_thresh:.2f}% with negative trend/score.",
+                })
+            if chg_pct <= -4.0 and posture == "SHORT_GAMMA":
+                mandates.append({
+                    "rule_id": "ENH_115",
+                    "action": "ADVISE_25PCT_OPEN_TRIM",
+                    "trim_pct": 25,
+                    "severity": "warning",
+                    "detail": f"Pre-market drop {chg_pct:.2f}% <= -4.0% under SHORT_GAMMA.",
+                })
+
+        if status_upper == "OPEN":
+            if spy_short_gamma and vwap > 0 and dist_vwap is not None and dist_vwap <= -2.0:
+                mandates.append({
+                    "rule_id": "MANDATE_52",
+                    "action": "MANDATORY_25PCT_SWEEP_TRIM",
+                    "trim_pct": 25,
+                    "severity": "critical",
+                    "detail": f"SPY SHORT_GAMMA and price {dist_vwap:.2f}% below VWAP (<= -2.0%); sweeping limit -0.5% required.",
+                })
+
+            if hhmm < 1030 and vwap > 0 and price < vwap:
+                if rvol >= 3.0 and trend == "DOWN":
+                    mandates.append({
+                        "rule_id": "MANDATE_43",
+                        "action": "VOLUME_OVERRIDE_25_50PCT_TRIM",
+                        "trim_pct": 25,
+                        "severity": "critical",
+                        "detail": f"Pre-10:30 ET VWAP breakdown with rVol {rvol:.2f}x >= 3.0x overrides whipsaw shield.",
+                    })
+                else:
+                    mandates.append({
+                        "rule_id": "MANDATE_47",
+                        "action": "OPENING_WHIPSAW_SHIELD_ACTIVE",
+                        "severity": "info",
+                        "detail": "Pre-10:30 ET sub-VWAP whipsaw shield active unless 15m confirmed or rVol >= 3.0x.",
+                    })
+            elif hhmm >= 1030 and spy_short_gamma and vwap > 0 and price < vwap and trend == "DOWN":
+                mandates.append({
+                    "rule_id": "ENH_249",
+                    "action": "MANDATORY_25PCT_TRIM",
+                    "trim_pct": 25,
+                    "severity": "warning",
+                    "detail": "Post-10:30 ET sub-VWAP downtrend under SPY SHORT_GAMMA.",
+                })
+
+            if 1130 <= hhmm < 1300 and spy_short_gamma and vwap > 0 and dist_vwap is not None and dist_vwap <= -1.5 and rvol < 0.80:
+                mandates.append({
+                    "rule_id": "MANDATE_50",
+                    "action": "MANDATORY_25PCT_MIDDAY_TRIM",
+                    "trim_pct": 25,
+                    "severity": "warning",
+                    "detail": f"Midday sub-VWAP ({dist_vwap:.2f}%) with contracting volume (rVol {rvol:.2f}x < 0.80).",
+                })
+
+            if hod > 0 and price >= hod * 0.995 and (rvol < 1.0 or tracker.get("rvol_decelerating_3x")):
+                mandates.append({
+                    "rule_id": "ENH_258",
+                    "action": "MANDATORY_10_15PCT_DOUBLE_TOP_TRIM",
+                    "trim_pct": 15,
+                    "severity": "warning",
+                    "detail": f"Within 0.5% of HOD (${hod:.2f}) with weak/decelerating rVol ({rvol:.2f}x).",
+                })
+
+        if tracker.get("rsi_overbought_minutes", 0.0) >= 240.0:
+            mandates.append({
+                "rule_id": "MANDATE_38",
+                "action": "MANDATORY_15PCT_TIMER_TRIM",
+                "trim_pct": 15,
+                "severity": "warning",
+                "detail": f"RSI > 75 sustained for {tracker['rsi_overbought_minutes']:.0f}m (>= 240m timer).",
+            })
+
+        if dist_vwap is not None and dist_vwap >= 12.0 and rsi > 85.0:
+            mandates.append({
+                "rule_id": "MANDATE_40",
+                "action": "MANDATORY_15PCT_SWEEP_TRIM",
+                "trim_pct": 15,
+                "severity": "critical",
+                "detail": f"Parabolic +{dist_vwap:.2f}% VWAP extension with RSI {rsi:.1f} > 85.",
+            })
+
+        if tracker.get("gamma_whiplash_lock"):
+            mandates.append({
+                "rule_id": "ENH_17_B",
+                "action": "GAMMA_WHIPLASH_LOCK",
+                "severity": "warning",
+                "detail": "Intraday LONG->SHORT->LONG gamma flip detected; GEX dampening untrusted until next close.",
+            })
+
+        if tracker.get("gamma_flicker_overbought"):
+            mandates.append({
+                "rule_id": "ENH_111",
+                "action": "STOP_TIGHTEN_50PCT",
+                "severity": "warning",
+                "detail": "RSI > 75 overlapped SHORT_GAMMA intraday; tighten trailing stop by 50%.",
+            })
+
+        return mandates
+
+    def evaluate(
+        self,
+        live_state: Dict[str, Any],
+        ssot: Optional[Dict[str, Any]] = None,
+        fx_info: Optional[Dict[str, Any]] = None,
+        ny_dt: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """Builds a compact deterministic analytics bundle for DATA_PACKET & /api/analytics."""
+        now_ny = ny_dt or datetime.now(NY_TZ)
+        tickers = live_state.get("tickers", []) if isinstance(live_state, dict) else []
+        market_status = str(live_state.get("status") or "UNKNOWN").upper() if isinstance(live_state, dict) else "UNKNOWN"
+
+        by_sym: Dict[str, Dict[str, Any]] = {
+            str(t.get("ticker") or "").strip().upper(): t
+            for t in (tickers or [])
+            if isinstance(t, dict) and t.get("ticker")
+        }
+
+        regime = classify_regime(tickers, market_status=market_status)
+        global_vetoes = self._evaluate_global_vetoes(regime)
+
+        ms = ssot.get("mutable_state", ssot) if isinstance(ssot, dict) and isinstance(ssot.get("mutable_state"), dict) else (ssot if isinstance(ssot, dict) else {})
+        portfolio_rows = ms.get("portfolio_snapshot", []) if isinstance(ms, dict) else []
+        watched_raw = ms.get("watched_tickers", []) if isinstance(ms, dict) else []
+
+        eurusd_rate = None
+        if isinstance(fx_info, dict) and fx_info.get("available"):
+            eurusd_rate = fx_info.get("eurusd_rate")
+
+        held_symbols = set()
+        positions_out: List[Dict[str, Any]] = []
+        for pos in (portfolio_rows or []):
+            if not isinstance(pos, dict):
+                continue
+            sym = str(pos.get("ticker") or "").strip().upper()
+            if not sym:
+                continue
+            shares_d = _to_decimal(pos.get("shares")) or Decimal("0")
+            if shares_d <= Decimal("0"):
+                continue
+            held_symbols.add(sym)
+            row = by_sym.get(sym, {})
+            valid = _is_ticker_valid_and_fresh(row)
+            sizing = compute_position_tranches(
+                ticker=sym,
+                shares_raw=pos.get("shares"),
+                wac_raw=pos.get("wac"),
+                price_raw=row.get("price") if valid else None,
+                prev_close_raw=row.get("regular_close"),
+                eurusd_rate_raw=eurusd_rate,
+            )
+            tracker = self._get_tracker_snapshot(sym)
+            mandates = self._evaluate_position_mandates(row, tracker, regime, market_status, now_ny)
+            sizing["valid_telemetry"] = valid
+            sizing["triggered_mandates"] = mandates
+            sizing["tracker"] = tracker
+            positions_out.append(sizing)
+
+        watchlist_out: List[Dict[str, Any]] = []
+        permissibility = regime["strategy_permissibility"]
+        for w in (watched_raw or []):
+            wsym = str(w).strip().upper()
+            if not wsym or wsym in held_symbols:
+                continue
+            row = by_sym.get(wsym)
+            if row:
+                watchlist_out.append(_classify_watchlist_setup(row, permissibility))
+
+        return {
+            "as_of_ny": now_ny.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "friction_hurdles": {
+                "us_round_trip_pct": 0.85,
+                "eur_omxh_round_trip_pct": 0.25,
+            },
+            "regime": regime,
+            "global_vetoes": global_vetoes,
+            "positions": positions_out,
+            "watchlist_signals": watchlist_out,
+        }
+
+
+ANALYTICS_ENGINE = AnalyticsEngine()

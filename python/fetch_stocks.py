@@ -67,6 +67,14 @@ except ImportError:
         from python.alert_monitor import ALERT_MONITOR
     except ImportError:
         ALERT_MONITOR = None
+
+try:
+    from analytics_engine import ANALYTICS_ENGINE
+except ImportError:
+    try:
+        from python.analytics_engine import ANALYTICS_ENGINE
+    except ImportError:
+        ANALYTICS_ENGINE = None
 from background_intelligence import (
     BackgroundIntelligenceCoordinator,
     BackgroundResultApplicator,
@@ -7541,6 +7549,11 @@ def run_daemon():
                     final_output["alerts"] = ALERT_MONITOR.get_dashboard_payload()
             except Exception as alert_err:
                 logger.warning(f"[AlertMonitor] Tick evaluation skipped: {alert_err}")
+            try:
+                if ANALYTICS_ENGINE is not None:
+                    ANALYTICS_ENGINE.record_tick(data, market_status=status)
+            except Exception as analytics_err:
+                logger.warning(f"[AnalyticsEngine] Tick tracking skipped: {analytics_err}")
             publish_global_state_snapshot(final_output)
 
             wait_start = t_time.time()
