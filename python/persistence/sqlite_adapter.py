@@ -727,26 +727,63 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
         categories: Union[Dict[str, Any], List[Any]],
         caller_role: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Upserts scout category records into SQLite."""
+        """Replaces scout category definitions in SQLite atomically."""
+        desired: Dict[str, Optional[List[str]]] = {}
+        if isinstance(categories, dict):
+            for name, tickers in categories.items():
+                clean_name = str(name).strip()
+                if not clean_name:
+                    continue
+                if isinstance(tickers, list):
+                    desired[clean_name] = [str(t).strip() for t in tickers if str(t).strip()]
+                elif tickers is None:
+                    desired[clean_name] = []
+                else:
+                    desired[clean_name] = [str(tickers).strip()] if str(tickers).strip() else []
+        elif isinstance(categories, list):
+            for item in categories:
+                if isinstance(item, str):
+                    clean_name = item.strip()
+                    if clean_name:
+                        desired.setdefault(clean_name, None)
+                elif isinstance(item, dict):
+                    clean_name = str(item.get("category_name") or item.get("name") or "").strip()
+                    if not clean_name:
+                        continue
+                    raw_tickers = item.get("tickers")
+                    desired[clean_name] = (
+                        [str(t).strip() for t in raw_tickers if str(t).strip()]
+                        if isinstance(raw_tickers, list)
+                        else None
+                    )
+
         try:
             with UnitOfWork(self._db_manager, auto_commit=True) as uow:
-                if isinstance(categories, dict):
-                    for name, tickers in categories.items():
-                        tick_list = tickers if isinstance(tickers, list) else [str(tickers)]
-                        uow.scout_categories.upsert_category(
-                            name=str(name),
-                            description="Stage 2 Scout Category",
-                            tickers=tick_list,
+                existing_cats = uow.scout_categories.list_categories()
+                existing_by_name = {c.category_name: c for c in existing_cats}
+
+                for cat in existing_cats:
+                    if cat.category_name not in desired:
+                        uow.scout_categories.delete_category(
+                            category_id=cat.id,
+                            caller_role=caller_role,
                         )
-                elif isinstance(categories, list):
-                    for item in categories:
-                        name = item if isinstance(item, str) else item.get("category_name", "UNKNOWN")
-                        uow.scout_categories.upsert_category(
-                            name=str(name),
-                            description="Stage 2 Scout Category",
-                            tickers=[],
-                        )
+
+                for cat_name, tick_list in desired.items():
+                    resolved_tickers = (
+                        list(existing_by_name[cat_name].tickers)
+                        if tick_list is None and cat_name in existing_by_name
+                        else (tick_list or [])
+                    )
+                    uow.scout_categories.upsert_category(
+                        category_name=cat_name,
+                        description="Stage 2 Scout Category",
+                        tickers=resolved_tickers,
+                        caller_role=caller_role,
+                    )
             return self.get_scout_categories()
+        except PermissionError:
+            raise
         except Exception as e:
             raise PersistenceError(f"Failed to save scout categories in SQLite: {e}") from e
 

@@ -75,9 +75,18 @@ async function main() {
     window.addEventListener('unhandledrejection', (e) => errors.push(`unhandled rejection: ${e.reason}`));
 
     const calls = [];
+    let scoutCategories = [];
     window.fetch = async (url, opts = {}) => {
         const pathOnly = String(url).split('?')[0];
-        calls.push(`${(opts.method || 'GET').toUpperCase()} ${pathOnly}`);
+        const method = (opts.method || 'GET').toUpperCase();
+        calls.push(`${method} ${pathOnly}`);
+        if (pathOnly === '/api/scout_categories') {
+            if (method === 'POST') {
+                scoutCategories = JSON.parse(opts.body || '[]');
+                return { ok: true, status: 200, json: async () => ({ status: 'success', categories: [...scoutCategories] }) };
+            }
+            return { ok: true, status: 200, json: async () => [...scoutCategories] };
+        }
         const prompt = pathOnly.startsWith('/api/prompts/') ? { prompt: '' } : undefined;
         const body = API[pathOnly] ?? prompt ?? {};
         return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(body)) };
@@ -217,6 +226,29 @@ async function main() {
         assert.deepStrictEqual(pills, ['TRIM', 'HOLD']);
         const srcDetails = msg.querySelector('details.chat-sources-details');
         assert(srcDetails && srcDetails.open === false, 'Source Index should auto-collapse');
+    });
+
+    const techBtnBefore = window.document.querySelector('#scout-categories-container button[data-sector="Technology"]');
+    const initialPressed = techBtnBefore ? techBtnBefore.getAttribute('aria-pressed') : null;
+    if (techBtnBefore) techBtnBefore.click();
+    await new Promise((r) => setTimeout(r, 60));
+    const techBtnAfterOn = window.document.querySelector('#scout-categories-container button[data-sector="Technology"]');
+    const pressedAfterOn = techBtnAfterOn ? techBtnAfterOn.getAttribute('aria-pressed') : null;
+    const activeClassAfterOn = techBtnAfterOn ? techBtnAfterOn.classList.contains('active') : false;
+    if (techBtnAfterOn) techBtnAfterOn.click();
+    await new Promise((r) => setTimeout(r, 60));
+    const techBtnAfterOff = window.document.querySelector('#scout-categories-container button[data-sector="Technology"]');
+    const pressedAfterOff = techBtnAfterOff ? techBtnAfterOff.getAttribute('aria-pressed') : null;
+    const activeClassAfterOff = techBtnAfterOff ? techBtnAfterOff.classList.contains('active') : true;
+    const postScoutCalls = calls.filter((c) => c === 'POST /api/scout_categories').length;
+    check('Sector Discovery: clicking a sector button toggles it on and off', () => {
+        assert(techBtnBefore, 'Technology sector button missing');
+        assert.strictEqual(initialPressed, 'false');
+        assert.strictEqual(pressedAfterOn, 'true', 'clicking sector button should toggle it active');
+        assert.strictEqual(activeClassAfterOn, true);
+        assert.strictEqual(pressedAfterOff, 'false', 'clicking active sector button should toggle it off');
+        assert.strictEqual(activeClassAfterOff, false);
+        assert.strictEqual(postScoutCalls, 2, `expected 2 POST /api/scout_categories calls, got ${postScoutCalls}`);
     });
 
     window.close();

@@ -449,6 +449,30 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
             self.assertEqual(len(lessons), 1)
             self.assertEqual(lessons[0]["rule_code"], "L-101")
 
+    def test_sqlite_scout_categories_toggle_replace_and_clear(self):
+        with execution_role_context("Terminal Orchestrator"):
+            saved = self.adapter.save_scout_categories(["Technology", "AI & Data"])
+            self.assertEqual(set(saved.keys()), {"Technology", "AI & Data"})
+
+            saved_with_tickers = self.adapter.save_scout_categories(
+                {"Technology": ["NVDA", "MSFT"], "AI & Data": ["PLTR"]}
+            )
+            self.assertEqual(saved_with_tickers["Technology"], ("NVDA", "MSFT"))
+            self.assertEqual(saved_with_tickers["AI & Data"], ("PLTR",))
+
+            # Un-toggle Technology: omit it from list while keeping AI & Data and its tickers
+            toggled_off = self.adapter.save_scout_categories(["AI & Data"])
+            self.assertEqual(set(toggled_off.keys()), {"AI & Data"})
+            self.assertEqual(toggled_off["AI & Data"], ("PLTR",))
+
+            # Clear all categories
+            cleared = self.adapter.save_scout_categories([])
+            self.assertEqual(cleared, {})
+
+        with execution_role_context("Python Engineer"):
+            with self.assertRaises(PermissionError):
+                self.adapter.save_scout_categories(["Technology"])
+
     def test_sqlite_empty_first_run_basket_parity(self):
         """Empty SQLite database returns valid empty basket contract matching JSON first-run."""
         basket = self.adapter.get_portfolio_basket()

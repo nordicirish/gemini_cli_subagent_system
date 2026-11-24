@@ -1180,18 +1180,22 @@ const VERIFIED_SCOUT_SECTORS = [
     "Real Estate", "Materials", "Communication Services",
     "AI & Data", "Aerospace & Defense", "Biotech", "Semiconductors"
 ];
+let activeScoutCategories = [];
 
 async function fetchScoutCategories() {
     try {
         const res = await fetch(`${API_BASE}/scout_categories`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const activeCategories = await res.json();
-        renderScoutCategories(activeCategories);
+        renderScoutCategories(Array.isArray(activeCategories) ? activeCategories : []);
     } catch (e) { console.error("Scout categories fetch failed", e); }
 }
 
 function renderScoutCategories(activeList) {
     if (!dScoutContainer) return;
-    const activeSet = new Set(activeList);
+    const normalized = Array.isArray(activeList) ? activeList : [];
+    activeScoutCategories = [...normalized];
+    const activeSet = new Set(normalized);
     
     let html = '';
     VERIFIED_SCOUT_SECTORS.forEach(sector => {
@@ -1201,7 +1205,10 @@ function renderScoutCategories(activeList) {
             : 'background: rgba(255, 255, 255, 0.03); border-color: var(--panel-border); color: var(--text-dim);';
         
         html += `
-            <button class="scout-toggle-btn" 
+            <button type="button"
+                    class="scout-toggle-btn${isActive ? ' active' : ''}"
+                    aria-pressed="${isActive ? 'true' : 'false'}"
+                    data-sector="${sector}"
                     onclick="toggleScoutCategory('${sector}')" 
                     style="padding: 4px 8px; border-radius: 4px; border: 1px solid; font-size: 0.65rem; font-weight: 600; cursor: pointer; transition: all 0.2s; ${style}">
                 ${sector}
@@ -1213,8 +1220,16 @@ function renderScoutCategories(activeList) {
 
 async function toggleScoutCategory(sector) {
     try {
-        const res = await fetch(`${API_BASE}/scout_categories`);
-        let list = await res.json();
+        let list = [...activeScoutCategories];
+        try {
+            const res = await fetch(`${API_BASE}/scout_categories`);
+            if (res.ok) {
+                const serverList = await res.json();
+                if (Array.isArray(serverList)) list = serverList;
+            }
+        } catch (fetchErr) {
+            console.warn("Using cached scout categories during toggle:", fetchErr);
+        }
         
         if (list.includes(sector)) {
             list = list.filter(c => c !== sector);
@@ -1223,7 +1238,10 @@ async function toggleScoutCategory(sector) {
         }
         
         await saveScoutCategories(list);
-    } catch (e) { console.error("Toggle failed", e); }
+    } catch (e) {
+        console.error("Toggle failed", e);
+        showFeedback(null, '', e.message || 'Failed to toggle scout sector.', true, dAiScoutStatus);
+    }
 }
 
 async function saveScoutCategories(list) {
@@ -1233,12 +1251,25 @@ async function saveScoutCategories(list) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(list)
         });
+        let data = null;
+        try { data = await res.json(); } catch (_) { data = null; }
         if (res.ok) {
-            const updated = await res.json();
-            renderScoutCategories(updated.categories);
+            const updatedList = data && Array.isArray(data.categories) ? data.categories : list;
+            renderScoutCategories(updatedList);
+            if (dAiScoutStatus) {
+                dAiScoutStatus.textContent = '';
+                dAiScoutStatus.className = 'status-message inline-feedback';
+            }
             pollData(); // Force immediate refresh to pull newly scanned scouts
+        } else {
+            const errMsg = (data && (data.detail || data.message)) || `Failed to save scout sector (HTTP ${res.status})`;
+            console.error("Scout categories save rejected:", res.status, errMsg);
+            showFeedback(null, '', errMsg, true, dAiScoutStatus);
         }
-    } catch (e) { console.error("Scout categories update failed", e); }
+    } catch (e) {
+        console.error("Scout categories update failed", e);
+        showFeedback(null, '', e.message || 'Scout categories update failed.', true, dAiScoutStatus);
+    }
 }
 
 async function fetchScoutConfig() {
