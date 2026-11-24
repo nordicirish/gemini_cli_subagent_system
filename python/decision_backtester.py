@@ -115,6 +115,65 @@ def _flatten_decision_entries(decision_log: List[Dict[str, Any]]) -> List[Dict[s
     return flattened
 
 
+_LOGGABLE_RECO_ACTIONS = {"BUY", "ADD", "TRIM", "SELL", "EXIT", "REDUCE", "HOLD", "AVOID"}
+_RECO_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s.*actionable recommendations?", re.IGNORECASE)
+_SECTION_END_RE = re.compile(r"^\s{0,3}(?:#{1,6}\s|---+\s*$|<details)")
+_RECO_BULLET_RE = re.compile(
+    r"^\s*(?:[*\-+]|\d+[.)])\s+\[?(?P<action>[A-Z_]+)\]?\s+(?P<ticker>\^?[A-Z][A-Z0-9.\-]{0,9})\b(?P<rest>.*)$"
+)
+_PRICE_RE = re.compile(r"\$\s?([0-9]{1,6}(?:,[0-9]{3})*(?:\.[0-9]{1,4})?)")
+
+
+def extract_chat_recommendations(
+    response_text: str,
+    known_tickers: Optional[set] = None,
+) -> List[Dict[str, Any]]:
+    """Extracts per-ticker `[ACTION] TICKER ... $price` bullets from the Actionable Recommendations section.
+
+    Only BUY/ADD/TRIM/SELL/EXIT/REDUCE/HOLD/AVOID bullets are returned (LESSON/TRIGGER/WATCH are not
+    scorable decisions). When known_tickers is given, symbols outside it are dropped.
+    """
+    if not isinstance(response_text, str) or not response_text:
+        return []
+    known = {str(t).strip().upper() for t in known_tickers} if known_tickers else None
+
+    results: List[Dict[str, Any]] = []
+    seen: set = set()
+    in_section = False
+    for raw_line in response_text.splitlines():
+        if _RECO_HEADING_RE.match(raw_line):
+            in_section = True
+            continue
+        if not in_section:
+            continue
+        if _SECTION_END_RE.match(raw_line):
+            in_section = False
+            continue
+        line = raw_line.replace("**", "").replace("__", "").replace("`", "")
+        m = _RECO_BULLET_RE.match(line)
+        if not m:
+            continue
+        action = m.group("action").upper()
+        ticker = m.group("ticker").upper().rstrip(".-")
+        if action not in _LOGGABLE_RECO_ACTIONS or ticker in _NON_TICKER_LABELS:
+            continue
+        if known is not None and ticker not in known:
+            continue
+        key = (ticker, action)
+        if key in seen:
+            continue
+        seen.add(key)
+        price_m = _PRICE_RE.search(m.group("rest") or "")
+        price = _safe_float(price_m.group(1).replace(",", "")) if price_m else None
+        results.append({
+            "ticker": ticker,
+            "action": action,
+            "price": price,
+            "text": line.strip().lstrip("*-+ ").strip()[:500],
+        })
+    return results
+
+
 def _parse_entry_date(raw_date: Any) -> Optional[datetime]:
     if not raw_date:
         return None
@@ -138,6 +197,11 @@ def backtest_decision_log(
     """Evaluates decision_log entries against forward historical OHLCV bars."""
     raw_list = list(decision_log) if isinstance(decision_log, list) else []
     entries_list = _flatten_decision_entries(raw_list)
+    # Adapters differ in order (SQLite lists newest-first); sort oldest-first so the
+    # max_entries tail below is always the most recent decisions.
+    entries_list.sort(
+        key=lambda e: _parse_entry_date(e.get("date") or e.get("timestamp") or e.get("timestamp_utc")) or datetime.min
+    )
     provider = history_provider or _default_history_provider
 
     evaluated: List[Dict[str, Any]] = []
@@ -180,7 +244,10 @@ def backtest_decision_log(
         if start_pos is None or start_pos >= len(df):
             continue
 
-        logged_price = _safe_float(item.get("price") or item.get("price_at_eval") or item.get("entry_price"))
+        votes = item.get("votes") if isinstance(item.get("votes"), dict) else {}
+        logged_price = _safe_float(
+            item.get("price") or item.get("price_at_eval") or item.get("entry_price") or votes.get("price")
+        )
         entry_close = _safe_float(df.iloc[start_pos]["Close"])
         entry_price = logged_price if (logged_price and logged_price > 0) else entry_close
         if not entry_price or entry_price <= 0:

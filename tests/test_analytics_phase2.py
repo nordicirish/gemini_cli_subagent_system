@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 import web_server  # noqa: E402
 from alert_monitor import AlertMonitor  # noqa: E402
 from analytics_engine import AnalyticsEngine  # noqa: E402
-from decision_backtester import backtest_decision_log  # noqa: E402
+from decision_backtester import backtest_decision_log, extract_chat_recommendations  # noqa: E402
 from sec_edgar import fetch_recent_sec_filings  # noqa: E402
 
 
@@ -144,6 +144,87 @@ class TestBacktesterAndSecEdgar(unittest.TestCase):
         self.assertEqual(nested_res["total_logged"], 1)
         self.assertEqual(nested_res["evaluated_count"], 1)
         self.assertAlmostEqual(nested_res["entries"][0]["agreement_score_sa"], 0.91, places=2)
+
+    def test_backtester_reads_votes_price_and_uses_most_recent_entries(self):
+        idx = pd.to_datetime(["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-09"], utc=True)
+        hist = pd.DataFrame({"Close": [10.0, 10.5, 11.0, 10.8, 11.5, 12.0]}, index=idx)
+        # SQLite shape, newest-first; price only lives in votes.
+        log = [
+            {"ticker": "UMAC", "action_proposed": "TRIM", "votes": {"price": 10.5}, "timestamp": "2026-11-03T15:00:00+00:00"},
+            {"ticker": "SESSION", "action_proposed": "HOLD", "votes": {}, "timestamp": "2026-11-03T14:00:00+00:00"},
+            {"ticker": "UMAC", "action_proposed": "BUY", "votes": {"price": 10.0}, "timestamp": "2026-11-02T15:00:00+00:00"},
+        ]
+        res = backtest_decision_log(log, history_provider=lambda s: hist if s == "UMAC" else None, max_entries=1)
+        self.assertEqual(res["evaluated_count"], 1)
+        self.assertEqual(res["entries"][0]["action"], "TRIM")  # the most recent decision, not the oldest
+        self.assertAlmostEqual(res["entries"][0]["entry_price"], 10.5, places=4)
+
+    def test_extract_chat_recommendations_parses_actionable_section_only(self):
+        text = "\n".join([
+            "### 🏁 Final Council Decision",
+            "**HOLD**",
+            "* **[TRIM] RCAT** — mention outside section is ignored $1.00",
+            "### 🎯 Actionable Recommendations",
+            "* **[HOLD] UMAC** — Maintain 1,860 shares; stop at $8.71 (465 shares [25%] limit $8.67).",
+            "* **[TRIM] RCAT** — Sell 120 shares at limit $12.40.",
+            "* **[WATCH] AMZN** — Inactive watchlist holding ($252.52).",
+            "* **[LESSON] PORTFOLIO** — Tighten stops before PCE.",
+            "* **[BUY] FAKE** — Not a tracked ticker at $5.00.",
+            "* **[HOLD] UMAC** — duplicate is dropped.",
+            "#### Adversarial Framing",
+            "* **[SELL] UMAC** — after the section ends $1.00",
+        ])
+        recos = extract_chat_recommendations(text, known_tickers={"UMAC", "RCAT", "AMZN"})
+        self.assertEqual([(r["ticker"], r["action"]) for r in recos], [("UMAC", "HOLD"), ("RCAT", "TRIM")])
+        self.assertAlmostEqual(recos[0]["price"], 8.71, places=2)
+        self.assertAlmostEqual(recos[1]["price"], 12.40, places=2)
+        self.assertEqual(extract_chat_recommendations("no headings here"), [])
+
+    def test_chat_recommendations_are_logged_as_per_ticker_rows(self):
+        appended = []
+
+        class FakeSvc:
+            def append_decision_log(self, entry, prepend=False, caller_role=None):
+                appended.append(entry)
+
+        text = "### 🎯 Actionable Recommendations\n- **[TRIM] UMAC** — Sell 465 shares at $8.67."
+        with patch.object(web_server, "get_persistence_service", return_value=FakeSvc()):
+            n = web_server._log_chat_recommendations(text, "turn-x", {"UMAC"})
+        self.assertEqual(n, 1)
+        self.assertEqual(appended[0]["ticker"], "UMAC")
+        self.assertEqual(appended[0]["action_proposed"], "TRIM")
+        self.assertEqual(appended[0]["session_id"], "turn-x")
+        self.assertAlmostEqual(appended[0]["votes"]["price"], 8.67, places=2)
+
+    def test_review_endpoint_runs_read_only_review_engine_with_evidence(self):
+        captured = {}
+
+        class FakeSvc:
+            def get_decision_log(self):
+                return [{"ticker": "SESSION", "action_proposed": "HOLD", "timestamp": "2026-11-03T14:00:00+00:00"}]
+
+            def get_trade_lessons(self):
+                return [{"id": 1, "rule": "L-1: Example lesson"}]
+
+        def fake_engine(query):
+            captured["query"] = query
+            return "### 🎯 Actionable Recommendations\n- [LESSON] PORTFOLIO — Log per-ticker decisions."
+
+        tool_names = {t.__name__ for t in web_server.review_log_engine._agent_tools}
+        self.assertNotIn("update_trade_lessons", tool_names)
+        self.assertNotIn(web_server.review_log_engine, web_server.terminal_tools)
+
+        client = TestClient(web_server.app)
+        with patch.object(web_server, "get_persistence_service", return_value=FakeSvc()), \
+                patch.object(web_server, "review_log_engine", side_effect=fake_engine):
+            res = client.post("/api/review", json={"message": "Review Log", "turn_id": "turn-review-1"})
+        body = res.json()
+        self.assertEqual(body["status"], "success")
+        self.assertIn("[LESSON]", body["response"])
+        self.assertIn("Evidence base", body["response"])
+        self.assertEqual(body["evidence"]["session_level_rows_not_scorable"], 1)
+        self.assertIn("REVIEW_EVIDENCE", captured["query"])
+        self.assertIn("L-1: Example lesson", captured["query"])
 
     def test_add_trade_lesson_endpoint_persists_owner_approved_lesson(self):
         saved = {}

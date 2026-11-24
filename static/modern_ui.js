@@ -99,7 +99,8 @@ const ModernChat = {
             label: 'Review Log',
             id: 'qp-review-log',
             tooltip: 'Forensically audit past decisions to generate corrective trade lessons and actionable triggers.',
-            prompt: 'SYSTEM DIRECTIVE: EXECUTE [MANDATE_26_POST_TRADE_REVIEW]. DO NOT produce a routine Stage 0 HOLD/WATCH market wrap. Invoke the Post-Trade Review Engine (`ask_post-trade_review_engine`) or call `read_decision_log`, `run_decision_backtest`, and `read_trade_lessons` directly. Audit historical decisions against realized 1D/3D/5D price action and agreement_score_sa calibration. Output strictly under `### 🚨 Alerts & Risk Warnings` and `### 🎯 Actionable Recommendations`, formatting 3-5 concrete findings prefixed with `[LESSON]`, `[TRIGGER]`, or `[RULE_PROPOSAL]` (with exact ticker + price where applicable) BEFORE forensic commentary.'
+            // Served by /api/review (see fireQuickPrompt); the directive lives in prompts/review_log_prompt.txt.
+            prompt: 'Review Log: post-trade review of logged Council decisions (MANDATE_26).'
         },
     ],
 
@@ -364,35 +365,17 @@ const ModernChat = {
                 console.error('Deep Dive Watchlist prompt build failed', e);
             }
         }
-        if (qp.id === 'qp-review-log') {
-            try {
-                const btRes = await fetch('/api/analytics/backtest');
-                if (btRes && btRes.ok) {
-                    const bt = await btRes.json();
-                    const summary = {
-                        total_logged: bt.total_logged || 0,
-                        evaluated_count: bt.evaluated_count || 0,
-                        hit_rate_pct: bt.hit_rate_pct,
-                        avg_ret_1d_pct: bt.avg_ret_1d_pct,
-                        avg_ret_5d_pct: bt.avg_ret_5d_pct,
-                        avg_mae_pct: bt.avg_mae_pct,
-                        by_action: bt.by_action || {},
-                        sample_entries: Array.isArray(bt.entries) ? bt.entries.slice(-10) : [],
-                    };
-                    qp = {
-                        ...qp,
-                        prompt: `${qp.prompt}\n\n[PRECOMPUTED_BACKTEST_SUMMARY]: ${JSON.stringify(summary)}`,
-                    };
-                }
-            } catch (_) {
-                /* fallback to base Review Log directive offline */
-            }
-        }
-
-
         // Store the friendly display label so the chat bubble shows icon+name, not the raw system prompt
         this._pendingDisplayLabel = `${qp.icon} ${qp.label}`;
         this.input.value = qp.prompt;
+
+        // Review Log bypasses the orchestrator (whose mandatory Final Council Decision template turned it
+        // into a routine HOLD wrap): /api/review runs the read-only Review Engine over the server-side
+        // backtest. The review itself is not a trading decision, so it is not auto-saved to the decision log.
+        if (qp.id === 'qp-review-log') {
+            await this.sendMessage(false, { endpoint: '/api/review', skipDecisionLog: true });
+            return;
+        }
         await this.sendMessage();
     },
 
@@ -1561,7 +1544,8 @@ const ModernChat = {
             const savedHistory = JSON.parse(localStorage.getItem('gem_chat_history') || '[]');
             const historyPayload = savedHistory.slice(-15);
 
-            const res = await fetch('/api/chat', {
+            const endpoint = (options && options.endpoint) || '/api/chat';
+            const res = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 signal: abortController.signal,
@@ -1621,7 +1605,9 @@ const ModernChat = {
                 this.renderProposals(data.proposals);
 
                 // Auto-save every Council response silently to the decision log
-                this.autoSaveDecisionLog(data.response);
+                if (!(options && options.skipDecisionLog)) {
+                    this.autoSaveDecisionLog(data.response);
+                }
             } else if (data.code === 'quota_exhausted') {
                 this.renderQuotaExhaustedCard(thinkingId);
             } else {

@@ -59,14 +59,14 @@ try:
     from alert_monitor import ALERT_MONITOR, extract_triggers_from_chat
     from alert_sentinel import ALERT_SENTINEL
     from analytics_engine import ANALYTICS_ENGINE
-    from decision_backtester import backtest_decision_log
+    from decision_backtester import backtest_decision_log, extract_chat_recommendations
     from macro_calendar import get_macro_calendar_status
     from sec_edgar import fetch_recent_sec_filings
 except ImportError:
     from python.alert_monitor import ALERT_MONITOR, extract_triggers_from_chat
     from python.alert_sentinel import ALERT_SENTINEL
     from python.analytics_engine import ANALYTICS_ENGINE
-    from python.decision_backtester import backtest_decision_log
+    from python.decision_backtester import backtest_decision_log, extract_chat_recommendations
     from python.macro_calendar import get_macro_calendar_status
     from python.sec_edgar import fetch_recent_sec_filings
 
@@ -422,6 +422,16 @@ post_trade_review = framework.create_agent_tool(
     agent_tools=[tools.read_decision_log, tools.run_decision_backtest, tools.read_trade_lessons, tools.update_trade_lessons, tools.perform_web_forensic_search]
 )
 
+# Read-only Review Engine behind the chat "Review Log" chip (/api/review). It is invoked directly,
+# bypassing the orchestrator's mandatory Final Council Decision template, and holds no write tools:
+# lessons persist only when the owner clicks "Save Lesson" on a [LESSON] line.
+review_log_engine = framework.create_agent_tool(
+    name="Review Engine",
+    file_path="engine_instructions/post_trade_review.md",
+    mode="FAST",
+    agent_tools=[tools.read_decision_log, tools.run_decision_backtest, tools.read_trade_lessons]
+)
+
 # Council Members
 bullish_advocate = framework.create_agent_tool(
     name="Bullish Advocate", 
@@ -609,6 +619,62 @@ def _payload_details_html(json_text: str, state: str) -> str:
         f'\n<div class="payload-body">'
         f'\n\n```json\n{json_text}\n```\n\n</div>\n</details>\n\n'
     )
+
+
+def _known_tickers() -> set:
+    """Tracked + live-feed ticker symbols, used to filter symbols parsed out of model prose."""
+    try:
+        import fetch_stocks
+        snap_tickers = fetch_stocks.get_global_state_snapshot().get("tickers", [])
+        known = {
+            str(t.get("ticker")).strip().upper()
+            for t in snap_tickers
+            if isinstance(t, dict) and t.get("ticker")
+        }
+        known.update(
+            str(t).strip().upper()
+            for t in (list(getattr(fetch_stocks, "ALL_TICKERS", []) or []) + list(getattr(fetch_stocks, "TICKERS", []) or []))
+            if str(t).strip()
+        )
+        return known
+    except Exception as e:
+        framework.log(f"[System Warning] Known-ticker lookup failed: {redact_secrets(str(e))}")
+        return set()
+
+
+def _log_chat_recommendations(response_text: str, turn_id: str, known_tickers: Optional[set]) -> int:
+    """Appends one decision_log row per `[ACTION] TICKER ... $price` recommendation in a Council reply."""
+    try:
+        recos = extract_chat_recommendations(response_text, known_tickers or None)
+    except Exception as e:
+        framework.log(f"[System Warning] Recommendation extraction failed: {redact_secrets(str(e))}")
+        return 0
+    if not recos:
+        return 0
+    from datetime import datetime as _dt, timezone as _tz
+    ts = _dt.now(_tz.utc).isoformat()
+    logged = 0
+    try:
+        service = get_persistence_service()
+        for reco in recos:
+            service.append_decision_log({
+                "session_id": turn_id,
+                "ticker": reco["ticker"],
+                "action_proposed": reco["action"],
+                "decision_outcome": "RECOMMENDED",
+                "votes": {"source": "chat_recommendation", "price": reco["price"]},
+                "transcript_text": reco["text"],
+                "timestamp": ts,
+                "price": reco["price"],
+            })
+            logged += 1
+    except PermissionError:
+        raise
+    except Exception as e:
+        framework.log(f"[System Warning] Recommendation logging stopped after {logged} row(s): {redact_secrets(str(e))}")
+    if logged:
+        framework.log(f"[System] Logged {logged} per-ticker recommendation(s) to decision_log for backtesting.")
+    return logged
 
 
 def _process_execution_payload(json_text: str, turn_id: str) -> Dict[str, Any]:
@@ -1302,21 +1368,15 @@ def chat_endpoint(req: ChatRequest):
                 except Exception as ie:
                     framework.log(f"[System Warning] Decision interception inside chat_endpoint failed: {redact_secrets(str(ie))}")
 
+            known_tickers = _known_tickers()
+
+            # Record each per-ticker recommendation as its own scorable decision_log row
+            # (the payload path stores one SESSION-level blob the backtester cannot evaluate).
+            _log_chat_recommendations(full_response_original, turn_id, known_tickers)
+
             # Auto-arm AI-identified key-level alert triggers (never from halted/vetoed turns)
             if payload_result is None or payload_result.get("state") != "skipped":
                 try:
-                    import fetch_stocks
-                    snap_tickers = fetch_stocks.get_global_state_snapshot().get("tickers", [])
-                    known_tickers = {
-                        str(t.get("ticker")).strip().upper()
-                        for t in snap_tickers
-                        if isinstance(t, dict) and t.get("ticker")
-                    }
-                    known_tickers.update(
-                        str(t).strip().upper()
-                        for t in (list(getattr(fetch_stocks, "ALL_TICKERS", []) or []) + list(getattr(fetch_stocks, "TICKERS", []) or []))
-                        if str(t).strip()
-                    )
                     extracted_triggers = extract_triggers_from_chat(
                         full_response_original,
                         raw_payload_json=raw_payload_json,
@@ -2085,6 +2145,161 @@ def get_decision_backtest(limit: int = 25):
     if not isinstance(raw_log, list):
         raw_log = []
     return backtest_decision_log(raw_log, max_entries=max(1, min(100, int(limit or 25))))
+
+
+REVIEW_LOG_PROMPT_PATH = "prompts/review_log_prompt.txt"
+_REVIEW_LOG_FALLBACK_PROMPT = (
+    "SYSTEM DIRECTIVE: POST-TRADE REVIEW (MANDATE_26). Audit the Council's past recommendations using the "
+    "REVIEW_EVIDENCE below. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations "
+    "(3-5 bullets prefixed [LESSON], [TRIGGER] or [RULE_PROPOSAL]). Do not emit an EXECUTION_PAYLOAD."
+)
+
+
+def _lesson_text(lesson: Any) -> str:
+    if not isinstance(lesson, dict):
+        return str(lesson)[:300]
+    for key in ("rule", "lesson", "directive_text", "text"):
+        val = lesson.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()[:300]
+    return json.dumps(lesson, default=str)[:300]
+
+
+def _build_review_evidence(limit: int = 25) -> Dict[str, Any]:
+    """Deterministic evidence packet for the Review Engine: backtest, data-quality counts, recent lessons."""
+    service = get_persistence_service()
+    raw_log = service.get_decision_log()
+    if not isinstance(raw_log, list):
+        raw_log = []
+    bt = backtest_decision_log(raw_log, max_entries=limit)
+    session_rows = sum(
+        1 for e in raw_log
+        if isinstance(e, dict)
+        and not e.get("decisions")
+        and str(e.get("ticker") or "SESSION").strip().upper() in {"SESSION", "PORTFOLIO", ""}
+    )
+    try:
+        lessons = service.get_trade_lessons()
+    except Exception:
+        lessons = []
+    lessons = list(lessons) if isinstance(lessons, list) else []
+    return {
+        "data_quality": {
+            "decision_log_rows": len(raw_log),
+            "session_level_rows_not_scorable": session_rows,
+            "per_ticker_decisions": bt.get("total_logged", 0),
+            "scored_against_price_history": bt.get("evaluated_count", 0),
+        },
+        "backtest_summary": {k: v for k, v in bt.items() if k != "entries"},
+        "backtest_entries": (bt.get("entries") or [])[-limit:],
+        "trade_lessons_registry": {
+            "count": len(lessons),
+            "recent": [_lesson_text(x) for x in lessons[-15:]],
+        },
+    }
+
+
+def _load_review_log_prompt() -> str:
+    if os.path.exists(REVIEW_LOG_PROMPT_PATH):
+        try:
+            with open(REVIEW_LOG_PROMPT_PATH, "r", encoding="utf-8") as f:
+                text = f.read().strip()
+            if text:
+                return text
+        except Exception as e:
+            framework.log(f"[System Warning] Review prompt load failed: {e}")
+    return _REVIEW_LOG_FALLBACK_PROMPT
+
+
+@app.post("/api/review")
+def review_endpoint(req: ChatRequest):
+    """Review Log chip: runs the read-only Review Engine over the decision log + deterministic backtest."""
+    global _active_turn_id, _active_turn_event
+
+    raw_tid = getattr(req, "turn_id", None)
+    turn_id = (raw_tid.strip() if isinstance(raw_tid, str) and raw_tid.strip() else None) or f"turn-{uuid.uuid4().hex}"
+
+    with _registered_turn(turn_id) as turn_event, _chat_execution_lock:
+        activated = False
+        orig_framework_cancel_check = getattr(framework, "cancel_check", check_cancelled)
+        cancelled_res = {
+            "status": "success",
+            "response": "[OFFLINE] Session terminated by user interrupt.",
+            "cancelled": True,
+            "turn_id": turn_id,
+        }
+        try:
+            if turn_event.is_set():
+                return cancelled_res
+            with _turn_registry_lock:
+                cancel_event.clear()
+                _active_turn_id = turn_id
+                _active_turn_event = turn_event
+                activated = True
+
+            def turn_cancel_check() -> bool:
+                with _turn_registry_lock:
+                    return bool(turn_event.is_set() or (_active_turn_id == turn_id and cancel_event.is_set()))
+
+            framework.cancel_check = turn_cancel_check
+            framework.reset_turn_usage()
+
+            framework.log("[System] Review Log: building decision-log evidence and backtest...")
+            evidence = _build_review_evidence()
+            dq = evidence["data_quality"]
+            query = (
+                f"{_load_review_log_prompt()}\n\n[REVIEW_EVIDENCE]:\n```json\n"
+                f"{json.dumps(_normalize_for_json(evidence), indent=1, default=str)}\n```"
+            )
+            framework.log("[System] Review Log: delegating to Review Engine...")
+            review_text = review_log_engine(query)
+            if turn_cancel_check():
+                return cancelled_res
+
+            review_text = (review_text or "").strip() or (
+                "_[The Review Engine returned no text. Please try again or check system logs.]_"
+            )
+            evidence_line = (
+                f"> 🧾 **Evidence base:** {dq['scored_against_price_history']} decision(s) scored against price history, "
+                f"from {dq['per_ticker_decisions']} per-ticker decision(s) in {dq['decision_log_rows']} log rows "
+                f"({dq['session_level_rows_not_scorable']} session-level transcripts cannot be scored)."
+            )
+            usage_lock = getattr(framework, "_usage_lock", None)
+            if usage_lock is not None:
+                with usage_lock:
+                    usage_snapshot = dict(framework.turn_usage)
+            else:
+                usage_snapshot = dict(framework.turn_usage)
+            return {
+                "status": "success",
+                "response": f"{review_text}\n\n---\n\n{evidence_line}",
+                "usage": usage_snapshot,
+                "turn_id": turn_id,
+                "evidence": dq,
+            }
+        except Exception as e:
+            error_msg = redact_secrets(str(e))
+            if turn_event.is_set() or "cancelled" in error_msg.lower():
+                return cancelled_res
+            framework.log(f"[Error] Review endpoint exception: {error_msg}")
+            if "429" in error_msg or "quota" in error_msg.lower() or "resource_exhausted" in error_msg.lower():
+                return {
+                    "status": "error",
+                    "code": "quota_exhausted",
+                    "message": "Free tier quota exhausted. Upgrade to Paid Tier to continue.",
+                    "turn_id": turn_id,
+                }
+            return {"status": "error", "message": error_msg, "turn_id": turn_id}
+        finally:
+            if activated:
+                framework.cancel_check = orig_framework_cancel_check
+            with _turn_registry_lock:
+                if _active_turn_id == turn_id:
+                    _active_turn_id = None
+                    _active_turn_event = None
+                _precancelled_turn_ids.pop(turn_id, None)
+                if turn_id not in _completed_turn_ids:
+                    _completed_turn_ids.append(turn_id)
 
 
 @app.get("/api/analytics/sec/{ticker}")

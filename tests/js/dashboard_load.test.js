@@ -156,6 +156,7 @@ const API = {
     },
     '/api/list_models': { status: 'success', models: [], current_model: 'test-model' },
     '/api/chat': { status: 'success', response: 'Boot complete.', proposals: [], turn_id: 't1' },
+    '/api/review': { status: 'success', response: '### 🎯 Actionable Recommendations\n- [LESSON] PORTFOLIO — Log per-ticker decisions.', turn_id: 't-review' },
 };
 
 async function main() {
@@ -421,6 +422,19 @@ async function main() {
         assert.strictEqual(pill.textContent.trim(), 'BEAR_VOLATILE');
         assert(pill.classList.contains('regime-crisis'), 'BEAR_VOLATILE should map to regime-crisis');
         assert(window.document.getElementById('chart-exec-plan-btn'), 'chart-exec-plan-btn missing from chart modal');
+    });
+
+    // Review Log chip goes to the dedicated read-only review endpoint, not the orchestrator chat
+    const chatCallsBefore = calls.filter((c) => c === 'POST /api/chat').length;
+    const saveLogBefore = calls.filter((c) => c === 'POST /api/save_decision_log').length;
+    window.document.getElementById('qp-review-log').click();
+    await new Promise((r) => setTimeout(r, 120));
+    check('Review Log chip: POSTs /api/review (not /api/chat) and does not auto-save the review as a decision', () => {
+        assert(calls.includes('POST /api/review'), 'Review Log click did not POST /api/review');
+        assert.strictEqual(calls.filter((c) => c === 'POST /api/chat').length, chatCallsBefore, 'Review Log must not go through /api/chat');
+        assert.strictEqual(calls.filter((c) => c === 'POST /api/save_decision_log').length, saveLogBefore, 'review output must not be auto-saved to decision log');
+        const lastAi = [...window.document.querySelectorAll('.modern-message.ai')].slice(-1)[0];
+        assert(lastAi && lastAi.querySelector('.reco-action-btn.save-lesson'), 'review [LESSON] line should render a Save Lesson button');
     });
 
     // Review Log / Chat actionable recommendation buttons & cost estimate removal check
