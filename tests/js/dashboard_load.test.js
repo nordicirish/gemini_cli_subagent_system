@@ -156,7 +156,8 @@ const API = {
     },
     '/api/list_models': { status: 'success', models: [], current_model: 'test-model' },
     '/api/chat': { status: 'success', response: 'Boot complete.', proposals: [], turn_id: 't1' },
-    '/api/review': { status: 'success', response: '### 🎯 Actionable Recommendations\n- [LESSON] PORTFOLIO — Log per-ticker decisions.', turn_id: 't-review' },
+    '/api/review': { status: 'success', response: '### 🎯 Actionable Recommendations\n- [LESSON] PORTFOLIO — Log per-ticker decisions.', turn_id: 't-review', improvement_proposals: [{ id: 'imp-1', kind: 'rule', rule_id: 'ENH_1', action: 'ADD', text: 'Halve size before PCE.', justification: 'row 3', source: 'Review Engine', status: 'pending' }] },
+    '/api/improvements/imp-1/apply': { status: 'success', proposal: { id: 'imp-1', kind: 'rule', status: 'applied', amendment_id: 'A-1' } },
 };
 
 async function main() {
@@ -435,6 +436,28 @@ async function main() {
         assert.strictEqual(calls.filter((c) => c === 'POST /api/save_decision_log').length, saveLogBefore, 'review output must not be auto-saved to decision log');
         const lastAi = [...window.document.querySelectorAll('.modern-message.ai')].slice(-1)[0];
         assert(lastAi && lastAi.querySelector('.reco-action-btn.save-lesson'), 'review [LESSON] line should render a Save Lesson button');
+    });
+
+    const impCard = window.document.querySelector('.improvement-card[data-improvement-id="imp-1"]');
+    const impTitleBefore = impCard ? impCard.querySelector('.proposal-title').textContent : '';
+    let applyBody = null;
+    const origFetch = window.fetch;
+    window.fetch = async (url, opts = {}) => {
+        if (String(url).includes('/api/improvements/imp-1/apply')) applyBody = opts.body;
+        return origFetch(url, opts);
+    };
+    if (impCard) {
+        impCard.querySelector('.improvement-text').value = 'Halve size before PCE (edited).';
+        impCard.querySelector('.proposal-apply').click();
+    }
+    await new Promise((r) => setTimeout(r, 80));
+    window.fetch = origFetch;
+    check('Improvement proposals: review rule proposal renders an approval card and Apply sends the edited text', () => {
+        assert(impCard, 'improvement card for imp-1 not rendered');
+        assert(impTitleBefore.includes('ENH_1') && impTitleBefore.includes('not applied'), `pending title was: ${impTitleBefore}`);
+        assert(applyBody && JSON.parse(applyBody).text === 'Halve size before PCE (edited).', `apply body was ${applyBody}`);
+        assert.strictEqual(impCard.dataset.state, 'applied');
+        assert(impCard.textContent.includes('A-1'), 'applied card should show the amendment id');
     });
 
     // Review Log / Chat actionable recommendation buttons & cost estimate removal check

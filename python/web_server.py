@@ -60,6 +60,13 @@ try:
     from alert_sentinel import ALERT_SENTINEL
     from analytics_engine import ANALYTICS_ENGINE
     from decision_backtester import backtest_decision_log, extract_chat_recommendations
+    from improvement_proposals import (
+        IMPROVEMENT_STORE,
+        ImprovementNotFoundError,
+        ImprovementStateError,
+        ImprovementValidationError,
+        extract_rule_proposals,
+    )
     from macro_calendar import get_macro_calendar_status
     from sec_edgar import fetch_recent_sec_filings
 except ImportError:
@@ -67,6 +74,13 @@ except ImportError:
     from python.alert_sentinel import ALERT_SENTINEL
     from python.analytics_engine import ANALYTICS_ENGINE
     from python.decision_backtester import backtest_decision_log, extract_chat_recommendations
+    from python.improvement_proposals import (
+        IMPROVEMENT_STORE,
+        ImprovementNotFoundError,
+        ImprovementStateError,
+        ImprovementValidationError,
+        extract_rule_proposals,
+    )
     from python.macro_calendar import get_macro_calendar_status
     from python.sec_edgar import fetch_recent_sec_filings
 
@@ -642,6 +656,25 @@ def _known_tickers() -> set:
         return set()
 
 
+def _live_spot_prices() -> Dict[str, float]:
+    """Latest live price per ticker from the market daemon snapshot (empty when unavailable)."""
+    prices: Dict[str, float] = {}
+    try:
+        import fetch_stocks
+        for t in fetch_stocks.get_global_state_snapshot().get("tickers", []) or []:
+            if not isinstance(t, dict) or not t.get("ticker"):
+                continue
+            try:
+                val = float(t.get("price"))
+            except (TypeError, ValueError):
+                continue
+            if val > 0:
+                prices[str(t["ticker"]).strip().upper()] = val
+    except Exception as e:
+        framework.log(f"[System Warning] Live price lookup for decision logging failed: {redact_secrets(str(e))}")
+    return prices
+
+
 def _log_chat_recommendations(response_text: str, turn_id: str, known_tickers: Optional[set]) -> int:
     """Appends one decision_log row per `[ACTION] TICKER ... $price` recommendation in a Council reply."""
     try:
@@ -653,19 +686,22 @@ def _log_chat_recommendations(response_text: str, turn_id: str, known_tickers: O
         return 0
     from datetime import datetime as _dt, timezone as _tz
     ts = _dt.now(_tz.utc).isoformat()
+    spot_by_ticker = _live_spot_prices()
     logged = 0
     try:
         service = get_persistence_service()
         for reco in recos:
+            spot = spot_by_ticker.get(reco["ticker"])
             service.append_decision_log({
                 "session_id": turn_id,
                 "ticker": reco["ticker"],
                 "action_proposed": reco["action"],
                 "decision_outcome": "RECOMMENDED",
-                "votes": {"source": "chat_recommendation", "price": reco["price"]},
+                # price = live spot at decision time (backtest entry); level = stop/limit the bullet cites
+                "votes": {"source": "chat_recommendation", "price": spot, "level": reco["level"]},
                 "transcript_text": reco["text"],
                 "timestamp": ts,
-                "price": reco["price"],
+                "price": spot,
             })
             logged += 1
     except PermissionError:
@@ -1212,6 +1248,7 @@ def chat_endpoint(req: ChatRequest):
 
             # Tag proposals staged by agent update_ssot tool calls during this turn
             PROPOSAL_STORE.current_turn_id = turn_id
+            IMPROVEMENT_STORE.current_turn_id = turn_id
             framework.reset_turn_usage()
 
             def turn_cancel_check() -> bool:
@@ -1437,6 +1474,7 @@ def chat_endpoint(req: ChatRequest):
                 "warning": active_model_warning,
                 "turn_id": turn_id,
                 "proposals": PROPOSAL_STORE.list(status="pending", turn_id=turn_id),
+                "improvement_proposals": IMPROVEMENT_STORE.list(status="pending", turn_id=turn_id),
             }
         except Exception as e:
             import traceback
@@ -1469,6 +1507,8 @@ def chat_endpoint(req: ChatRequest):
                 framework.cancel_check = orig_framework_cancel_check
                 if PROPOSAL_STORE.current_turn_id == turn_id:
                     PROPOSAL_STORE.current_turn_id = None
+                if IMPROVEMENT_STORE.current_turn_id == turn_id:
+                    IMPROVEMENT_STORE.current_turn_id = None
             with _turn_registry_lock:
                 if _active_turn_id == turn_id:
                     _active_turn_id = None
@@ -2053,6 +2093,54 @@ async def add_trade_lesson_endpoint(req: Request):
         return JSONResponse({"status": "error", "detail": "Failed to persist trade lesson"}, status_code=503)
 
 
+@app.get("/api/improvements")
+def list_improvement_proposals():
+    """Pending agent-proposed lessons and rules.md amendments awaiting owner approval."""
+    return {"status": "success", "proposals": IMPROVEMENT_STORE.list(status="pending")}
+
+
+@app.post("/api/improvements/{proposal_id}/apply")
+async def apply_improvement_proposal(proposal_id: str, req: Request):
+    """Owner approval: writes the (optionally edited) lesson or rule amendment."""
+    edited_text = None
+    try:
+        raw = await req.body()
+        if raw:
+            body = json.loads(raw)
+            if isinstance(body, dict) and body.get("text") is not None:
+                edited_text = str(body.get("text"))
+    except Exception:
+        return JSONResponse({"status": "error", "detail": "Invalid JSON body"}, status_code=422)
+    try:
+        applied = IMPROVEMENT_STORE.apply(proposal_id, edited_text=edited_text)
+    except ImprovementNotFoundError:
+        return JSONResponse({"status": "error", "detail": "Proposal not found."}, status_code=404)
+    except ImprovementStateError as se:
+        return JSONResponse({"status": "error", "detail": str(se)}, status_code=409)
+    except (ImprovementValidationError, PersistenceValidationError) as ve:
+        return JSONResponse({"status": "error", "detail": redact_secrets(str(ve))}, status_code=422)
+    except PermissionError:
+        raise
+    except Exception as e:
+        framework.log(f"[Error] Applying improvement {proposal_id} failed: {redact_secrets(str(e))}")
+        return JSONResponse({"status": "error", "detail": "Failed to apply proposal. Nothing was marked applied."}, status_code=503)
+    label = applied.get("amendment_id") or applied.get("kind")
+    framework.log(f"[System] Owner applied improvement proposal {proposal_id} ({label}).")
+    return {"status": "success", "proposal": applied}
+
+
+@app.post("/api/improvements/{proposal_id}/discard")
+def discard_improvement_proposal(proposal_id: str):
+    try:
+        discarded = IMPROVEMENT_STORE.discard(proposal_id)
+    except ImprovementNotFoundError:
+        return JSONResponse({"status": "error", "detail": "Proposal not found."}, status_code=404)
+    except ImprovementStateError as se:
+        return JSONResponse({"status": "error", "detail": str(se)}, status_code=409)
+    framework.log(f"[System] Owner discarded improvement proposal {proposal_id}.")
+    return {"status": "success", "proposal": discarded}
+
+
 @app.get("/api/alerts")
 def get_alerts():
     payload = ALERT_MONITOR.get_dashboard_payload()
@@ -2211,6 +2299,26 @@ def _load_review_log_prompt() -> str:
     return _REVIEW_LOG_FALLBACK_PROMPT
 
 
+def _stage_review_rule_proposals(review_text: str, turn_id: str) -> List[Dict[str, Any]]:
+    """Stages each [RULE_PROPOSAL] line of a review as a pending owner-approval proposal."""
+    try:
+        parsed = extract_rule_proposals(review_text)
+    except Exception as e:
+        framework.log(f"[System Warning] Rule proposal extraction failed: {redact_secrets(str(e))}")
+        return []
+    for prop in parsed:
+        try:
+            IMPROVEMENT_STORE.stage_rule(
+                prop["rule_id"], prop["text"], action=prop["action"],
+                justification=prop["justification"], source="Review Engine", turn_id=turn_id,
+            )
+        except Exception as e:
+            framework.log(f"[System Warning] Could not stage rule proposal: {redact_secrets(str(e))}")
+    if parsed:
+        framework.log(f"[System] Review Log staged {len(parsed)} rule proposal(s) for owner approval.")
+    return IMPROVEMENT_STORE.list(status="pending", turn_id=turn_id)
+
+
 @app.post("/api/review")
 def review_endpoint(req: ChatRequest):
     """Review Log chip: runs the read-only Review Engine over the decision log + deterministic backtest."""
@@ -2242,6 +2350,7 @@ def review_endpoint(req: ChatRequest):
                     return bool(turn_event.is_set() or (_active_turn_id == turn_id and cancel_event.is_set()))
 
             framework.cancel_check = turn_cancel_check
+            IMPROVEMENT_STORE.current_turn_id = turn_id
             framework.reset_turn_usage()
 
             framework.log("[System] Review Log: building decision-log evidence and backtest...")
@@ -2259,6 +2368,7 @@ def review_endpoint(req: ChatRequest):
             review_text = (review_text or "").strip() or (
                 "_[The Review Engine returned no text. Please try again or check system logs.]_"
             )
+            staged = _stage_review_rule_proposals(review_text, turn_id)
             evidence_line = (
                 f"> 🧾 **Evidence base:** {dq['scored_against_price_history']} decision(s) scored against price history, "
                 f"from {dq['per_ticker_decisions']} per-ticker decision(s) in {dq['decision_log_rows']} log rows "
@@ -2276,6 +2386,7 @@ def review_endpoint(req: ChatRequest):
                 "usage": usage_snapshot,
                 "turn_id": turn_id,
                 "evidence": dq,
+                "improvement_proposals": staged,
             }
         except Exception as e:
             error_msg = redact_secrets(str(e))
@@ -2293,6 +2404,8 @@ def review_endpoint(req: ChatRequest):
         finally:
             if activated:
                 framework.cancel_check = orig_framework_cancel_check
+                if IMPROVEMENT_STORE.current_turn_id == turn_id:
+                    IMPROVEMENT_STORE.current_turn_id = None
             with _turn_registry_lock:
                 if _active_turn_id == turn_id:
                     _active_turn_id = None

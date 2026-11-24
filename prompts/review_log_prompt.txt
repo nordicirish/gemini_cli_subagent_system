@@ -21,7 +21,7 @@ Failure patterns, calibration drift, repeated MAE breaches, data gaps. Prefix ea
 3-5 bullets. Each bullet starts with exactly one tag:
 - [LESSON] TICKER-or-PORTFOLIO — one self-contained sentence that can be saved verbatim to the trade_lessons registry.
 - [TRIGGER] TICKER — a concrete alert level with an exact $price and the direction (above/below) and why.
-- [RULE_PROPOSAL] RULE_ID — the rule in rules.md to ADD or MODIFY, the exact proposed text, and the evidence row(s) that justify it. These are proposals for the owner; never claim they are applied.
+- [RULE_PROPOSAL] RULE_ID — ADD: <exact rule text>. Justification: <evidence rows>. Use MODIFY instead of ADD when changing an existing rule, and name that rule as RULE_ID (e.g. MANDATE_52 or ENH_259; use NEW_RULE for a brand-new rule). Keep each proposal on one line. Each one becomes an approval card for the owner, who may edit it before applying, so never claim it is applied.
 
 ### 📊 Scorecard
 A compact table by action: count, hit rate %, avg 5D return %, avg MAE %. Then the 3 worst outcomes by 5D return with date, ticker, action, entry price.

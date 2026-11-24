@@ -159,6 +159,19 @@ class TestBacktesterAndSecEdgar(unittest.TestCase):
         self.assertEqual(res["entries"][0]["action"], "TRIM")  # the most recent decision, not the oldest
         self.assertAlmostEqual(res["entries"][0]["entry_price"], 10.5, places=4)
 
+    def test_backtester_ignores_transcript_blobs_without_a_ticker(self):
+        idx = pd.to_datetime(["2026-11-02", "2026-11-03", "2026-11-04"], utc=True)
+        hist = pd.DataFrame({"Close": [10.0, 10.5, 11.0]}, index=idx)
+        blob = "### 🏁 Final Council Decision\n\n**HOLD**\n\nRKLB leads; trim tranche armed at $72. " * 3
+        log = [
+            {"ticker": None, "action_proposed": blob, "timestamp": "2026-11-02T00:00:00Z"},
+            {"ticker": None, "action_proposed": "TRIM RCAT", "timestamp": "2026-11-02T00:00:00Z"},
+        ]
+        seen = []
+        res = backtest_decision_log(log, history_provider=lambda s: seen.append(s) or hist)
+        self.assertEqual(seen, ["RCAT"])  # the blob never yields a pseudo-ticker like "HOLD"
+        self.assertEqual(res["entries"][0]["action"], "TRIM")
+
     def test_extract_chat_recommendations_parses_actionable_section_only(self):
         text = "\n".join([
             "### 🏁 Final Council Decision",
@@ -176,8 +189,8 @@ class TestBacktesterAndSecEdgar(unittest.TestCase):
         ])
         recos = extract_chat_recommendations(text, known_tickers={"UMAC", "RCAT", "AMZN"})
         self.assertEqual([(r["ticker"], r["action"]) for r in recos], [("UMAC", "HOLD"), ("RCAT", "TRIM")])
-        self.assertAlmostEqual(recos[0]["price"], 8.71, places=2)
-        self.assertAlmostEqual(recos[1]["price"], 12.40, places=2)
+        self.assertAlmostEqual(recos[0]["level"], 8.71, places=2)
+        self.assertAlmostEqual(recos[1]["level"], 12.40, places=2)
         self.assertEqual(extract_chat_recommendations("no headings here"), [])
 
     def test_chat_recommendations_are_logged_as_per_ticker_rows(self):
@@ -188,13 +201,15 @@ class TestBacktesterAndSecEdgar(unittest.TestCase):
                 appended.append(entry)
 
         text = "### 🎯 Actionable Recommendations\n- **[TRIM] UMAC** — Sell 465 shares at $8.67."
-        with patch.object(web_server, "get_persistence_service", return_value=FakeSvc()):
+        with patch.object(web_server, "get_persistence_service", return_value=FakeSvc()),                 patch.object(web_server, "_live_spot_prices", return_value={"UMAC": 8.82}):
             n = web_server._log_chat_recommendations(text, "turn-x", {"UMAC"})
         self.assertEqual(n, 1)
         self.assertEqual(appended[0]["ticker"], "UMAC")
         self.assertEqual(appended[0]["action_proposed"], "TRIM")
         self.assertEqual(appended[0]["session_id"], "turn-x")
-        self.assertAlmostEqual(appended[0]["votes"]["price"], 8.67, places=2)
+        # Entry price is the live spot, not the $8.67 limit the bullet cites.
+        self.assertAlmostEqual(appended[0]["votes"]["price"], 8.82, places=2)
+        self.assertAlmostEqual(appended[0]["votes"]["level"], 8.67, places=2)
 
     def test_review_endpoint_runs_read_only_review_engine_with_evidence(self):
         captured = {}

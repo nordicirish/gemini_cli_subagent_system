@@ -395,11 +395,21 @@ class TestToolDispatcher(unittest.TestCase):
             # 3. tools.update_trade_lessons & intercept_and_log_decision also propagate errors fail-closed
             mock_service.save_trade_lessons.side_effect = PersistenceError("Lessons write failure")
             mock_service.append_decision_log.side_effect = PersistenceError("Decision write failure")
-            with execution_role_context("Terminal Orchestrator"):
-                with self.assertRaises(PersistenceError):
-                    tools.update_trade_lessons('[{"rule": "L-99: Test rule"}]')
-                with self.assertRaises(PersistenceError):
-                    tools.intercept_and_log_decision({"portfolio_snapshot": [{"ticker": "SPY", "action": "HOLD"}]})
+            with tempfile.TemporaryDirectory() as tmp:
+                from improvement_proposals import ImprovementProposalStore
+                temp_store = ImprovementProposalStore(store_path=os.path.join(tmp, "improvements.json"))
+                with patch.object(tools, "IMPROVEMENT_STORE", temp_store):
+                    # Owner/system path writes directly, so a persistence failure surfaces
+                    with self.assertRaises(PersistenceError):
+                        tools.update_trade_lessons('[{"rule": "L-99: Test rule"}]')
+                    with execution_role_context("Terminal Orchestrator"):
+                        # Agent path stages for owner approval and never touches trade_lessons
+                        msg = tools.update_trade_lessons('[{"rule": "L-99: Test rule"}]')
+                        self.assertIn("owner approval", msg)
+                        self.assertEqual(mock_service.save_trade_lessons.call_count, 1)
+                        self.assertEqual([p["text"] for p in temp_store.list()], ["L-99: Test rule"])
+                        with self.assertRaises(PersistenceError):
+                            tools.intercept_and_log_decision({"portfolio_snapshot": [{"ticker": "SPY", "action": "HOLD"}]})
 
 
 if __name__ == "__main__":

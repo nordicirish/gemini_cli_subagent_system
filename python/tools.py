@@ -20,6 +20,7 @@ from tool_registry import (
     get_active_caller_role,
 )
 from portfolio_proposals import PROPOSAL_STORE
+from improvement_proposals import IMPROVEMENT_STORE, is_agent_caller, lesson_items_from_payload
 
 try:
     from persistence import get_persistence_service, PersistenceError, PersistenceValidationError
@@ -162,6 +163,19 @@ def update_trade_lessons(lessons_json: str) -> str:
             raise PersistenceValidationError("lessons_json must resolve to a JSON list or object.")
     else:
         parsed_lessons = lessons_json
+
+    if is_agent_caller():
+        # Agents propose; the owner approves. Nothing reaches trade_lessons until Apply is clicked.
+        items = lesson_items_from_payload(parsed_lessons)
+        if not items:
+            raise PersistenceValidationError("lessons_json contained no lesson text to propose.")
+        role = get_active_caller_role()
+        staged = [IMPROVEMENT_STORE.stage_lesson(i["text"], i["ticker"], source=role) for i in items]
+        ids = ", ".join(s["id"] for s in staged)
+        return (
+            f"Staged {len(staged)} trade lesson(s) for owner approval ({ids}). "
+            "They are NOT saved yet; the owner applies or discards them in the dashboard."
+        )
 
     service = get_persistence_service()
     service.save_trade_lessons(parsed_lessons)
@@ -455,7 +469,7 @@ GLOBAL_TOOL_REGISTRY.register(
 GLOBAL_TOOL_REGISTRY.register(
     name="update_trade_lessons",
     func=update_trade_lessons,
-    description="Appends or updates historical trade lessons in context/trade_lessons.json.",
+    description="Proposes trade lessons. Agent calls are staged for owner approval in the dashboard and are not saved until the owner applies them.",
     classification="WRITE",
     required_permission="write_lessons",
     requires_human_approval=False,

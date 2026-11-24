@@ -74,10 +74,14 @@ def _extract_ticker_from_entry(entry: Dict[str, Any]) -> str:
     if isinstance(raw, str) and raw.strip():
         sym = raw.strip().upper()
         return "" if sym in _NON_TICKER_LABELS else sym
-    text = f"{entry.get('action_proposed', '')} {entry.get('lesson', '')}"
+    # Fallback for terse legacy rows only (e.g. action_proposed "TRIM RCAT"). A long value is a whole
+    # transcript pasted into the field, where the first caps word is prose ("HOLD", "VIX"), not a ticker.
+    text = f"{entry.get('action_proposed') or ''} {entry.get('lesson') or ''}".strip()
+    if len(text) > 80:
+        return ""
     for m in re.finditer(r"\b([A-Z]{2,5})\b", text):
         cand = m.group(1).upper()
-        if cand not in _NON_TICKER_LABELS:
+        if cand not in _NON_TICKER_LABELS and cand not in POSITIVE_ACTIONS and cand not in DEFENSIVE_ACTIONS:
             return cand
     return ""
 
@@ -163,12 +167,14 @@ def extract_chat_recommendations(
         if key in seen:
             continue
         seen.add(key)
-        price_m = _PRICE_RE.search(m.group("rest") or "")
-        price = _safe_float(price_m.group(1).replace(",", "")) if price_m else None
+        # The first $ figure is the level the bullet cites (stop / limit / target), NOT the spot
+        # price at decision time, so it is kept as "level" and never used as the entry price.
+        level_m = _PRICE_RE.search(m.group("rest") or "")
+        level = _safe_float(level_m.group(1).replace(",", "")) if level_m else None
         results.append({
             "ticker": ticker,
             "action": action,
-            "price": price,
+            "level": level,
             "text": line.strip().lstrip("*-+ ").strip()[:500],
         })
     return results
@@ -280,7 +286,9 @@ def backtest_decision_log(
             hit = ret_5d > 0.0
 
         audit = item.get("scrutiny_audit") if isinstance(item.get("scrutiny_audit"), dict) else {}
-        sa_score = _safe_float(audit.get("agreement_score_sa") or item.get("agreement_score_sa"))
+        sa_score = _safe_float(
+            audit.get("agreement_score_sa") or item.get("agreement_score_sa") or votes.get("agreement_score_sa")
+        )
         row_res = {
             "date": str(item.get("date") or (target_dt.strftime("%Y-%m-%d") if target_dt else "")),
             "ticker": ticker,

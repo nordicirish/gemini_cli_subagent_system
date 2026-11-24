@@ -71,3 +71,4 @@ node_modules/
 # Ephemeral agentic verification receipts, screenshots & logs
 .agents/state/
 .agents/logs/
+context/improvement_proposals.json

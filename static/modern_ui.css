@@ -431,6 +431,22 @@ a:active {
 .proposal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
 .proposal-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
 .proposal-status { color: var(--text-secondary); }
+.improvement-text {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 64px;
+    resize: vertical;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: rgba(0, 0, 0, 0.25);
+    color: inherit;
+    font: inherit;
+    font-size: 0.85rem;
+    line-height: 1.45;
+}
+.improvement-text:disabled { opacity: 0.8; }
+.improvement-justification { color: var(--text-secondary); font-size: 0.8rem; margin-top: 6px; }
 
 /* ─── Top-Loaded AI Verdict, Alerts & Recommendations Callouts ─── */
 .chat-top-brief {

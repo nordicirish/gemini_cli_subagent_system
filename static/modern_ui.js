@@ -816,6 +816,7 @@ const ModernChat = {
         this._renderStandbyMessage();
         // Pending proposals live server-side and survive a page reload.
         this.loadPendingProposals();
+        this.loadPendingImprovements();
     },
 
     async runUpdateAnalysis() {
@@ -1603,6 +1604,7 @@ const ModernChat = {
                 }
                 this.appendMessage('ai', data.response, true, cost, data.usage, data.model);
                 this.renderProposals(data.proposals);
+                this.renderImprovementProposals(data.improvement_proposals);
 
                 // Auto-save every Council response silently to the decision log
                 if (!(options && options.skipDecisionLog)) {
@@ -1776,6 +1778,144 @@ const ModernChat = {
             }
         } catch (e) {
             card.querySelectorAll('button').forEach(btn => { btn.disabled = false; });
+            if (status) status.textContent = 'Connection failed. Nothing was written.';
+        }
+    },
+
+    // --- Owner-approved self-improvement proposals (trade lessons & rules.md amendments) ---------
+    // Agents stage these instead of writing; nothing persists until the owner clicks Apply.
+    // Model-derived text is inserted with textContent / textarea.value (never innerHTML).
+
+    async loadPendingImprovements() {
+        try {
+            const res = await fetch('/api/improvements');
+            if (!res.ok) return;
+            const data = await res.json();
+            this.renderImprovementProposals(data.proposals);
+        } catch (e) {
+            console.warn('[Improvements] Failed to load pending proposals:', e);
+        }
+    },
+
+    renderImprovementProposals(proposals) {
+        if (!Array.isArray(proposals) || proposals.length === 0) return;
+        if (!this._renderedImprovementIds) this._renderedImprovementIds = new Set();
+        const aiMessages = Array.from(this.messages.querySelectorAll('.modern-message.ai:not(.thinking-msg)'));
+        const latestAi = aiMessages.length ? aiMessages[aiMessages.length - 1] : null;
+        let anchor = latestAi ? latestAi.querySelector('.chat-top-brief') : null;
+        proposals.forEach(p => {
+            if (!p || !p.id || this._renderedImprovementIds.has(p.id)) return;
+            this._renderedImprovementIds.add(p.id);
+            const card = this._buildImprovementCard(p);
+            if (anchor) {
+                anchor.after(card);
+                anchor = card;
+            } else {
+                this.messages.appendChild(card);
+            }
+        });
+        if (!latestAi) this.messages.scrollTop = this.messages.scrollHeight;
+    },
+
+    _buildImprovementCard(p) {
+        const isRule = p.kind === 'rule';
+        const card = document.createElement('div');
+        card.className = 'proposal-card improvement-card';
+        card.dataset.improvementId = p.id;
+        card.dataset.kind = p.kind;
+        card.dataset.state = 'pending';
+
+        const title = document.createElement('div');
+        title.className = 'proposal-title';
+        title.textContent = isRule
+            ? `🧠 Proposed rule ${p.action === 'MODIFY' ? 'change' : 'addition'} (${p.rule_id || 'NEW_RULE'}): not applied yet`
+            : `🧠 Proposed trade lesson${p.ticker && p.ticker !== 'PORTFOLIO' ? ` (${p.ticker})` : ''}: not saved yet`;
+        card.appendChild(title);
+
+        const meta = document.createElement('div');
+        meta.className = 'proposal-meta';
+        meta.textContent = isRule
+            ? `From ${p.source || 'the Review Engine'}. Applying appends it to "Owner-Approved Amendments" in rules.md. Edit the text first if needed.`
+            : `From ${p.source || 'an agent'}. Applying saves it to the trade lessons registry. Edit the text first if needed.`;
+        card.appendChild(meta);
+
+        const text = document.createElement('textarea');
+        text.className = 'improvement-text';
+        text.rows = 3;
+        text.value = p.text || '';
+        text.setAttribute('aria-label', isRule ? 'Proposed rule text' : 'Proposed lesson text');
+        card.appendChild(text);
+
+        if (p.justification) {
+            const just = document.createElement('div');
+            just.className = 'improvement-justification';
+            just.textContent = `Justification: ${p.justification}`;
+            card.appendChild(just);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'proposal-actions';
+        const applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.className = 'glow-btn proposal-apply';
+        applyBtn.textContent = isRule ? 'Apply to rules.md' : 'Save lesson';
+        const discardBtn = document.createElement('button');
+        discardBtn.type = 'button';
+        discardBtn.className = 'glow-btn outline proposal-discard';
+        discardBtn.textContent = 'Discard';
+        const status = document.createElement('span');
+        status.className = 'proposal-status';
+        status.setAttribute('role', 'status');
+        actions.append(applyBtn, discardBtn, status);
+        card.appendChild(actions);
+
+        applyBtn.addEventListener('click', () => this._resolveImprovement(card, 'apply'));
+        discardBtn.addEventListener('click', () => this._resolveImprovement(card, 'discard'));
+        return card;
+    },
+
+    _setImprovementCardState(card, state, titleText, message) {
+        card.dataset.state = state;
+        const title = card.querySelector('.proposal-title');
+        if (title && titleText) title.textContent = titleText;
+        const status = card.querySelector('.proposal-status');
+        if (status) status.textContent = message || '';
+        card.querySelectorAll('button, textarea').forEach(el => { el.disabled = true; });
+    },
+
+    async _resolveImprovement(card, action) {
+        const id = card.dataset.improvementId;
+        const isRule = card.dataset.kind === 'rule';
+        const status = card.querySelector('.proposal-status');
+        const textEl = card.querySelector('.improvement-text');
+        const controls = card.querySelectorAll('button, textarea');
+        controls.forEach(el => { el.disabled = true; });
+        if (status) status.textContent = action === 'apply' ? 'Applying…' : 'Discarding…';
+        try {
+            const opts = { method: 'POST' };
+            if (action === 'apply') {
+                opts.headers = { 'Content-Type': 'application/json' };
+                opts.body = JSON.stringify({ text: textEl ? textEl.value : undefined });
+            }
+            const res = await fetch(`/api/improvements/${encodeURIComponent(id)}/${action}`, opts);
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.status === 'success') {
+                if (action === 'apply') {
+                    const p = data.proposal || {};
+                    this._setImprovementCardState(card, 'applied',
+                        isRule ? `✅ Rule amendment applied${p.amendment_id ? ` (${p.amendment_id})` : ''}` : '✅ Lesson saved',
+                        isRule ? 'Agents will use it from their next call.' : (p.duplicate ? 'This lesson was already in the registry.' : 'Added to the trade lessons registry.'));
+                } else {
+                    this._setImprovementCardState(card, 'discarded', '✖ Proposal discarded', 'Nothing was written.');
+                }
+            } else if (res.status === 404 || res.status === 409) {
+                this._setImprovementCardState(card, 'expired', '⚠️ Proposal no longer available', data.detail || 'This proposal is no longer pending.');
+            } else {
+                controls.forEach(el => { el.disabled = false; });
+                if (status) status.textContent = `Failed: ${data.detail || `HTTP ${res.status}`}. Nothing was written.`;
+            }
+        } catch (e) {
+            controls.forEach(el => { el.disabled = false; });
             if (status) status.textContent = 'Connection failed. Nothing was written.';
         }
     },

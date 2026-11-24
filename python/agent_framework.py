@@ -690,6 +690,8 @@ DEFAULT_ANTIGRAVITY_MODELS: List[Dict[str, str]] = [
 
 _RULES_SECTION_PRIORITY = (
     "HEADER",
+    # Owner-approved amendments supersede earlier rules, so they must survive compaction.
+    "## Owner-Approved Amendments",
     "## System Thresholds",
     "## Global Logic Gates",
     "## Anti Hallucination Core",
