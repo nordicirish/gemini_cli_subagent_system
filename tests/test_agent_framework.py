@@ -862,6 +862,34 @@ class TestContextAndTokenEfficiency(unittest.TestCase):
             agent_framework.SUBAGENT_TURN_TIMEOUT_SECONDS,
         )
 
+    def test_rs1_rs3_rs4_compacted_rules_preserve_core_thresholds_and_modern_tiers(self):
+        """Compacted rules.md retains System Thresholds & core gates and removes stale model references."""
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parent.parent
+        rules_text = (repo_root / "gem_trading_rules" / "rules.md").read_text(encoding="utf-8")
+        compacted = agent_framework._compact_rules_for_budget(rules_text, 60_000)
+
+        for required in (
+            "## System Thresholds",
+            "## Global Logic Gates",
+            "## Anti Hallucination Core",
+            "## Tool Supremacy Hierarchy",
+            "## Score Protocol",
+            "GLOBAL_ALPHA_FRICTION_HURDLE",
+            "VOLATILITY_REGIME_TELEMETRY",
+        ):
+            self.assertIn(required, compacted, f"Compacted rules missing {required}")
+
+        for rel_path in (
+            "gem_trading_rules/rules.md",
+            "engine_instructions/terminal.md",
+            "engine_instructions/context_engine.md",
+        ):
+            txt = (repo_root / rel_path).read_text(encoding="utf-8")
+            self.assertNotIn("GEMMA (Gemma4 via Cloud)", txt, f"Stale GEMMA ref in {rel_path}")
+            self.assertNotIn("Gemini 3.8 Flash Extended", txt, f"Stale Gemini 3.8 ref in {rel_path}")
+
 
 if __name__ == "__main__":
     unittest.main()

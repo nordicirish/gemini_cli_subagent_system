@@ -87,4 +87,4 @@ SOLE OWNER of all state operations: merge, drift detection, commit, rule promoti
 - **notes**:
 
 ## Preferred Tier
-GEMMA (Gemma4 via Cloud)
+UTILITY / FAST (Executed locally via Antigravity Engine — e.g., Gemini 4 Hydrogen / Neon)

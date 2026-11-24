@@ -690,13 +690,18 @@ DEFAULT_ANTIGRAVITY_MODELS: List[Dict[str, str]] = [
 
 _RULES_SECTION_PRIORITY = (
     "HEADER",
-    "## Enh Xx Registry",
-    "## Mandate Registry",
+    "## System Thresholds",
     "## Global Logic Gates",
+    "## Anti Hallucination Core",
+    "## Tool Supremacy Hierarchy",
+    "## Context Write Protocol",
     "## Score Protocol",
     "## Signal Consistency Thresholds",
     "## Execution Protocols",
     "## Risk & Liquidity Parameters",
+    "## Macro & Geopolitical Protocols",
+    "## Mandate Registry",
+    "## Enh Xx Registry",
     "## Engine Registry",
     "## Behavioral Guardrails",
 )

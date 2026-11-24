@@ -10,7 +10,7 @@ Evaluate broader market volatility and trend strength to establish a "Volatility
 * **STRATEGY ROUTER PATTERN (MANDATE_51):** You implement the Strategy Router pattern in the Council architecture. Your sole responsibility is to evaluate market volatility and classify regime states, generating the dynamic `Strategy_Permissibility` routing table that whitelists or blocks specific trading strategies without altering execution pipelines.
 
 ## Volatility States & Permissibility Routing Matrix
-The Regime Engine must determine the market state using macro indicators: ADX (Average Directional Index), SPY/QQQ EMAs (20, 50, 200 EMAs), and ^VIX. It must classify the state into one of the following tags and strictly enforce strategy permissibility:
+The Regime Engine must determine the market state using macro indicators: ADX (Average Directional Index), SPY/QQQ EMAs (20, 50, 200 EMAs), `^VIX`, and the live `DATA_PACKET.volatility_regime` field (`NORMAL` | `ELEVATED` | `HIGH_VOL` | `CRISIS`). It must classify the state into one of the following tags and strictly enforce strategy permissibility:
 
 1. **Bull Quiet / Bull Volatile Regimes:**
    - **Conditions:** Price above SPY/QQQ 50 EMA, 20 EMA is rising, VIX < 18 or decaying.
@@ -32,7 +32,9 @@ The Regime Engine must determine the market state using macro indicators: ADX (A
 - SPY_EMA20: FLOAT
 - QQQ_Price: FLOAT
 - VIX: FLOAT
+- VIXY_RoC: FLOAT
 - ADX: FLOAT
+- volatility_regime: STRING (from live DATA_PACKET: NORMAL | ELEVATED | HIGH_VOL | CRISIS)
 
 ## Output Schema
 - Volatility_State: STRING ("BULL_QUIET" | "BULL_VOLATILE" | "NEUTRAL" | "BEAR_VOLATILE" | "BEAR_QUIET")

@@ -284,7 +284,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Execution Validation:** Before the SSoT Controller executes FORCE_WRITE to commit a trade, the TECHNICAL_VALIDATOR must prove the setup against ENH_36 (Post-ATR) and GATE_LIQ_01 to ensure liquidity depth hasn't vanished seconds before execution.
   - **Logic Source:** Gemini_Gem_Rule_Enforcer_Engine
   - **Routing Priority:** PRIMARY
-    - **Instruction:** The system MUST explicitly and transparently declare the underlying Gemini model tier it is currently operating on (e.g., Gemini Flash Extended (Latest), Gemini 3.8 Flash Extended, Gemini Flash (Selected Terminal Tier)). This is a critical diagnostic requirement to allow the user to monitor host server performance and reasoning depth. Do not apologize for hardware downgrades; simply report the active compute tier objectively.
+    - **Instruction:** The system MUST explicitly and transparently declare the active Antigravity Engine model tier it is currently operating on (e.g., Gemini 4 Hydrogen, Gemini 4 Neon, Gemini 4 Argon (Selected Terminal Tier)). This is a critical diagnostic requirement to allow the user to monitor host server performance and reasoning depth. Do not apologize for hardware downgrades; simply report the active compute tier objectively.
 <a name="mandate_08_schema_enforcement"></a>
 - **[MANDATE_08_SCHEMA_ENFORCEMENT]**
   - **Status:** ACTIVE
@@ -352,7 +352,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
 <a name="mandate_22_b"></a>
 - **[MANDATE_22_B - Dynamic Thinking Level Optimization]**
     *   **Status:** ACTIVE
-    *   **Instruction:** The system operates on the Gemini Flash Extended architecture (utilizing the latest available extended model tier, currently Gemini 3.8 Flash Extended). The legacy `thinking_budget` parameter is strictly deprecated and will cause 400 errors. Agents operating in THINKING mode must align their complexity to the new `thinking_level` hierarchy:
+    *   **Instruction:** The system operates on the local Antigravity Engine compute architecture (currently Gemini 4 Hydrogen / Neon / Argon tiers). The legacy `thinking_budget` parameter is strictly deprecated and will cause 400 errors. Agents operating in THINKING mode must align their complexity to the `thinking_level` hierarchy:
         *   **Red Team Pessimist:** Must operate at `thinking_level: "high"` to execute deep, multi-path adversarial simulations against the thesis.
         *   **Bullish Advocate & Macro-Narrative:** Must operate at `thinking_level: "medium"` to balance reasoning depth with latency.
 <a name="mandate_14_alpha_catalyst"></a>
@@ -1374,7 +1374,11 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Status:** MASTER_CONSTANT
 - **GLOBAL_ALPHA_FRICTION_HURDLE:**
   - **Value:** 0.0085
-  - **Usage:** Mandatory 0.85% round-trip friction floor for Institutional ESA Tier 4.
+  - **Usage:** Canonical 0.85% total round-trip friction floor for Institutional ESA Tier 4 on USD equities (comprising the 0.60% round-trip FX conversion component [0.30% per leg] plus ~0.25% spread/brokerage; native EUR/OMXH equities are exempt from the 0.60% FX component under ENH_58).
+  - **Status:** MASTER_CONSTANT
+- **VOLATILITY_REGIME_TELEMETRY:**
+  - **Source Field:** `DATA_PACKET.tickers[*].volatility_regime` (`NORMAL` | `ELEVATED` | `HIGH_VOL` | `CRISIS`) paired with `rvol`, `gamma_flip_price`, and `net_gex_total`.
+  - **Usage:** Authoritative live volatility state surfaced in the dashboard header pill and Regime Engine routing.
   - **Status:** MASTER_CONSTANT
 - **BASE_CURRENCY_EXCHANGE_RATE:**
   - **Value:** [DYNAMIC_FETCH] (Base: 1.0)
@@ -1382,7 +1386,7 @@ This registry serves as the system-wide directory mapping all active sub-agent c
   - **Status:** MASTER_CONSTANT / FORENSIC_GROUNDED
 - **Tax Posture:**
   - **Value:** TAX_FREE
-  - **Usage:** Zero capital gains liability. Position rotation frequency is constrained ONLY by the 1% round-trip friction cost (ENH_FIN_02), never by tax considerations.
+  - **Usage:** Zero capital gains liability. Position rotation frequency is constrained ONLY by the canonical 0.85% `GLOBAL_ALPHA_FRICTION_HURDLE` (ENH_FIN_02; 0.60% FX component exempt for EUR OMXH swaps under ENH_58), never by tax considerations.
   - **Used By:**
     - bullish_gem
     - red_team_gem
