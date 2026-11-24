@@ -2499,11 +2499,11 @@ class TestStage37ConsolidatedTrustPrecisionAndPersistence(unittest.TestCase):
         self.assertTrue(any("[REDACTED_SECRET]" in m for m in logged_messages))
         self.assertFalse(any("AIzaSyD-secret12345" in m for m in logged_messages))
 
-    def test_r3_modern_ui_preserves_stale_portfolio_and_renders_degraded_state(self):
-        """R3: modern_ui.js fetchPortfolio/renderPortfolio preserve lastValidPortfolioBasket and surface degraded/stale state on 503 errors."""
+    def test_r3_portfolio_preserves_stale_portfolio_and_renders_degraded_state(self):
+        """R3: portfolio.js fetchPortfolio/renderPortfolio preserve lastValidPortfolioBasket and surface degraded/stale state on 503 errors."""
         node_bin = shutil.which("node")
         self.assertIsNotNone(node_bin, "node executable must be available")
-        ui_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "modern_ui.js"))
+        ui_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "portfolio.js"))
 
         script = r"""
 const fs = require('fs');
@@ -2602,8 +2602,7 @@ const sandbox = {
 };
 
 vm.runInNewContext(uiCode, sandbox);
-const chatUI = sandbox.window.chatUI;
-chatUI.init();
+const panel = sandbox.window.PortfolioPanel;
 
 (async () => {
     const tbody = elementsById['portfolio-manager-body'];
@@ -2611,8 +2610,8 @@ chatUI.init();
 
     // 1. Initial failure: does not fabricate 0 cash/empty rows
     await sandbox.window.fetchPortfolio(true);
-    assert.strictEqual(chatUI.portfolioDegraded, true);
-    assert.strictEqual(chatUI.lastValidPortfolioBasket, null);
+    assert.strictEqual(panel.portfolioDegraded, true);
+    assert.strictEqual(panel.lastValidPortfolioBasket, null);
     assert.strictEqual(tbody.getAttribute('data-portfolio-state'), 'degraded');
     assert.strictEqual(tbody.getAttribute('data-portfolio-stale'), 'false');
     assert.strictEqual(tbody.innerHTML, '');
@@ -2620,7 +2619,7 @@ chatUI.init();
 
     // 2. Authoritative load succeeds
     await sandbox.window.fetchPortfolio(true);
-    assert.strictEqual(chatUI.portfolioDegraded, false);
+    assert.strictEqual(panel.portfolioDegraded, false);
     assert.strictEqual(tbody.getAttribute('data-portfolio-state'), 'authoritative');
     assert(tbody.innerHTML.includes('NVDA'));
     assert(tbody.innerHTML.includes('12.3456'));
@@ -2631,7 +2630,7 @@ chatUI.init();
 
     // 3. Subsequent 503 preserves lastValidPortfolioBasket & NVDA/1000.55 DOM rows
     await sandbox.window.fetchPortfolio(true);
-    assert.strictEqual(chatUI.portfolioDegraded, true);
+    assert.strictEqual(panel.portfolioDegraded, true);
     assert.strictEqual(tbody.getAttribute('data-portfolio-state'), 'degraded');
     assert.strictEqual(tbody.getAttribute('data-portfolio-stale'), 'true');
     assert.strictEqual(section.getAttribute('data-portfolio-stale'), 'true');
@@ -2640,7 +2639,7 @@ chatUI.init();
 
     // 4. Recovery restores authoritative state
     await sandbox.window.fetchPortfolio(true);
-    assert.strictEqual(chatUI.portfolioDegraded, false);
+    assert.strictEqual(panel.portfolioDegraded, false);
     assert.strictEqual(tbody.getAttribute('data-portfolio-state'), 'authoritative');
     assert.strictEqual(tbody.getAttribute('data-portfolio-stale'), 'false');
     assert(tbody.innerHTML.includes('SPY'));
@@ -2653,11 +2652,11 @@ chatUI.init();
         proc = subprocess.run([node_bin, "-e", script, ui_path], capture_output=True, text=True, timeout=15)
         self.assertEqual(proc.returncode, 0, f"Node test failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}")
 
-    def test_modern_ui_preserves_unsaved_draft_row_during_polling(self):
-        """modern_ui.js fetchPortfolio(false) skips polling overwrite when a draft row is present, while fetchPortfolio(true) refreshes."""
+    def test_portfolio_preserves_unsaved_draft_row_during_polling(self):
+        """portfolio.js fetchPortfolio(false) skips polling overwrite when a draft row is present, while fetchPortfolio(true) refreshes."""
         node_bin = shutil.which("node")
         self.assertIsNotNone(node_bin, "node executable must be available")
-        ui_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "modern_ui.js"))
+        ui_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "portfolio.js"))
 
         script = r"""
 const fs = require('fs');
@@ -2747,8 +2746,7 @@ const sandbox = {
 };
 
 vm.runInNewContext(uiCode, sandbox);
-const chatUI = sandbox.window.chatUI;
-chatUI.init();
+const panel = sandbox.window.PortfolioPanel;
 
 (async () => {
     const tbody = elementsById['portfolio-manager-body'];
@@ -2756,8 +2754,8 @@ chatUI.init();
     // 1. Authoritative initial load sets lastValidPortfolioBasket
     await sandbox.window.fetchPortfolio(true);
     assert.strictEqual(fetchCalls, 1);
-    assert.strictEqual(chatUI.lastValidPortfolioBasket.portfolio.length, 1);
-    assert.strictEqual(chatUI.lastValidPortfolioBasket.portfolio[0].ticker, 'SPY');
+    assert.strictEqual(panel.lastValidPortfolioBasket.portfolio.length, 1);
+    assert.strictEqual(panel.lastValidPortfolioBasket.portfolio[0].ticker, 'SPY');
 
     // 2. Render unsaved draft row (NVDA with wac=0)
     const rendered = sandbox.window.renderPortfolio({
@@ -2773,7 +2771,7 @@ chatUI.init();
     assert(tbody.innerHTML.includes('data-draft="true"'));
     assert(tbody.innerHTML.includes('placeholder="WAC > 0"'));
     // lastValidPortfolioBasket must NOT be polluted by the unsaved draft
-    assert.strictEqual(chatUI.lastValidPortfolioBasket.portfolio.length, 1);
+    assert.strictEqual(panel.lastValidPortfolioBasket.portfolio.length, 1);
 
     // 3. Background polling fetchPortfolio(false) must NOT clobber draft row
     await sandbox.window.fetchPortfolio(false);

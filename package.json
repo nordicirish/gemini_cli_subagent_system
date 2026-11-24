@@ -4,7 +4,8 @@
   "description": "Test-only JavaScript dependencies for the GEM dashboard. Nothing here ships to the browser; static/index.html loads its own pinned CDN copies of marked and DOMPurify (tests/test_chat_sanitizer.py checks the versions match).",
   "license": "UNLICENSED",
   "scripts": {
-    "test:sanitizer": "node tests/js/sanitize_chat_html.test.js"
+    "test:sanitizer": "node tests/js/sanitize_chat_html.test.js",
+    "test:dashboard": "node tests/js/dashboard_load.test.js"
   },
   "devDependencies": {
     "dompurify": "3.2.6",

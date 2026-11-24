@@ -53,9 +53,6 @@ const ModernChat = {
     input: null,
     messages: null,
     sendBtn: null,
-    lastValidPortfolioBasket: null,
-    portfolioDegraded: false,
-    portfolioDegradedDetail: null,
     
     BOOT_PROMPT: 'SYSTEM BOOT: Execute the full Stage 0 Council Boot Sequence. Using the live DATA_PACKET just injected: (1) Baseline sync — ground all portfolio prices. (2) Cash reconciliation. (3) Regime classification. (4) Portfolio health audit. (5) Market posture assessment. Output a clear, human-readable summary of your findings.',
 
@@ -123,14 +120,6 @@ const ModernChat = {
         this.activeAbortController = null;
         this.includeChartsNext = false;
         this.isAborted = false;
-        this.lastValidPortfolioBasket = null;
-        this.portfolioDegraded = false;
-        this.portfolioDegradedDetail = null;
-
-        if (typeof window !== 'undefined') {
-            window.fetchPortfolio = (force = false) => this.fetchPortfolio(force);
-            window.renderPortfolio = (data) => this.renderPortfolio(data);
-        }
 
         if (this.launcher) this.launcher.onclick = () => this.toggle();
         if (this.closeBtn) this.closeBtn.onclick = () => this.hide();
@@ -1552,192 +1541,8 @@ const ModernChat = {
         }
     },
 
-    markPortfolioDegraded(detail) {
-        const msg = detail || 'Authoritative portfolio persistence unavailable';
-        const isStale = this.lastValidPortfolioBasket !== null;
-        this.portfolioDegraded = true;
-        this.portfolioDegradedDetail = msg;
 
-        const tbody = document.getElementById('portfolio-manager-body');
-        const container =
-            document.getElementById('portfolio-manager-section')
-            || document.getElementById('portfolio-content')
-            || tbody;
-
-        if (tbody && typeof tbody.setAttribute === 'function') {
-            tbody.setAttribute('data-portfolio-state', 'degraded');
-            tbody.setAttribute('data-portfolio-stale', isStale ? 'true' : 'false');
-        }
-        if (container && typeof container.setAttribute === 'function') {
-            container.setAttribute('data-portfolio-state', 'degraded');
-            container.setAttribute('data-portfolio-stale', isStale ? 'true' : 'false');
-        }
-
-        if (container) {
-            let banner = document.getElementById('portfolio-degraded-banner');
-            if (!banner) {
-                banner = document.createElement('div');
-                banner.id = 'portfolio-degraded-banner';
-                banner.className = 'portfolio-degraded-banner';
-                banner.style.cssText = 'margin: 8px 0; padding: 8px 10px; border-radius: 6px; border: 1px solid #f85149; background: rgba(248, 81, 73, 0.12); color: #ff7b72; font-size: 0.78rem; font-weight: 700;';
-                if (typeof container.insertBefore === 'function' && container.firstChild) {
-                    container.insertBefore(banner, container.firstChild);
-                } else if (typeof container.appendChild === 'function') {
-                    container.appendChild(banner);
-                }
-            }
-            banner.style.display = 'block';
-            banner.setAttribute('data-portfolio-stale', isStale ? 'true' : 'false');
-            banner.textContent = isStale
-                ? `⚠️ STALE PORTFOLIO DATA — ${msg} (Showing last known valid portfolio)`
-                : `⚠️ PORTFOLIO UNAVAILABLE — ${msg}`;
-        }
-    },
-
-    clearPortfolioDegraded() {
-        this.portfolioDegraded = false;
-        this.portfolioDegradedDetail = null;
-
-        const tbody = document.getElementById('portfolio-manager-body');
-        const container =
-            document.getElementById('portfolio-manager-section')
-            || document.getElementById('portfolio-content')
-            || tbody;
-
-        if (tbody && typeof tbody.setAttribute === 'function') {
-            tbody.setAttribute('data-portfolio-state', 'authoritative');
-            tbody.setAttribute('data-portfolio-stale', 'false');
-        }
-        if (container && typeof container.setAttribute === 'function') {
-            container.setAttribute('data-portfolio-state', 'authoritative');
-            container.setAttribute('data-portfolio-stale', 'false');
-        }
-
-        const banner = document.getElementById('portfolio-degraded-banner');
-        if (banner) {
-            banner.style.display = 'none';
-            banner.textContent = '';
-            banner.setAttribute('data-portfolio-stale', 'false');
-        }
-    },
-
-    async fetchPortfolio(force = false) {
-        const tbody = document.getElementById('portfolio-manager-body');
-        const hasDraft = tbody && typeof tbody.querySelector === 'function'
-            && Boolean(tbody.querySelector('tr.portfolio-item-row[data-draft="true"]'));
-        if (!force && hasDraft) {
-            return;
-        }
-        if (
-            !force
-            && document.activeElement
-            && document.activeElement.classList
-            && document.activeElement.classList.contains('portfolio-input')
-        ) {
-            return;
-        }
-        try {
-            const res = await fetch('/api/basket');
-            const statusOk = res && (res.ok === true || (res.ok === undefined && (!res.status || res.status < 400)));
-            if (!statusOk) {
-                let detail = `Authoritative portfolio persistence unavailable (HTTP ${(res && res.status) || 'error'})`;
-                try {
-                    const errBody = await res.json();
-                    if (errBody && (errBody.detail || errBody.message)) {
-                        detail = errBody.detail || errBody.message;
-                    }
-                } catch (_) {}
-                this.markPortfolioDegraded(detail);
-                return;
-            }
-            const data = await res.json();
-            if (!data || data.status === 'error' || !Array.isArray(data.portfolio)) {
-                this.markPortfolioDegraded((data && (data.detail || data.message)) || 'Invalid portfolio payload');
-                return;
-            }
-            this.renderPortfolio(data);
-        } catch (e) {
-            this.markPortfolioDegraded((e && e.message) || 'Portfolio fetch failed');
-        }
-    },
-
-    renderPortfolio(data) {
-        if (!data || data.status === 'error' || !Array.isArray(data.portfolio)) {
-            this.markPortfolioDegraded(
-                (data && (data.detail || data.message)) || 'Authoritative portfolio persistence unavailable'
-            );
-            return false;
-        }
-
-        const hasDraft = Boolean(data._hasDraft);
-        if (!hasDraft) {
-            this.lastValidPortfolioBasket = JSON.parse(JSON.stringify(data));
-            this.clearPortfolioDegraded();
-        }
-
-        const tbody = document.getElementById('portfolio-manager-body');
-        if (!tbody) return true;
-
-        const portfolio = data.portfolio;
-        const cashRaw = data.unallocated_cash_eur !== undefined && data.unallocated_cash_eur !== null ? data.unallocated_cash_eur : 0;
-        const cashNum = Number(cashRaw) || 0;
-        // Live EUR/USD only, never an assumed rate. An explicit eurusd_rate key (even null) wins.
-        const sharedRate = (typeof currentEurUsdRate !== 'undefined') ? currentEurUsdRate : null;
-        const rawRate = Object.prototype.hasOwnProperty.call(data, 'eurusd_rate') ? data.eurusd_rate : sharedRate;
-        const rateNum = Number(rawRate);
-        const rate = rawRate !== null && rawRate !== undefined && Number.isFinite(rateNum) && rateNum > 0 ? rateNum : null;
-        if (typeof currentEurUsdRate !== 'undefined') {
-            currentEurUsdRate = rate;
-        }
-        const fxTitle = rate ? '' : ' title="Live EUR/USD rate unavailable"';
-        const cashUsd = rate ? `$${(cashNum * rate).toFixed(2)}` : '—';
-        const tickerMap = (typeof latestTickersMap !== 'undefined' && latestTickersMap) ? latestTickersMap : {};
-
-        let totalUsd = 0; // positions only; cash is added below via the live rate
-        let html = '';
-        portfolio.forEach((item, index) => {
-            const sharesVal = item.shares !== undefined && item.shares !== null ? item.shares : 0;
-            const wacVal = item.wac !== undefined && item.wac !== null ? item.wac : 0;
-            const isDraft = Boolean(item._draft);
-            const wacNum = Number(wacVal);
-            const showEmptyWac = isDraft && !(wacNum > 0);
-            const livePrice = (tickerMap[item.ticker] && tickerMap[item.ticker].price) || (wacNum > 0 ? wacNum : 0);
-            totalUsd += (Number(sharesVal) || 0) * livePrice;
-            const draftAttr = isDraft ? ' data-draft="true"' : '';
-            const wacInputVal = showEmptyWac ? '' : wacVal;
-            const wacPlaceholderAttr = showEmptyWac ? ' placeholder="WAC > 0" style="border-color: var(--yellow, #d29922);"' : '';
-            html += `
-            <tr data-index="${index}"${draftAttr} class="portfolio-item-row">
-                <td style="color: var(--accent); font-weight: 700; font-size: 0.8rem;">${item.ticker}</td>
-                <td><input type="number" class="portfolio-input" data-key="shares" value="${sharesVal}" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
-                <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${wacInputVal}"${wacPlaceholderAttr} oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
-                <td><button class="delete-btn" onclick="deleteFromPortfolio(${index})">&times;</button></td>
-            </tr>
-        `;
-        });
-
-        const grandUsd = rate ? cashNum * rate + totalUsd : null;
-        const totalEurText = rate ? `€${Math.round(grandUsd / rate).toLocaleString()}` : '—';
-        const totalUsdText = rate ? `$${Math.round(grandUsd).toLocaleString()}` : '—';
-        html += `
-        <tr class="cash-row" style="background: rgba(0, 255, 148, 0.05);">
-            <td style="color: var(--green); font-weight: 700; font-size: 0.75rem;">CASH (€)</td>
-            <td><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cashRaw}" style="color: var(--green);" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
-            <td colspan="2" id="cash-val-usd"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${cashUsd}</td>
-        </tr>
-        <tr class="total-row" style="background: rgba(88, 166, 255, 0.08);">
-            <td style="color: var(--accent); font-weight: 700; font-size: 0.75rem;">TOTAL</td>
-            <td id="total-val-eur"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; font-family: var(--font-mono);">${totalEurText}</td>
-            <td colspan="2" id="total-val-usd"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${totalUsdText}</td>
-        </tr>
-    `;
-
-        tbody.innerHTML = html;
-        return true;
-    }
 };
 
 window.chatUI = ModernChat;
-window.fetchPortfolio = (force = false) => ModernChat.fetchPortfolio(force);
-window.renderPortfolio = (data) => ModernChat.renderPortfolio(data);
 window.addEventListener('load', () => ModernChat.init());

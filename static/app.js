@@ -32,37 +32,6 @@ let MACRO_LABELS = {
     'QQQ': 'NASDAQ 100',
     'GDX': 'GOLD MINERS'
 };
-// Live EUR/USD (USD per EUR) from /api/basket. null = no fresh quote: conversions show "—"
-// instead of assuming a rate. USD cash itself is derived server-side.
-let currentEurUsdRate = null;
-const FX_UNAVAILABLE_TEXT = '—';
-const FX_UNAVAILABLE_TITLE = ' title="Live EUR/USD rate unavailable"';
-
-function liveEurUsdRate(candidate) {
-    const n = Number(candidate);
-    return candidate !== null && candidate !== undefined && Number.isFinite(n) && n > 0 ? n : null;
-}
-
-// Rate for a render: an explicit eurusd_rate key (even null) wins; otherwise keep the current one.
-function resolveRenderRate(data) {
-    return (data && Object.prototype.hasOwnProperty.call(data, 'eurusd_rate'))
-        ? liveEurUsdRate(data.eurusd_rate)
-        : currentEurUsdRate;
-}
-
-function formatUsdCash(cashEur, rate) {
-    return rate ? `$${(cashEur * rate).toFixed(2)}` : FX_UNAVAILABLE_TEXT;
-}
-
-// positionsUsd: market value of holdings (USD). Cash is EUR; totals need the live rate.
-function formatPortfolioTotals(cashEur, positionsUsd, rate) {
-    if (!rate) return { eur: FX_UNAVAILABLE_TEXT, usd: FX_UNAVAILABLE_TEXT };
-    const totalUsd = cashEur * rate + positionsUsd;
-    return {
-        eur: `€${Math.round(totalUsd / rate).toLocaleString()}`,
-        usd: `$${Math.round(totalUsd).toLocaleString()}`,
-    };
-}
 let latestTickersMap = {};
 
 const dCopyBtn = document.getElementById('copy-json-btn');
@@ -72,11 +41,7 @@ const dPasteBtn = document.getElementById('paste-payload-btn');
 const dMobileStatus = document.getElementById('mobile-data-status');
 
 // Manager Elements
-const dPortfolioBody = document.getElementById('portfolio-manager-body');
 const dWatchlistContainer = document.getElementById('watchlist-manager-container');
-const dAddPortfolioTicker = document.getElementById('add-portfolio-ticker');
-const dAddToPortfolioBtn = document.getElementById('add-to-portfolio-btn');
-const dSavePortfolioBtn = document.getElementById('save-portfolio-btn');
 const dAddWatchlistTicker = document.getElementById('add-watchlist-ticker');
 const dAddToWatchlistBtn = document.getElementById('add-to-watchlist-btn');
 
@@ -941,307 +906,6 @@ async function pollData() {
 // Start
 init();
 
-// Portfolio Logic
-function getPortfolioFeedbackEl() {
-    return document.getElementById('portfolio-feedback');
-}
-
-function setPortfolioHint(message, colorClass = 'text-yellow') {
-    const feedbackEl = getPortfolioFeedbackEl();
-    if (!feedbackEl) return;
-    if (!message) {
-        feedbackEl.textContent = '';
-        feedbackEl.className = 'status-message inline-feedback';
-        return;
-    }
-    feedbackEl.textContent = message;
-    feedbackEl.className = `status-message inline-feedback active ${colorClass}`;
-}
-
-async function fetchPortfolio(force = false) {
-    const hasDraft = dPortfolioBody
-        && typeof dPortfolioBody.querySelector === 'function'
-        && Boolean(dPortfolioBody.querySelector('tr.portfolio-item-row[data-draft="true"]'));
-    if (!force && hasDraft) return;
-    if (!force && document.activeElement && document.activeElement.classList.contains('portfolio-input')) return;
-    try {
-        const res = await fetch(`${API_BASE}/basket`);
-        const data = await res.json();
-        renderPortfolio(data);
-    } catch (e) { console.error("Portfolio fetch failed", e); }
-}
-
-function updatePortfolioTotals() {
-    const portfolio = getCurrentPortfolio();
-    const cashEur = getCurrentCash();
-    const rate = currentEurUsdRate;
-
-    const cashUsdEl = document.getElementById('cash-val-usd');
-    if (cashUsdEl) {
-        cashUsdEl.textContent = formatUsdCash(cashEur, rate);
-    }
-
-    let positionsUsd = 0;
-    portfolio.forEach(item => {
-        const livePrice = (latestTickersMap[item.ticker] && latestTickersMap[item.ticker].price) || item.wac || 0;
-        positionsUsd += (item.shares || 0) * livePrice;
-    });
-    const totals = formatPortfolioTotals(cashEur, positionsUsd, rate);
-
-    const totalEurEl = document.getElementById('total-val-eur');
-    const totalUsdEl = document.getElementById('total-val-usd');
-
-    if (totalEurEl) totalEurEl.textContent = totals.eur;
-    if (totalUsdEl) totalUsdEl.textContent = totals.usd;
-}
-
-function renderPortfolio(data) {
-    if (!dPortfolioBody) return;
-    let html = '';
-    const portfolio = data.portfolio || [];
-    const cash = data.unallocated_cash_eur || 0;
-    const rate = resolveRenderRate(data);
-    currentEurUsdRate = rate; // Update global rate
-    const cashUsd = formatUsdCash(cash, rate);
-    const fxTitle = rate ? '' : FX_UNAVAILABLE_TITLE;
-    
-    let totalUsd = 0; // positions only; cash is added via the live rate in formatPortfolioTotals
-    portfolio.forEach((item, index) => {
-        const isDraft = Boolean(item._draft);
-        const wacNum = Number(item.wac) || 0;
-        const showEmptyWac = isDraft && !(wacNum > 0);
-        const livePrice = (latestTickersMap[item.ticker] && latestTickersMap[item.ticker].price) || (wacNum > 0 ? wacNum : 0);
-        totalUsd += (item.shares || 0) * livePrice;
-        const draftAttr = isDraft ? ' data-draft="true"' : '';
-        const wacInputVal = showEmptyWac ? '' : (item.wac || 0);
-        const wacPlaceholderAttr = showEmptyWac ? ' placeholder="WAC > 0" style="border-color: var(--yellow, #d29922);"' : '';
-        html += `
-            <tr data-index="${index}"${draftAttr} class="portfolio-item-row">
-                <td style="color: var(--accent); font-weight: 700; font-size: 0.8rem;">${item.ticker}</td>
-                <td><input type="number" class="portfolio-input" data-key="shares" value="${item.shares || 0}" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
-                <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${wacInputVal}"${wacPlaceholderAttr} oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
-                <td><button class="delete-btn" onclick="deleteFromPortfolio(${index})">&times;</button></td>
-            </tr>
-        `;
-    });
-
-    const totals = formatPortfolioTotals(cash, totalUsd, rate);
-
-    html += `
-        <tr class="cash-row" style="background: rgba(0, 255, 148, 0.05);">
-            <td style="color: var(--green); font-weight: 700; font-size: 0.75rem;">CASH (€)</td>
-            <td><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cash}" style="color: var(--green);" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
-            <td colspan="2" id="cash-val-usd"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${cashUsd}</td>
-        </tr>
-        <tr class="total-row" style="background: rgba(88, 166, 255, 0.08);">
-            <td style="color: var(--accent); font-weight: 700; font-size: 0.75rem;">TOTAL</td>
-            <td id="total-val-eur"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; font-family: var(--font-mono);">${totals.eur}</td>
-            <td colspan="2" id="total-val-usd"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${totals.usd}</td>
-        </tr>
-    `;
-
-    dPortfolioBody.innerHTML = html;
-}
-
-async function addToPortfolio() {
-    const ticker = dAddPortfolioTicker.value.trim().toUpperCase();
-    if (!ticker) return;
-    const portfolio = getCurrentPortfolio();
-    if (portfolio.find(i => i.ticker === ticker)) {
-        setPortfolioHint(`${ticker} is already in your portfolio.`, 'text-yellow');
-        return;
-    }
-
-    const livePriceRaw = latestTickersMap[ticker] && Number(latestTickersMap[ticker].price);
-    const hasLivePrice = Number.isFinite(livePriceRaw) && livePriceRaw > 0;
-    dAddPortfolioTicker.value = '';
-
-    if (hasLivePrice) {
-        portfolio.push({
-            ticker,
-            shares: 1,
-            wac: Number(livePriceRaw.toFixed(2)),
-            _draft: false
-        });
-        const hasDraft = portfolio.some(i => Boolean(i._draft));
-        renderPortfolio({
-            portfolio: portfolio,
-            unallocated_cash_eur: getCurrentCash(),
-            eurusd_rate: currentEurUsdRate,
-            _hasDraft: hasDraft
-        });
-        if (!hasDraft) setPortfolioHint('');
-        updatePortfolioTotals();
-        await savePortfolio(portfolio, { explicit: true });
-        return;
-    }
-
-    portfolio.push({ ticker, shares: 1, wac: 0, _draft: true });
-    renderPortfolio({
-        portfolio: portfolio,
-        unallocated_cash_eur: getCurrentCash(),
-        eurusd_rate: currentEurUsdRate,
-        _hasDraft: true
-    });
-    updatePortfolioTotals();
-    setPortfolioHint(`Enter WAC (> 0) for ${ticker} and press Enter or SYNC to save.`, 'text-yellow');
-    if (dPortfolioBody) {
-        const draftRow = dPortfolioBody.querySelector('tr.portfolio-item-row[data-draft="true"]:last-of-type')
-            || dPortfolioBody.querySelector('tr.portfolio-item-row[data-draft="true"]');
-        const wacInput = draftRow && draftRow.querySelector('[data-key="wac"]');
-        if (wacInput) wacInput.focus();
-    }
-}
-
-function getCurrentPortfolio() {
-    const rows = dPortfolioBody.querySelectorAll('tr.portfolio-item-row');
-    const portfolio = [];
-    rows.forEach(row => {
-        portfolio.push({
-            ticker: (row.cells[0].textContent || '').trim().toUpperCase(),
-            shares: parseFloat(row.querySelector('[data-key="shares"]').value) || 0,
-            wac: parseFloat(row.querySelector('[data-key="wac"]').value) || 0,
-            _draft: row.getAttribute('data-draft') === 'true'
-        });
-    });
-    return portfolio;
-}
-
-function getCurrentCash() {
-    const cashInput = document.getElementById('cash-input-eur');
-    return cashInput ? parseFloat(cashInput.value) || 0 : 0;
-}
-
-let isSavingPortfolio = false;
-let pendingPortfolioSave = null;
-
-async function savePortfolio(portfolioArr, options = {}) {
-    const pArray = portfolioArr || getCurrentPortfolio();
-    const missingWac = pArray.find(i => (Number(i.shares) || 0) > 0 && !(Number(i.wac) > 0));
-    const btn = dSavePortfolioBtn;
-    const feedbackEl = getPortfolioFeedbackEl();
-
-    if (missingWac) {
-        const msg = `Enter a positive WAC (> 0) for ${missingWac.ticker} to save.`;
-        if (options.explicit && btn) {
-            showFeedback(btn, "WAC?", msg, true, feedbackEl);
-        } else {
-            setPortfolioHint(msg, 'text-yellow');
-        }
-        if (dPortfolioBody) {
-            const rows = dPortfolioBody.querySelectorAll('tr.portfolio-item-row');
-            for (const row of rows) {
-                const rowTicker = (row.cells[0].textContent || '').trim().toUpperCase();
-                if (rowTicker === missingWac.ticker) {
-                    const wacInput = row.querySelector('[data-key="wac"]');
-                    if (wacInput) wacInput.focus();
-                    break;
-                }
-            }
-        }
-        return;
-    }
-
-    if (isSavingPortfolio) {
-        pendingPortfolioSave = pArray;
-        return;
-    }
-    isSavingPortfolio = true;
-    if (btn) {
-        btn.innerHTML = "WAIT...";
-        btn.disabled = true;
-    }
-    try {
-        const cVal = getCurrentCash();
-        const rate = currentEurUsdRate;
-        const cleanPortfolio = pArray.map(({ ticker, shares, wac }) => ({ ticker, shares, wac }));
-        // USD cash is derived server-side from EUR at the live rate (unchanged if no fresh rate)
-        const payload = {
-            portfolio: cleanPortfolio,
-            unallocated_cash_eur: cVal
-        };
-        const res = await fetch(`${API_BASE}/basket`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        if (res.ok) {
-            const resData = await res.json();
-            if (resData && resData.portfolio) {
-                renderPortfolio({
-                    portfolio: resData.portfolio,
-                    unallocated_cash_eur: resData.unallocated_cash_eur !== undefined ? resData.unallocated_cash_eur : cVal,
-                    eurusd_rate: rate
-                });
-            }
-            setPortfolioHint('');
-            if (btn) {
-                btn.innerHTML = "SYNC";
-                btn.disabled = false;
-                showFeedback(btn, "SYNC ✅", "Portfolio saved!", false, feedbackEl);
-            }
-            updatePortfolioTotals();
-            // Trigger an immediate background poll to update the main dashboard table
-            await pollData();
-        } else {
-            let detail = `Failed to save portfolio (HTTP ${res.status})`;
-            try {
-                const errBody = await res.json();
-                if (errBody && (errBody.detail || errBody.message)) {
-                    detail = errBody.detail || errBody.message;
-                }
-            } catch (_) {}
-            if (btn) {
-                btn.innerHTML = "SYNC";
-                btn.disabled = false;
-                showFeedback(btn, "SYNC ❌", detail, true, feedbackEl);
-            } else {
-                setPortfolioHint(detail, 'text-red');
-            }
-        }
-    } catch (e) { 
-        console.error("Portfolio update failed", e); 
-        const msg = (e && e.message) || "Portfolio update failed";
-        if (btn) {
-            btn.innerHTML = "SYNC";
-            btn.disabled = false;
-            showFeedback(btn, "SYNC ❌", msg, true, feedbackEl);
-        } else {
-            setPortfolioHint(msg, 'text-red');
-        }
-    } finally {
-        isSavingPortfolio = false;
-        if (btn) {
-            btn.disabled = false;
-            if (btn.dataset.isFeedback !== "true") {
-                btn.innerHTML = "SYNC";
-            }
-        }
-        if (pendingPortfolioSave) {
-            const next = pendingPortfolioSave;
-            pendingPortfolioSave = null;
-            savePortfolio(next);
-        }
-    }
-}
-
-async function deleteFromPortfolio(index) {
-    const portfolio = getCurrentPortfolio();
-    if (index >= 0 && index < portfolio.length) {
-        portfolio.splice(index, 1);
-        const hasDraft = portfolio.some(i => Boolean(i._draft));
-        renderPortfolio({
-            portfolio: portfolio,
-            unallocated_cash_eur: getCurrentCash(),
-            eurusd_rate: currentEurUsdRate,
-            _hasDraft: hasDraft
-        });
-        if (!hasDraft) setPortfolioHint('');
-        updatePortfolioTotals();
-        await savePortfolio(portfolio);
-    }
-}
-
 // Watchlist Logic
 async function fetchWatchlist() {
     if (document.activeElement === dAddWatchlistTicker) return;
@@ -1442,27 +1106,18 @@ if (dAiScoutMaxRsiSelect) {
 
 
 // Global Exports
-window.deleteFromPortfolio = deleteFromPortfolio;
 window.deleteFromWatchlist = deleteFromWatchlist;
 window.toggleScoutCategory = toggleScoutCategory;
 window.toggleSection = toggleSection;
 window.copySessionReviewPayload = copySessionReviewPayload;
 window.runScout = runScout;
-window.updatePortfolioTotals = updatePortfolioTotals;
 
-if (dAddPortfolioTicker) {
-    dAddPortfolioTicker.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') addToPortfolio();
-    });
-}
 if (dAddWatchlistTicker) {
     dAddWatchlistTicker.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') addToWatchlist();
     });
 }
 
-if (dAddToPortfolioBtn) dAddToPortfolioBtn.addEventListener('click', addToPortfolio);
-if (dSavePortfolioBtn) dSavePortfolioBtn.addEventListener('click', () => savePortfolio(null, { explicit: true }));
 if (dAddToWatchlistBtn) dAddToWatchlistBtn.addEventListener('click', addToWatchlist);
 
 // Shared scout runner — mode: 'sectors' | 'watchlist'
@@ -1516,25 +1171,6 @@ if (dScanWatchlistBtn) {
     dScanWatchlistBtn.addEventListener('click', () => runScout('watchlist'));
 }
 
-
-// Real-time conversion feedback as user types cash value
-dPortfolioBody.addEventListener('input', (e) => {
-    if (e.target.id === 'cash-input-eur') {
-        const val = parseFloat(e.target.value) || 0;
-        const usdDisplay = e.target.closest('tr').querySelector('td[colspan="2"]');
-        if (usdDisplay) {
-            usdDisplay.textContent = formatUsdCash(val, currentEurUsdRate);
-        }
-    }
-});
-
-// Save immediately on Enter inside portfolio table inputs (replaces duplicate change listener)
-dPortfolioBody.addEventListener('keydown', async (e) => {
-    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('portfolio-input')) {
-        e.preventDefault();
-        await savePortfolio(null, { explicit: true });
-    }
-});
 
 async function copySessionReviewPayload(triggerBtn, statusEl) {
     const btn = triggerBtn || document.getElementById('btn-session-review');
