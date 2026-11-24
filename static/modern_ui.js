@@ -889,34 +889,9 @@ const ModernChat = {
             renderSanitizedMarkdown(msgDiv, text);
             this.enhanceAiMessageStructure(msgDiv, model);
 
-            // Collapsible SSoT Payload dynamic text toggling (v10.46)
-            const payloadDetails = msgDiv.querySelectorAll('.execution-payload-details');
-            payloadDetails.forEach(details => {
-                const summaryText = details.querySelector('summary');
-                if (summaryText) {
-                    details.addEventListener('toggle', () => {
-                        const isOpened = details.open;
-                        const text = summaryText.textContent;
-                        if (text.includes('Pending Your Approval')) {
-                            summaryText.textContent = isOpened
-                                ? '⏳ SSoT Execution Payload (Pending Your Approval — Expanded)'
-                                : '⏳ SSoT Execution Payload (Pending Your Approval)';
-                        } else if (text.includes('SSoT Synchronization Failed')) {
-                            summaryText.textContent = isOpened
-                                ? '⚠️ System Execution Payload (SSoT Synchronization Failed — Expanded)'
-                                : '⚠️ System Execution Payload (SSoT Synchronization Failed)';
-                        } else if (text.includes('Incomplete') || text.includes('⚠️')) {
-                            summaryText.textContent = isOpened 
-                                ? '⚠️ Incomplete SSoT Payload' 
-                                : '⚠️ Incomplete SSoT Payload (Truncated)';
-                        } else {
-                            summaryText.textContent = isOpened 
-                                ? '⚖️ SSoT Execution Payload' 
-                                : '⚖️ SSoT Execution Payload (Hidden)';
-                        }
-                    });
-                }
-            });
+            // The server strips SSoT EXECUTION_PAYLOAD JSON from replies; also drop the collapsible
+            // payload blocks that replies saved before that change (e.g. archived sessions) still carry.
+            msgDiv.querySelectorAll('.execution-payload-details').forEach(el => el.remove());
             
             // Collapsible Adversarial Framing Isolation (v10.36)
             const paragraphs = msgDiv.querySelectorAll('p');

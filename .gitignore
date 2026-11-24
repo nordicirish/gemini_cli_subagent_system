@@ -72,3 +72,4 @@ node_modules/
 .agents/state/
 .agents/logs/
 context/improvement_proposals.json
+context/gem.db.bak-*

@@ -610,29 +610,8 @@ def _is_halted_execution_payload(raw_json: str) -> Optional[str]:
 
 _PAYLOAD_MARKERS = ("EXECUTION_PAYLOAD", "thoughtSignature", "portfolio_snapshot")
 
-# Visual styling lives in static/modern_ui.css (keyed on data-payload-state); the chat UI strips
-# inline style attributes from rendered model output, so none are emitted here.
-_PAYLOAD_DETAILS_LABELS = {
-    "pending": "⏳ SSoT Execution Payload (Pending Your Approval)",
-    "no_changes": "⚖️ SSoT Execution Payload (Hidden)",
-    "skipped": "⚠️ SSoT Execution Payload (Skipped — Council Halt / Data Gap Active)",
-    "failed": "⚠️ System Execution Payload (SSoT Synchronization Failed)",
-}
-
-
 def _looks_like_execution_payload(text: str) -> bool:
     return any(marker in text for marker in _PAYLOAD_MARKERS)
-
-
-def _payload_details_html(json_text: str, state: str) -> str:
-    """Collapsible block that replaces the raw payload in the displayed response."""
-    label = _PAYLOAD_DETAILS_LABELS[state]
-    return (
-        f'\n\n<details class="execution-payload-details" data-payload-state="{state}">'
-        f'\n<summary>{label}</summary>'
-        f'\n<div class="payload-body">'
-        f'\n\n```json\n{json_text}\n```\n\n</div>\n</details>\n\n'
-    )
 
 
 def _known_tickers() -> set:
@@ -1343,11 +1322,8 @@ def chat_endpoint(req: ChatRequest):
                     raw_payload_json = inner_json
 
                     payload_result = _process_execution_payload(inner_json, turn_id)
-                    cleaned_response = (
-                        full_response[:idx]
-                        + _payload_details_html(inner_json, payload_result["state"])
-                        + full_response[block_end:]
-                    )
+                    # The payload is machine data for the proposal store: strip it from the reply entirely.
+                    cleaned_response = full_response[:idx] + "\n\n" + full_response[block_end:]
 
             # 2. Fallback: unfenced JSON object located by outermost braces
             if payload_result is None:
@@ -1372,11 +1348,7 @@ def chat_endpoint(req: ChatRequest):
 
                         raw_payload_json = candidate
                         payload_result = _process_execution_payload(candidate, turn_id)
-                        cleaned_response = (
-                            full_response[:clean_start_idx]
-                            + _payload_details_html(candidate, payload_result["state"])
-                            + full_response[clean_end_idx:]
-                        )
+                        cleaned_response = full_response[:clean_start_idx] + "\n\n" + full_response[clean_end_idx:]
 
             if payload_result is not None:
                 import re

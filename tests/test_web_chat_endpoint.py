@@ -2803,7 +2803,7 @@ const panel = sandbox.window.PortfolioPanel;
             res_slice = web_server.chat_endpoint(web_server.ChatRequest(message="Update via fenced payload"))
             self.assertEqual(res_slice["status"], "success")
             self.assertNotIn("synchronized successfully", res_slice["response"])
-            self.assertIn("SSoT Synchronization Failed", res_slice["response"])
+            self.assertNotIn("EXECUTION_PAYLOAD", res_slice["response"])  # payload JSON never shown
             self.assertIn("synchronization failed. Authoritative state was not updated", res_slice["response"])
 
             # 2. Brace-extracted unfenced payload
@@ -2815,7 +2815,7 @@ const panel = sandbox.window.PortfolioPanel;
             res_brace = web_server.chat_endpoint(web_server.ChatRequest(message="Update via brace payload"))
             self.assertEqual(res_brace["status"], "success")
             self.assertNotIn("synchronized successfully", res_brace["response"])
-            self.assertIn("SSoT Synchronization Failed", res_brace["response"])
+            self.assertNotIn("EXECUTION_PAYLOAD", res_brace["response"])  # payload JSON never shown
             self.assertIn("synchronization failed. Authoritative state was not updated", res_brace["response"])
 
     def test_r4_scout_categories_fails_honestly_with_503_and_skips_background_reload(self):

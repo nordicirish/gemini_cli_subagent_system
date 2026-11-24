@@ -425,6 +425,28 @@ async function main() {
         assert(window.document.getElementById('chart-exec-plan-btn'), 'chart-exec-plan-btn missing from chart modal');
     });
 
+    // Replies saved before payload stripping (e.g. archived sessions) must not show the SSoT JSON either
+    window.chatUI.appendMessage('ai', [
+        'Routine wrap.',
+        '',
+        '<details class="execution-payload-details" data-payload-state="no_changes">',
+        '<summary>⚖️ SSoT Execution Payload (Hidden)</summary>',
+        '<div class="payload-body">',
+        '',
+        '```json',
+        '{"EXECUTION_PAYLOAD": {"portfolio_snapshot": []}}',
+        '```',
+        '',
+        '</div>',
+        '</details>',
+    ].join('\n'), false);
+    const legacyMsg = [...window.document.querySelectorAll('.modern-message.ai')].slice(-1)[0];
+    check('Chat replies never display SSoT EXECUTION_PAYLOAD JSON (legacy blocks removed)', () => {
+        assert.strictEqual(legacyMsg.querySelector('.execution-payload-details'), null, 'payload details block still rendered');
+        assert(!legacyMsg.textContent.includes('EXECUTION_PAYLOAD'), 'payload JSON text still visible');
+        assert(legacyMsg.textContent.includes('Routine wrap.'), 'prose should remain');
+    });
+
     // Review Log chip goes to the dedicated read-only review endpoint, not the orchestrator chat
     const chatCallsBefore = calls.filter((c) => c === 'POST /api/chat').length;
     const saveLogBefore = calls.filter((c) => c === 'POST /api/save_decision_log').length;

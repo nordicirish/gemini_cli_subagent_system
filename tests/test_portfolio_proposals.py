@@ -266,7 +266,11 @@ class TestChatEndpointStagesPayload(unittest.TestCase):
             fetch_stocks.publish_global_state_snapshot(orig)
 
         self.assertEqual(res["status"], "success")
-        self.assertIn("Pending Your Approval", res["response"])
+        # The payload JSON is stripped from the reply entirely; only prose + status badge remain.
+        self.assertNotIn("EXECUTION_PAYLOAD", res["response"])
+        self.assertNotIn("```json", res["response"])
+        self.assertTrue(res["response"].startswith("Trim AMD."))
+        self.assertIn("Portfolio change proposed", res["response"])
         self.assertIn("Nothing has been written yet", res["response"])
         self.assertNotIn("synchronized successfully", res["response"])
         self.assertEqual(service.writes, [])
