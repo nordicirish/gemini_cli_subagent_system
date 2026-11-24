@@ -839,6 +839,29 @@ class TestContextAndTokenEfficiency(unittest.TestCase):
         self.assertIn("gemini-4-neon-high", fb_names)
         self.assertIn("gemini-4-hydrogen-high", fb_names)
 
+    def test_chat_session_forwards_turn_timeout_for_orchestrator_and_subagent(self):
+        """AntigravityChatSession uses 300s timeout for Orchestrator turns and 180s for Subagent turns."""
+        mock_runner = MagicMock()
+        mock_runner.run_prompt.return_value = AntigravityResponse("Done")
+
+        orch_session = self.framework.create_chat_session("SYS", [], model_name="gemini-4-neon-high")
+        orch_session.runner = mock_runner
+        orch_session.send_message("Run news scan")
+        self.assertEqual(
+            mock_runner.run_prompt.call_args.kwargs.get("timeout"),
+            agent_framework.ORCHESTRATOR_TURN_TIMEOUT_SECONDS,
+        )
+
+        mock_runner.reset_mock()
+        sub_session = agent_framework.AntigravityChatSession(
+            mock_runner, "SYS", [], is_subagent=True, model_name="gemini-4-hydrogen-high"
+        )
+        sub_session.send_message("Subagent query")
+        self.assertEqual(
+            mock_runner.run_prompt.call_args.kwargs.get("timeout"),
+            agent_framework.SUBAGENT_TURN_TIMEOUT_SECONDS,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

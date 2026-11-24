@@ -6927,6 +6927,49 @@ def get_macro_telemetry_context():
     return v_p, v_regime, v_roc
 
 
+_NO_VWAP_SYMBOLS = frozenset({"^VIX", "^VVIX"})
+
+
+def _select_next_vwap_batch(
+    all_tickers: Sequence[str],
+    pointer: int,
+    batch_size: int = 2,
+    current_vwaps: Optional[Dict[str, float]] = None,
+    max_catchup: int = 2,
+) -> Tuple[List[str], int]:
+    """
+    Selects the next VWAP refresh batch without even/odd modular starvation and
+    prioritizes up to max_catchup active tickers that currently have no VWAP (<= 0).
+    """
+    n = len(all_tickers)
+    if n == 0:
+        return [], 0
+    eff_batch_size = max(1, int(batch_size))
+    eff_ptr = int(pointer)
+    if eff_ptr < 0 or eff_ptr >= n:
+        eff_ptr = 0
+
+    batch = list(all_tickers[eff_ptr : eff_ptr + eff_batch_size])
+    next_ptr = 0 if (eff_ptr + eff_batch_size) >= n else (eff_ptr + eff_batch_size)
+
+    if current_vwaps is not None and max_catchup > 0:
+        added = 0
+        batch_set = set(batch)
+        for sym in all_tickers:
+            if added >= max_catchup:
+                break
+            sym_u = str(sym or "").strip().upper()
+            if not sym_u or sym_u in _NO_VWAP_SYMBOLS or sym in batch_set:
+                continue
+            cur_v = current_vwaps.get(sym, current_vwaps.get(sym_u, 0.0))
+            if not isinstance(cur_v, (int, float)) or isinstance(cur_v, bool) or cur_v <= 0:
+                batch.append(sym)
+                batch_set.add(sym)
+                added += 1
+
+    return batch, next_ptr
+
+
 # -----------------------------
 # MAIN LOOP
 # -----------------------------
@@ -7064,11 +7107,13 @@ def run_daemon():
             w_scr = max(10, avail - used)
             table_width = used + w_scr + 8
 
-            pointer = int(cache.vwap_pointer)
-            if pointer >= len(ALL_TICKERS):
-                pointer = 0
-            batch = ALL_TICKERS[pointer: pointer + BATCH_SIZE]  # type: ignore[call-overload]
-            cache.vwap_pointer = (pointer + BATCH_SIZE) % len(ALL_TICKERS)
+            batch, next_vwap_pointer = _select_next_vwap_batch(
+                ALL_TICKERS,
+                int(cache.vwap_pointer),
+                batch_size=BATCH_SIZE,
+                current_vwaps=cache.vwaps,
+            )
+            cache.vwap_pointer = next_vwap_pointer
 
             status_color = GREEN
             if status == "PRE-MARKET":
@@ -7089,6 +7134,14 @@ def run_daemon():
             print(f"Mode: {mode_str}")
             if remaining_tickers and not is_heavy:
                 print(f"{YELLOW}⏳ VWAP batch: [{', '.join(batch)}] fresh | [{', '.join(remaining_tickers)}] cached from prior cycle{RESET}")
+
+            # Drain completed heavy options/GEX results BEFORE coordinate_market_data_cycle()
+            # updates cache spot prices/timestamps, preserving exact spot snapshot alignment.
+            apply_background_heavy_market_data_results(
+                now_ny=ny_now,
+                coordinator=daemon_heavy_coord,
+                applicator=daemon_heavy_app,
+            )
 
             coordinate_market_data_cycle(
                 ALL_TICKERS,

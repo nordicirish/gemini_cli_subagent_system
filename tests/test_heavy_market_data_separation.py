@@ -1762,5 +1762,102 @@ class TestStage223Finding3DaemonCoordinatorShutdown(_HeavyMarketDataTestBase):
         self.assertTrue(any("Error shutting down coordinator during daemon exit: shutdown failure" in msg for msg in cm.output))
 
 
+class TestVwapRotationAndPreTickGexDrain(unittest.TestCase):
+    """Regression coverage for VWAP modular starvation fix and pre-tick GEX drain ordering."""
+
+    def test_select_next_vwap_batch_visits_all_indices_and_prioritizes_missing_vwap(self):
+        tickers = ["UMAC", "AMZN", "GOOG", "^VIX", "VIXY", "^VVIX", "IEF", "UUP", "SPY", "QQQ"]
+        # Simulate prior even-length modular starvation starting at odd pointer 1
+        visited = set()
+        ptr = 1
+        vwaps = {sym: 100.0 for sym in tickers if sym not in ("UMAC", "^VIX", "^VVIX")}
+        vwaps["UMAC"] = 0.0  # Held ticker with missing VWAP
+
+        first_batch, ptr = fs._select_next_vwap_batch(
+            tickers, ptr, batch_size=2, current_vwaps=vwaps, max_catchup=2
+        )
+        # Missing VWAP catch-up immediately picks up UMAC on the very first cycle
+        self.assertIn("UMAC", first_batch)
+        visited.update(first_batch)
+
+        # Walking pointer around full cycle with no missing catch-up visits index 0 cleanly too
+        ptr = 1
+        cycle_visited = set()
+        for _ in range(6):
+            b, ptr = fs._select_next_vwap_batch(tickers, ptr, batch_size=2, current_vwaps=None)
+            cycle_visited.update(b)
+        self.assertEqual(cycle_visited, set(tickers))
+
+    def test_draining_heavy_gex_before_spot_update_publishes_spy_and_qqq(self):
+        with _isolated_all_coordinators() as (_, _, _, _, heavy_coord, heavy_app):
+            t_obs = "2026-11-24T14:30:00Z"
+            t_ret = "2026-11-24T14:30:01Z"
+            for sym, spot in (("SPY", 719.50), ("QQQ", 641.50)):
+                fs.cache.prices[sym] = spot
+                fs.cache.price_validity[sym] = "VALID"
+                fs.cache.freshness[sym] = "CURRENT"
+                fs.cache.observation_times[sym] = t_obs
+                fs.cache.retrieval_times[sym] = t_ret
+
+            class _MockTicker:
+                def __init__(self, sym, spot):
+                    self.ticker = sym
+                    self._spot = spot
+                    self.options = ["2026-12-18"]
+                    self.fast_info = SimpleNamespace(three_month_average_volume=50_000_000)
+
+                def option_chain(self, exp):
+                    return _make_option_chain_pair(self._spot)
+
+            acc_spy, _ = fs.enqueue_options_gex(
+                "SPY", ticker_obj=_MockTicker("SPY", 719.50), spot_price=719.50, coordinator=heavy_coord
+            )
+            acc_qqq, _ = fs.enqueue_options_gex(
+                "QQQ", ticker_obj=_MockTicker("QQQ", 641.50), spot_price=641.50, coordinator=heavy_coord
+            )
+            self.assertTrue(acc_spy and acc_qqq)
+            self.assertTrue(_wait_workers_idle(heavy_coord, timeout=5.0))
+
+            # Drain BEFORE next tick mutates spot price/timestamps -> both SPY & QQQ publish
+            audit = fs.apply_background_heavy_market_data_results(
+                coordinator=heavy_coord, applicator=heavy_app
+            )
+            self.assertEqual(len(audit), 2)
+            self.assertTrue(all(ok for _, ok, _ in audit), f"Unexpected rejection: {audit}")
+            self.assertIn("SPY", fs.cache.gex)
+            self.assertIn("QQQ", fs.cache.gex)
+
+
+class TestDashboardRvolColumn(unittest.TestCase):
+    """Verify dashboard table header, row rendering, cache busting, and section colspan include rVol."""
+
+    def test_dashboard_table_includes_rvol_column_and_aligned_colspan(self):
+        import re
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parent.parent
+        html = (repo_root / "static" / "index.html").read_text(encoding="utf-8")
+        app_js = (repo_root / "static" / "app.js").read_text(encoding="utf-8")
+
+        table_match = re.search(
+            r'<table id="data-table">.*?<thead>\s*<tr>(.*?)</tr>\s*</thead>',
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(table_match)
+        headers = re.findall(r"<th\b[^>]*>(.*?)</th>", table_match.group(1), re.DOTALL)
+        self.assertEqual(len(headers), 14)
+        self.assertEqual(headers[4].strip(), "Volume")
+        self.assertEqual(headers[5].strip(), "rVol")
+        self.assertIn("app.js?v=18.56", html)
+
+        self.assertIn("rvol: 0,", app_js)
+        self.assertIn("<td>${formatVol(row.volume)}</td>\n                <td class=\"${rvolClass}\"", app_js.replace("\r\n", "\n"))
+        self.assertIn("Number(row.volume) > 0 && Number.isFinite(rvolNum) && rvolNum > 0", app_js)
+        self.assertIn("<td colspan=\"14\">${label}</td>", app_js)
+        self.assertIn("<td colspan=\"14\">Scout Intelligence Suggestions</td>", app_js)
+        self.assertNotIn("colspan=\"13\"", app_js)
+
+
 if __name__ == "__main__":
     unittest.main()

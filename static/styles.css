@@ -449,6 +449,14 @@ h1 {
     line-height: 1.2;
 }
 
+.macro-gex.text-green {
+    color: var(--green);
+}
+
+.macro-gex.text-red {
+    color: var(--red);
+}
+
 /* ─── Main Grid ─── */
 .main-content {
     display: grid;

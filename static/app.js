@@ -409,6 +409,7 @@ function renderTable(tickers, state) {
                 session_change_pct: 0,
                 gap_percent: 0,
                 volume: 0,
+                rvol: 0,
                 atr_percent: 0,
                 rsi: 50.0,
                 macd: 0.0,
@@ -551,6 +552,23 @@ function renderTable(tickers, state) {
         }
 
         const scoutIndicator = row._isScout ? `<span class="scout-dot"></span>` : '';
+        const rvolNum = Number(row.rvol);
+        const hasRvol = Number(row.volume) > 0 && Number.isFinite(rvolNum) && rvolNum > 0;
+        let rvolClass = 'text-muted';
+        let rvolStyle = '';
+        if (hasRvol) {
+            if (rvolNum >= 2.0) {
+                rvolClass = 'text-green';
+                rvolStyle = ' style="font-weight: 600;"';
+            } else if (rvolNum >= 1.5) {
+                rvolClass = 'text-yellow';
+            } else if (rvolNum < 0.5) {
+                rvolClass = 'text-muted';
+            } else {
+                rvolClass = 'text-white';
+            }
+        }
+        const rvolDisplay = hasRvol ? `${rvolNum.toFixed(2)}x` : '—';
         return `
             <tr class="chart-clickable" onclick="openChartModal('${sym}')" title="Click to view 1m TradingView chart">
                 <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}">
@@ -561,6 +579,7 @@ function renderTable(tickers, state) {
                 <td class="${dayColor}">${row.session_change_pct > 0 ? '+' : ''}${row.session_change_pct.toFixed(2)}%</td>
                 <td class="${gapColor}">${row.gap_percent > 0 ? '+' : ''}${row.gap_percent.toFixed(2)}%</td>
                 <td>${formatVol(row.volume)}</td>
+                <td class="${rvolClass}"${rvolStyle} title="Relative Volume vs 20d avg (time-paced)">${rvolDisplay}</td>
                 <td>${row.atr_percent.toFixed(2)}%</td>
                 <td class="${rsiColor}">${row.rsi.toFixed(1)}</td>
                 <td>${row.vwap > 0 ? row.vwap.toFixed(2) : '—'}</td>
@@ -592,7 +611,7 @@ function renderTable(tickers, state) {
 
     const renderHeader = (label, cls = '') => `
         <tr class="table-section-header ${cls}">
-            <td colspan="13">${label}</td>
+            <td colspan="14">${label}</td>
         </tr>
     `;
 
@@ -611,7 +630,7 @@ function renderTable(tickers, state) {
         if (groups.scouts.length > 0) {
             html += `
                 <tr class="table-sub-header scout-header">
-                    <td colspan="13">Scout Intelligence Suggestions</td>
+                    <td colspan="14">Scout Intelligence Suggestions</td>
                 </tr>
             `;
             groups.scouts.forEach(t => {
@@ -801,13 +820,17 @@ async function pollData() {
                         const changeStr = (changeVal > 0 ? '+' : '') + changeVal.toFixed(2) + '%';
                         const changeColor = changeVal > 0 ? 'text-green' : 'text-red';
                         
+                        const INDEX_GEX_TICKERS = new Set(['SPY', 'QQQ', 'IWM', 'DIA']);
+                        const symUpper = tickerStr.toUpperCase();
                         let gexLine = '';
-                        if (row.net_gex_total !== undefined && row.net_gex_total !== 0) {
-                            const gexVal = row.net_gex_total.toFixed(3);
+                        const rawGex = Number(row.net_gex_total);
+                        if (Number.isFinite(rawGex) && rawGex !== 0) {
+                            const gexSign = rawGex > 0 ? '+' : '';
+                            const gexVal = `${gexSign}${rawGex.toFixed(3)}`;
                             let gexColor = 'text-muted';
-                            if (row.net_gex_total > 0.005) {
+                            if (rawGex > 0.005) {
                                 gexColor = 'text-green';
-                            } else if (row.net_gex_total < -0.005) {
+                            } else if (rawGex < -0.005) {
                                 gexColor = 'text-red';
                             }
                             
@@ -819,6 +842,8 @@ async function pollData() {
                                 chevron = `<span class="text-red" style="margin-left: 2px; font-weight: bold;">▼</span>`;
                             }
                             gexLine = `<div class="macro-gex ${gexColor}">GEX: ${gexVal}${chevron}</div>`;
+                        } else if (INDEX_GEX_TICKERS.has(symUpper)) {
+                            gexLine = `<div class="macro-gex text-muted">GEX: —</div>`;
                         }
 
                         hudHtml += `

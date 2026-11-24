@@ -1039,6 +1039,8 @@ class AntigravityAgentRunner:
 
 
 MAX_SUBAGENT_TOOL_TURNS = 3
+ORCHESTRATOR_TURN_TIMEOUT_SECONDS = 300
+SUBAGENT_TURN_TIMEOUT_SECONDS = 180
 
 
 class AntigravityChatSession:
@@ -1052,6 +1054,7 @@ class AntigravityChatSession:
         generate_fn=None,
         is_subagent: bool = False,
         model_name: Optional[str] = None,
+        turn_timeout: Optional[int] = None,
     ):
         self.runner = runner
         self.sys_instruction = sys_instruction
@@ -1061,6 +1064,11 @@ class AntigravityChatSession:
         self.generate_fn = generate_fn
         self.is_subagent = is_subagent
         self.model_name = model_name
+        self.turn_timeout = (
+            turn_timeout
+            if turn_timeout is not None
+            else (SUBAGENT_TURN_TIMEOUT_SECONDS if is_subagent else ORCHESTRATOR_TURN_TIMEOUT_SECONDS)
+        )
         self.history = []
 
     def get_history(self):
@@ -1126,6 +1134,7 @@ class AntigravityChatSession:
                 user_input,
                 system_instruction=full_sys,
                 mode=self.mode,
+                timeout=self.turn_timeout,
                 model_name=self.model_name,
             )
 
