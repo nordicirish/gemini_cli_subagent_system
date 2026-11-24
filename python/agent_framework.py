@@ -11,7 +11,9 @@ import threading
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import concurrent.futures
+import datetime
 import logging
+from zoneinfo import ZoneInfo
 from logging.handlers import TimedRotatingFileHandler
 
 try:
@@ -1038,6 +1040,19 @@ class AntigravityAgentRunner:
         )
 
 
+NEW_YORK_TZ = ZoneInfo("America/New_York")
+
+
+def ny_now() -> datetime.datetime:
+    """Current New York wall-clock time; follows EST (UTC-5) / EDT (UTC-4) automatically."""
+    return datetime.datetime.now(NEW_YORK_TZ)
+
+
+def format_ny_timestamp(dt: datetime.datetime) -> str:
+    """The [SYSTEM_TIME (NEW YORK / ET)] format used in prompts (local NY wall-clock time)."""
+    return dt.astimezone(NEW_YORK_TZ).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 MAX_SUBAGENT_TOOL_TURNS = 3
 ORCHESTRATOR_TURN_TIMEOUT_SECONDS = 300
 SUBAGENT_TURN_TIMEOUT_SECONDS = 180
@@ -1664,19 +1679,15 @@ class AgentFramework:
     def create_agent_tool(self, name, file_path, mode="PRO", agent_tools=None):
         instruction = self.load_system_instruction(file_path)
 
-        import datetime
-        # Force US/Eastern (New York) Time — UTC-4 (EDT)
-        now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
-        ny_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
-        current_year = now.year
-
-        temporal_anchor = self.load_temporal_anchor_prompt(ny_iso, current_year)
-        final_instruction = instruction + temporal_anchor
-
         def call_subagent(query: str) -> str:
             cancel_fn = getattr(self, "cancel_check", None)
             if cancel_fn and cancel_fn():
                 return "[OFFLINE] Session terminated by user interrupt."
+
+            # Stamp the current New York time per call (DST-aware), not once at server start.
+            now = ny_now()
+            ny_iso = format_ny_timestamp(now)
+            final_instruction = instruction + self.load_temporal_anchor_prompt(ny_iso, now.year)
             with execution_role_context(name):
                 self.log(f"\n[Orchestrator -> {name}] Delegating: {query[:100]}...")
 

@@ -890,10 +890,8 @@ def chat_endpoint(req: ChatRequest):
             # 1. Map names to actual tool functions for manual execution
             tool_map = {f.__name__: f for f in terminal_tools}
 
-            import datetime
-            # Calculate US/Eastern (New York) Time (EDT is UTC-4)
-            ny_time = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
-            current_iso = ny_time.strftime("%Y-%m-%dT%H:%M:%S")
+            # Current New York time (DST-aware: EST UTC-5 / EDT UTC-4)
+            current_iso = agent_framework.format_ny_timestamp(agent_framework.ny_now())
 
             # --- AUTO DATA INJECTION ---
             # Build a structured DATA_PACKET from live GLOBAL_STATE for automatic context hydration.
