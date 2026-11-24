@@ -197,6 +197,10 @@ def main():
 
     sys_instruction = framework._get_sys_instruction(terminal_instruction)
 
+    # Live EUR/USD rate for USD cash derivation (replaces the former hardcoded 1.08)
+    import fx_rates
+    fx_rates.start_background_refresher(log=framework.log)
+
     chat = framework.create_chat_session(sys_instruction, terminal_tools, orchestrator_model)
 
     while True:

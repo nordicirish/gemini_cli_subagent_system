@@ -1849,7 +1849,10 @@ class TestDashboardRvolColumn(unittest.TestCase):
         self.assertEqual(len(headers), 14)
         self.assertEqual(headers[4].strip(), "Volume")
         self.assertEqual(headers[5].strip(), "rVol")
-        self.assertIn("app.js?v=18.56", html)
+        # Cache-bust must be at least the rVol release (18.56); later bumps are fine.
+        app_ver = re.search(r'app\.js\?v=(\d+)\.(\d+)', html)
+        self.assertIsNotNone(app_ver)
+        self.assertGreaterEqual((int(app_ver.group(1)), int(app_ver.group(2))), (18, 56))
 
         self.assertIn("rvol: 0,", app_js)
         self.assertIn("<td>${formatVol(row.volume)}</td>\n                <td class=\"${rvolClass}\"", app_js.replace("\r\n", "\n"))

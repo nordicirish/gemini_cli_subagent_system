@@ -39,6 +39,12 @@ try:
 except ImportError:
     from tool_registry import authorize_financial_mutation, get_active_caller_role
 
+# Bare import first so the process-wide live quote state is shared (see sqlite_adapter).
+try:
+    from fx_rates import derive_usd_cash, get_eurusd
+except ImportError:
+    from python.fx_rates import derive_usd_cash, get_eurusd
+
 from .contracts import (
     PersistenceAdapter,
     PersistenceError,
@@ -133,7 +139,7 @@ class JsonPersistenceAdapter(PersistenceAdapter):
                 "portfolio": [],
                 "unallocated_cash_eur": Decimal("0.00"),
                 "unallocated_cash_usd": Decimal("0.00"),
-                "eurusd_rate": 1.08,
+                **self._live_rate_fields(),
             }
 
         data = self._read_raw_ssot_dict()
@@ -142,7 +148,7 @@ class JsonPersistenceAdapter(PersistenceAdapter):
                 "portfolio": [],
                 "unallocated_cash_eur": Decimal("0.00"),
                 "unallocated_cash_usd": Decimal("0.00"),
-                "eurusd_rate": 1.08,
+                **self._live_rate_fields(),
             }
 
         ms = data.get("mutable_state", {})
@@ -209,7 +215,7 @@ class JsonPersistenceAdapter(PersistenceAdapter):
             ep.get("unallocated_cash_usd") if ep.get("unallocated_cash_usd") is not None else
             state_ctx.get("unallocated_cash_usd", Decimal("0.00"))
         )
-        raw_rate = data.get("exchange_rate", 1.08) if data.get("exchange_rate") is not None else 1.08
+        raw_rate = data.get("exchange_rate")
 
         cash_eur = validate_financial_decimal(
             raw_cash_eur if raw_cash_eur is not None else Decimal("0.00"),
@@ -225,24 +231,51 @@ class JsonPersistenceAdapter(PersistenceAdapter):
             allow_zero=True,
             non_negative=True,
         )
-        rate = validate_finite_float(raw_rate, "exchange_rate", allow_zero=False)
+        if raw_rate is not None:
+            # A rate stored in the SSoT file is data, not a default: keep honouring it.
+            rate_fields = {
+                "eurusd_rate": validate_finite_float(raw_rate, "exchange_rate", allow_zero=False),
+                "eurusd_rate_as_of": None,
+            }
+        else:
+            rate_fields = self._live_rate_fields()
 
         return {
             "portfolio": portfolio,
             "unallocated_cash_eur": cash_eur,
             "unallocated_cash_usd": cash_usd,
-            "eurusd_rate": rate,
+            **rate_fields,
         }
+
+    @staticmethod
+    def _live_rate_fields() -> Dict[str, Any]:
+        quote = get_eurusd()
+        return {
+            "eurusd_rate": quote.rate if quote else None,
+            "eurusd_rate_as_of": quote.as_of_utc if quote else None,
+        }
+
+    @staticmethod
+    def _resolve_usd_cash(eur_cash: Decimal, usd_cash: Optional[Decimal]) -> Optional[Decimal]:
+        """Same rules as SqlitePersistenceAdapter._resolve_usd_cash (None = keep stored USD)."""
+        if usd_cash is not None and (usd_cash > Decimal("0") or eur_cash == Decimal("0")):
+            return usd_cash
+        if eur_cash == Decimal("0"):
+            return Decimal("0.00")
+        quote = get_eurusd()
+        return derive_usd_cash(eur_cash, quote) if quote else None
 
     def save_portfolio_basket(
         self,
         portfolio: List[Dict[str, Any]],
         unallocated_cash_eur: Union[Decimal, int, str],
-        unallocated_cash_usd: Union[Decimal, int, str] = Decimal("0.00"),
+        unallocated_cash_usd: Optional[Union[Decimal, int, str]] = None,
         caller_role: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Saves updated portfolio holdings and cash balances into ssot.json atomically.
+        USD cash omitted (or 0 while EUR > 0) is derived at the live EUR/USD rate, or left
+        unchanged when no fresh rate exists.
         Enforces exact Decimal validation and authorize_financial_mutation before disk modification.
         """
         payload = {
@@ -292,32 +325,48 @@ class JsonPersistenceAdapter(PersistenceAdapter):
         eur_cash = validate_financial_decimal(
             unallocated_cash_eur, "unallocated_cash_eur", max_scale=2, allow_zero=True, non_negative=True
         )
-        usd_cash = validate_financial_decimal(
-            unallocated_cash_usd, "unallocated_cash_usd", max_scale=2, allow_zero=True, non_negative=True
+        usd_cash = (
+            validate_financial_decimal(
+                unallocated_cash_usd, "unallocated_cash_usd", max_scale=2, allow_zero=True, non_negative=True
+            )
+            if unallocated_cash_usd is not None
+            else None
         )
-        # Intentional FX conversion rounding boundary: when explicit USD cash is 0 and
-        # EUR cash > 0, derive USD cash at 1.08 EUR/USD quantized to 2 decimals (ROUND_HALF_UP).
-        if usd_cash == Decimal("0") and eur_cash > Decimal("0"):
-            usd_cash = (eur_cash * Decimal("1.08")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        usd_cash = self._resolve_usd_cash(eur_cash, usd_cash)
 
         eur_json_str = format_financial_decimal(eur_cash, min_scale=2)
-        usd_json_str = format_financial_decimal(usd_cash, min_scale=2)
+        usd_json_str = format_financial_decimal(usd_cash, min_scale=2) if usd_cash is not None else None
+        stored_usd: List[Any] = []
 
         def _update_basket_ssot(data: Any) -> Dict[str, Any]:
             if not isinstance(data, dict):
                 data = {}
             data["portfolio_snapshot"] = new_snapshot_json
             data["unallocated_cash_eur"] = eur_json_str
-            data["unallocated_cash_usd"] = usd_json_str
+            has_ms = "mutable_state" in data and isinstance(data["mutable_state"], dict)
+            if usd_json_str is not None:
+                data["unallocated_cash_usd"] = usd_json_str
+            else:
+                # No fresh FX rate: leave stored USD cash as it is.
+                existing = data["mutable_state"].get("unallocated_cash_usd") if has_ms else None
+                if existing is None:
+                    existing = data.get("unallocated_cash_usd", "0.00")
+                stored_usd.append(existing)
 
-            if "mutable_state" in data and isinstance(data["mutable_state"], dict):
+            if has_ms:
                 data["mutable_state"]["portfolio_snapshot"] = new_snapshot_json
                 data["mutable_state"]["unallocated_cash_eur"] = eur_json_str
-                data["mutable_state"]["unallocated_cash_usd"] = usd_json_str
+                if usd_json_str is not None:
+                    data["mutable_state"]["unallocated_cash_usd"] = usd_json_str
 
             return data
 
         atomic_update_json(self.ssot_path, _update_basket_ssot, default_factory=dict)
+        if usd_cash is None:
+            usd_cash = validate_financial_decimal(
+                stored_usd[0] if stored_usd else "0.00",
+                "unallocated_cash_usd", max_scale=2, allow_zero=True, non_negative=True,
+            )
         return {
             "status": "success",
             "portfolio": new_snapshot_dec,

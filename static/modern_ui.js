@@ -1460,7 +1460,7 @@ const ModernChat = {
         (p.cash || []).forEach(c => {
             const row = body.insertRow();
             row.className = 'proposal-row-cash';
-            [`Cash ${c.currency}`, 'Set', arrow(c.before, c.after), ''].forEach(val => { row.insertCell().textContent = val; });
+            [`Cash ${c.currency}`, c.note ? 'Derived' : 'Set', arrow(c.before, c.after), c.note || ''].forEach(val => { row.insertCell().textContent = val; });
         });
         card.appendChild(table);
 
@@ -1681,14 +1681,19 @@ const ModernChat = {
         const portfolio = data.portfolio;
         const cashRaw = data.unallocated_cash_eur !== undefined && data.unallocated_cash_eur !== null ? data.unallocated_cash_eur : 0;
         const cashNum = Number(cashRaw) || 0;
-        const rate = Number(data.eurusd_rate) || (typeof currentEurUsdRate !== 'undefined' && currentEurUsdRate) || 1.08;
+        // Live EUR/USD only, never an assumed rate. An explicit eurusd_rate key (even null) wins.
+        const sharedRate = (typeof currentEurUsdRate !== 'undefined') ? currentEurUsdRate : null;
+        const rawRate = Object.prototype.hasOwnProperty.call(data, 'eurusd_rate') ? data.eurusd_rate : sharedRate;
+        const rateNum = Number(rawRate);
+        const rate = rawRate !== null && rawRate !== undefined && Number.isFinite(rateNum) && rateNum > 0 ? rateNum : null;
         if (typeof currentEurUsdRate !== 'undefined') {
             currentEurUsdRate = rate;
         }
-        const cashUsd = (cashNum * rate).toFixed(2);
+        const fxTitle = rate ? '' : ' title="Live EUR/USD rate unavailable"';
+        const cashUsd = rate ? `$${(cashNum * rate).toFixed(2)}` : '—';
         const tickerMap = (typeof latestTickersMap !== 'undefined' && latestTickersMap) ? latestTickersMap : {};
 
-        let totalUsd = cashNum * rate;
+        let totalUsd = 0; // positions only; cash is added below via the live rate
         let html = '';
         portfolio.forEach((item, index) => {
             const sharesVal = item.shares !== undefined && item.shares !== null ? item.shares : 0;
@@ -1711,17 +1716,19 @@ const ModernChat = {
         `;
         });
 
-        const totalEur = totalUsd / rate;
+        const grandUsd = rate ? cashNum * rate + totalUsd : null;
+        const totalEurText = rate ? `€${Math.round(grandUsd / rate).toLocaleString()}` : '—';
+        const totalUsdText = rate ? `$${Math.round(grandUsd).toLocaleString()}` : '—';
         html += `
         <tr class="cash-row" style="background: rgba(0, 255, 148, 0.05);">
             <td style="color: var(--green); font-weight: 700; font-size: 0.75rem;">CASH (€)</td>
             <td><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cashRaw}" style="color: var(--green);" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
-            <td colspan="2" id="cash-val-usd" style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">$${cashUsd}</td>
+            <td colspan="2" id="cash-val-usd"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${cashUsd}</td>
         </tr>
         <tr class="total-row" style="background: rgba(88, 166, 255, 0.08);">
             <td style="color: var(--accent); font-weight: 700; font-size: 0.75rem;">TOTAL</td>
-            <td id="total-val-eur" style="font-size: 0.75rem; font-weight: 700; color: #fff; font-family: var(--font-mono);">€${Math.round(totalEur).toLocaleString()}</td>
-            <td colspan="2" id="total-val-usd" style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">$${Math.round(totalUsd).toLocaleString()}</td>
+            <td id="total-val-eur"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; font-family: var(--font-mono);">${totalEurText}</td>
+            <td colspan="2" id="total-val-usd"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${totalUsdText}</td>
         </tr>
     `;
 

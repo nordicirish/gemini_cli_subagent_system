@@ -41,6 +41,7 @@ try:
 except ImportError:
     from python.atomic_io import FileLock, atomic_update_json
 
+import fx_rates
 from portfolio_proposals import (
     PROPOSAL_STORE,
     ProposalConflictError,
@@ -118,7 +119,8 @@ class BasketRequest(BaseModel):
 class BasketSaveRequest(BaseModel):
     portfolio: List[BasketItem]
     unallocated_cash_eur: Decimal
-    unallocated_cash_usd: Decimal = Decimal("0.00")
+    # Omitted -> derived server-side from EUR at the live EUR/USD rate (unchanged if no fresh rate)
+    unallocated_cash_usd: Optional[Decimal] = None
 
     @field_validator("unallocated_cash_eur", mode="before")
     @classmethod
@@ -129,7 +131,9 @@ class BasketSaveRequest(BaseModel):
 
     @field_validator("unallocated_cash_usd", mode="before")
     @classmethod
-    def _validate_cash_usd(cls, v: Any) -> Decimal:
+    def _validate_cash_usd(cls, v: Any) -> Optional[Decimal]:
+        if v is None:
+            return None
         return validate_financial_decimal(
             v, "unallocated_cash_usd", max_scale=2, allow_zero=True, non_negative=True
         )
@@ -1060,6 +1064,8 @@ def chat_endpoint(req: ChatRequest):
                     "_meta": raw_meta if isinstance(raw_meta, (dict, collections.abc.Mapping)) else {},
                     "timestamp": live_state.get("timestamp", current_iso),
                     "market_status": live_state.get("status", "UNKNOWN"),
+                    # Live EUR/USD (USD per EUR); available=false means no fresh quote
+                    "fx": fx_rates.fx_public(fx_rates.get_eurusd()),
                     "tickers": slim_tickers,
                     "ssot": ssot,
                     "trade_lessons": trade_lessons_list[-10:],
@@ -1606,7 +1612,7 @@ async def save_basket(request: Request):
         )
         framework.log(
             f"[System] SSoT Basket & Cash updated: {len(new_snapshot)} holding(s). "
-            f"Cash: {req.unallocated_cash_eur} EUR | {req.unallocated_cash_usd} USD"
+            f"Cash: {req.unallocated_cash_eur} EUR | {updated_basket.get('unallocated_cash_usd')} USD"
         )
 
         # Hot-reload TICKERS in fetch_stocks so the scanning daemon immediately registers changes
@@ -1899,6 +1905,9 @@ if __name__ == "__main__":
     # Start the background data daemon
     daemon_thread = threading.Thread(target=run_daemon, daemon=True)
     daemon_thread.start()
+
+    # Live EUR/USD rate (refreshes every 5 minutes; replaces the former hardcoded 1.08)
+    fx_rates.start_background_refresher(log=framework.log)
 
     try:
         import fetch_stocks

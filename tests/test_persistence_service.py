@@ -231,7 +231,9 @@ class TestJsonPersistenceAdapter(unittest.TestCase):
         self.assertEqual(basket["portfolio"], [])
         self.assertEqual(basket["unallocated_cash_eur"], Decimal("0.00"))
         self.assertEqual(basket["unallocated_cash_usd"], Decimal("0.00"))
-        self.assertEqual(basket["eurusd_rate"], 1.08)
+        # No live quote in tests: the rate is reported as unavailable, never a default
+        self.assertIsNone(basket["eurusd_rate"])
+        self.assertIsNone(basket["eurusd_rate_as_of"])
 
     def test_empty_ssot_file_fails_closed_with_integrity_error(self):
         """Existing but empty or whitespace SSoT file must raise PersistenceIntegrityError."""
@@ -453,7 +455,9 @@ class TestSqlitePersistenceAdapter(unittest.TestCase):
         self.assertEqual(basket["portfolio"], [])
         self.assertEqual(basket["unallocated_cash_eur"], Decimal("0.00"))
         self.assertEqual(basket["unallocated_cash_usd"], Decimal("0.00"))
-        self.assertEqual(basket["eurusd_rate"], 1.08)
+        # No live quote in tests: the rate is reported as unavailable, never a default
+        self.assertIsNone(basket["eurusd_rate"])
+        self.assertIsNone(basket["eurusd_rate_as_of"])
 
         ssot = self.adapter.get_ssot_data()
         self.assertIsInstance(ssot, dict)

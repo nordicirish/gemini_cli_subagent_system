@@ -32,7 +32,37 @@ let MACRO_LABELS = {
     'QQQ': 'NASDAQ 100',
     'GDX': 'GOLD MINERS'
 };
-let currentEurUsdRate = 1.08; // Store EURUSD rate globally for real-time conversion
+// Live EUR/USD (USD per EUR) from /api/basket. null = no fresh quote: conversions show "—"
+// instead of assuming a rate. USD cash itself is derived server-side.
+let currentEurUsdRate = null;
+const FX_UNAVAILABLE_TEXT = '—';
+const FX_UNAVAILABLE_TITLE = ' title="Live EUR/USD rate unavailable"';
+
+function liveEurUsdRate(candidate) {
+    const n = Number(candidate);
+    return candidate !== null && candidate !== undefined && Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// Rate for a render: an explicit eurusd_rate key (even null) wins; otherwise keep the current one.
+function resolveRenderRate(data) {
+    return (data && Object.prototype.hasOwnProperty.call(data, 'eurusd_rate'))
+        ? liveEurUsdRate(data.eurusd_rate)
+        : currentEurUsdRate;
+}
+
+function formatUsdCash(cashEur, rate) {
+    return rate ? `$${(cashEur * rate).toFixed(2)}` : FX_UNAVAILABLE_TEXT;
+}
+
+// positionsUsd: market value of holdings (USD). Cash is EUR; totals need the live rate.
+function formatPortfolioTotals(cashEur, positionsUsd, rate) {
+    if (!rate) return { eur: FX_UNAVAILABLE_TEXT, usd: FX_UNAVAILABLE_TEXT };
+    const totalUsd = cashEur * rate + positionsUsd;
+    return {
+        eur: `€${Math.round(totalUsd / rate).toLocaleString()}`,
+        usd: `$${Math.round(totalUsd).toLocaleString()}`,
+    };
+}
 let latestTickersMap = {};
 
 const dCopyBtn = document.getElementById('copy-json-btn');
@@ -944,27 +974,25 @@ async function fetchPortfolio(force = false) {
 function updatePortfolioTotals() {
     const portfolio = getCurrentPortfolio();
     const cashEur = getCurrentCash();
-    const rate = currentEurUsdRate || 1.08;
-    const cashUsd = cashEur * rate;
+    const rate = currentEurUsdRate;
 
     const cashUsdEl = document.getElementById('cash-val-usd');
     if (cashUsdEl) {
-        cashUsdEl.textContent = `$${cashUsd.toFixed(2)}`;
+        cashUsdEl.textContent = formatUsdCash(cashEur, rate);
     }
 
-    let totalUsd = cashUsd;
+    let positionsUsd = 0;
     portfolio.forEach(item => {
         const livePrice = (latestTickersMap[item.ticker] && latestTickersMap[item.ticker].price) || item.wac || 0;
-        totalUsd += (item.shares || 0) * livePrice;
+        positionsUsd += (item.shares || 0) * livePrice;
     });
-
-    const totalEur = totalUsd / rate;
+    const totals = formatPortfolioTotals(cashEur, positionsUsd, rate);
 
     const totalEurEl = document.getElementById('total-val-eur');
     const totalUsdEl = document.getElementById('total-val-usd');
 
-    if (totalEurEl) totalEurEl.textContent = `€${Math.round(totalEur).toLocaleString()}`;
-    if (totalUsdEl) totalUsdEl.textContent = `$${Math.round(totalUsd).toLocaleString()}`;
+    if (totalEurEl) totalEurEl.textContent = totals.eur;
+    if (totalUsdEl) totalUsdEl.textContent = totals.usd;
 }
 
 function renderPortfolio(data) {
@@ -972,11 +1000,12 @@ function renderPortfolio(data) {
     let html = '';
     const portfolio = data.portfolio || [];
     const cash = data.unallocated_cash_eur || 0;
-    const rate = data.eurusd_rate || currentEurUsdRate || 1.08;
+    const rate = resolveRenderRate(data);
     currentEurUsdRate = rate; // Update global rate
-    const cashUsd = (cash * rate).toFixed(2);
+    const cashUsd = formatUsdCash(cash, rate);
+    const fxTitle = rate ? '' : FX_UNAVAILABLE_TITLE;
     
-    let totalUsd = cash * rate;
+    let totalUsd = 0; // positions only; cash is added via the live rate in formatPortfolioTotals
     portfolio.forEach((item, index) => {
         const isDraft = Boolean(item._draft);
         const wacNum = Number(item.wac) || 0;
@@ -996,18 +1025,18 @@ function renderPortfolio(data) {
         `;
     });
 
-    const totalEur = totalUsd / rate;
+    const totals = formatPortfolioTotals(cash, totalUsd, rate);
 
     html += `
         <tr class="cash-row" style="background: rgba(0, 255, 148, 0.05);">
             <td style="color: var(--green); font-weight: 700; font-size: 0.75rem;">CASH (€)</td>
             <td><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cash}" style="color: var(--green);" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
-            <td colspan="2" id="cash-val-usd" style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">$${cashUsd}</td>
+            <td colspan="2" id="cash-val-usd"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${cashUsd}</td>
         </tr>
         <tr class="total-row" style="background: rgba(88, 166, 255, 0.08);">
             <td style="color: var(--accent); font-weight: 700; font-size: 0.75rem;">TOTAL</td>
-            <td id="total-val-eur" style="font-size: 0.75rem; font-weight: 700; color: #fff; font-family: var(--font-mono);">€${Math.round(totalEur).toLocaleString()}</td>
-            <td colspan="2" id="total-val-usd" style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">$${Math.round(totalUsd).toLocaleString()}</td>
+            <td id="total-val-eur"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; font-family: var(--font-mono);">${totals.eur}</td>
+            <td colspan="2" id="total-val-usd"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${totals.usd}</td>
         </tr>
     `;
 
@@ -1124,12 +1153,12 @@ async function savePortfolio(portfolioArr, options = {}) {
     }
     try {
         const cVal = getCurrentCash();
-        const rate = currentEurUsdRate || 1.08;
+        const rate = currentEurUsdRate;
         const cleanPortfolio = pArray.map(({ ticker, shares, wac }) => ({ ticker, shares, wac }));
+        // USD cash is derived server-side from EUR at the live rate (unchanged if no fresh rate)
         const payload = {
             portfolio: cleanPortfolio,
-            unallocated_cash_eur: cVal,
-            unallocated_cash_usd: parseFloat((cVal * rate).toFixed(2))
+            unallocated_cash_eur: cVal
         };
         const res = await fetch(`${API_BASE}/basket`, {
             method: 'POST',
@@ -1482,10 +1511,9 @@ if (dScanWatchlistBtn) {
 dPortfolioBody.addEventListener('input', (e) => {
     if (e.target.id === 'cash-input-eur') {
         const val = parseFloat(e.target.value) || 0;
-        const usdVal = (val * currentEurUsdRate).toFixed(2);
         const usdDisplay = e.target.closest('tr').querySelector('td[colspan="2"]');
         if (usdDisplay) {
-            usdDisplay.textContent = `$${usdVal}`;
+            usdDisplay.textContent = formatUsdCash(val, currentEurUsdRate);
         }
     }
 });

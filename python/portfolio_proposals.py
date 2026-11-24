@@ -9,7 +9,8 @@ Merge semantics are per ticker:
   * a ticker absent from the proposal is left unchanged (never deleted);
   * a position closes only when the proposal explicitly sets its shares to 0;
   * a field (shares / wac) absent from a proposal entry keeps its current value;
-  * USD cash is never derived from EUR cash; an absent currency keeps its current value.
+  * when EUR cash changes and USD is not proposed, USD is derived at the live EUR/USD rate and
+    shown as its own diff row; with no fresh rate it keeps its current value (never a guessed rate).
 
 At apply time the touched tickers and currencies must still hold the values the diff was
 computed against; otherwise the proposal is rejected as stale and nothing is written.
@@ -31,6 +32,7 @@ except ImportError:
     from python.persistence import get_persistence_service, PersistenceValidationError
     from python.persistence.contracts import validate_financial_decimal
 
+from fx_rates import derive_usd_cash, get_eurusd
 from tool_registry import TRUSTED_SYSTEM_ROLES, get_active_caller_role
 
 _PORTFOLIO_KEYS = ("portfolio_snapshot", "portfolio")
@@ -189,8 +191,23 @@ def compute_changes(data: Dict[str, Any], current: Dict[str, Any]) -> Tuple[List
         after = _cash(raw, field)
         before = current["cash"][currency]
         if after != before:
-            cash_changes.append({"currency": currency, "before": before, "after": after})
+            cash_changes.append({"currency": currency, "before": before, "after": after, "note": None})
 
+    # USD cash mirrors EUR cash: when EUR changes and USD is not proposed, derive USD at the live
+    # EUR/USD rate and show it as its own diff row. Without a fresh rate USD stays unchanged.
+    eur_change = next((c for c in cash_changes if c["currency"] == "EUR"), None)
+    usd_proposed, _ = _find_first(data, ("unallocated_cash_usd",))
+    if eur_change is not None and not usd_proposed:
+        quote = get_eurusd()
+        if quote is not None:
+            derived = derive_usd_cash(eur_change["after"], quote)
+            if derived != current["cash"]["USD"]:
+                cash_changes.append({
+                    "currency": "USD",
+                    "before": current["cash"]["USD"],
+                    "after": derived,
+                    "note": f"derived from EUR at live EUR/USD {quote.rate} ({quote.as_of_utc})",
+                })
     return position_changes, cash_changes
 
 
@@ -309,7 +326,7 @@ class PortfolioProposal:
                 for c in self.position_changes
             ],
             "cash": [
-                {"currency": c["currency"], "before": _dec_str(c["before"]), "after": _dec_str(c["after"])}
+                {"currency": c["currency"], "before": _dec_str(c["before"]), "after": _dec_str(c["after"]), "note": c.get("note")}
                 for c in self.cash_changes
             ],
         }

@@ -55,6 +55,13 @@ from .contracts import (
     validate_finite_float,
 )
 
+# Bare import first: fx_rates holds process-wide quote state, so it must resolve to the same
+# module instance the web server's refresher updates (not a separate python.fx_rates copy).
+try:
+    from fx_rates import derive_usd_cash, get_eurusd
+except ImportError:
+    from python.fx_rates import derive_usd_cash, get_eurusd
+
 
 _UNSET = object()
 
@@ -185,6 +192,20 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
                     wac_eur=data["wac"],
                     caller_role=caller_role,
                 )
+
+    @staticmethod
+    def _resolve_usd_cash(eur_dec: Decimal, usd_dec: Optional[Decimal]) -> Optional[Decimal]:
+        """
+        Explicit positive USD cash is kept. Otherwise USD is the EUR equivalent at the live
+        EUR/USD rate (cents, ROUND_HALF_UP). Returns None (leave stored USD unchanged) when EUR
+        cash is positive but no fresh rate exists; zero EUR cash maps to zero USD.
+        """
+        if usd_dec is not None and (usd_dec > Decimal("0") or eur_dec == Decimal("0")):
+            return usd_dec
+        if eur_dec == Decimal("0"):
+            return Decimal("0.00")
+        quote = get_eurusd()
+        return derive_usd_cash(eur_dec, quote) if quote else None
 
     def _parse_payload_input(self, payload: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
         if isinstance(payload, dict):
@@ -397,13 +418,15 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
                 usd_amount = validate_financial_decimal(
                     usd_raw, "unallocated_cash_usd", max_scale=2, allow_zero=True, non_negative=True
                 )
-                rate = validate_finite_float(1.08, "exchange_rate", allow_zero=False, non_negative=True)
+                quote = get_eurusd()
 
                 return {
                     "portfolio": portfolio,
                     "unallocated_cash_eur": eur_amount,
                     "unallocated_cash_usd": usd_amount,
-                    "eurusd_rate": rate,
+                    # Live rate, or None when no fresh quote exists (never a default rate)
+                    "eurusd_rate": quote.rate if quote else None,
+                    "eurusd_rate_as_of": quote.as_of_utc if quote else None,
                 }
         except (PersistenceValidationError, PersistenceIntegrityError):
             raise
@@ -416,12 +439,15 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
         self,
         portfolio: List[Dict[str, Any]],
         unallocated_cash_eur: Union[Decimal, int, str],
-        unallocated_cash_usd: Union[Decimal, int, str] = Decimal("0.00"),
+        unallocated_cash_usd: Optional[Union[Decimal, int, str]] = None,
         caller_role: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Atomically updates cash and position records inside a single UnitOfWork transaction.
         Enforces exact Decimal validation, authorization, and automatic rollback on failure.
+
+        USD cash omitted (or 0 while EUR cash > 0) is derived from EUR at the live EUR/USD rate;
+        with no fresh rate the stored USD cash is left unchanged rather than guessed.
         """
         authorize_financial_mutation(
             operation_name="update_ssot",
@@ -434,13 +460,14 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
         eur_dec = validate_financial_decimal(
             unallocated_cash_eur, "unallocated_cash_eur", max_scale=2, allow_zero=True, non_negative=True
         )
-        usd_dec = validate_financial_decimal(
-            unallocated_cash_usd, "unallocated_cash_usd", max_scale=2, allow_zero=True, non_negative=True
+        usd_dec = (
+            validate_financial_decimal(
+                unallocated_cash_usd, "unallocated_cash_usd", max_scale=2, allow_zero=True, non_negative=True
+            )
+            if unallocated_cash_usd is not None
+            else None
         )
-        # Intentional FX conversion rounding boundary: when explicit USD cash is 0 and
-        # EUR cash > 0, derive USD cash at 1.08 EUR/USD quantized to 2 decimals (ROUND_HALF_UP).
-        if usd_dec == Decimal("0") and eur_dec > Decimal("0"):
-            usd_dec = (eur_dec * Decimal("1.08")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        usd_dec = self._resolve_usd_cash(eur_dec, usd_dec)
 
         try:
             with UnitOfWork(self._db_manager, auto_commit=True) as uow:
@@ -451,6 +478,9 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
                     usd_dec=usd_dec,
                     caller_role=caller_role,
                 )
+                if usd_dec is None:
+                    stored_usd = uow.cash.get_cash("PRIMARY", "USD")
+                    usd_dec = stored_usd.amount if stored_usd else Decimal("0.00")
 
             return {
                 "status": "success",
@@ -534,8 +564,8 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
             if has_usd
             else None
         )
-        if eur_dec is not None and not has_usd and eur_dec > Decimal("0"):
-            usd_dec = (eur_dec * Decimal("1.08")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if eur_dec is not None and not has_usd:
+            usd_dec = self._resolve_usd_cash(eur_dec, None)
 
         extracted_lessons = self._extract_lessons_from_payload(data)
         decision_params = self._extract_decision_params_from_payload(data, portfolio_source=raw_portfolio)

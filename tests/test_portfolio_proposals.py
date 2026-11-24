@@ -117,9 +117,10 @@ class TestProposalSemantics(unittest.TestCase):
                 {"ticker": "nvda", "shares": 2, "wac": "1.00"},
             ]))
 
-    def test_eur_only_change_keeps_usd_explicitly(self):
+    @patch("portfolio_proposals.get_eurusd", return_value=None)
+    def test_eur_only_change_keeps_usd_explicitly_without_live_rate(self, _no_rate):
         out = self.store.submit(_payload(unallocated_cash_eur=Decimal("2000.00")))
-        self.assertEqual(out["proposal"]["cash"], [{"currency": "EUR", "before": "1000.00", "after": "2000.00"}])
+        self.assertEqual(out["proposal"]["cash"], [{"currency": "EUR", "before": "1000.00", "after": "2000.00", "note": None}])
         self.store.apply(out["proposal"]["proposal_id"])
         written, _ = self.service.writes[-1]
         self.assertEqual(written["mutable_state"]["unallocated_cash_usd"], Decimal("500.00"))
