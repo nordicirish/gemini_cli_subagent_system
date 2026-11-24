@@ -62,3 +62,6 @@ context/gem.db-wal
 *.code-workspace
 
 cache/daily_history_cache.json
+
+# Node test-only dependencies (see package.json)
+node_modules/

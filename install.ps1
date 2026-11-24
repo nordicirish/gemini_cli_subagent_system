@@ -54,6 +54,23 @@ else {
     Exit 1
 }
 
+# 4b. Install test-only JavaScript dependencies (jsdom, DOMPurify, marked) for the chat sanitizer tests.
+#     Optional: the dashboard itself loads its own pinned CDN copies and does not need node_modules.
+$npmPath = Get-Command npm -ErrorAction SilentlyContinue
+if ($npmPath -and (Test-Path (Join-Path $PSScriptRoot "package.json"))) {
+    Write-Host "Installing test-only JavaScript dependencies (npm ci)..." -ForegroundColor Yellow
+    & npm ci --ignore-scripts --no-audit --no-fund
+    if ($?) {
+        Write-Host "JavaScript test dependencies installed." -ForegroundColor Green
+    }
+    else {
+        Write-Warning "npm ci failed; chat sanitizer jsdom tests will be skipped."
+    }
+}
+else {
+    Write-Warning "npm not found; skipping test-only JavaScript dependencies (chat sanitizer jsdom tests will be skipped)."
+}
+
 # 5. Create required directories
 $requiredDirs = @("logs", "context", "context/charts", "scripts", "prompts", "engine_instructions", "gem_trading_rules", "static", "cache")
 foreach ($dir in $requiredDirs) {
