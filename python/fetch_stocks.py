@@ -6320,11 +6320,21 @@ def calculate_score(symbol):
     return score, note
 
 
-def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None, open_price: float = 0.0, atr: float = 0.0, rsi: float = 50.0, rvol: float = 1.0, vwap: float = 0.0) -> dict:
-    """Calculates Trend-Based Fibonacci Extension & Profit-Taking targets
-    strictly optimized for the active daily trading session per ENH_254 & ENH_255.
-    Anchors to today's session high/low (HOD/LOD) and daily ATR volatility ceiling,
-    preventing stale multi-week swing distortion.
+def calculate_fib_forecast(
+    symbol: str,
+    current_price: float,
+    hist_df=None,
+    open_price: float = 0.0,
+    atr: float = 0.0,
+    rsi: float = 50.0,
+    rvol: float = 1.0,
+    vwap: float = 0.0,
+    session_change_pct: float = None,
+    trend: str = None,
+    market_status: str = None,
+) -> dict:
+    """Calculates direction-aware intraday Fibonacci Retracement/Extension targets
+    and rVol-scaled ATR ceilings bounded strictly to today's active session.
     """
     p = float(current_price) if current_price else 0.0
     if hist_df is None and symbol:
@@ -6357,6 +6367,7 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None, open
 
     if p <= 0 and day_h <= 0:
         return {
+            "mode": "NONE",
             "pA": 0.0, "pB": 0.0, "pC": 0.0,
             "impulse": 0.0,
             "t1_100": 0.0, "t1_pct": 0.0, "t1_limit": 0.0,
@@ -6373,121 +6384,203 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None, open
         }
 
     try:
+        rvol_val = float(rvol) if (rvol is not None and float(rvol) > 0) else 1.0
+        vwap_val = float(vwap or 0.0)
+
         # Anchor points strictly bounded to current session
         p_a = day_l
         p_b = day_h
-        
-        # Calculate session impulse
-        session_impulse = p_b - p_a
-        
-        # If session range is tight (early session), scale impulse using daily ATR
-        min_impulse = (atr_val * 0.50) if atr_val > 0 else (p * 0.02)
-        impulse = max(session_impulse, min_impulse, 0.01)
+        session_range = max(p_b - p_a, 0.0)
 
-        # Pullback floor PC: current price or estimated consolidation floor
-        if p > 0 and p <= p_b:
-            p_c = p
-        elif p > p_b:
-            # Active breakout into new session highs: retest base
-            p_c = round(p_b - (impulse * 0.382), 2)
-        else:
-            p_c = p_a + (impulse * 0.382)
+        # Realistic Intraday ATR Ceiling anchored from session low and scaled by rVol
+        rvol_scale = min(max(rvol_val, 0.55), 1.25)
+        daily_peak_atr = round(day_l + (atr_val * rvol_scale), 2) if atr_val > 0 else 0.0
 
-        # Daily Trading Peak Ratios per ENH_254 & ENH_255
-        ratio_defs = [
-            (0.236, "0.236 Early Trim"),
-            (0.382, "0.382 Conservative Trim"),
-            (0.500, "0.500 Mid Expansion"),
-            (0.618, "0.618 Golden Ratio"),
-            (0.786, "0.786 Extension"),
-            (1.000, "1.000 Measured Move (T1)"),
-            (1.272, "1.272 Expansion Peak"),
-            (1.618, "1.618 Golden Peak Target (T2)"),
-            (2.000, "2.000 Momentum Target"),
-            (2.618, "2.618 Parabolic Blow-Off (T3)")
-        ]
+        # Direction / Regime classification
+        is_pullback = (
+            (session_change_pct is not None and float(session_change_pct) < 0)
+            or (str(trend or "").upper() == "DOWN")
+            or (vwap_val > 0 and p > 0 and p < vwap_val * 0.999)
+            or (session_change_pct is None and open_p > 0 and p > 0 and p < open_p and p < day_h)
+        )
 
         levels = []
         next_res = None
         next_res_label = None
         dist_next_pct = None
 
-        # If current price is below the Daily Session High (PB), PB is the immediate resistance ceiling
-        if p > 0 and p_b > p:
-            pb_dist = round(((p_b - p) / p) * 100, 2)
-            levels.append({
-                "ratio": "Peak",
-                "label": "Daily Peak",
-                "price": round(p_b, 2),
-                "distance_pct": pb_dist
-            })
-            next_res = round(p_b, 2)
-            next_res_label = "Daily Peak"
-            dist_next_pct = pb_dist
+        if is_pullback:
+            mode = "RETRACEMENT"
+            impulse = session_range if session_range > 0 else max((atr_val * 0.35) if atr_val > 0 else (p * 0.015), 0.01)
+            p_c = p_a
 
-        for ratio, label in ratio_defs:
-            lvl_price = round(p_c + (ratio * impulse), 2)
-            lvl_dist = round(((lvl_price - p) / p) * 100, 2) if p > 0 else 0.0
-            levels.append({
-                "ratio": ratio,
-                "label": label,
-                "price": lvl_price,
-                "distance_pct": lvl_dist
-            })
-            if p > 0 and lvl_price > p and next_res is None:
-                next_res = lvl_price
-                next_res_label = label
-                dist_next_pct = lvl_dist
+            retracement_defs = [
+                (0.236, "0.236 Retracement"),
+                (0.382, "0.382 Retracement"),
+                (0.500, "0.500 Retracement"),
+                (0.618, "0.618 Golden Retracement"),
+                (0.786, "0.786 Deep Retracement"),
+                (1.000, "HOD (1.000 Recovery)"),
+            ]
 
-        if next_res is None and levels:
-            next_res = levels[-1]["price"]
-            next_res_label = str(levels[-1]["label"]) + " (Exceeded)"
-            dist_next_pct = levels[-1]["distance_pct"]
+            first_above_spot = None
+            for ratio, label in retracement_defs:
+                lvl_price = round(p_a + (ratio * impulse), 2)
+                lvl_dist = round(((lvl_price - p) / p) * 100, 2) if p > 0 else 0.0
+                entry = {
+                    "ratio": ratio,
+                    "label": label,
+                    "price": lvl_price,
+                    "distance_pct": lvl_dist,
+                }
+                levels.append(entry)
+                if p > 0 and lvl_price > p and first_above_spot is None:
+                    first_above_spot = entry
+                if p > 0 and lvl_price > p * 1.001 and next_res is None:
+                    next_res = lvl_price
+                    next_res_label = label
+                    dist_next_pct = lvl_dist
 
-        # Tranches per ENH_254: T1 = 1.000, T1.272 = 1.272, T2 = 1.618, T3 = 2.618
-        t1_val = round(p_c + (1.000 * impulse), 2)
-        t1272_val = round(p_c + (1.272 * impulse), 2)
-        t2_val = round(p_c + (1.618 * impulse), 2)
-        t3_val = round(p_c + (2.618 * impulse), 2)
+            if next_res is None and first_above_spot is not None:
+                next_res = first_above_spot["price"]
+                next_res_label = first_above_spot["label"]
+                dist_next_pct = first_above_spot["distance_pct"]
+            elif next_res is None and levels:
+                next_res = levels[-1]["price"]
+                next_res_label = levels[-1]["label"]
+                dist_next_pct = levels[-1]["distance_pct"]
 
-        # Front-running limit orders per ENH_254/255: 0.25% beneath the exact level
-        t1_limit = round(t1_val * 0.9975, 2)
-        t2_limit = round(t2_val * 0.9975, 2)
-        t3_limit = round(t3_val * 0.9975, 2)
+            # Fixed-anchor tranche reference values (anchored at p_a, never ticking spot)
+            t1_val = round(p_a + (1.000 * impulse), 2)
+            t1272_val = round(p_a + (1.272 * impulse), 2)
+            t2_val = round(p_a + (1.618 * impulse), 2)
+            t3_val = round(p_a + (2.618 * impulse), 2)
 
-        # ATR Daily Volatility Ceiling Confluence per ENH_255
-        daily_peak_atr = round(open_p + (1.25 * atr_val), 2) if (open_p > 0 and atr_val > 0) else 0.0
-        atr_confluence = False
-        confluent_target = None
-        if daily_peak_atr > 0:
-            for cand_val, cand_lbl in [(t1_val, "T1"), (t1272_val, "T1.272"), (t2_val, "T2")]:
-                if abs(cand_val - daily_peak_atr) / daily_peak_atr <= 0.018:
-                    atr_confluence = True
-                    confluent_target = cand_val
-                    break
+            t1_limit = round(t1_val * 0.9975, 2)
+            t2_limit = round(t2_val * 0.9975, 2)
+            t3_limit = round(t3_val * 0.9975, 2)
 
-        # Daily Peak Target Selection
-        if atr_confluence and confluent_target:
-            daily_peak_target = confluent_target
-        elif daily_peak_atr > 0 and abs(t2_val - daily_peak_atr) / daily_peak_atr <= 0.035:
-            # High proximity to daily volatility ceiling
-            daily_peak_target = t2_val
-        elif p_b > p and p_b >= t1_val:
-            daily_peak_target = p_b
+            if daily_peak_atr > p and p_b > p:
+                daily_peak_target = min(p_b, daily_peak_atr)
+            else:
+                daily_peak_target = p_b
+
+            atr_confluence = bool(
+                daily_peak_atr > 0 and abs(daily_peak_target - daily_peak_atr) / daily_peak_atr <= 0.018
+            )
+
+            if p_b > 0 and p >= p_b * 0.995:
+                daily_peak_status = "AT_PEAK_RESISTANCE"
+            elif vwap_val > 0 and p < vwap_val:
+                daily_peak_status = "BELOW_VWAP"
+            else:
+                daily_peak_status = "PULLBACK"
         else:
-            daily_peak_target = t2_val
+            mode = "EXTENSION"
+            min_impulse = (atr_val * 0.35) if atr_val > 0 else (p * 0.015)
+            impulse = max(session_range, min_impulse, 0.01)
 
-        # Daily Peak Exhaustion Status per ENH_255
-        daily_peak_status = "EXPANDING"
-        if p >= t1_val:
-            if (rvol < 1.5 and rsi > 70) or (vwap > 0 and p >= vwap * 1.10 and rsi > 80) or (daily_peak_target > 0 and p >= daily_peak_target * 0.995):
+            # Fixed pullback anchor p_c (never ticking current_price)
+            if vwap_val > 0 and p_a <= vwap_val <= p_b:
+                p_c = round(max(p_a, min(vwap_val, p_b - (impulse * 0.236))), 2)
+            else:
+                p_c = round(p_a + (impulse * 0.382), 2)
+
+            ratio_defs = [
+                (0.236, "0.236 Early Trim"),
+                (0.382, "0.382 Conservative Trim"),
+                (0.500, "0.500 Mid Expansion"),
+                (0.618, "0.618 Golden Ratio"),
+                (0.786, "0.786 Extension"),
+                (1.000, "1.000 Measured Move (T1)"),
+                (1.272, "1.272 Expansion Peak"),
+                (1.618, "1.618 Golden Peak Target (T2)"),
+                (2.000, "2.000 Momentum Target"),
+                (2.618, "2.618 Parabolic Blow-Off (T3)"),
+            ]
+
+            if p > 0 and p_b > p * 1.001:
+                pb_dist = round(((p_b - p) / p) * 100, 2)
+                levels.append({
+                    "ratio": "HOD",
+                    "label": "Session HOD",
+                    "price": round(p_b, 2),
+                    "distance_pct": pb_dist,
+                })
+                next_res = round(p_b, 2)
+                next_res_label = "Session HOD"
+                dist_next_pct = pb_dist
+
+            first_above_spot = None
+            for ratio, label in ratio_defs:
+                lvl_price = round(p_c + (ratio * impulse), 2)
+                lvl_dist = round(((lvl_price - p) / p) * 100, 2) if p > 0 else 0.0
+                entry = {
+                    "ratio": ratio,
+                    "label": label,
+                    "price": lvl_price,
+                    "distance_pct": lvl_dist,
+                }
+                levels.append(entry)
+                if p > 0 and lvl_price > p and first_above_spot is None:
+                    first_above_spot = entry
+                if p > 0 and lvl_price > p * 1.001 and next_res is None:
+                    next_res = lvl_price
+                    next_res_label = label
+                    dist_next_pct = lvl_dist
+
+            if next_res is None and first_above_spot is not None:
+                next_res = first_above_spot["price"]
+                next_res_label = first_above_spot["label"]
+                dist_next_pct = first_above_spot["distance_pct"]
+            elif next_res is None and levels:
+                next_res = levels[-1]["price"]
+                next_res_label = str(levels[-1]["label"]) + " (Exceeded)"
+                dist_next_pct = levels[-1]["distance_pct"]
+
+            # Fixed-anchor tranches
+            t1_val = round(p_c + (1.000 * impulse), 2)
+            t1272_val = round(p_c + (1.272 * impulse), 2)
+            t2_val = round(p_c + (1.618 * impulse), 2)
+            t3_val = round(p_c + (2.618 * impulse), 2)
+
+            # Front-running limit orders per ENH_254/255: 0.25% beneath the exact level
+            t1_limit = round(t1_val * 0.9975, 2)
+            t2_limit = round(t2_val * 0.9975, 2)
+            t3_limit = round(t3_val * 0.9975, 2)
+
+            # Conservative ATR-capped Daily Peak Target
+            breakout_confirmed = (rvol_val >= 1.5) and (p >= p_b * 0.995) and (vwap_val <= 0 or p >= vwap_val)
+            if breakout_confirmed:
+                raw_target = t2_val if (daily_peak_atr <= 0 or t2_val <= daily_peak_atr) else max(t1_val, daily_peak_atr)
+            elif p_b > p * 1.001:
+                raw_target = p_b
+            else:
+                raw_target = t1_val
+
+            if daily_peak_atr > p:
+                daily_peak_target = min(raw_target, daily_peak_atr)
+            else:
+                daily_peak_target = raw_target
+
+            atr_confluence = bool(
+                daily_peak_atr > 0 and abs(daily_peak_target - daily_peak_atr) / daily_peak_atr <= 0.018
+            )
+
+            # Daily Peak Exhaustion Status per ENH_255
+            daily_peak_status = "EXPANDING"
+            if (daily_peak_target > 0 and p >= daily_peak_target * 0.995) or (
+                p >= t1_val and (
+                    (rvol_val < 1.5 and rsi > 70)
+                    or (vwap_val > 0 and p >= vwap_val * 1.10 and rsi > 80)
+                )
+            ):
                 daily_peak_status = "PEAK_EXHAUSTED"
             elif daily_peak_target > 0 and abs(p - daily_peak_target) / daily_peak_target <= 0.018:
                 daily_peak_status = "AT_PEAK_RESISTANCE"
-        elif daily_peak_target > 0 and abs(p - daily_peak_target) / daily_peak_target <= 0.018:
-            daily_peak_status = "AT_PEAK_RESISTANCE"
 
         return {
+            "mode": mode,
             "pA": round(p_a, 2),
             "pB": round(p_b, 2),
             "pC": round(p_c, 2),
@@ -6512,6 +6605,7 @@ def calculate_fib_forecast(symbol: str, current_price: float, hist_df=None, open
         }
     except Exception as e:
         return {
+            "mode": "NONE",
             "pA": 0.0, "pB": 0.0, "pC": 0.0,
             "impulse": 0.0,
             "t1_100": 0.0, "t1_pct": 0.0, "t1_limit": 0.0,
@@ -7282,6 +7376,16 @@ def run_daemon():
                     is_scout = actionable and sym in ACTIVE_SCOUT_TICKERS and sym not in held_and_watched
                 effective_reg_close = to_float(cache.regular_close.get(sym) or techs.get("Last_Reg_Close"))
                 effective_pre_price = to_float(cache.pre_market_price.get(sym))
+                _session_chg_pct = (
+                    round(((float(p) - effective_reg_close) / effective_reg_close) * 100, 2)
+                    if (effective_reg_close and effective_reg_close > 0)
+                    else float(cache.session_change.get(sym, 0.0))
+                )
+                _trend_label = (
+                    "UP" if (-ts if sym in INVERSE_MACRO else ts) >= 3
+                    else "DOWN" if (-ts if sym in INVERSE_MACRO else ts) <= -3
+                    else "FLAT"
+                )
                 item_dict = {
                     "ticker": sym,
                     "session": cache.session.get(sym),
@@ -7302,7 +7406,7 @@ def run_daemon():
 
                     # Returns
                     # session_change_pct: required by ENH_FIN_02 Protective Exit Override logic
-                    "session_change_pct": round(((float(p) - effective_reg_close) / effective_reg_close) * 100, 2) if (effective_reg_close and effective_reg_close > 0) else float(cache.session_change.get(sym, 0.0)),
+                    "session_change_pct": _session_chg_pct,
                     "gap_percent": round(((effective_pre_price - effective_reg_close) / effective_reg_close) * 100, 2) if (status == "PRE-MARKET" and effective_reg_close and effective_reg_close > 0 and effective_pre_price and effective_pre_price > 0) else float(gap),
                     "pre_market_change_percent": round(((effective_pre_price - effective_reg_close) / effective_reg_close) * 100, 2) if (effective_reg_close and effective_reg_close > 0 and effective_pre_price and effective_pre_price > 0) else float(cache.pre_market_change.get(sym, 0.0)),
                     "after_hours_change_percent": float(cache.after_hours_change.get(sym, 0.0)),
@@ -7350,7 +7454,7 @@ def run_daemon():
                     "signal": classify_signal(sym),
                     # trend label thresholds: gem_trading_rules/rules.md > TREND_SCORE_UP_THRESHOLD / TREND_SCORE_DOWN_THRESHOLD
                     # For INVERSE_MACRO: JSON trend uses equity-perspective (negated score)
-                    "trend": ("UP" if (-ts if sym in INVERSE_MACRO else ts) >= 3 else "DOWN" if (-ts if sym in INVERSE_MACRO else ts) <= -3 else "FLAT"),
+                    "trend": _trend_label,
                     
                     # Phase 6 Enhancements (Already computed inline above)
 
@@ -7361,7 +7465,10 @@ def run_daemon():
                         atr=float(to_float(techs.get("ATR"), default=0.0) or 0.0),
                         rsi=float(rsi_raw or 50.0),
                         rvol=float(calculate_rvol(sym) or 1.0),
-                        vwap=float(vwap or 0.0)
+                        vwap=float(vwap or 0.0),
+                        session_change_pct=_session_chg_pct,
+                        trend=_trend_label,
+                        market_status=status,
                     )
                 }
                 if is_scout:

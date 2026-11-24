@@ -27,12 +27,32 @@ const API = {
         status: 'OPEN',
         timestamp: '2026-11-24T16:00:00Z',
         // Watchlist comes from the SSoT (the only place /api/data publishes it)
-        local_storage_state: { mutable_state: { portfolio_snapshot: [{ ticker: 'NVDA', shares: 10, wac: 100 }], watched_tickers: ['AMD', 'TSLA'] } },
+        local_storage_state: { mutable_state: { portfolio_snapshot: [{ ticker: 'NVDA', shares: 10, wac: 100 }], watched_tickers: ['AMD', 'PLTR', 'TSLA'] } },
         tickers: [
-            { ticker: 'NVDA', price: 120.5, session_change_pct: 1.2, gap_percent: 0.1, atr_percent: 2.5, rsi: 55, vwap: 119, volatility_regime: 'ELEVATED', vix_price: 24.5 },
-            { ticker: 'SPY', price: 718.68, session_change_pct: -0.5, gap_percent: -0.2, atr_percent: 1.1, rsi: 48, vwap: 719.0, net_gex_total: -0.013 },
+            {
+                ticker: 'NVDA', price: 120.5, session_change_pct: 1.2, gap_percent: 0.1, atr_percent: 2.5, rsi: 55, vwap: 119,
+                volatility_regime: 'ELEVATED', vix_price: 24.5,
+                fib_forecast: {
+                    mode: 'EXTENSION', pA: 118.0, pB: 122.0, pC: 119.5, impulse: 4.0,
+                    t1_100: 123.5, t2_1618: 125.97, t3_2618: 129.97,
+                    next_resistance: 122.0, next_resistance_label: 'Session HOD', distance_to_next_pct: 1.24,
+                    daily_peak_target: 122.0, daily_peak_atr: 123.0, daily_peak_status: 'EXPANDING', atr_confluence: true,
+                },
+            },
+            {
+                ticker: 'SPY', price: 718.68, session_change_pct: -0.5, gap_percent: -0.2, atr_percent: 1.1, rsi: 48, vwap: 719.0, net_gex_total: -0.013,
+            },
             // Warm-up row: no numbers yet. Used to throw in renderRow and blank the whole table.
             { ticker: 'AMD', price: null, session_change_pct: null, gap_percent: null, atr_percent: null, rsi: null },
+            {
+                ticker: 'PLTR', price: 140.0, session_change_pct: -2.1, gap_percent: -0.5, atr_percent: 3.1, rsi: 41, vwap: 141.5, volume: 2500000, rvol: 0.62,
+                fib_forecast: {
+                    mode: 'RETRACEMENT', pA: 138.0, pB: 144.0, pC: 138.0, impulse: 6.0,
+                    t1_100: 144.0, t2_1618: 147.71, t3_2618: 153.71,
+                    next_resistance: 141.0, next_resistance_label: '0.500 Retracement', distance_to_next_pct: 0.71,
+                    daily_peak_target: 144.0, daily_peak_atr: 145.0, daily_peak_status: 'PULLBACK', atr_confluence: false,
+                },
+            },
             // TSLA is on the watchlist but not scanned yet: must still get a row.
         ],
     },
@@ -124,10 +144,25 @@ async function main() {
         const sections = rows.filter((r) => r.querySelector('td[colspan="14"]')).map((r) => r.textContent.trim());
         assert.deepStrictEqual(sections, ['Your Portfolio', 'Strategic Watchlist']);
         const symbols = rows.filter((r) => !r.querySelector('td[colspan="14"]')).map((r) => r.cells[0].textContent.trim());
-        assert.deepStrictEqual(symbols, ['NVDA', 'AMD', 'TSLA']);
+        assert.deepStrictEqual(symbols, ['NVDA', 'AMD', 'PLTR', 'TSLA']);
         const amd = rows.find((r) => r.cells[0].textContent.trim() === 'AMD');
         assert.strictEqual(amd.cells[1].textContent.trim(), '—', 'null price should render as —');
         assert(rows.find((r) => r.cells[0].textContent.trim() === 'TSLA').textContent.includes('Pending scan'));
+    });
+    check('Fib Target UI separates Extension vs Retracement without dual Peak ambiguity', () => {
+        const rows = [...window.document.querySelectorAll('#data-table tbody tr')];
+        const nvda = rows.find((r) => r.cells[0].textContent.trim() === 'NVDA');
+        const pltr = rows.find((r) => r.cells[0].textContent.trim() === 'PLTR');
+        assert(nvda && pltr, 'NVDA and PLTR rows missing');
+        const nvdaFib = nvda.cells[11];
+        assert(nvdaFib.textContent.includes('HOD $122.00'), `expected HOD tag, got: ${nvdaFib.textContent}`);
+        assert(nvdaFib.textContent.includes('Target Cap: $122.00'), `expected Target Cap subtitle, got: ${nvdaFib.textContent}`);
+        assert(!nvdaFib.textContent.includes('Daily Peak:'), 'should not render contradictory Daily Peak label');
+        const pltrFib = pltr.cells[11];
+        assert(pltrFib.querySelector('.fib-target-tag.retracement'), 'expected retracement tag class');
+        assert(pltrFib.textContent.includes('0.50 $141.00'), `expected retracement prefix, got: ${pltrFib.textContent}`);
+        assert(pltrFib.textContent.includes('HOD Cap: $144.00'), `expected HOD Cap subtitle, got: ${pltrFib.textContent}`);
+        assert(pltrFib.textContent.includes('Pullback'), 'expected Pullback status pill');
     });
     check('chat boots and market table polls', () => {
         assert(calls.includes('POST /api/chat'), 'boot chat turn not sent');

@@ -47,12 +47,152 @@ class TestInvestmentRegression(unittest.TestCase):
                 session_cache.pop("UMAC", None)
             res = self._fib_forecast(hist_df)
         self.assertIsNotNone(res)
+        self.assertEqual(res.get("mode"), "EXTENSION")
+        self.assertAlmostEqual(res.get("pC"), 24.38, places=2)
         self.assertIn("t1_100", res)
         self.assertIn("t2_1618", res)
         self.assertIn("t3_2618", res)
-        self.assertAlmostEqual(res["t1_100"], 26.84, places=2)
-        self.assertAlmostEqual(res["t2_1618"], 28.35, places=2)
-        self.assertAlmostEqual(res["t3_2618"], 30.80, places=2)
+        self.assertAlmostEqual(res["t1_100"], 26.83, places=2)
+        self.assertAlmostEqual(res["t2_1618"], 28.34, places=2)
+        self.assertAlmostEqual(res["t3_2618"], 30.79, places=2)
+        self.assertAlmostEqual(res["daily_peak_atr"], 25.79, places=2)
+        self.assertAlmostEqual(res["daily_peak_target"], 25.79, places=2)
+
+    def test_fibonacci_bearish_pullback_uses_retracement_and_caps_at_hod(self):
+        """Red/down sessions must emit Fib retracement resistance capped at HOD, never EXPANDING."""
+        import pandas as pd
+        from unittest.mock import patch
+
+        hist_df = pd.DataFrame(
+            {"Open": [9.45], "High": [9.48], "Low": [8.65], "Close": [8.99], "Volume": [1490000]},
+            index=[pd.Timestamp("2026-11-24 15:00:00+00:00", tz="UTC")],
+        )
+        cache = fetch_stocks.cache
+        with (
+            patch.dict(cache.history, {"UMAC": hist_df}),
+            patch.dict(cache.day_high), patch.dict(cache.day_low), patch.dict(cache.day_open),
+        ):
+            for session_cache in (cache.day_high, cache.day_low, cache.day_open):
+                session_cache.pop("UMAC", None)
+            res = fetch_stocks.calculate_fib_forecast(
+                symbol="UMAC",
+                current_price=8.99,
+                hist_df=hist_df,
+                open_price=9.45,
+                atr=1.38,
+                rsi=30.3,
+                rvol=0.62,
+                vwap=8.94,
+                session_change_pct=-5.47,
+                trend="DOWN",
+            )
+
+        self.assertEqual(res["mode"], "RETRACEMENT")
+        self.assertEqual(res["daily_peak_status"], "PULLBACK")
+        self.assertNotEqual(res["daily_peak_status"], "EXPANDING")
+        self.assertAlmostEqual(res["next_resistance"], 9.07, places=2)
+        self.assertLessEqual(res["daily_peak_target"], 9.48)
+        self.assertAlmostEqual(res["daily_peak_target"], 9.48, places=2)
+
+    def test_fibonacci_below_vwap_weak_rvol_status_and_cap(self):
+        """Sub-VWAP weak-rVol sessions must report BELOW_VWAP and cap daily target at HOD."""
+        import pandas as pd
+        from unittest.mock import patch
+
+        hist_df = pd.DataFrame(
+            {"Open": [255.00], "High": [255.56], "Low": [250.53], "Close": [252.48], "Volume": [18590000]},
+            index=[pd.Timestamp("2026-11-24 15:00:00+00:00", tz="UTC")],
+        )
+        cache = fetch_stocks.cache
+        with (
+            patch.dict(cache.history, {"AMZN": hist_df}),
+            patch.dict(cache.day_high), patch.dict(cache.day_low), patch.dict(cache.day_open),
+        ):
+            for session_cache in (cache.day_high, cache.day_low, cache.day_open):
+                session_cache.pop("AMZN", None)
+            res = fetch_stocks.calculate_fib_forecast(
+                symbol="AMZN",
+                current_price=252.48,
+                hist_df=hist_df,
+                open_price=255.00,
+                atr=10.00,
+                rsi=44.6,
+                rvol=0.47,
+                vwap=252.78,
+                session_change_pct=-1.14,
+                trend="FLAT",
+            )
+
+        self.assertEqual(res["mode"], "RETRACEMENT")
+        self.assertEqual(res["daily_peak_status"], "BELOW_VWAP")
+        self.assertLessEqual(res["next_resistance"], 255.56)
+        self.assertAlmostEqual(res["next_resistance"], 253.05, delta=0.02)
+        self.assertAlmostEqual(res["daily_peak_target"], 255.56, places=2)
+
+    def test_fibonacci_extension_anchor_is_invariant_to_intraday_price_ticks_and_high_rvol_breakout(self):
+        """Extension anchors must not drift upward as spot ticks inside the range; high-rVol breakout caps at ATR."""
+        import pandas as pd
+        from unittest.mock import patch
+
+        hist_df = pd.DataFrame(
+            {"Open": [121.00], "High": [125.00], "Low": [120.00], "Close": [123.00], "Volume": [5000000]},
+            index=[pd.Timestamp("2026-11-24 15:00:00+00:00", tz="UTC")],
+        )
+        cache = fetch_stocks.cache
+        with (
+            patch.dict(cache.history, {"NVDA": hist_df}),
+            patch.dict(cache.day_high), patch.dict(cache.day_low), patch.dict(cache.day_open),
+        ):
+            for session_cache in (cache.day_high, cache.day_low, cache.day_open):
+                session_cache.pop("NVDA", None)
+            tick1 = fetch_stocks.calculate_fib_forecast(
+                symbol="NVDA",
+                current_price=123.00,
+                hist_df=hist_df,
+                open_price=121.00,
+                atr=6.00,
+                rsi=60.0,
+                rvol=1.20,
+                vwap=122.50,
+                session_change_pct=1.65,
+                trend="UP",
+            )
+            tick2 = fetch_stocks.calculate_fib_forecast(
+                symbol="NVDA",
+                current_price=124.50,
+                hist_df=hist_df,
+                open_price=121.00,
+                atr=6.00,
+                rsi=62.0,
+                rvol=1.20,
+                vwap=122.50,
+                session_change_pct=2.89,
+                trend="UP",
+            )
+            breakout = fetch_stocks.calculate_fib_forecast(
+                symbol="NVDA",
+                current_price=125.00,
+                hist_df=hist_df,
+                open_price=121.00,
+                atr=6.00,
+                rsi=64.0,
+                rvol=1.85,
+                vwap=122.50,
+                session_change_pct=3.30,
+                trend="UP",
+            )
+
+        self.assertEqual(tick1["mode"], "EXTENSION")
+        self.assertAlmostEqual(tick1["pC"], tick2["pC"], places=2)
+        self.assertAlmostEqual(tick1["t1_100"], tick2["t1_100"], places=2)
+        self.assertAlmostEqual(tick1["t2_1618"], tick2["t2_1618"], places=2)
+        self.assertAlmostEqual(tick1["t3_2618"], tick2["t3_2618"], places=2)
+
+        self.assertEqual(breakout["mode"], "EXTENSION")
+        self.assertAlmostEqual(breakout["daily_peak_atr"], 127.50, places=2)
+        self.assertAlmostEqual(breakout["daily_peak_target"], 127.50, places=2)
+        self.assertTrue(breakout["atr_confluence"])
+        self.assertEqual(breakout["daily_peak_status"], "EXPANDING")
 
     @staticmethod
     def _fib_forecast(hist_df):

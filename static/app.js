@@ -615,12 +615,32 @@ function renderTable(tickers, state) {
             const dist = Number(fib.distance_to_next_pct || 0);
             const distStr = `${dist >= 0 ? '+' : ''}${dist.toFixed(1)}%`;
             const label = fib.next_resistance_label || '';
-            
+            const isRetracement = fib.mode === 'RETRACEMENT'
+                || fib.daily_peak_status === 'PULLBACK'
+                || fib.daily_peak_status === 'BELOW_VWAP';
+
             let tagClass = 't1';
             let tagPrefix = '🎯 T1';
-            if (label.includes('Peak')) {
+            if (isRetracement) {
+                tagClass = 'retracement';
+                if (label.includes('HOD')) {
+                    tagPrefix = '↩ HOD';
+                } else if (label.includes('0.786')) {
+                    tagPrefix = '↩ 0.786';
+                } else if (label.includes('0.618')) {
+                    tagPrefix = '↩ 0.618';
+                } else if (label.includes('0.500')) {
+                    tagPrefix = '↩ 0.50';
+                } else if (label.includes('0.382')) {
+                    tagPrefix = '↩ 0.382';
+                } else if (label.includes('0.236')) {
+                    tagPrefix = '↩ 0.236';
+                } else {
+                    tagPrefix = '↩ Res';
+                }
+            } else if (label.includes('HOD') || label.includes('Peak')) {
                 tagClass = 'peak';
-                tagPrefix = '🎯 Peak';
+                tagPrefix = '🎯 HOD';
             } else if (label.includes('T3') || label.includes('2.618')) {
                 tagClass = 't3';
                 tagPrefix = '🎯 T3';
@@ -646,17 +666,34 @@ function renderTable(tickers, state) {
                 tagClass = 't1';
                 tagPrefix = '🎯 Fib';
             }
-            
-            const tooltip = `Fib Anchors: A=$${fib.pA || '—'}, B=$${fib.pB || '—'}, C=$${fib.pC || '—'} | Next: ${label} $${nextPrice} (${distStr}) | T1=$${fib.t1_100 || '—'} | T2=$${fib.t2_1618 || '—'} | T3=$${fib.t3_2618 || '—'}`;
+
+            const atrCapStr = fib.daily_peak_atr ? `$${Number(fib.daily_peak_atr).toFixed(2)}` : '—';
+            const peakCapStr = fib.daily_peak_target ? `$${Number(fib.daily_peak_target).toFixed(2)}` : '—';
+            const tooltip = `Mode: ${fib.mode || 'EXTENSION'} | Anchors: A=$${fib.pA || '—'}, B=$${fib.pB || '—'}, C=$${fib.pC || '—'} | Next: ${label} $${nextPrice} (${distStr}) | Cap=${peakCapStr} | ATR Cap=${atrCapStr} | Status=${fib.daily_peak_status || '—'}`;
             if (fib.daily_peak_target && Number(fib.daily_peak_target) > 0) {
                 const peakTarget = `$${Number(fib.daily_peak_target).toFixed(2)}`;
                 const atrConfBadge = fib.atr_confluence ? `<span class="fib-atr-confluence-badge" title="ATR Confluence detected">⚡ ATR</span>` : '';
-                fibTargetHtml = `
-                    <div class="fib-target-cell-wrapper">
-                        <span class="fib-target-tag ${tagClass}" title="${tooltip}">${tagPrefix} $${nextPrice} (${distStr})</span>
-                        <div class="fib-peak-indicator" title="Projected Daily Trading Peak Target: ${peakTarget}">Daily Peak: <strong>${peakTarget}</strong> ${atrConfBadge}</div>
-                    </div>
-                `;
+                if (isRetracement) {
+                    const statusLabel = fib.daily_peak_status === 'BELOW_VWAP'
+                        ? 'Below VWAP'
+                        : (fib.daily_peak_status === 'PULLBACK' ? 'Pullback' : 'At HOD');
+                    fibTargetHtml = `
+                        <div class="fib-target-cell-wrapper">
+                            <span class="fib-target-tag ${tagClass}" title="${tooltip}">${tagPrefix} $${nextPrice} (${distStr})</span>
+                            <div class="fib-peak-indicator" title="Session HOD / ATR Cap: ${peakTarget}">HOD Cap: <strong>${peakTarget}</strong> <span class="fib-status-pill pullback">${statusLabel}</span> ${atrConfBadge}</div>
+                        </div>
+                    `;
+                } else {
+                    const exhaustedPill = fib.daily_peak_status === 'PEAK_EXHAUSTED'
+                        ? ' <span class="fib-status-pill exhausted">Exhausted</span>'
+                        : '';
+                    fibTargetHtml = `
+                        <div class="fib-target-cell-wrapper">
+                            <span class="fib-target-tag ${tagClass}" title="${tooltip}">${tagPrefix} $${nextPrice} (${distStr})</span>
+                            <div class="fib-peak-indicator" title="ATR-Capped Intraday Target: ${peakTarget}">Target Cap: <strong>${peakTarget}</strong>${exhaustedPill} ${atrConfBadge}</div>
+                        </div>
+                    `;
+                }
             } else {
                 fibTargetHtml = `<span class="fib-target-tag ${tagClass}" title="${tooltip}">${tagPrefix} $${nextPrice} (${distStr})</span>`;
             }
