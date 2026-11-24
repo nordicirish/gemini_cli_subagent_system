@@ -348,6 +348,7 @@ if (dPasteBtn) dPasteBtn.addEventListener('click', () => ingestExecutionPayload(
 
 // Format large numbers (Volume)
 function formatVol(vol) {
+    if (vol === null || vol === undefined || !Number.isFinite(Number(vol))) return '—';
     if (vol >= 1000000) return (vol / 1000000).toFixed(2) + 'M';
     if (vol >= 1000) return (vol / 1000).toFixed(1) + 'K';
     return vol.toString();
@@ -376,7 +377,17 @@ function renderTable(tickers, state) {
         scouts: []
     };
 
-    const userWatchlist = new Set((state.watchlist || []).map(s => s.toUpperCase()));
+    // Watchlist lives in the SSoT (mutable_state.watched_tickers), the same source as GET /api/watchlist.
+    // /api/data has never published a top-level `watchlist`, so reading only state.watchlist left this
+    // set empty and dropped every watchlist ticker from the table.
+    const watchedRaw = [
+        ...(Array.isArray(state.watchlist) ? state.watchlist : []),
+        ...(Array.isArray(ms.watched_tickers) ? ms.watched_tickers : []),
+        ...(Array.isArray(ssot.watched_tickers) ? ssot.watched_tickers : []),
+    ];
+    const userWatchlist = new Set(
+        watchedRaw.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim().toUpperCase())
+    );
     const processedSyms = new Set();
 
     tickers.forEach(t => {
@@ -422,18 +433,48 @@ function renderTable(tickers, state) {
         }
     });
 
+    // Likewise show watchlist tickers that the background scan has not reached yet
+    userWatchlist.forEach(sym => {
+        if (!processedSyms.has(sym) && !heldTickers.has(sym) && !MACRO_TICKERS.includes(sym)) {
+            groups.watchlist.push({
+                ticker: sym,
+                price: (latestTickersMap[sym] && latestTickersMap[sym].price) || null,
+                session_change_pct: null,
+                gap_percent: null,
+                volume: 0,
+                rvol: null,
+                atr_percent: null,
+                rsi: null,
+                vwap: 0,
+                trend: 'FLAT',
+                score: 0,
+                note: 'Pending scan'
+            });
+            processedSyms.add(sym);
+        }
+    });
+
     let html = '';
 
-    const renderRow = (row) => {
+    // Numbers can be null while the background scan warms up (or for pending watchlist rows);
+    // show "—" instead of throwing, which used to abort the whole table render.
+    const isNum = (v) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+    const fmt = (v, digits) => (isNum(v) ? Number(v).toFixed(digits) : '—');
+    const fmtSigned = (v, digits) => (isNum(v) ? `${Number(v) > 0 ? '+' : ''}${Number(v).toFixed(digits)}%` : '—');
+
+    const renderRowUnsafe = (row) => {
         const sym = row.ticker;
-        const p = row.price.toFixed(2);
-        
+        const p = fmt(row.price, 2);
+
         let pClass = '';
-        if(prevPrices[sym]) {
-            if(p > prevPrices[sym]) pClass = 'flash-up';
-            else if(p < prevPrices[sym]) pClass = 'flash-down';
+        if (isNum(row.price)) {
+            const pNum = Number(row.price);
+            if (prevPrices[sym]) {
+                if (pNum > prevPrices[sym]) pClass = 'flash-up';
+                else if (pNum < prevPrices[sym]) pClass = 'flash-down';
+            }
+            prevPrices[sym] = pNum;
         }
-        prevPrices[sym] = p;
 
         let gapColor = row.gap_percent > 0 ? 'text-green' : (row.gap_percent < 0 ? 'text-red' : 'text-white');
         let rsiColor = 'text-white';
@@ -571,13 +612,13 @@ function renderTable(tickers, state) {
                     ${scoutIndicator}
                 </td>
                 <td class="${pClass}">${p}</td>
-                <td class="${dayColor}">${row.session_change_pct > 0 ? '+' : ''}${row.session_change_pct.toFixed(2)}%</td>
-                <td class="${gapColor}">${row.gap_percent > 0 ? '+' : ''}${row.gap_percent.toFixed(2)}%</td>
+                <td class="${dayColor}">${fmtSigned(row.session_change_pct, 2)}</td>
+                <td class="${gapColor}">${fmtSigned(row.gap_percent, 2)}</td>
                 <td>${formatVol(row.volume)}</td>
                 <td class="${rvolClass}"${rvolStyle} title="Relative Volume vs 20d avg (time-paced)">${rvolDisplay}</td>
-                <td>${row.atr_percent.toFixed(2)}%</td>
-                <td class="${rsiColor}">${row.rsi.toFixed(1)}</td>
-                <td>${row.vwap > 0 ? row.vwap.toFixed(2) : '—'}</td>
+                <td>${isNum(row.atr_percent) ? `${fmt(row.atr_percent, 2)}%` : '—'}</td>
+                <td class="${rsiColor}">${fmt(row.rsi, 1)}</td>
+                <td>${isNum(row.vwap) && Number(row.vwap) > 0 ? fmt(row.vwap, 2) : '—'}</td>
                 <td>${macdHtml}</td>
                 <td>${trendHtml}</td>
                 <td>${fibTargetHtml}</td>
@@ -602,6 +643,18 @@ function renderTable(tickers, state) {
                 </td>
             </tr>
         `;
+    };
+
+    // One malformed row must not blank the whole table: render a placeholder row instead.
+    const renderRow = (row) => {
+        try {
+            return renderRowUnsafe(row);
+        } catch (e) {
+            console.error(`Row render failed for ${row && row.ticker}`, e);
+            const sym = String((row && row.ticker) || '?').replace(/[<>&"']/g, '');
+            const TABLE_COLUMNS = 14;  // ticker cell + the rest of the 14-column table
+            return `<tr class="row-render-error"><td><span class="ticker-symbol">${sym}</span></td><td colspan="${TABLE_COLUMNS - 1}">— data unavailable —</td></tr>`;
+        }
     };
 
     const renderHeader = (label, cls = '') => `

@@ -23,7 +23,18 @@ const API = {
     '/api/scout_categories': ['AI_INFRA'],
     '/api/scout_sectors': [],
     '/api/scout_config': { limit: 5, max_rsi: 70 },
-    '/api/data': { status: 'OPEN', tickers: [{ ticker: 'NVDA', price: 120.5 }], timestamp: '2026-11-24T16:00:00Z' },
+    '/api/data': {
+        status: 'OPEN',
+        timestamp: '2026-11-24T16:00:00Z',
+        // Watchlist comes from the SSoT (the only place /api/data publishes it)
+        local_storage_state: { mutable_state: { portfolio_snapshot: [{ ticker: 'NVDA', shares: 10, wac: 100 }], watched_tickers: ['AMD', 'TSLA'] } },
+        tickers: [
+            { ticker: 'NVDA', price: 120.5, session_change_pct: 1.2, gap_percent: 0.1, atr_percent: 2.5, rsi: 55, vwap: 119 },
+            // Warm-up row: no numbers yet. Used to throw in renderRow and blank the whole table.
+            { ticker: 'AMD', price: null, session_change_pct: null, gap_percent: null, atr_percent: null, rsi: null },
+            // TSLA is on the watchlist but not scanned yet: must still get a row.
+        ],
+    },
     '/api/proposals': { status: 'success', proposals: [] },
     '/api/list_models': { status: 'success', models: [], current_model: 'test-model' },
     '/api/chat': { status: 'success', response: 'Boot complete.', proposals: [], turn_id: 't1' },
@@ -106,6 +117,16 @@ async function main() {
         assert.strictEqual(pollError, null, `polling failed: ${pollError}`);
         assert.strictEqual(panelFetches, 1, `PortfolioPanel.fetchPortfolio called ${panelFetches}x`);
         assert.strictEqual(basketAfter - basketBefore, 1, 'expected exactly one basket request per poll');
+    });
+    check('market table shows portfolio and watchlist sections, tolerating missing numbers', () => {
+        const rows = [...window.document.querySelectorAll('#data-table tbody tr')];
+        const sections = rows.filter((r) => r.querySelector('td[colspan="14"]')).map((r) => r.textContent.trim());
+        assert.deepStrictEqual(sections, ['Your Portfolio', 'Strategic Watchlist']);
+        const symbols = rows.filter((r) => !r.querySelector('td[colspan="14"]')).map((r) => r.cells[0].textContent.trim());
+        assert.deepStrictEqual(symbols, ['NVDA', 'AMD', 'TSLA']);
+        const amd = rows.find((r) => r.cells[0].textContent.trim() === 'AMD');
+        assert.strictEqual(amd.cells[1].textContent.trim(), '—', 'null price should render as —');
+        assert(rows.find((r) => r.cells[0].textContent.trim() === 'TSLA').textContent.includes('Pending scan'));
     });
     check('chat boots and market table polls', () => {
         assert(calls.includes('POST /api/chat'), 'boot chat turn not sent');
