@@ -2852,6 +2852,71 @@ chatUI.init();
             self.assertEqual(body["status"], "error")
             mock_reload.assert_not_called()
 
+    def test_list_models_returns_dynamic_hydrogen_and_neon_models(self):
+        """GET /api/list_models exposes Hydrogen and Neon models with provider='antigravity'."""
+        mock_models = [
+            {"name": "gemini-4-neon-high", "label": "Gemini 4 Neon (High)", "provider": "antigravity"},
+            {"name": "gemini-4-hydrogen-high", "label": "Gemini 4 Hydrogen (High)", "provider": "antigravity"},
+        ]
+        with patch.object(web_server.framework.antigravity_runner, "list_available_models", return_value=mock_models):
+            res = web_server.list_models_endpoint()
+
+        self.assertEqual(res["status"], "success")
+        names = [m["name"] for m in res["models"]]
+        self.assertIn("gemini-4-neon-high", names)
+        self.assertIn("gemini-4-hydrogen-high", names)
+        self.assertTrue(all(m.get("provider") == "antigravity" for m in res["models"]))
+
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_chat_endpoint_skips_ssot_update_on_halted_veto_payload(self, mock_dispatch, mock_charts):
+        """CRITICAL_SYNC_ALERT / halt_active / ENH_12_STATE_ABSENCE_VETO payloads must NOT invoke tools.update_ssot."""
+        valid_state = {"financial_state_valid": True, "local_storage_state": {}, "tickers": []}
+        halted_payload = json.dumps({
+            "EXECUTION_PAYLOAD": {
+                "directive": "HOLD",
+                "unallocated_cash_eur": 0.0,
+                "unallocated_cash_usd": 0.0,
+                "state_context": {
+                    "status": "CRITICAL_SYNC_ALERT",
+                    "error": "ENH_12_STATE_ABSENCE_VETO",
+                },
+                "portfolio_snapshot": [],
+                "runtime_flags": {"data_gap": True, "halt_active": True},
+                "forensic_intelligence": {
+                    "active_flags": ["CRITICAL_SYNC_ALERT", "ENH_12_STATE_ABSENCE_VETO"]
+                },
+            }
+        })
+
+        with (
+            patch_global_state(valid_state),
+            patch("tools.update_ssot") as mock_update,
+        ):
+            # 1. Slice-extracted halted payload
+            mock_dispatch.return_value = {
+                "status": "completed",
+                "response": f"REJECT\n```json\n{halted_payload}\n```",
+                "turn_count": 1,
+            }
+            res_slice = web_server.chat_endpoint(web_server.ChatRequest(message="Analyze SPY"))
+            self.assertEqual(res_slice["status"], "success")
+            mock_update.assert_not_called()
+            self.assertNotIn("synchronized successfully", res_slice["response"])
+            self.assertIn("SSoT update skipped", res_slice["response"])
+
+            # 2. Brace-extracted halted payload
+            mock_dispatch.return_value = {
+                "status": "completed",
+                "response": f"REJECT {halted_payload}",
+                "turn_count": 1,
+            }
+            res_brace = web_server.chat_endpoint(web_server.ChatRequest(message="Analyze SPY"))
+            self.assertEqual(res_brace["status"], "success")
+            mock_update.assert_not_called()
+            self.assertNotIn("synchronized successfully", res_brace["response"])
+            self.assertIn("SSoT update skipped", res_brace["response"])
+
 
 if __name__ == "__main__":
     unittest.main()

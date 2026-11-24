@@ -654,6 +654,197 @@ def _cleanup_subprocess(
     return cleanup_success
 
 
+MAX_AGY_STDIN_BYTES = 90_000
+
+DEFAULT_ANTIGRAVITY_MODELS: List[Dict[str, str]] = [
+    {"name": "gemini-4-neon-high", "label": "Gemini 4 Neon (High)", "provider": "antigravity"},
+    {"name": "gemini-4-neon-xhigh", "label": "Gemini 4 Neon (XHigh)", "provider": "antigravity"},
+    {"name": "gemini-4-neon-medium", "label": "Gemini 4 Neon (Medium)", "provider": "antigravity"},
+    {"name": "gemini-4-neon-low", "label": "Gemini 4 Neon (Low)", "provider": "antigravity"},
+    {"name": "gemini-4-hydrogen-high", "label": "Gemini 4 Hydrogen (High)", "provider": "antigravity"},
+    {"name": "gemini-4-hydrogen-xhigh", "label": "Gemini 4 Hydrogen (XHigh)", "provider": "antigravity"},
+    {"name": "gemini-4-hydrogen-medium", "label": "Gemini 4 Hydrogen (Medium)", "provider": "antigravity"},
+    {"name": "gemini-4-hydrogen-low", "label": "Gemini 4 Hydrogen (Low)", "provider": "antigravity"},
+    {"name": "gemini-4-argon-high", "label": "Gemini 4 Argon (High)", "provider": "antigravity"},
+    {"name": "gemini-4-argon-medium", "label": "Gemini 4 Argon (Medium)", "provider": "antigravity"},
+    {"name": "gemini-4-argon-low", "label": "Gemini 4 Argon (Low)", "provider": "antigravity"},
+    {"name": "gemini-4-carbon-high", "label": "Gemini 4 Carbon (High)", "provider": "antigravity"},
+    {"name": "gemini-4-carbon-medium", "label": "Gemini 4 Carbon (Medium)", "provider": "antigravity"},
+    {"name": "gemini-4-carbon-low", "label": "Gemini 4 Carbon (Low)", "provider": "antigravity"},
+    {"name": "gemini-pro-orchestrator-neon", "label": "Orchestrator (Neon)", "provider": "antigravity"},
+    {"name": "gemini-pro-orchestrator", "label": "Orchestrator (Carbon)", "provider": "antigravity"},
+    {"name": "gemini-pro-orchestrator-argon", "label": "Orchestrator (Argon)", "provider": "antigravity"},
+    {"name": "gemini-3.8-flash-high", "label": "Gemini 3.8 Flash (High)", "provider": "antigravity"},
+    {"name": "gemini-3.8-flash-medium", "label": "Gemini 3.8 Flash (Medium)", "provider": "antigravity"},
+    {"name": "gemini-3.8-flash-low", "label": "Gemini 3.8 Flash (Low)", "provider": "antigravity"},
+    {"name": "claude-opus-5-5-high", "label": "Claude Opus 5.5 (High)", "provider": "antigravity"},
+    {"name": "claude-opus-5-5-medium", "label": "Claude Opus 5.5 (Medium)", "provider": "antigravity"},
+    {"name": "claude-opus-5-5-low", "label": "Claude Opus 5.5 (Low)", "provider": "antigravity"},
+    {"name": "claude-sonnet-5-5-high", "label": "Claude Sonnet 5.5 (High)", "provider": "antigravity"},
+    {"name": "claude-sonnet-5-5-medium", "label": "Claude Sonnet 5.5 (Medium)", "provider": "antigravity"},
+    {"name": "claude-sonnet-5-5-low", "label": "Claude Sonnet 5.5 (Low)", "provider": "antigravity"},
+    {"name": "gpt-oss-120b-medium", "label": "GPT-OSS 120B (Medium)", "provider": "antigravity"},
+]
+
+_RULES_SECTION_PRIORITY = (
+    "HEADER",
+    "## Enh Xx Registry",
+    "## Mandate Registry",
+    "## Global Logic Gates",
+    "## Score Protocol",
+    "## Signal Consistency Thresholds",
+    "## Execution Protocols",
+    "## Risk & Liquidity Parameters",
+    "## Engine Registry",
+    "## Behavioral Guardrails",
+)
+
+
+def _truncate_utf8_lines(text: str, max_bytes: int) -> str:
+    """Truncates text on line boundaries (or UTF-8 char boundaries) within max_bytes."""
+    if max_bytes <= 0:
+        return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    clipped = encoded[:max_bytes].decode("utf-8", errors="ignore")
+    last_nl = clipped.rfind("\n")
+    if last_nl > 0:
+        clipped = clipped[:last_nl]
+    return clipped
+
+
+def _compact_rules_for_budget(rules_text: str, max_bytes: int) -> str:
+    """Prioritizes high-signal rules.md sections so compacted static rules fit inside max_bytes."""
+    note = "\n[Note: Static rules.md compacted to fit CLI stdin budget; full canonical rules remain in gem_trading_rules/rules.md.]"
+    note_bytes = len(note.encode("utf-8"))
+    if max_bytes <= note_bytes + 64:
+        return _truncate_utf8_lines(note.lstrip("\n"), max_bytes)
+
+    body_budget = max_bytes - note_bytes
+    sections: List[Tuple[str, str]] = []
+    cur_heading = "HEADER"
+    cur_lines: List[str] = []
+    for line in rules_text.splitlines(keepends=True):
+        if line.startswith("## "):
+            if cur_lines:
+                sections.append((cur_heading, "".join(cur_lines)))
+            cur_heading = line.strip()
+            cur_lines = [line]
+        else:
+            cur_lines.append(line)
+    if cur_lines:
+        sections.append((cur_heading, "".join(cur_lines)))
+
+    used_indices: Set[int] = set()
+    ordered_chunks: List[str] = []
+    for prio in _RULES_SECTION_PRIORITY:
+        for idx, (heading, chunk) in enumerate(sections):
+            if idx not in used_indices and (heading == prio or heading.startswith(prio)):
+                used_indices.add(idx)
+                ordered_chunks.append(chunk)
+    for idx, (_heading, chunk) in enumerate(sections):
+        if idx not in used_indices:
+            ordered_chunks.append(chunk)
+
+    selected: List[str] = []
+    used_bytes = 0
+    for chunk in ordered_chunks:
+        chunk_bytes = len(chunk.encode("utf-8"))
+        if used_bytes + chunk_bytes <= body_budget:
+            selected.append(chunk)
+            used_bytes += chunk_bytes
+        else:
+            remaining = body_budget - used_bytes
+            if remaining > 128:
+                partial = _truncate_utf8_lines(chunk, remaining)
+                if partial:
+                    selected.append(partial)
+            break
+
+    return "".join(selected).rstrip() + note
+
+
+def _build_bounded_prompt(
+    analytical_output_instruction: str,
+    system_instruction: str,
+    prompt: str,
+    max_bytes: int = MAX_AGY_STDIN_BYTES,
+) -> str:
+    """
+    Constructs the CLI stdin prompt within max_bytes so agy.exe never truncates the
+    trailing live DATA_PACKET, local_storage_state, or user query.
+    """
+    if system_instruction:
+        full_prompt = (
+            f"{analytical_output_instruction}\n\n"
+            f"System Instructions:\n{system_instruction}\n\n"
+            f"Task / User Prompt:\n{prompt}\n"
+        )
+    else:
+        full_prompt = f"{analytical_output_instruction}\n\nTask / User Prompt:\n{prompt}\n"
+
+    if len(full_prompt.encode("utf-8")) <= max_bytes:
+        return full_prompt
+
+    # Preserve the trailing Task / User Prompt and tool-calling protocol suffix intact.
+    if not system_instruction:
+        return full_prompt
+
+    tools_markers = (
+        "\n\nAvailable Tools:\n",
+        "\n\nIf you need to query subagents or execute tools,",
+    )
+    tools_indices = [system_instruction.find(m) for m in tools_markers if system_instruction.find(m) != -1]
+    tools_idx = min(tools_indices) if tools_indices else len(system_instruction)
+    sys_head = system_instruction[:tools_idx]
+    tools_suffix = system_instruction[tools_idx:]
+
+    kb_marker = "--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---"
+    kb_idx = sys_head.find(kb_marker)
+    if kb_idx != -1:
+        base_part = sys_head[:kb_idx]
+        rules_part = sys_head[kb_idx + len(kb_marker):].lstrip("\r\n")
+        kb_header = f"{kb_marker}\n"
+    else:
+        base_part = sys_head
+        rules_part = ""
+        kb_header = ""
+
+    def _assemble(b_part: str, r_part: str) -> str:
+        sys_body = f"{b_part}{kb_header}{r_part}{tools_suffix}"
+        return (
+            f"{analytical_output_instruction}\n\n"
+            f"System Instructions:\n{sys_body}\n\n"
+            f"Task / User Prompt:\n{prompt}\n"
+        )
+
+    if rules_part:
+        without_rules = _assemble(base_part, "")
+        rules_budget = max_bytes - len(without_rules.encode("utf-8"))
+        if rules_budget > 512:
+            compacted_rules = _compact_rules_for_budget(rules_part, rules_budget)
+            candidate = _assemble(base_part, compacted_rules)
+            if len(candidate.encode("utf-8")) <= max_bytes:
+                return candidate
+        brief_note = "[Static rules.md omitted from inline prompt to preserve live DATA_PACKET and user query; canonical rules remain in gem_trading_rules/rules.md.]\n"
+        candidate = _assemble(base_part, brief_note)
+        if len(candidate.encode("utf-8")) <= max_bytes:
+            return candidate
+        # Re-check omitting kb_header too before touching base_part
+        kb_header = ""
+        candidate = _assemble(base_part, "")
+        if len(candidate.encode("utf-8")) <= max_bytes:
+            return candidate
+
+    overhead_without_base = len(_assemble("", "").encode("utf-8"))
+    base_budget = max_bytes - overhead_without_base
+    if base_budget > 0:
+        clipped_base = _truncate_utf8_lines(base_part, base_budget)
+        return _assemble(clipped_base, "")
+    return _assemble("", "")
+
+
 class AntigravityAgentRunner:
     def __init__(self, agy_path=None, cancel_check=None):
         if agy_path and os.path.exists(agy_path):
@@ -666,6 +857,49 @@ class AntigravityAgentRunner:
             self.agy_path = next((c for c in candidates if os.path.exists(c)), "agy")
         self.cancel_check = cancel_check
         self.is_available = os.path.exists(self.agy_path) or bool(os.environ.get("AGY_PATH"))
+        self._models_cache: Optional[List[Dict[str, str]]] = None
+        self._models_cache_ts: float = 0.0
+
+    def list_available_models(
+        self, force_refresh: bool = False, timeout: int = 10
+    ) -> List[Dict[str, str]]:
+        """Queries `agy models` dynamically with short TTL cache and static fallback."""
+        now = time.monotonic()
+        if not force_refresh and self._models_cache is not None and (now - self._models_cache_ts) < 300.0:
+            return [dict(m) for m in self._models_cache]
+
+        parsed: List[Dict[str, str]] = []
+        try:
+            proc = subprocess.run(
+                [self.agy_path, "models"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=timeout,
+            )
+            if proc.returncode == 0 and proc.stdout:
+                for raw_line in proc.stdout.splitlines():
+                    line = raw_line.strip()
+                    if not line or "\t" not in line:
+                        continue
+                    model_id, label = line.split("\t", 1)
+                    model_id = model_id.strip()
+                    label = label.strip()
+                    if model_id and label:
+                        parsed.append({
+                            "name": model_id,
+                            "label": label,
+                            "provider": "antigravity",
+                        })
+        except Exception:
+            parsed = []
+
+        if parsed:
+            self._models_cache = parsed
+            self._models_cache_ts = now
+            return [dict(m) for m in parsed]
+
+        return [dict(m) for m in DEFAULT_ANTIGRAVITY_MODELS]
 
     def run_prompt(
         self,
@@ -674,14 +908,17 @@ class AntigravityAgentRunner:
         mode: str = "FAST",
         tools=None,
         timeout: int = 120,
-        cancel_check: Optional[Callable[[], bool]] = None
+        cancel_check: Optional[Callable[[], bool]] = None,
+        model_name: Optional[str] = None,
     ) -> AntigravityResponse:
         effective_cancel_check = cancel_check if cancel_check is not None else self.cancel_check
         if effective_cancel_check and effective_cancel_check():
             raise RuntimeError("Operation cancelled by user.")
 
-        # Map execution mode to Antigravity model tiers
-        if mode in ("PRO", "THINKING"):
+        # Map execution mode to Antigravity model tiers unless explicitly overridden
+        if isinstance(model_name, str) and model_name.strip():
+            model = model_name.strip()
+        elif mode in ("PRO", "THINKING"):
             model = "gemini-3.8-flash-high"
         else:
             model = "gemini-3.8-flash-low"
@@ -696,9 +933,11 @@ class AntigravityAgentRunner:
             "Output all analyses, reasoning, and JSON payloads directly as text."
         )
 
-        full_prompt = f"{analytical_output_instruction}\n\nTask / User Prompt:\n{prompt}\n"
-        if system_instruction:
-            full_prompt = f"{analytical_output_instruction}\n\nSystem Instructions:\n{system_instruction}\n\nTask / User Prompt:\n{prompt}\n"
+        full_prompt = _build_bounded_prompt(
+            analytical_output_instruction,
+            system_instruction,
+            prompt,
+        )
 
         cmd = [
             self.agy_path,
@@ -812,6 +1051,7 @@ class AntigravityChatSession:
         mode: str = "PRO",
         generate_fn=None,
         is_subagent: bool = False,
+        model_name: Optional[str] = None,
     ):
         self.runner = runner
         self.sys_instruction = sys_instruction
@@ -820,6 +1060,7 @@ class AntigravityChatSession:
         self.mode = mode
         self.generate_fn = generate_fn
         self.is_subagent = is_subagent
+        self.model_name = model_name
         self.history = []
 
     def get_history(self):
@@ -881,7 +1122,12 @@ class AntigravityChatSession:
         if self.generate_fn is not None:
             resp = self.generate_fn(user_input, full_sys, self.mode)
         else:
-            resp = self.runner.run_prompt(user_input, system_instruction=full_sys, mode=self.mode)
+            resp = self.runner.run_prompt(
+                user_input,
+                system_instruction=full_sys,
+                mode=self.mode,
+                model_name=self.model_name,
+            )
 
         text = ""
         if hasattr(resp, "text") and resp.text:
@@ -951,7 +1197,13 @@ DEFAULT_MODEL_GEMMA = "gemini-3.8-flash-low"
 DEFAULT_MODEL_THINKING = "gemini-3.8-flash-high"
 
 MODEL_MAPPING = {
-    "PRO":      ["gemini-3.8-flash-high", "gemini-4-argon-high"],
+    "PRO":      [
+        "gemini-4-neon-high",
+        "gemini-4-hydrogen-high",
+        "gemini-4-argon-high",
+        "gemini-4-carbon-high",
+        "gemini-3.8-flash-high",
+    ],
     "FLASH":    ["gemini-3.8-flash-low"],
     "GEMMA":    ["gemini-3.8-flash-low"],
     "THINKING": ["gemini-3.8-flash-high"],
@@ -991,7 +1243,12 @@ class AgentFramework:
 
     def create_chat_session(self, sys_instruction: str, tools: list, model_name: str = None):
         """Creates an AntigravityChatSession for the Master Orchestrator."""
-        return AntigravityChatSession(self.antigravity_runner, sys_instruction, tools)
+        return AntigravityChatSession(
+            self.antigravity_runner,
+            sys_instruction,
+            tools,
+            model_name=model_name,
+        )
 
     def load_chart_parts(self) -> list:
         """Load latest 1-minute chart screenshots from context/charts/ as multimodal Part instances."""

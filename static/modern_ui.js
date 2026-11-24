@@ -386,7 +386,8 @@ const ModernChat = {
                 const experimentalModels = [];
                 data.models.forEach(m => {
                     const nameLower = m.name.toLowerCase();
-                    const isPaid = nameLower.includes('pro') || (nameLower.includes('preview') && !nameLower.includes('flash') && !nameLower.includes('thinking'));
+                    const isLocalAntigravity = m.provider === 'antigravity';
+                    const isPaid = !isLocalAntigravity && (nameLower.includes('pro') || (nameLower.includes('preview') && !nameLower.includes('flash') && !nameLower.includes('thinking')));
                     if (!includePaid && isPaid) return;
                     if (nameLower.includes('-exp') || nameLower.includes('experimental') || nameLower.includes('thinking-exp')) {
                         experimentalModels.push(m);

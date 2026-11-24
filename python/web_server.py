@@ -504,6 +504,40 @@ def should_attach_charts(req: ChatRequest) -> bool:
     return bool(getattr(req, "include_charts", False))
 
 
+def _is_halted_execution_payload(raw_json: str) -> Optional[str]:
+    """
+    Returns a reason string if an extracted EXECUTION_PAYLOAD represents a halted,
+    truncated, or ENH_12 state-absence veto response that must never overwrite SSoT.
+    """
+    try:
+        parsed = json.loads(raw_json, parse_float=Decimal)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+
+    ep = parsed.get("EXECUTION_PAYLOAD") if isinstance(parsed.get("EXECUTION_PAYLOAD"), dict) else parsed
+    runtime_flags = ep.get("runtime_flags") if isinstance(ep.get("runtime_flags"), dict) else {}
+    if runtime_flags.get("halt_active") is True or runtime_flags.get("data_gap") is True:
+        return "Council halt / data-gap veto active"
+
+    state_ctx = ep.get("state_context") if isinstance(ep.get("state_context"), dict) else {}
+    state_status = str(state_ctx.get("status", "")).upper()
+    state_err = str(state_ctx.get("error", "")).upper()
+    if state_status == "CRITICAL_SYNC_ALERT" or "STATE_ABSENCE_VETO" in state_err:
+        return "CRITICAL_SYNC_ALERT / ENH_12 state-absence veto active"
+
+    forensic = ep.get("forensic_intelligence") if isinstance(ep.get("forensic_intelligence"), dict) else {}
+    active_flags = forensic.get("active_flags", [])
+    if isinstance(active_flags, list):
+        for flag in active_flags:
+            flag_u = str(flag).upper()
+            if any(marker in flag_u for marker in ("CRITICAL_SYNC_ALERT", "STATE_ABSENCE_VETO", "INPUT_TRUNCATION")):
+                return "Council truncation / state-absence veto active"
+
+    return None
+
+
 def _extract_cancel_turn_id(req: Any) -> Optional[str]:
     if req is None:
         return None
@@ -592,13 +626,11 @@ def get_news_scan_prompt():
 def list_models_endpoint():
     """Return authorized Antigravity App Agent models for local execution."""
     try:
-        models = [
-            {"name": "gemini-3.8-flash-high", "label": "GEMINI-3.8-FLASH-HIGH (ANTIGRAVITY PRO/THINKING)"},
-            {"name": "gemini-3.8-flash-low", "label": "GEMINI-3.8-FLASH-LOW (ANTIGRAVITY FAST)"},
-            {"name": "gemini-4-argon-high", "label": "GEMINI-4-ARGON-HIGH (ANTIGRAVITY EXPERT)"},
-            {"name": "claude-opus-5-5-high", "label": "CLAUDE-OPUS-5.5-HIGH (ANTIGRAVITY REASONING)"},
-            {"name": "gpt-oss-120b-medium", "label": "GPT-OSS-120B-MEDIUM (ANTIGRAVITY OPEN)"},
-        ]
+        runner = getattr(framework, "antigravity_runner", None)
+        if runner is not None and hasattr(runner, "list_available_models"):
+            models = runner.list_available_models()
+        else:
+            models = [dict(m) for m in getattr(agent_framework, "DEFAULT_ANTIGRAVITY_MODELS", [])]
         global active_model_warning
         active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
         return {"status": "success", "models": models, "current_model": ORCHESTRATOR_MODEL, "warning": active_model_warning}
@@ -1045,6 +1077,7 @@ def chat_endpoint(req: ChatRequest):
             cleaned_response = full_response
             payload_extracted = False
             payload_succeeded = False
+            payload_skipped_reason: Optional[str] = None
             
             # Look for json markdown code block wrappers
             idx = full_response.find("```json")
@@ -1068,30 +1101,43 @@ def chat_endpoint(req: ChatRequest):
                     if not is_truncated:
                         inner_json = inner_json[:-3]
                     inner_json = inner_json.strip()
-                        
-                    framework.log("[System] Auto-processing slice-extracted EXECUTION_PAYLOAD...")
-                    try:
-                        res = tools.update_ssot(inner_json)
-                        framework.log(f"[System] SSoT update result: {res}")
+
+                    halt_reason = _is_halted_execution_payload(inner_json)
+                    if halt_reason:
+                        framework.log(f"[System Warning] Skipping SSoT update for slice-extracted payload: {halt_reason}")
                         payload_html = (
-                            f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
-                            f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden)</summary>'
-                            f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
-                        )
-                        cleaned_response = full_response[:idx] + payload_html + full_response[actual_close_idx + (0 if is_truncated else 3):]
-                        payload_extracted = True
-                        payload_succeeded = True
-                    except Exception as pe:
-                        framework.log(f"[System Error] Failed to update SSoT with sliced payload: {redact_secrets(str(pe))}")
-                        # Surface explicit failure details without claiming SSoT synchronization succeeded
-                        payload_html = (
-                            f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
-                            f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ System Execution Payload (SSoT Synchronization Failed)</summary>'
+                            f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #d29922; border-left: 2px solid var(--yellow); padding-left: 15px; background: rgba(210,153,34,0.06); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(210,153,34,0.18);">'
+                            f'\n<summary style="font-weight: 700; color: var(--yellow); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ SSoT Execution Payload (Skipped — Council Halt / Data Gap Active)</summary>'
                             f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
                         )
                         cleaned_response = full_response[:idx] + payload_html + full_response[actual_close_idx + (0 if is_truncated else 3):]
                         payload_extracted = True
                         payload_succeeded = False
+                        payload_skipped_reason = halt_reason
+                    else:
+                        framework.log("[System] Auto-processing slice-extracted EXECUTION_PAYLOAD...")
+                        try:
+                            res = tools.update_ssot(inner_json)
+                            framework.log(f"[System] SSoT update result: {res}")
+                            payload_html = (
+                                f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
+                                f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden)</summary>'
+                                f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
+                            )
+                            cleaned_response = full_response[:idx] + payload_html + full_response[actual_close_idx + (0 if is_truncated else 3):]
+                            payload_extracted = True
+                            payload_succeeded = True
+                        except Exception as pe:
+                            framework.log(f"[System Error] Failed to update SSoT with sliced payload: {redact_secrets(str(pe))}")
+                            # Surface explicit failure details without claiming SSoT synchronization succeeded
+                            payload_html = (
+                                f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #f85149; border-left: 2px solid var(--red); padding-left: 15px; background: rgba(248,81,73,0.05); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(248,81,73,0.1);">'
+                                f'\n<summary style="font-weight: 700; color: var(--red); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ System Execution Payload (SSoT Synchronization Failed)</summary>'
+                                f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{inner_json}\n```\n\n</div>\n</details>\n\n'
+                            )
+                            cleaned_response = full_response[:idx] + payload_html + full_response[actual_close_idx + (0 if is_truncated else 3):]
+                            payload_extracted = True
+                            payload_succeeded = False
                             
             if not payload_extracted:
                 # Fallback to direct curly brace extraction
@@ -1117,17 +1163,30 @@ def chat_endpoint(req: ChatRequest):
                                 
                         try:
                             json.loads(candidate, parse_float=Decimal)
-                            framework.log("[System] Auto-processing brace-extracted EXECUTION_PAYLOAD...")
-                            res = tools.update_ssot(candidate)
-                            framework.log(f"[System] SSoT update result: {res}")
-                            payload_html = (
-                                f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
-                                f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden)</summary>'
-                                f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
-                            )
-                            cleaned_response = full_response[:clean_start_idx] + payload_html + full_response[clean_end_idx:]
-                            payload_extracted = True
-                            payload_succeeded = True
+                            halt_reason = _is_halted_execution_payload(candidate)
+                            if halt_reason:
+                                framework.log(f"[System Warning] Skipping SSoT update for brace-extracted payload: {halt_reason}")
+                                payload_html = (
+                                    f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #d29922; border-left: 2px solid var(--yellow); padding-left: 15px; background: rgba(210,153,34,0.06); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; border: 1px solid rgba(210,153,34,0.18);">'
+                                    f'\n<summary style="font-weight: 700; color: var(--yellow); letter-spacing: 0.5px; outline: none; user-select: none;">⚠️ SSoT Execution Payload (Skipped — Council Halt / Data Gap Active)</summary>'
+                                    f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto; color: var(--text-secondary);">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
+                                )
+                                cleaned_response = full_response[:clean_start_idx] + payload_html + full_response[clean_end_idx:]
+                                payload_extracted = True
+                                payload_succeeded = False
+                                payload_skipped_reason = halt_reason
+                            else:
+                                framework.log("[System] Auto-processing brace-extracted EXECUTION_PAYLOAD...")
+                                res = tools.update_ssot(candidate)
+                                framework.log(f"[System] SSoT update result: {res}")
+                                payload_html = (
+                                    f'\n\n<details class="execution-payload-details" style="margin: 15px 0; cursor: pointer; color: #8b949e; border-left: 2px solid var(--accent-blue); padding-left: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; padding-top: 8px; padding-bottom: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05);">'
+                                    f'\n<summary style="font-weight: 700; color: var(--text-secondary); letter-spacing: 0.5px; outline: none; user-select: none;">⚖️ SSoT Execution Payload (Hidden)</summary>'
+                                    f'\n<div style="margin-top: 12px; font-family: monospace; font-size: 0.82rem; overflow-x: auto;">\n\n```json\n{candidate}\n```\n\n</div>\n</details>\n\n'
+                                )
+                                cleaned_response = full_response[:clean_start_idx] + payload_html + full_response[clean_end_idx:]
+                                payload_extracted = True
+                                payload_succeeded = True
                         except Exception as pe:
                             framework.log(f"[System Error] Failed to update SSoT with brace payload: {redact_secrets(str(pe))}")
                             # Surface explicit failure details without claiming SSoT synchronization succeeded
@@ -1158,13 +1217,20 @@ def chat_endpoint(req: ChatRequest):
                 
                 # Robust fallback if the AI generated NO conversational text
                 if not cleaned_response:
-                    if payload_succeeded:
+                    if payload_skipped_reason:
+                        cleaned_response = f"*(An Execution Payload was emitted under a Council halt/veto ({payload_skipped_reason}); SSoT synchronization was skipped and authoritative state was preserved.)*"
+                    elif payload_succeeded:
                         cleaned_response = "*(The AI Council executed its routine and synchronized the SSoT, but did not output a conversational summary for this turn.)*"
                     else:
                         cleaned_response = "*(An Execution Payload was detected in this response, but SSoT synchronization failed and authoritative state was not updated.)*"
                     
                 # Append honest status badge matching actual composite persistence outcome
-                if payload_succeeded:
+                if payload_skipped_reason:
+                    cleaned_response += (
+                        f"\n\n---\n\n*⚠️ SSoT update skipped ({payload_skipped_reason}). "
+                        "Authoritative state preserved.*"
+                    )
+                elif payload_succeeded:
                     cleaned_response += "\n\n---\n\n*⚖️ SSoT Shadow State synchronized successfully.*"
                 else:
                     cleaned_response += "\n\n---\n\n*⚠️ SSoT Shadow State synchronization failed. Authoritative state was not updated.*"

@@ -758,6 +758,87 @@ class TestContextAndTokenEfficiency(unittest.TestCase):
         self.assertEqual(self.framework.turn_usage["cached_tokens"], 0)
         self.assertFalse(self.framework.turn_usage["caching_active"])
 
+    def test_bounded_stdin_prompt_preserves_live_data_and_tools(self):
+        """_build_bounded_prompt compacts oversized static rules.md to <= MAX_AGY_STDIN_BYTES while preserving DATA_PACKET, local_storage_state, tools, and query."""
+        with open(os.path.join("engine_instructions", "terminal.md"), "r", encoding="utf-8") as f:
+            terminal_inst = f.read()
+        full_sys = self.framework._get_sys_instruction(terminal_inst)
+        full_sys_with_tools = (
+            f"{full_sys}\n\n"
+            "Available Tools:\n"
+            "- read_ssot: Read current SSoT state\n\n"
+            "If you need to query subagents or execute tools, output ONLY a JSON block specifying function calls:\n"
+            '```json\n{"function_calls": [{"name": "tool_name", "args": {"query": "..."}}]}\n```\n'
+            "Otherwise, output the complete single-pass Markdown analysis followed by the single valid ```json EXECUTION_PAYLOAD ``` block."
+        )
+        prompt = (
+            "--- LIVE MARKET DATA_PACKET ---\n"
+            'local_storage_state = {"portfolio_snapshot": [{"ticker": "NVDA", "shares": "10", "wac": "120.00"}], "unallocated_cash_eur": "1500.00"}\n'
+            "[USER_QUERY]: Evaluate NVDA position and portfolio allocation."
+        )
+        bounded = agent_framework._build_bounded_prompt(
+            "ANALYTICAL OUTPUT INSTRUCTION: Text only.",
+            full_sys_with_tools,
+            prompt,
+        )
+        self.assertLessEqual(
+            len(bounded.encode("utf-8")),
+            agent_framework.MAX_AGY_STDIN_BYTES,
+        )
+        self.assertIn("DATA_PACKET", bounded)
+        self.assertIn("local_storage_state", bounded)
+        self.assertIn("[USER_QUERY]: Evaluate NVDA position and portfolio allocation.", bounded)
+        self.assertIn("Available Tools:\n- read_ssot:", bounded)
+
+    def test_create_chat_session_forwards_selected_model_to_runner(self):
+        """AgentFramework.create_chat_session forwards model_name through AntigravityChatSession to subprocess --model."""
+        captured_cmd = {}
+        mock_proc = MagicMock()
+        mock_proc.pid = 88888
+        mock_proc.returncode = 0
+        mock_proc.poll.return_value = 0
+        mock_proc.communicate.return_value = ("Neon model response", "")
+
+        def fake_popen(cmd, **kwargs):
+            captured_cmd["cmd"] = list(cmd)
+            return mock_proc
+
+        session = self.framework.create_chat_session("SYS", [], model_name="gemini-4-neon-high")
+        with patch("agent_framework.subprocess.Popen", side_effect=fake_popen), \
+             patch("agent_framework._cleanup_subprocess"):
+            resp = session.send_message("Check SPY")
+
+        self.assertEqual(resp.text, "Neon model response")
+        cmd = captured_cmd["cmd"]
+        model_idx = cmd.index("--model")
+        self.assertEqual(cmd[model_idx + 1], "gemini-4-neon-high")
+
+    def test_list_available_models_parses_cli_and_falls_back(self):
+        """AntigravityAgentRunner.list_available_models parses `agy models` output and falls back to DEFAULT_ANTIGRAVITY_MODELS."""
+        runner = AntigravityAgentRunner(agy_path="mock_agy.exe")
+        mock_completed = MagicMock()
+        mock_completed.returncode = 0
+        mock_completed.stdout = (
+            "Fetching available models...\n"
+            "gemini-4-neon-high\tGemini 4 Neon (High)\n"
+            "gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)\n"
+        )
+        with patch("agent_framework.subprocess.run", return_value=mock_completed):
+            models = runner.list_available_models(force_refresh=True)
+
+        names = [m["name"] for m in models]
+        self.assertIn("gemini-4-neon-high", names)
+        self.assertIn("gemini-4-hydrogen-high", names)
+        self.assertTrue(all(m.get("provider") == "antigravity" for m in models))
+
+        # Failure falls back to DEFAULT_ANTIGRAVITY_MODELS including Hydrogen & Neon
+        runner._models_cache = None
+        with patch("agent_framework.subprocess.run", side_effect=OSError("agy missing")):
+            fallback = runner.list_available_models(force_refresh=True)
+        fb_names = [m["name"] for m in fallback]
+        self.assertIn("gemini-4-neon-high", fb_names)
+        self.assertIn("gemini-4-hydrogen-high", fb_names)
+
 
 if __name__ == "__main__":
     unittest.main()
