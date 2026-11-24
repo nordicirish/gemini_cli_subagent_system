@@ -7,7 +7,7 @@
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="styles.css?v=18.68">
-    <link rel="stylesheet" href="modern_ui.css?v=18.59">
+    <link rel="stylesheet" href="modern_ui.css?v=18.60">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
@@ -449,7 +449,7 @@
                                 <div style="display:flex; align-items:center; justify-content:space-between;">
                                     <div>
                                         <div style="font-size:0.8rem; color:white; font-weight:500;">Context Caching</div>
-                                        <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Cuts costs up to 75% on Pro models</div>
+                                        <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Managed automatically by local runtime</div>
                                     </div>
                                     <div id="settings-caching-toggle" onclick="window.chatUI&&window.chatUI.toggleSettingsCaching()" style="width:42px;height:24px;background:#238636;border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
                                         <div id="settings-caching-knob" style="position:absolute;top:4px;left:22px;width:16px;height:16px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>
@@ -475,7 +475,6 @@
                 <div class="modern-input-footer">
                     <div class="modern-input-tools" style="display:flex;align-items:center;gap:20px;">
                         <span id="chat-status-indicator" style="color:#8b949e;font-size:0.85rem;font-weight:500;letter-spacing:0.5px;">Status: Ready</span>
-                        <span id="chat-session-cost" style="color:var(--accent-blue);font-size:0.85rem;font-weight:500;letter-spacing:0.5px;">Est. Session Cost: $0.00</span>
                     </div>
                     <button class="modern-send-btn" id="send-chat-btn" style="width:auto;border-radius:12px;padding:10px 24px;font-weight:700;letter-spacing:1px;font-size:0.9rem;display:flex;align-items:center;gap:10px;"><span>✦</span> CHAT WITH THE COUNCIL</button>
                     <button class="modern-stop-btn" id="stop-chat-btn" style="display:none;width:auto;border-radius:12px;padding:10px 24px;font-weight:700;letter-spacing:1px;font-size:0.9rem;background:#da3633;border:none;color:white;cursor:pointer;align-items:center;gap:10px;"><span>⏸</span> STOP</button>
@@ -538,6 +537,6 @@
 
     <script src="portfolio.js?v=18.61"></script>
     <script src="app.js?v=18.70"></script>
-    <script src="modern_ui.js?v=18.63"></script>
+    <script src="modern_ui.js?v=18.64"></script>
 </body>
 </html>

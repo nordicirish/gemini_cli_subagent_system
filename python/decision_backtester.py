@@ -10,10 +10,17 @@ from __future__ import annotations
 from datetime import datetime
 import math
 import re
+import threading
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 POSITIVE_ACTIONS = {"BUY", "ADD", "EXECUTE", "HOLD", "ACCUMULATE"}
 DEFENSIVE_ACTIONS = {"TRIM", "SELL", "EXIT", "REDUCE", "LIQUIDATE", "REJECT", "AVOID"}
+_NON_TICKER_LABELS = {"SESSION", "PORTFOLIO", "SYSTEM", "MARKET", "COUNCIL", "GLOBAL"}
+
+_HIST_CACHE_LOCK = threading.RLock()
+_BACKTEST_HIST_CACHE: Dict[str, tuple[float, Any]] = {}
+_BACKTEST_HIST_TTL_SEC = 21600  # 6 hours
 
 
 def _safe_float(val: Any) -> Optional[float]:
@@ -27,28 +34,56 @@ def _safe_float(val: Any) -> Optional[float]:
 
 
 def _default_history_provider(ticker: str) -> Any:
+    sym = str(ticker or "").strip().upper()
+    if not sym or sym in _NON_TICKER_LABELS:
+        return None
     try:
         from fetch_stocks import cache
-        return cache.history.get(ticker)
+        cached_df = cache.history.get(sym)
+        if cached_df is not None and not getattr(cached_df, "empty", True):
+            return cached_df
     except Exception:
         try:
             from python.fetch_stocks import cache
-            return cache.history.get(ticker)
+            cached_df = cache.history.get(sym)
+            if cached_df is not None and not getattr(cached_df, "empty", True):
+                return cached_df
         except Exception:
-            return None
+            pass
+
+    now = time.time()
+    with _HIST_CACHE_LOCK:
+        hit = _BACKTEST_HIST_CACHE.get(sym)
+        if hit and (now - hit[0]) < _BACKTEST_HIST_TTL_SEC:
+            return hit[1]
+
+    try:
+        import yfinance as yf
+        df = yf.Ticker(sym).history(period="6mo", auto_adjust=False)
+        if df is not None and not getattr(df, "empty", True):
+            with _HIST_CACHE_LOCK:
+                _BACKTEST_HIST_CACHE[sym] = (now, df)
+            return df
+    except Exception:
+        return None
+    return None
 
 
 def _extract_ticker_from_entry(entry: Dict[str, Any]) -> str:
     raw = entry.get("ticker")
     if isinstance(raw, str) and raw.strip():
-        return raw.strip().upper()
+        sym = raw.strip().upper()
+        return "" if sym in _NON_TICKER_LABELS else sym
     text = f"{entry.get('action_proposed', '')} {entry.get('lesson', '')}"
-    m = re.search(r"\b([A-Z]{2,5})\b", text)
-    return m.group(1).upper() if m else ""
+    for m in re.finditer(r"\b([A-Z]{2,5})\b", text):
+        cand = m.group(1).upper()
+        if cand not in _NON_TICKER_LABELS:
+            return cand
+    return ""
 
 
 def _extract_action_from_entry(entry: Dict[str, Any]) -> str:
-    for key in ("action", "action_proposed", "decision", "outcome"):
+    for key in ("action", "trade_state", "verdict", "action_proposed", "decision", "outcome"):
         val = str(entry.get(key) or "").strip().upper()
         if not val:
             continue
@@ -56,6 +91,28 @@ def _extract_action_from_entry(entry: Dict[str, Any]) -> str:
             if tok in val:
                 return tok
     return "HOLD"
+
+
+def _flatten_decision_entries(decision_log: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    flattened: List[Dict[str, Any]] = []
+    for item in decision_log:
+        if not isinstance(item, dict):
+            continue
+        nested = item.get("decisions")
+        if isinstance(nested, list) and nested:
+            parent_date = item.get("date") or item.get("timestamp") or item.get("timestamp_utc")
+            for sub in nested:
+                if not isinstance(sub, dict):
+                    continue
+                merged = dict(sub)
+                if parent_date and not (merged.get("date") or merged.get("timestamp") or merged.get("timestamp_utc")):
+                    merged["timestamp"] = parent_date
+                flattened.append(merged)
+            continue
+        if str(item.get("ticker") or "").strip().upper() in _NON_TICKER_LABELS:
+            continue
+        flattened.append(item)
+    return flattened
 
 
 def _parse_entry_date(raw_date: Any) -> Optional[datetime]:
@@ -79,7 +136,8 @@ def backtest_decision_log(
     max_entries: int = 25,
 ) -> Dict[str, Any]:
     """Evaluates decision_log entries against forward historical OHLCV bars."""
-    entries_list = list(decision_log) if isinstance(decision_log, list) else []
+    raw_list = list(decision_log) if isinstance(decision_log, list) else []
+    entries_list = _flatten_decision_entries(raw_list)
     provider = history_provider or _default_history_provider
 
     evaluated: List[Dict[str, Any]] = []
@@ -101,7 +159,7 @@ def backtest_decision_log(
         target_dt = _parse_entry_date(item.get("date") or item.get("timestamp") or item.get("timestamp_utc"))
         try:
             df = hist_df.sort_index()
-            idx_dates = [getattr(ts, "tz_localize", None) and ts.tz_localize(None) or ts.tz_convert(None) if getattr(ts, "tzinfo", None) is not None else ts for ts in df.index]
+            idx_dates = [ts.tz_convert(None) if getattr(ts, "tzinfo", None) is not None else ts for ts in df.index]
         except Exception:
             continue
 
@@ -122,7 +180,7 @@ def backtest_decision_log(
         if start_pos is None or start_pos >= len(df):
             continue
 
-        logged_price = _safe_float(item.get("price") or item.get("entry_price"))
+        logged_price = _safe_float(item.get("price") or item.get("price_at_eval") or item.get("entry_price"))
         entry_close = _safe_float(df.iloc[start_pos]["Close"])
         entry_price = logged_price if (logged_price and logged_price > 0) else entry_close
         if not entry_price or entry_price <= 0:
@@ -154,11 +212,14 @@ def backtest_decision_log(
         else:
             hit = ret_5d > 0.0
 
+        audit = item.get("scrutiny_audit") if isinstance(item.get("scrutiny_audit"), dict) else {}
+        sa_score = _safe_float(audit.get("agreement_score_sa") or item.get("agreement_score_sa"))
         row_res = {
             "date": str(item.get("date") or (target_dt.strftime("%Y-%m-%d") if target_dt else "")),
             "ticker": ticker,
             "action": action,
             "entry_price": round(entry_price, 4),
+            "agreement_score_sa": round(sa_score, 4) if sa_score is not None else None,
             "bars_evaluated": len(closes),
             "ret_1d_pct": ret_1d,
             "ret_3d_pct": ret_3d,

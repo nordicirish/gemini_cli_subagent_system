@@ -1943,6 +1943,56 @@ def save_scout_categories(categories: List[str], background_tasks: BackgroundTas
             status_code=503,
         )
 
+@app.post("/api/trade_lessons/add")
+async def add_trade_lesson_endpoint(req: Request):
+    """Owner-triggered endpoint saving an approved post-trade lesson to trade_lessons."""
+    from tool_registry import authorize_financial_mutation
+    try:
+        body = await req.json()
+    except Exception:
+        return JSONResponse({"status": "error", "detail": "Invalid JSON lesson payload"}, status_code=422)
+    if not isinstance(body, dict):
+        return JSONResponse({"status": "error", "detail": "Lesson payload must be a JSON object"}, status_code=422)
+
+    lesson_text = str(body.get("lesson") or "").strip()
+    if not lesson_text or len(lesson_text) > 1000:
+        return JSONResponse({"status": "error", "detail": "Lesson must be between 1 and 1000 characters"}, status_code=422)
+
+    raw_ticker = str(body.get("ticker") or "").strip().upper()
+    ticker_sym = raw_ticker if (raw_ticker and len(raw_ticker) <= 10) else "PORTFOLIO"
+
+    try:
+        authorize_financial_mutation(
+            operation_name="update_trade_lessons",
+            target_resource="context/trade_lessons.json",
+            payload=body,
+        )
+        service = get_persistence_service()
+        existing = service.get_trade_lessons()
+        lessons_list = list(existing) if isinstance(existing, list) else []
+        entry = {
+            "date": agent_framework.ny_now().strftime("%Y-%m-%d"),
+            "ticker": ticker_sym,
+            "lesson": lesson_text,
+            "source": str(body.get("source") or "OWNER_APPROVED_REVIEW").strip()[:64],
+        }
+        already = any(
+            isinstance(x, dict) and str(x.get("lesson") or "").strip() == lesson_text
+            for x in lessons_list
+        )
+        if not already:
+            lessons_list.append(entry)
+            service.save_trade_lessons(lessons_list)
+        return {"status": "success", "total_lessons": len(lessons_list), "entry": entry, "duplicate": already}
+    except PermissionError:
+        raise
+    except PersistenceValidationError as ve:
+        return JSONResponse({"status": "error", "detail": redact_secrets(str(ve))}, status_code=422)
+    except Exception as e:
+        framework.log(f"[Error] Save Trade Lesson Failed: {redact_secrets(str(e))}")
+        return JSONResponse({"status": "error", "detail": "Failed to persist trade lesson"}, status_code=503)
+
+
 @app.get("/api/alerts")
 def get_alerts():
     payload = ALERT_MONITOR.get_dashboard_payload()

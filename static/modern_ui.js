@@ -98,8 +98,8 @@ const ModernChat = {
             icon: '📝',
             label: 'Review Log',
             id: 'qp-review-log',
-            tooltip: 'Forensically audit past decisions to generate corrective trade lessons.',
-            prompt: 'SYSTEM DIRECTIVE: EXECUTE [MANDATE_26_POST_TRADE_REVIEW]. Invoke the Post-Trade Review Engine to forensically audit the complete decision_log.json. Perform a decision log backtest and trade lessons permanency audit: (1) Grade historical agreement scores and trade state assumptions against realized price action. (2) Identify technical drift, liquidity errors, and rebalancing misfires. (3) Generate corrective trade lessons and save them using update_trade_lessons. Open with ### 🚨 Alerts & Risk Warnings and ### 🎯 Actionable Recommendations BEFORE forensic notes.'
+            tooltip: 'Forensically audit past decisions to generate corrective trade lessons and actionable triggers.',
+            prompt: 'SYSTEM DIRECTIVE: EXECUTE [MANDATE_26_POST_TRADE_REVIEW]. DO NOT produce a routine Stage 0 HOLD/WATCH market wrap. Invoke the Post-Trade Review Engine (`ask_post-trade_review_engine`) or call `read_decision_log`, `run_decision_backtest`, and `read_trade_lessons` directly. Audit historical decisions against realized 1D/3D/5D price action and agreement_score_sa calibration. Output strictly under `### 🚨 Alerts & Risk Warnings` and `### 🎯 Actionable Recommendations`, formatting 3-5 concrete findings prefixed with `[LESSON]`, `[TRIGGER]`, or `[RULE_PROPOSAL]` (with exact ticker + price where applicable) BEFORE forensic commentary.'
         },
     ],
 
@@ -362,6 +362,30 @@ const ModernChat = {
                 qp = { ...qp, prompt: `SYSTEM DIRECTIVE: DEEP DIVE WATCHLIST RESEARCH. Strategic Watchlist tickers: [${combined.join(', ')}]. Using the live DATA_PACKET just injected, perform a deep-dive research analysis on ALL of these tickers (includes both manual watchlist and scout intelligence candidates). For each ticker: (1) Assess technical setup, RSI, ATR%, GEX posture and trend. (2) Score risk/reward vs. current regime. (3) Provide a clear entry/avoid recommendation with supporting evidence. Output a structured, human-readable summary.` };
             } catch (e) {
                 console.error('Deep Dive Watchlist prompt build failed', e);
+            }
+        }
+        if (qp.id === 'qp-review-log') {
+            try {
+                const btRes = await fetch('/api/analytics/backtest');
+                if (btRes && btRes.ok) {
+                    const bt = await btRes.json();
+                    const summary = {
+                        total_logged: bt.total_logged || 0,
+                        evaluated_count: bt.evaluated_count || 0,
+                        hit_rate_pct: bt.hit_rate_pct,
+                        avg_ret_1d_pct: bt.avg_ret_1d_pct,
+                        avg_ret_5d_pct: bt.avg_ret_5d_pct,
+                        avg_mae_pct: bt.avg_mae_pct,
+                        by_action: bt.by_action || {},
+                        sample_entries: Array.isArray(bt.entries) ? bt.entries.slice(-10) : [],
+                    };
+                    qp = {
+                        ...qp,
+                        prompt: `${qp.prompt}\n\n[PRECOMPUTED_BACKTEST_SUMMARY]: ${JSON.stringify(summary)}`,
+                    };
+                }
+            } catch (_) {
+                /* fallback to base Review Log directive offline */
             }
         }
 
@@ -727,7 +751,6 @@ const ModernChat = {
         }
         let historyHtml = '<div style="padding: 10px;"><h3>Archived Sessions</h3>';
         sessions.forEach(s => {
-            const displayCost = Number(s.totalCost) || 0.0;
             const sid = Number(s.id) || 0;
             historyHtml += `
                 <div onclick="window.chatUI.loadSession(${sid})" style="padding: 10px; margin-bottom: 8px; background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
@@ -736,9 +759,6 @@ const ModernChat = {
                         <div style="font-weight: 500; margin-top: 4px;">${escapeHtml(s.preview)}</div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
-                        <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent-blue); text-align: right; flex-shrink: 0; padding-left: 10px;">
-                            Est. Cost: $${displayCost.toFixed(2)}
-                        </div>
                         <button onclick="event.stopPropagation(); window.chatUI.deleteSession(${sid})" style="background: rgba(255, 68, 68, 0.15); border: 1px solid rgba(255, 68, 68, 0.3); color: #ff6b6b; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.75rem;" title="Delete Session">&times;</button>
                     </div>
                 </div>
@@ -845,23 +865,7 @@ const ModernChat = {
     },
 
     updateTotalSessionCost() {
-        const messageElements = this.messages.querySelectorAll('.modern-message');
-        let totalCost = 0.0;
-        messageElements.forEach(el => {
-            if (el.classList.contains('thinking-msg')) return;
-            const cost = parseFloat(el.getAttribute('data-cost') || '0.0');
-            totalCost += cost;
-        });
-        const costEl = document.getElementById('chat-session-cost');
-        if (costEl) {
-            const subActive = this.geminiSubscriptionToggle && this.geminiSubscriptionToggle.checked;
-            if (subActive) {
-                costEl.style.display = 'none';
-            } else {
-                costEl.style.display = '';
-                costEl.textContent = `Est. Session Cost: $${totalCost.toFixed(2)}`;
-            }
-        }
+        // Cost estimate UI intentionally removed for local Antigravity runtime.
     },
 
     toggle() {
@@ -1035,33 +1039,6 @@ const ModernChat = {
                 // Remove the original header element — summary is the only title needed
                 debateHeader.remove();
             }
-            if (cost > 0 || (usage && Object.keys(usage).length > 0)) {
-                const subActive = this.geminiSubscriptionToggle && this.geminiSubscriptionToggle.checked;
-                const badge = document.createElement('div');
-                badge.className = 'cost-estimator';
-                const summary = this._summarizeUsageTokens(usage);
-                let tokenInfo = '';
-                if (usage) {
-                    let tokenText;
-                    if (summary.isMixed) {
-                        const measIn = summary.actualIn + summary.cachedIn;
-                        tokenText = `${summary.inTokens} in [${measIn} meas. + ~${summary.estIn} est.] / ${summary.outTokens} out [${summary.actualOut} meas. + ~${summary.estOut} est.] · mixed`;
-                    } else if (summary.isEstimatedOnly) {
-                        tokenText = `~${summary.inTokens} est. in / ~${summary.outTokens} est. out · chars/4 est.`;
-                    } else {
-                        tokenText = `${summary.inTokens} in / ${summary.outTokens} out`;
-                    }
-                    tokenInfo = ` <span style="font-size:0.65rem;opacity:0.7">(${tokenText})</span>`;
-                }
-                const costStr = summary.isMixed
-                    ? `Mixed Est. Cost: $${cost.toFixed(4)}`
-                    : (summary.isEstimatedOnly
-                        ? `Heuristic Est. Cost: $${cost.toFixed(4)}`
-                        : `Est. Cost: $${cost.toFixed(4)}`);
-                const planStr = subActive ? ` <span style="color:#58a6ff;font-size:0.65rem;margin-left:5px;font-weight:bold">[Plan Active]</span>` : '';
-                badge.innerHTML = `🪙 ${costStr}${planStr}${tokenInfo}`;
-                msgDiv.appendChild(badge);
-            }
             // Synchronize the model selector dropdown to the actual model that responded
             if (model && this.modelSelector && this.modelSelector.value !== model) {
                 const exists = Array.from(this.modelSelector.options).some(opt => opt.value === model);
@@ -1116,26 +1093,127 @@ const ModernChat = {
             if (['BUY', 'ADD', 'EXECUTE'].includes(w)) return 'action-buy';
             if (['TRIM', 'SELL'].includes(w)) return 'action-trim';
             if (['AVOID', 'REJECT'].includes(w)) return 'action-avoid';
+            if (['LESSON'].includes(w)) return 'action-lesson';
+            if (['TRIGGER'].includes(w)) return 'action-trigger';
+            if (['RULE_PROPOSAL'].includes(w)) return 'action-rule';
             return 'action-hold';
         };
-        const tokenRe = /^\s*\[?(BUY|ADD|EXECUTE|TRIM|SELL|HOLD|WATCH|WAIT|AVOID|REJECT)\]?(?=\s|$|:|—|-)/i;
+        const tokenRe = /^\s*\[?(BUY|ADD|EXECUTE|TRIM|SELL|HOLD|WATCH|WAIT|AVOID|REJECT|LESSON|TRIGGER|RULE_PROPOSAL)\]?(?=\s|$|:|—|-)/i;
+        const nonTickers = new Set([
+            'USD', 'EUR', 'VWAP', 'RSI', 'ATR', 'MACD', 'GEX', 'HOD', 'LOD', 'SMA', 'EMA',
+            'PCE', 'CPI', 'FOMC', 'NFP', 'GDP', 'SSR', 'RTH', 'EST', 'EDT', 'SEC', 'ETF',
+            'HOLD', 'TRIM', 'SELL', 'BUY', 'ADD', 'WATCH', 'WAIT', 'AVOID', 'REJECT', 'ALERT',
+            'STOP', 'LIMIT', 'CORE', 'STAGE', 'DAY', 'MAX', 'MIN', 'RULE', 'PROPOSAL', 'LESSON',
+            'TRIGGER', 'AND', 'FOR', 'WITH', 'THE', 'NOT', 'ZERO', 'CASH', 'NONE', 'VIX', 'VVIX',
+        ]);
+
+        const extractTicker = (raw) => {
+            const matches = String(raw || '').match(/\b[A-Z]{2,5}\b/g) || [];
+            return matches.find((tok) => !nonTickers.has(tok)) || null;
+        };
 
         container.querySelectorAll('li').forEach((li) => {
+            const fullText = (li.textContent || '').trim();
             const firstStrong = li.firstElementChild && ['STRONG', 'B'].includes(li.firstElementChild.tagName)
                 ? li.firstElementChild
                 : null;
             const targetNode = firstStrong && firstStrong.previousSibling === null ? firstStrong : li;
             const firstText = targetNode.firstChild && targetNode.firstChild.nodeType === 3 ? targetNode.firstChild : null;
-            if (!firstText) return;
-            const m = firstText.textContent.match(tokenRe);
-            if (!m) return;
 
-            const action = m[1].toUpperCase();
-            firstText.textContent = firstText.textContent.slice(m[0].length).replace(/^\s+/, '');
-            const pill = document.createElement('span');
-            pill.className = `action-pill ${actionClass(action)}`;
-            pill.textContent = action;
-            li.insertBefore(pill, li.firstChild);
+            let action = null;
+            if (firstText) {
+                const m = firstText.textContent.match(tokenRe);
+                if (m) {
+                    action = m[1].toUpperCase();
+                    firstText.textContent = firstText.textContent.slice(m[0].length).replace(/^[\s:]+/, '');
+                    const pill = document.createElement('span');
+                    pill.className = `action-pill ${actionClass(action)}`;
+                    pill.textContent = action;
+                    li.insertBefore(pill, li.firstChild);
+                    // Preserve literal whitespace between pill and following text
+                    li.insertBefore(document.createTextNode(' '), pill.nextSibling);
+                }
+            }
+
+            const sym = extractTicker(fullText);
+            const priceMatch = fullText.match(/\$([0-9]+(?:\.[0-9]{1,2})?)/);
+            const cleanBodyText = fullText.replace(tokenRe, '').replace(/^[\s:\-—]+/, '').trim();
+
+            if (action === 'LESSON' && cleanBodyText) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'reco-action-btn save-lesson';
+                btn.textContent = '📌 Save Lesson';
+                btn.onclick = async () => {
+                    btn.disabled = true;
+                    try {
+                        const res = await fetch('/api/trade_lessons/add', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ lesson: cleanBodyText, ticker: sym || 'PORTFOLIO' }),
+                        });
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        btn.textContent = '✓ Saved';
+                    } catch (_) {
+                        btn.textContent = '⚠ Retry';
+                        btn.disabled = false;
+                    }
+                };
+                li.appendChild(btn);
+            }
+
+            if (action === 'RULE_PROPOSAL' && cleanBodyText) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'reco-action-btn';
+                btn.textContent = '📋 Copy Proposal';
+                btn.onclick = async () => {
+                    try {
+                        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                            await navigator.clipboard.writeText(cleanBodyText);
+                        }
+                        btn.textContent = '✓ Copied';
+                    } catch (_) {
+                        btn.textContent = '📋 Copy Proposal';
+                    }
+                };
+                li.appendChild(btn);
+            }
+
+            if (sym && priceMatch) {
+                const targetPrice = Number(priceMatch[1]);
+                if (Number.isFinite(targetPrice) && targetPrice > 0) {
+                    const isDownside = /\b(stop|support|below|breach|downside|trim|sell|floor|tripwire)\b/i.test(fullText);
+                    const op = isDownside ? '<=' : '>=';
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'reco-action-btn arm-trigger';
+                    btn.textContent = `🔔 Arm ${sym} $${targetPrice.toFixed(2)}`;
+                    btn.onclick = async () => {
+                        btn.disabled = true;
+                        try {
+                            const res = await fetch('/api/alerts', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    ticker: sym,
+                                    metric: 'price',
+                                    op,
+                                    target: targetPrice,
+                                    label: 'Council Chat Recommendation',
+                                }),
+                            });
+                            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                            btn.textContent = '✓ Armed';
+                            if (typeof window.pollData === 'function') window.pollData();
+                        } catch (_) {
+                            btn.textContent = `⚠ Retry Arm`;
+                            btn.disabled = false;
+                        }
+                    };
+                    li.appendChild(btn);
+                }
+            }
         });
     },
 

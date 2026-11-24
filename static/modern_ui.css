@@ -533,6 +533,49 @@ a:active {
 .action-pill.action-trim  { background: rgba(210, 153, 34, 0.2); color: #e3b341; border: 1px solid rgba(210, 153, 34, 0.45); }
 .action-pill.action-hold  { background: rgba(88, 166, 255, 0.16); color: #58a6ff; border: 1px solid rgba(88, 166, 255, 0.35); }
 .action-pill.action-avoid { background: rgba(248, 81, 73, 0.2); color: #f85149; border: 1px solid rgba(248, 81, 73, 0.45); }
+.action-pill.action-lesson { background: rgba(188, 140, 255, 0.18); color: #bc8cff; border: 1px solid rgba(188, 140, 255, 0.4); }
+.action-pill.action-trigger { background: rgba(240, 136, 62, 0.2); color: #ffa657; border: 1px solid rgba(240, 136, 62, 0.45); }
+.action-pill.action-rule { background: rgba(56, 189, 248, 0.16); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
+
+.reco-action-btn {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    color: #e6edf3;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.66rem;
+    font-weight: 600;
+    cursor: pointer;
+    vertical-align: middle;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.reco-action-btn.arm-trigger {
+    border-color: rgba(88, 166, 255, 0.45);
+    background: rgba(88, 166, 255, 0.14);
+    color: #79c0ff;
+}
+
+.reco-action-btn.save-lesson {
+    border-color: rgba(188, 140, 255, 0.45);
+    background: rgba(188, 140, 255, 0.14);
+    color: #d2a8ff;
+}
+
+.reco-action-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: #79c0ff;
+    color: #ffffff;
+}
+
+.reco-action-btn:disabled {
+    opacity: 0.72;
+    cursor: default;
+}
 
 .chat-sources-details {
     margin: 12px 0;

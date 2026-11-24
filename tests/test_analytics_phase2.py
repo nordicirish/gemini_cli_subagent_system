@@ -126,6 +126,43 @@ class TestBacktesterAndSecEdgar(unittest.TestCase):
         self.assertIn("BUY", res["by_action"])
         self.assertIn("TRIM", res["by_action"])
 
+        nested_log = [
+            {"date": "2026-11-02", "ticker": "SESSION", "lesson": "Narrative summary only"},
+            {
+                "timestamp": "2026-11-02T15:00:00",
+                "decisions": [
+                    {
+                        "ticker": "UMAC",
+                        "price_at_eval": 10.0,
+                        "trade_state": "BUY",
+                        "scrutiny_audit": {"agreement_score_sa": 0.91},
+                    }
+                ],
+            },
+        ]
+        nested_res = backtest_decision_log(nested_log, history_provider=lambda s: hist if s == "UMAC" else None)
+        self.assertEqual(nested_res["total_logged"], 1)
+        self.assertEqual(nested_res["evaluated_count"], 1)
+        self.assertAlmostEqual(nested_res["entries"][0]["agreement_score_sa"], 0.91, places=2)
+
+    def test_add_trade_lesson_endpoint_persists_owner_approved_lesson(self):
+        saved = {}
+
+        class FakeSvc:
+            def get_trade_lessons(self):
+                return [{"date": "2026-11-01", "ticker": "UMAC", "lesson": "Existing lesson"}]
+
+            def save_trade_lessons(self, items):
+                saved["items"] = items
+
+        client = TestClient(web_server.app)
+        with patch.object(web_server, "get_persistence_service", return_value=FakeSvc()):
+            res = client.post("/api/trade_lessons/add", json={"ticker": "UMAC", "lesson": "Tighten stop pre-PCE"})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(saved["items"]), 2)
+        self.assertEqual(saved["items"][1]["ticker"], "UMAC")
+        self.assertEqual(saved["items"][1]["lesson"], "Tighten stop pre-PCE")
+
     def test_sec_edgar_dilution_warning_caching_and_urls(self):
         tmp = tempfile.TemporaryDirectory()
         calls = []

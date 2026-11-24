@@ -423,6 +423,29 @@ async function main() {
         assert(window.document.getElementById('chart-exec-plan-btn'), 'chart-exec-plan-btn missing from chart modal');
     });
 
+    // Review Log / Chat actionable recommendation buttons & cost estimate removal check
+    window.chatUI.appendMessage('ai', [
+        '### 🏁 Final Council Decision',
+        'HOLD',
+        '### 🎯 Actionable Recommendations',
+        '- **[LESSON] UMAC** — Tighten pre-PCE stop by 50%.',
+        '- **[TRIGGER] NVDA** — Arm defensive support stop at $118.50.',
+    ].join('\n'), false, 0.05, { prompt_tokens: 100, candidates_tokens: 50 }, 'gemini-3.8-flash-high');
+    const latestChatMsg = [...window.document.querySelectorAll('.modern-message.ai')].slice(-1)[0];
+    const saveLessonBtn = latestChatMsg.querySelector('.reco-action-btn.save-lesson');
+    const armRecoBtn = latestChatMsg.querySelector('.reco-action-btn.arm-trigger');
+    if (saveLessonBtn) saveLessonBtn.click();
+    if (armRecoBtn) armRecoBtn.click();
+    await new Promise((r) => setTimeout(r, 80));
+    check('Chat Actions & Cost Removal: omits cost estimate UI and wires 1-click Save Lesson & Arm Trigger buttons', () => {
+        assert.strictEqual(window.document.getElementById('chat-session-cost'), null, '#chat-session-cost should be removed');
+        assert.strictEqual(latestChatMsg.querySelector('.cost-estimator'), null, '.cost-estimator badge should not render');
+        const pillLi = latestChatMsg.querySelector('.chat-callout-reco li');
+        assert(pillLi && pillLi.textContent.includes('LESSON UMAC'), `expected space after pill, got: ${pillLi && pillLi.textContent}`);
+        assert(saveLessonBtn && calls.includes('POST /api/trade_lessons/add'), '1-click Save Lesson did not POST /api/trade_lessons/add');
+        assert(armRecoBtn && armRecoBtn.textContent.includes('Armed') || armRecoBtn.textContent.includes('$118.50'), '1-click Arm Trigger missing');
+    });
+
     window.close();
     console.log(results.join('\n'));
     const failed = results.filter((r) => r.startsWith('FAIL')).length;

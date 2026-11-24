@@ -1016,11 +1016,9 @@ class TestStage333ChatLatencyAndUxCleanup(unittest.TestCase):
         self.assertIn("turn_id: turnId", ui_js)
         self.assertIn("_summarizeUsageTokens", ui_js)
         self.assertIn("mixed_estimated_and_measured", ui_js)
-        self.assertIn("Mixed Est. Cost", ui_js)
+        self.assertNotIn("Est. Cost:", ui_js)
         self.assertIn("AbortController", ui_js)
         self.assertIn("_cleanupPendingTurnUI", ui_js)
-        self.assertIn("chars/4 est.", ui_js)
-        self.assertIn("Heuristic Est. Cost", ui_js)
         self.assertNotIn("saving up to 75% on token costs", ui_js)
         self.assertNotIn("Context Caching** enabled", ui_js)
         self.assertNotIn("/api/set_cache_policy", ui_js)
@@ -1420,11 +1418,7 @@ assert(Math.abs(mixedCost - expectedMixedCost) < 1e-12, `Expected mixed cost ${e
 
 chatUI.appendMessage('ai', 'Mixed reply', false, mixedCost, mixedUsage, 'gemini-3.8-flash-high');
 const lastMsg = elementsById['chat-messages'].children.slice(-1)[0];
-const mixedBadgeHtml = lastMsg.children.find(c => c.className === 'cost-estimator').innerHTML;
-assert(mixedBadgeHtml.includes('Mixed Est. Cost:'), mixedBadgeHtml);
-assert(mixedBadgeHtml.includes('240 in [200 meas. + ~40 est.]'), mixedBadgeHtml);
-assert(mixedBadgeHtml.includes('120 out [100 meas. + ~20 est.]'), mixedBadgeHtml);
-assert(mixedBadgeHtml.includes('mixed'), mixedBadgeHtml);
+assert(!lastMsg.children.find(c => c.className === 'cost-estimator'), 'Cost estimator badge must be omitted');
 
 // 2. Dual non-zero actual + estimated fields without explicit mode still aggregate cleanly
 const implicitMixed = {
@@ -1437,7 +1431,7 @@ const implicitCost = chatUI.calculateCost(implicitMixed, 'gemini-3.8-flash-high'
 const expectedImplicitCost = (150 * 0.075 + 70 * 0.30) / 1000000;
 assert(Math.abs(implicitCost - expectedImplicitCost) < 1e-12);
 
-// 3. Heuristic-only usage still displays heuristic label cleanly
+// 3. Heuristic-only usage omits cost estimate badge in UI
 const estOnlyUsage = {
     actual_prompt_tokens: 0,
     estimated_prompt_tokens: 120,
@@ -1452,9 +1446,7 @@ const estOnlyUsage = {
 };
 chatUI.appendMessage('ai', 'Est reply', false, 0.0001, estOnlyUsage, 'gemini-3.8-flash-high');
 const estMsg = elementsById['chat-messages'].children.slice(-1)[0];
-const estBadgeHtml = estMsg.children.find(c => c.className === 'cost-estimator').innerHTML;
-assert(estBadgeHtml.includes('Heuristic Est. Cost:'), estBadgeHtml);
-assert(estBadgeHtml.includes('~120 est. in / ~40 est. out'), estBadgeHtml);
+assert(!estMsg.children.find(c => c.className === 'cost-estimator'), 'Heuristic cost estimator badge must be omitted');
 
 // 4. Turn-ID-scoped UI cleanup & stopMessage correlation
 (async () => {
