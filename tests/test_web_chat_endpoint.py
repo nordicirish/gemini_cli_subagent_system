@@ -2468,7 +2468,7 @@ class TestStage37ConsolidatedTrustPrecisionAndPersistence(unittest.TestCase):
             self.assertEqual(zero_share_res.status_code, 200)
 
     def test_r3_basket_endpoints_fail_closed_with_503_and_redact_secrets(self):
-        """R3: /api/basket and /api/get_basket return HTTP 503 error (never empty/zero fallback) and redact secrets from error logs."""
+        """R3: /api/basket returns HTTP 503 error (never empty/zero fallback) and redacts secrets from error logs."""
         from fastapi.testclient import TestClient
 
         mock_service = MagicMock()
@@ -2492,11 +2492,9 @@ class TestStage37ConsolidatedTrustPrecisionAndPersistence(unittest.TestCase):
             self.assertNotIn("unallocated_cash_eur", body_web)
             self.assertNotIn("AIzaSyD-secret12345", json.dumps(body_web))
 
+            # The legacy duplicate route was removed; /api/basket is the only basket read path
             r_fs = client.get("/api/get_basket", headers={"Origin": "http://127.0.0.1:8000"})
-            self.assertEqual(r_fs.status_code, 503)
-            body_fs = r_fs.json()
-            self.assertEqual(body_fs["status"], "error")
-            self.assertEqual(body_fs["detail"], "Authoritative portfolio persistence unavailable")
+            self.assertEqual(r_fs.status_code, 404)
 
         self.assertTrue(any("[REDACTED_SECRET]" in m for m in logged_messages))
         self.assertFalse(any("AIzaSyD-secret12345" in m for m in logged_messages))

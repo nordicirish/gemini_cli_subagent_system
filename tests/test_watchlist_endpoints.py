@@ -137,25 +137,6 @@ class TestWatchlistEndpoints(unittest.TestCase):
         with self._orig_open(path, "rb") as f:
             return f.read()
 
-    def test_f2_fetch_stocks_get_watch_list_is_strictly_read_only(self):
-        """F2.1: GET /api/get_watch_list in fetch_stocks.py must not modify ssot.json or config.json."""
-        ssot_before = self._get_file_bytes(self.temp_ssot_path)
-        config_before = self._get_file_bytes(self.temp_config_path)
-
-        response = fetch_stocks.get_watch_list()
-        self.assertEqual(response.status_code, 200)
-
-        # Verify response structure and content
-        body = json.loads(response.body.decode("utf-8"))
-        self.assertEqual(body, ["AAPL", "MSFT"])
-
-        # Verify persistence service state is unchanged
-        self.assertEqual(self.service.get_watchlist(), ["AAPL", "MSFT"])
-
-        # Verify zero disk mutations on authoritative financial files
-        self.assertEqual(self._get_file_bytes(self.temp_ssot_path), ssot_before)
-        self.assertEqual(self._get_file_bytes(self.temp_config_path), config_before)
-
     def test_f2_web_server_get_watchlist_is_strictly_read_only(self):
         """F2.2: GET /api/watchlist in web_server.py must not modify ssot.json or config.json."""
         ssot_before = self._get_file_bytes(self.temp_ssot_path)
@@ -183,10 +164,6 @@ class TestWatchlistEndpoints(unittest.TestCase):
             ssot_before = self._get_file_bytes(self.temp_ssot_path)
             config_before = self._get_file_bytes(self.temp_config_path)
 
-            # Test fetch_stocks GET
-            fs_resp = fetch_stocks.get_watch_list()
-            self.assertEqual(json.loads(fs_resp.body.decode("utf-8")), ["OLD_SYM1", "OLD_SYM2"])
-
             # Test web_server GET
             ws_resp = web_server.get_watch_list()
             self.assertEqual(ws_resp, ["OLD_SYM1", "OLD_SYM2"])
@@ -202,13 +179,12 @@ class TestWatchlistEndpoints(unittest.TestCase):
         """F2: Watchlist GET endpoints normalize symbols (uppercase, stripped) and ignore invalid items."""
         import asyncio
         req = MockRequest({"watchlist": ["  tsla ", "NvDa", "", 123, None, "  amd  "]})
-        with execution_role_context("Terminal Orchestrator"):
-            res = asyncio.run(fetch_stocks.save_watch_list(req))
-        self.assertEqual(res.status_code, 200)
-
-        # fetch_stocks GET
-        fs_resp = fetch_stocks.get_watch_list()
-        self.assertEqual(json.loads(fs_resp.body.decode("utf-8")), ["AMD", "NVDA", "TSLA"])
+        with (
+            execution_role_context("Terminal Orchestrator"),
+            patch("web_server.check_invalid_tickers", return_value=[]),  # no network in tests
+        ):
+            res = asyncio.run(web_server.save_watch_list(req))
+        self.assertEqual(res.get("status"), "success")
 
         # web_server GET
         ws_resp = web_server.get_watch_list()
@@ -221,15 +197,7 @@ class TestWatchlistEndpoints(unittest.TestCase):
         """F2.3: Authorized POST requests to save_watch_list successfully update the active persistence backend."""
         import asyncio
 
-        # 1. Test fetch_stocks.save_watch_list (POST /api/save_watch_list)
-        req1 = MockRequest({"watchlist": ["GOOG", "AMZN"]})
-        with execution_role_context("Terminal Orchestrator"):
-            res1 = asyncio.run(fetch_stocks.save_watch_list(req1))
-        self.assertEqual(res1.status_code, 200)
-
-        self.assertEqual(self.service.get_watchlist(), ["AMZN", "GOOG"])
-
-        # 2. Test web_server.save_watch_list (POST /api/watchlist)
+        # web_server.save_watch_list (POST /api/watchlist) is the only watchlist write route
         req2 = MockRequest({"watchlist": ["META", "NFLX"]})
         with execution_role_context("Context Engine"):
             res2 = asyncio.run(web_server.save_watch_list(req2))
@@ -248,11 +216,6 @@ class TestWatchlistEndpoints(unittest.TestCase):
         unauthorized_roles = ["Python Engineer", "Architecture Agent", "Bullish Advocate"]
         for role in unauthorized_roles:
             with execution_role_context(role):
-                # fetch_stocks POST
-                req1 = MockRequest({"watchlist": ["HACK1"]})
-                with self.assertRaises(PermissionError, msg=f"fetch_stocks should block {role}"):
-                    asyncio.run(fetch_stocks.save_watch_list(req1))
-
                 # web_server POST
                 req2 = MockRequest({"watchlist": ["HACK2"]})
                 with self.assertRaises(PermissionError, msg=f"web_server should block {role}"):

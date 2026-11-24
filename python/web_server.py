@@ -1441,7 +1441,8 @@ def clear_decision_log():
         framework.log(f"[Error] Decision log clear failed: {e}")
         return {"status": "error", "message": str(e)}
 
-@app.get("/api/tickers")
+# /api/tickers is served by fetch_stocks.get_tickers (live tickers + macro labels); this
+# function only answers /api/get_settings (it used to also register a shadowed /api/tickers).
 @app.get("/api/get_settings")
 def get_settings():
     labels = {
@@ -1733,10 +1734,12 @@ async def save_watch_list(req: Request):
         raise
     except HTTPException as he:
         raise he
+    except PersistenceValidationError as ve:
+        return JSONResponse({"status": "error", "detail": redact_secrets(str(ve))}, status_code=422)
     except Exception as e:
-        framework.log(f"[Error] Watch List Save Failed: {e}")
-        return {"status": "error", "message": str(e)}
-        raise HTTPException(status_code=500, detail=str(e))
+        # Fail with a real error status (was HTTP 200 + {"status": "error"}), like /api/basket
+        framework.log(f"[Error] Watch List Save Failed: {redact_secrets(str(e))}")
+        return JSONResponse({"status": "error", "detail": "Failed to persist watchlist"}, status_code=503)
 
 @app.post("/api/ai_scout")
 async def run_ai_scout(request: Request, background_tasks: BackgroundTasks):

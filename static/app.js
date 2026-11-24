@@ -1301,8 +1301,18 @@ async function saveWatchlist(list) {
             dDataStatus.className = "status-message text-green";
             setTimeout(() => { dDataStatus.textContent = ""; }, 3000);
             pollData(); // Force immediate refresh
+        } else {
+            // e.g. 400 invalid ticker, 503 persistence failure: say so and resync to what is stored
+            const data = await res.json().catch(() => ({}));
+            await fetchWatchlist();
+            dDataStatus.textContent = `Watchlist not saved: ${data.detail || `HTTP ${res.status}`}`;
+            dDataStatus.className = "status-message text-red";
         }
-    } catch (e) { console.error("Watchlist update failed", e); }
+    } catch (e) {
+        console.error("Watchlist update failed", e);
+        dDataStatus.textContent = "Watchlist not saved: connection failed.";
+        dDataStatus.className = "status-message text-red";
+    }
 }
 
 // Toggle section visibility
