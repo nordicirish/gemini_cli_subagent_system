@@ -195,6 +195,35 @@ class TestStageGateAndStopHook(unittest.TestCase):
         self.assertTrue(hook_stop_verify.is_ignored_path(".agents/logs/agent-events.jsonl"))
         self.assertFalse(hook_stop_verify.is_ignored_path("python/web_server.py"))
 
+    def test_antigravity_stop_hook_guards_and_hooks_json_cwd_resolution(self):
+        res_cont = hook_stop_verify.evaluate_stop_hook(
+            raw_stdin=json.dumps({"hookEventName": "Stop", "continuationActive": True}),
+            repo_root=ROOT,
+            env={},
+        )
+        self.assertEqual(res_cont, {"decision": "allow"})
+
+        res_cancel = hook_stop_verify.evaluate_stop_hook(
+            raw_stdin=json.dumps({"hookEventName": "Stop", "terminationReason": "USER_CANCELED"}),
+            repo_root=ROOT,
+            env={},
+        )
+        self.assertEqual(res_cancel, {"decision": "allow"})
+
+        hooks_data = json.loads((ROOT / ".agents" / "hooks.json").read_text(encoding="utf-8"))
+        cmd = hooks_data["verify-on-stop"]["Stop"][0]["command"]
+        proc = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=str(ROOT / ".agents"),
+            input=json.dumps({"hookEventName": "Stop", "continuationActive": True}),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout.strip()), {"decision": "allow"})
+
 
 class TestSecurityAuditor(unittest.TestCase):
     def test_live_repo_security_audit_has_zero_blocking_findings(self):

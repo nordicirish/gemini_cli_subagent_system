@@ -38,6 +38,15 @@ IGNORED_PATH_PATTERNS = (
     re.compile(r"^(?:logs|cache|scratch)/"),
 )
 
+ANTIGRAVITY_SKIP_TERMINATION_REASONS = frozenset({
+    "USER_CANCELED",
+    "ERROR",
+    "MAX_INVOCATIONS",
+    "MAX_FORCED_INVOCATIONS",
+    "MAX_TOKEN_BUDGET_EXCEEDED",
+    "TERMINAL_CUSTOM_HOOK",
+})
+
 
 def is_ignored_path(rel_path: str) -> bool:
     """Return True if rel_path is an ignored runtime/editor artifact."""
@@ -102,6 +111,12 @@ def evaluate_stop_hook(raw_stdin: str = "", repo_root: Optional[Path] = None, en
             allow=True,
             system_message="Stop hook loop guard triggered; allowing stop after previous block.",
         )
+
+    if not is_claude and payload.get("continuationActive"):
+        return format_decision(is_claude=False, allow=True)
+
+    if not is_claude and payload.get("terminationReason") in ANTIGRAVITY_SKIP_TERMINATION_REASONS:
+        return format_decision(is_claude=False, allow=True)
 
     try:
         modified = get_relevant_modified_files(root)
