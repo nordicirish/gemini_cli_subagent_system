@@ -13,11 +13,13 @@ Runtime contracts (auto-detected from stdin JSON):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -95,6 +97,17 @@ def get_relevant_modified_files(repo_root: Path) -> List[str]:
     return [p for p in parse_porcelain_paths(proc.stdout) if not is_ignored_path(p)]
 
 
+def _block_marker_path(root: Path) -> Path:
+    return root / ".agents" / "state" / "stop-hook-last-block.json"
+
+
+def _clear_block_marker(marker: Path) -> None:
+    try:
+        marker.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def evaluate_stop_hook(raw_stdin: str = "", repo_root: Optional[Path] = None, env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Evaluate Stop hook gate and return decision dict."""
     root = (repo_root or find_repo_root()).resolve()
@@ -112,7 +125,11 @@ def evaluate_stop_hook(raw_stdin: str = "", repo_root: Optional[Path] = None, en
             system_message="Stop hook loop guard triggered; allowing stop after previous block.",
         )
 
-    if not is_claude and payload.get("continuationActive"):
+    try:
+        exec_num = int(payload.get("executionNum") or 0)
+    except (TypeError, ValueError):
+        exec_num = 0
+    if not is_claude and (payload.get("continuationActive") or exec_num > 0):
         return format_decision(is_claude=False, allow=True)
 
     if not is_claude and payload.get("terminationReason") in ANTIGRAVITY_SKIP_TERMINATION_REASONS:
@@ -158,10 +175,31 @@ def evaluate_stop_hook(raw_stdin: str = "", repo_root: Optional[Path] = None, en
             reason="Stop Hook Gate: scripts/stage_gate.py --fast timed out after 60s.",
         )
 
+    marker = _block_marker_path(root)
     if proc.returncode == 0:
+        _clear_block_marker(marker)
         return format_decision(is_claude, allow=True)
 
     details = (proc.stdout + "\n" + proc.stderr).strip()[-1400:]
+    if not is_claude:
+        conv_id = str(payload.get("conversationId") or "").strip() or ("__live__" if env is None else "")
+        if conv_id:
+            fp = hashlib.sha256(f"{conv_id}|{','.join(sorted(modified))}|{details}".encode("utf-8")).hexdigest()
+            now_ts = time.time()
+            try:
+                if marker.is_file():
+                    prev = json.loads(marker.read_text(encoding="utf-8"))
+                    if isinstance(prev, dict) and prev.get("fingerprint") == fp and (now_ts - float(prev.get("ts") or 0.0)) < 120.0:
+                        _clear_block_marker(marker)
+                        return format_decision(is_claude=False, allow=True)
+            except (OSError, ValueError, TypeError):
+                pass
+            try:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(json.dumps({"fingerprint": fp, "ts": now_ts}), encoding="utf-8")
+            except OSError:
+                pass
+
     return format_decision(
         is_claude,
         allow=False,

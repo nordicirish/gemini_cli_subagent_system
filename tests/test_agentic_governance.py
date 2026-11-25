@@ -210,6 +210,33 @@ class TestStageGateAndStopHook(unittest.TestCase):
         )
         self.assertEqual(res_cancel, {"decision": "allow"})
 
+        res_exec = hook_stop_verify.evaluate_stop_hook(
+            raw_stdin=json.dumps({"hookEventName": "Stop", "executionNum": 1}),
+            repo_root=ROOT,
+            env={},
+        )
+        self.assertEqual(res_exec, {"decision": "allow"})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            (tmp_root / "scripts").mkdir()
+            (tmp_root / "scripts" / "stage_gate.py").write_text("import sys; print('BLOCK'); sys.exit(1)\n", encoding="utf-8")
+            (tmp_root / "scripts" / "demo.py").write_text("# changed\n", encoding="utf-8")
+            for args in (
+                ["git", "init"],
+                ["git", "config", "user.email", "test@example.com"],
+                ["git", "config", "user.name", "Test"],
+                ["git", "add", "scripts/stage_gate.py"],
+                ["git", "commit", "-m", "init"],
+            ):
+                subprocess.run(args, cwd=str(tmp_root), check=True, capture_output=True, text=True)
+
+            stdin_payload = json.dumps({"hookEventName": "Stop", "conversationId": "conv-dedupe-1"})
+            first = hook_stop_verify.evaluate_stop_hook(raw_stdin=stdin_payload, repo_root=tmp_root, env={})
+            self.assertEqual(first["decision"], "continue")
+            second = hook_stop_verify.evaluate_stop_hook(raw_stdin=stdin_payload, repo_root=tmp_root, env={})
+            self.assertEqual(second, {"decision": "allow"})
+
         hooks_data = json.loads((ROOT / ".agents" / "hooks.json").read_text(encoding="utf-8"))
         cmd = hooks_data["verify-on-stop"]["Stop"][0]["command"]
         proc = subprocess.run(
