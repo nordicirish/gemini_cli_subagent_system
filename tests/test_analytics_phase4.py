@@ -57,6 +57,27 @@ class TestMacroCalendarShield(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_post_release_grace_window_and_expiration(self):
+        # 15m after 2026-11-25 08:30 ET Core PCE -> still inside 30-min grace window
+        cal_live = get_macro_calendar_status(
+            now_ny=datetime(2026, 11, 25, 8, 45, tzinfo=NY_TZ),
+            calendar_path="__nonexistent__.json",
+        )
+        self.assertTrue(cal_live["shield_active"])
+        self.assertEqual(cal_live["next_event"]["name"], "Core PCE")
+        self.assertTrue(cal_live["next_event"]["in_release_window"])
+
+        # 35m after release (09:05 ET) and 2h+ after (10:39 ET) -> expired, advances to NFP
+        for check_dt in (
+            datetime(2026, 11, 25, 9, 5, tzinfo=NY_TZ),
+            datetime(2026, 11, 25, 10, 39, tzinfo=NY_TZ),
+        ):
+            cal_expired = get_macro_calendar_status(now_ny=check_dt, calendar_path="__nonexistent__.json")
+            self.assertFalse(cal_expired["shield_active"])
+            self.assertEqual(cal_expired["stop_tighten_factor"], 1.0)
+            self.assertEqual(cal_expired["sizing_dampener"], 1.0)
+            self.assertEqual(cal_expired["next_event"]["name"], "Non-Farm Payrolls")
+
 
 class TestPhase4ExecutionAndRouter(unittest.TestCase):
     def _sample_state(self):

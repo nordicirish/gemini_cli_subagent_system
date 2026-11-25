@@ -194,20 +194,29 @@ header.glass-panel {
     flex-shrink: 0;
 }
 
-/* Scrolls only when the alerts overflow the bar (set by updateAlertMarquee in app.js). */
-.ticker-content.is-scrolling .ticker-group {
+/* Scrolls smoothly across the bar (clones only when overflowing; single-pass when fitting). */
+.ticker-content.is-scrolling:not(.is-single-pass) .ticker-group {
     padding-right: 48px; /* spacing between the end of the list and its repeat */
 }
 
-.ticker-content.is-scrolling .ticker-track {
+.ticker-content.is-scrolling:not(.is-single-pass) .ticker-track {
     animation: marquee-scroll var(--marquee-duration, 30s) linear infinite;
     will-change: transform;
 }
 
+.ticker-content.is-scrolling.is-single-pass .ticker-track {
+    animation: marquee-pass var(--marquee-duration, 24s) linear var(--marquee-delay, 0s) infinite;
+    will-change: transform;
+}
+
 /* Pause while the owner is reading or reaching for an acknowledge (×) button. */
-.top-alert-bar:hover .ticker-track,
-.ticker-content:focus-within .ticker-track {
-    animation-play-state: paused;
+.top-alert-bar:hover .ticker-content.is-scrolling .ticker-track,
+.top-alert-bar:hover .ticker-content.is-scrolling.is-single-pass .ticker-track,
+.ticker-content.is-scrolling:hover .ticker-track,
+.ticker-content.is-scrolling.is-single-pass:hover .ticker-track,
+.ticker-content.is-scrolling:focus-within .ticker-track,
+.ticker-content.is-scrolling.is-single-pass:focus-within .ticker-track {
+    animation-play-state: paused !important;
 }
 
 @keyframes marquee-scroll {
@@ -215,9 +224,15 @@ header.glass-panel {
     to   { transform: translate3d(-50%, 0, 0); }
 }
 
+@keyframes marquee-pass {
+    from { transform: translate3d(var(--marquee-start, 100%), 0, 0); }
+    to   { transform: translate3d(-100%, 0, 0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .ticker-content { overflow-x: auto; scrollbar-width: thin; }
-    .ticker-content.is-scrolling .ticker-track { animation: none; }
+    .ticker-content.is-scrolling .ticker-track,
+    .ticker-content.is-scrolling.is-single-pass .ticker-track { animation: none; }
 }
 
 .alert-item {

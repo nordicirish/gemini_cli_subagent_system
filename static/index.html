@@ -1,18 +1,22 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.69">
+    <link rel="stylesheet" href="styles.css?v=18.72">
     <link rel="stylesheet" href="modern_ui.css?v=18.60">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
     <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js"></script>
 </head>
+
 <body>
     <div class="app-container">
 
@@ -44,18 +48,24 @@
                     </div>
                     <div class="status-item" id="macro-calendar-container">
                         <span class="label">Macro:</span>
-                        <span id="macro-calendar-pill" class="macro-cal-pill macro-cal-clear" title="Upcoming Tier-1 Macro Economic Events (ENH_47 / ENH_259)">📅 —</span>
+                        <span id="macro-calendar-pill" class="macro-cal-pill macro-cal-clear"
+                            title="Upcoming Tier-1 Macro Economic Events (ENH_47 / ENH_259)">📅 —</span>
                     </div>
                     <div class="status-item" id="refresh-status-container" style="display: none;">
-                        <span id="refresh-status" class="value text-yellow" style="font-weight: bold;">⚡ HEAVY REFRESH</span>
+                        <span id="refresh-status" class="value text-yellow" style="font-weight: bold;">⚡ HEAVY
+                            REFRESH</span>
                     </div>
                     <div class="status-item">
                         <span class="label">Updated:</span>
                         <span id="last-updated" class="value">—</span>
                     </div>
-                    <button id="toggle-sidebar-btn" class="glow-btn outline header-action-btn" type="button" aria-expanded="false" aria-controls="dashboard-sidebar" title="Toggle Portfolio, Watchlist &amp; Scout tools panel">🧰 TOOLS</button>
-                    <button id="open-indices-modal-btn" class="glow-btn outline header-action-btn" type="button" title="Manage tracked macro indices">⚙️ INDICES</button>
-                    <button id="launch-chat-btn" class="glow-btn chat-launcher header-action-btn" type="button" title="Consult Gemini AI Council">💬 AI COUNCIL</button>
+                    <button id="toggle-sidebar-btn" class="glow-btn outline header-action-btn" type="button"
+                        aria-expanded="false" aria-controls="dashboard-sidebar"
+                        title="Toggle Portfolio, Watchlist &amp; Scout tools panel">🧰 TOOLS</button>
+                    <button id="open-indices-modal-btn" class="glow-btn outline header-action-btn" type="button"
+                        title="Manage tracked macro indices">⚙️ INDICES</button>
+                    <button id="launch-chat-btn" class="glow-btn chat-launcher header-action-btn" type="button"
+                        title="Consult Gemini AI Council">💬 AI COUNCIL</button>
                 </div>
             </div>
         </header>
@@ -70,19 +80,24 @@
         <!-- ─── Portfolio & Risk Command Strip ─── -->
         <section class="portfolio-command-strip glass-panel" id="portfolio-command-strip">
             <div class="cmd-strip-metrics" id="cmd-strip-metrics">
-                <span class="cmd-metric"><span class="cmd-label">Equity</span><strong id="cmd-equity-val">—</strong></span>
-                <span class="cmd-metric"><span class="cmd-label">Unrealized P&amp;L</span><strong id="cmd-pnl-val">—</strong></span>
+                <span class="cmd-metric"><span class="cmd-label">Equity</span><strong
+                        id="cmd-equity-val">—</strong></span>
+                <span class="cmd-metric"><span class="cmd-label">Unrealized P&amp;L</span><strong
+                        id="cmd-pnl-val">—</strong></span>
                 <span class="cmd-metric"><span class="cmd-label">Cash</span><strong id="cmd-cash-val">—</strong></span>
-                <span class="cmd-metric"><span class="cmd-label">Vetoes</span><strong id="cmd-vetoes-val">0</strong></span>
+                <span class="cmd-metric"><span class="cmd-label">Vetoes</span><strong
+                        id="cmd-vetoes-val">0</strong></span>
             </div>
             <div class="cmd-strip-actions" id="cmd-strip-actions"></div>
         </section>
 
         <!-- ─── Main Content ─── -->
         <main class="main-content sidebar-collapsed" id="main-content">
-            <div class="left-content-wrapper" style="display: grid; grid-template-columns: 1fr; align-items: start; gap: 16px;">
+            <div class="left-content-wrapper"
+                style="display: grid; grid-template-columns: 1fr; align-items: start; gap: 16px;">
                 <!-- Initial Fetch Progress Container -->
-                <div id="initial-fetch-progress-container" class="glass-panel progress-panel" style="display: none; grid-area: 1 / 1; align-self: start; z-index: 100;">
+                <div id="initial-fetch-progress-container" class="glass-panel progress-panel"
+                    style="display: none; grid-area: 1 / 1; align-self: start; z-index: 100;">
                     <div class="progress-info">
                         <h2 id="progress-phase-title">Initializing Market Data Daemon...</h2>
                         <p id="progress-status-text">Connecting to real-time data feeds...</p>
@@ -135,7 +150,8 @@
                 <div class="sidebar-card glass-panel manager-card minimized">
                     <div class="header-row">
                         <h3 onclick="toggleSection('portfolio-content', this)">
-                            <span class="icon">💼</span> Portfolio <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                            <span class="icon">💼</span> Portfolio <span class="chevron"
+                                style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
                         </h3>
                     </div>
                     <div id="portfolio-content" style="display: none;">
@@ -144,7 +160,8 @@
                             <button id="add-to-portfolio-btn" class="add-btn">+</button>
                             <button id="save-portfolio-btn" class="glow-btn sync-btn">SYNC</button>
                         </div>
-                        <div id="portfolio-feedback" class="status-message inline-feedback" style="margin-bottom: 6px; font-size: 0.72rem;"></div>
+                        <div id="portfolio-feedback" class="status-message inline-feedback"
+                            style="margin-bottom: 6px; font-size: 0.72rem;"></div>
                         <div class="manager-table-container" style="margin-top: 0;">
                             <table class="manager-table">
                                 <thead>
@@ -167,7 +184,8 @@
                 <div class="sidebar-card glass-panel manager-card minimized">
                     <div class="header-row">
                         <h3 onclick="toggleSection('watchlist-content', this)">
-                            <span class="icon">👀</span> Watchlist <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                            <span class="icon">👀</span> Watchlist <span class="chevron"
+                                style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
                         </h3>
                     </div>
                     <div id="watchlist-content" style="display: none;">
@@ -185,33 +203,53 @@
                 <div class="sidebar-card glass-panel manager-card minimized">
                     <div class="header-row">
                         <h3 onclick="toggleSection('scout-content', this)">
-                            <span class="icon">🔭</span> Scout Intelligence <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                            <span class="icon">🔭</span> Scout Intelligence <span class="chevron"
+                                style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
                         </h3>
                     </div>
                     <div id="scout-content" style="display: none;">
 
                         <!-- Action 1: Scan Watchlist -->
-                        <div style="background: rgba(88,166,255,0.05); border: 1px solid rgba(88,166,255,0.2); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
-                            <p style="font-size: 0.6rem; color: var(--accent); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 6px;">🎯 Watchlist Rescan</p>
-                            <p style="font-size: 0.62rem; color: var(--text-dim); margin-bottom: 8px; line-height: 1.4;">Force a fresh signal evaluation on tickers already in your Watchlist.</p>
-                            <button id="scan-watchlist-btn" class="glow-btn outline" style="font-size: 0.7rem; padding: 5px 10px;" title="Triggers a forced refresh cycle on your current Watchlist tickers">🎯 Scan Watchlist</button>
-                            <div id="scan-watchlist-status" class="status-message inline-feedback" style="margin-top: 5px;"></div>
+                        <div
+                            style="background: rgba(88,166,255,0.05); border: 1px solid rgba(88,166,255,0.2); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
+                            <p
+                                style="font-size: 0.6rem; color: var(--accent); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 6px;">
+                                🎯 Watchlist Rescan</p>
+                            <p
+                                style="font-size: 0.62rem; color: var(--text-dim); margin-bottom: 8px; line-height: 1.4;">
+                                Force a fresh signal evaluation on tickers already in your Watchlist.</p>
+                            <button id="scan-watchlist-btn" class="glow-btn outline"
+                                style="font-size: 0.7rem; padding: 5px 10px;"
+                                title="Triggers a forced refresh cycle on your current Watchlist tickers">🎯 Scan
+                                Watchlist</button>
+                            <div id="scan-watchlist-status" class="status-message inline-feedback"
+                                style="margin-top: 5px;"></div>
                         </div>
 
                         <!-- Divider -->
                         <div style="border-top: 1px solid var(--panel-border); margin: 2px 0 10px;"></div>
 
                         <!-- Action 2: Scout New Sectors -->
-                        <p style="font-size: 0.6rem; color: var(--text-dim); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px;">🔭 Sector Discovery</p>
-                        <p style="font-size: 0.62rem; color: var(--text-dim); margin-bottom: 8px; line-height: 1.4;">Enable sectors below, then scan to discover new candidate tickers from those industries.</p>
-                        <div id="scout-categories-container" class="scout-grid-container" style="margin-top: 0; min-height: 40px; border: 1px dashed var(--panel-border); padding: 8px; border-radius: 4px; margin-bottom: 10px;">
+                        <p
+                            style="font-size: 0.6rem; color: var(--text-dim); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px;">
+                            🔭 Sector Discovery</p>
+                        <p style="font-size: 0.62rem; color: var(--text-dim); margin-bottom: 8px; line-height: 1.4;">
+                            Enable sectors below, then scan to discover new candidate tickers from those industries.</p>
+                        <div id="scout-categories-container" class="scout-grid-container"
+                            style="margin-top: 0; min-height: 40px; border: 1px dashed var(--panel-border); padding: 8px; border-radius: 4px; margin-bottom: 10px;">
                             <!-- Grid injected by JS -->
                         </div>
-                        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
-                            <p style="font-size: 0.6rem; color: var(--text-dim); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 10px;">Filter Config</p>
+                        <div
+                            style="background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+                            <p
+                                style="font-size: 0.6rem; color: var(--text-dim); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 10px;">
+                                Filter Config</p>
                             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                <label for="scout-limit-select" style="font-size: 0.65rem; color: var(--text-dim); font-weight: 600; flex: 1;">Max Tickers (1–5):</label>
-                                <select id="scout-limit-select" class="mini-input" style="width: auto; padding: 2px 6px; font-size: 0.7rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--accent); border-radius: 4px;">
+                                <label for="scout-limit-select"
+                                    style="font-size: 0.65rem; color: var(--text-dim); font-weight: 600; flex: 1;">Max
+                                    Tickers (1–5):</label>
+                                <select id="scout-limit-select" class="mini-input"
+                                    style="width: auto; padding: 2px 6px; font-size: 0.7rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--accent); border-radius: 4px;">
                                     <option value="1">1</option>
                                     <option value="2" selected>2</option>
                                     <option value="3">3</option>
@@ -220,8 +258,11 @@
                                 </select>
                             </div>
                             <div style="display: flex; align-items: center; gap: 8px;">
-                                <label for="scout-max-rsi-select" style="font-size: 0.65rem; color: var(--text-dim); font-weight: 600; flex: 1;">Max RSI:</label>
-                                <select id="scout-max-rsi-select" class="mini-input" style="min-width: 120px; width: auto; padding: 2px 6px; font-size: 0.7rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--accent); border-radius: 4px;">
+                                <label for="scout-max-rsi-select"
+                                    style="font-size: 0.65rem; color: var(--text-dim); font-weight: 600; flex: 1;">Max
+                                    RSI:</label>
+                                <select id="scout-max-rsi-select" class="mini-input"
+                                    style="min-width: 120px; width: auto; padding: 2px 6px; font-size: 0.7rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--accent); border-radius: 4px;">
                                     <option value="50">50 — Strict</option>
                                     <option value="60">60 — Guarded</option>
                                     <option value="70">70 — Balanced</option>
@@ -231,7 +272,8 @@
                                 </select>
                             </div>
                         </div>
-                        <button id="run-ai-scout-btn" class="glow-btn" style="margin-top: 0; font-size: 0.7rem;" title="Discover new tickers from enabled sectors above">🔭 Scout New Sectors</button>
+                        <button id="run-ai-scout-btn" class="glow-btn" style="margin-top: 0; font-size: 0.7rem;"
+                            title="Discover new tickers from enabled sectors above">🔭 Scout New Sectors</button>
                         <div id="ai-scout-status" class="status-message inline-feedback" style="margin-top: 6px;"></div>
                     </div>
                 </div>
@@ -240,7 +282,9 @@
                 <div class="sidebar-card glass-panel manager-card desktop-only">
                     <div class="header-row">
                         <h3 onclick="toggleSection('alerts-manager-content', this)" style="white-space: nowrap;">
-                            <span class="icon">🔔</span> Key Triggers <span id="alerts-active-count" class="alerts-count-pill">0</span> <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block;">▼</span>
+                            <span class="icon">🔔</span> Key Triggers <span id="alerts-active-count"
+                                class="alerts-count-pill">0</span> <span class="chevron"
+                                style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block;">▼</span>
                         </h3>
                     </div>
                     <div id="alerts-manager-content">
@@ -249,7 +293,8 @@
                         </div>
                         <div class="alert-quick-add">
                             <div class="alert-quick-row">
-                                <input type="text" id="alert-ticker-input" placeholder="TICKER" maxlength="10" style="width: 68px; flex: 0 0 auto; text-transform: uppercase;">
+                                <input type="text" id="alert-ticker-input" placeholder="TICKER" maxlength="10"
+                                    style="width: 68px; flex: 0 0 auto; text-transform: uppercase;">
                                 <select id="alert-metric-select" title="Metric" style="flex: 1; min-width: 0;">
                                     <option value="price">Price</option>
                                     <option value="rsi">RSI</option>
@@ -264,23 +309,28 @@
                                 </select>
                             </div>
                             <div class="alert-quick-row">
-                                <input type="number" id="alert-target-input" placeholder="Target level" step="0.01" style="flex: 1; min-width: 0;">
-                                <button id="add-alert-rule-btn" type="button" class="alert-action-btn" title="Arm Trigger">+ Arm</button>
+                                <input type="number" id="alert-target-input" placeholder="Target level" step="0.01"
+                                    style="flex: 1; min-width: 0;">
+                                <button id="add-alert-rule-btn" type="button" class="alert-action-btn"
+                                    title="Arm Trigger">+ Arm</button>
                             </div>
                         </div>
 
                         <div class="sentinel-control-box">
                             <div class="sentinel-header-row">
                                 <span class="sentinel-title">⚡ Low-Power Sentinel</span>
-                                <button id="sentinel-toggle-btn" type="button" class="sentinel-toggle-btn" aria-pressed="false">OFF</button>
+                                <button id="sentinel-toggle-btn" type="button" class="sentinel-toggle-btn"
+                                    aria-pressed="false">OFF</button>
                             </div>
                             <div class="sentinel-config-row">
-                                <select id="sentinel-provider-select" title="Model Provider" style="flex: 1; min-width: 0;">
+                                <select id="sentinel-provider-select" title="Model Provider"
+                                    style="flex: 1; min-width: 0;">
                                     <option value="gemini_free">Gemini Free Tier</option>
                                     <option value="auto">Auto (Free → Local)</option>
                                     <option value="antigravity">Local Antigravity</option>
                                 </select>
-                                <select id="sentinel-interval-select" title="Check Cadence" style="width: 64px; flex: 0 0 auto;">
+                                <select id="sentinel-interval-select" title="Check Cadence"
+                                    style="width: 64px; flex: 0 0 auto;">
                                     <option value="60">1m</option>
                                     <option value="180">3m</option>
                                     <option value="300">5m</option>
@@ -289,14 +339,18 @@
                                 </select>
                             </div>
                             <div class="sentinel-peak-row">
-                                <label class="sentinel-check-label" title="Use 60-day intraday Peak Window &amp; Exhaustion zones to arm morning sell triggers">
+                                <label class="sentinel-check-label"
+                                    title="Use 60-day intraday Peak Window &amp; Exhaustion zones to arm morning sell triggers">
                                     <input type="checkbox" id="sentinel-peak-toggle"> 🎯 Predict Daily Peaks
                                 </label>
                             </div>
-                            <button id="sentinel-run-now-btn" type="button" class="alert-action-btn full" title="Run Sentinel Trigger Tune Now">⚡ Tune Triggers Now</button>
-                            <div id="sentinel-status-text" class="sentinel-status-meta">Sentinel idle (Free Tier fallback ready)</div>
+                            <button id="sentinel-run-now-btn" type="button" class="alert-action-btn full"
+                                title="Run Sentinel Trigger Tune Now">⚡ Tune Triggers Now</button>
+                            <div id="sentinel-status-text" class="sentinel-status-meta">Sentinel idle (Free Tier
+                                fallback ready)</div>
                         </div>
-                        <div id="alerts-panel-status" class="status-message inline-feedback" style="margin-top: 6px;"></div>
+                        <div id="alerts-panel-status" class="status-message inline-feedback" style="margin-top: 6px;">
+                        </div>
                     </div>
                 </div>
 
@@ -304,14 +358,16 @@
                 <div class="sidebar-card glass-panel manager-card desktop-only">
                     <div class="header-row">
                         <h3 onclick="toggleSection('analytics-quant-content', this)" style="white-space: nowrap;">
-                            <span class="icon">📊</span> Quant &amp; Backtest <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block;">▼</span>
+                            <span class="icon">📊</span> Quant &amp; Backtest <span class="chevron"
+                                style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block;">▼</span>
                         </h3>
                     </div>
                     <div id="analytics-quant-content">
                         <div id="analytics-quant-panel" class="quant-panel">
                             <span class="empty-msg">Loading quant analytics...</span>
                         </div>
-                        <button id="refresh-analytics-btn" type="button" class="alert-action-btn full" title="Refresh Quant Analytics & Decision Backtest">↻ Refresh Quant &amp; Backtest</button>
+                        <button id="refresh-analytics-btn" type="button" class="alert-action-btn full"
+                            title="Refresh Quant Analytics & Decision Backtest">↻ Refresh Quant &amp; Backtest</button>
                     </div>
                 </div>
 
@@ -319,13 +375,15 @@
                 <div class="sidebar-card glass-panel manager-card minimized desktop-only">
                     <div class="header-row">
                         <h3 onclick="toggleSection('admin-content', this)">
-                            <span class="icon">⚙️</span> Admin & Database <span class="chevron" style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                            <span class="icon">⚙️</span> Admin & Database <span class="chevron"
+                                style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
                         </h3>
                     </div>
                     <div id="admin-content" style="display: none;">
                         <p class="subtitle" style="margin-bottom: 8px;">Decision Log & Database Management</p>
                         <div class="btn-row">
-                            <button id="clear-log-btn" class="glow-btn outline danger mini">🗑️ Clear Decision Log</button>
+                            <button id="clear-log-btn" class="glow-btn outline danger mini">🗑️ Clear Decision
+                                Log</button>
                             <div id="clear-log-status" class="status-message inline-feedback"></div>
                         </div>
                     </div>
@@ -346,7 +404,7 @@
             <textarea id="indices-input" rows="3" placeholder="^VIX, ^VVIX, VIXY, IEF, UUP, SPY, GDX"></textarea>
             <button id="update-indices-btn">UPDATE INDICES</button>
             <div id="indices-status" class="status-message"></div>
-            
+
             <div class="modal-section-title">Real-time macro indicator data</div>
             <div class="indices-grid" id="indices-grid">
                 <!-- Populated by JS -->
@@ -376,12 +434,14 @@
             <div class="modern-chat-header">
                 <div class="modern-header-left" style="display: flex; align-items: center; gap: 14px;">
                     <div class="modern-logo-box">⚖️</div>
-                    <h2 style="margin: 0; font-size: 1.1rem; letter-spacing: 1px; white-space: nowrap;">GEMINI AI COUNCIL</h2>
+                    <h2 style="margin: 0; font-size: 1.1rem; letter-spacing: 1px; white-space: nowrap;">GEMINI AI
+                        COUNCIL</h2>
                 </div>
                 <div class="modern-header-right" style="display: flex; align-items: center; gap: 8px;">
                     <input type="checkbox" id="paid-tiers-toggle" style="display:none;">
                     <input type="checkbox" id="gemini-subscription-toggle" checked style="display:none;">
-                    <span id="context-caching-toggle-container" style="display:none;"><input type="checkbox" id="context-caching-toggle" checked></span>
+                    <span id="context-caching-toggle-container" style="display:none;"><input type="checkbox"
+                            id="context-caching-toggle" checked></span>
 
                     <script>
                         let currentChatSize = 0.95;
@@ -394,97 +454,154 @@
                     </script>
 
                     <!-- Model selector -->
-                    <select id="model-selector" autocomplete="off" style="background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); color: white; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 0.72rem; outline: none; max-width: 210px; height: 34px;">
+                    <select id="model-selector" autocomplete="off"
+                        style="background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); color: white; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 0.72rem; outline: none; max-width: 210px; height: 34px;">
                         <option value="" style="background:#1a1a1a;">Loading models...</option>
                     </select>
 
                     <!-- ⚙️ Settings gear popover -->
                     <div style="position: relative;">
-                        <button id="settings-gear-btn" title="Settings" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: white; width: 34px; height: 34px; border-radius: 8px; cursor: pointer; font-size: 1rem; display: flex; align-items: center; justify-content: center; transition: background 0.2s; flex-shrink:0;">⚙️</button>
+                        <button id="settings-gear-btn" title="Settings"
+                            style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: white; width: 34px; height: 34px; border-radius: 8px; cursor: pointer; font-size: 1rem; display: flex; align-items: center; justify-content: center; transition: background 0.2s; flex-shrink:0;">⚙️</button>
 
-                        <div id="settings-popover" style="display:none; position:absolute; top:calc(100% + 8px); right:0; width:290px; background:#0d1117; border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:18px; z-index:9999; box-shadow:0 12px 40px rgba(0,0,0,0.6); animation: popover-in 0.15s ease-out;">
+                        <div id="settings-popover"
+                            style="display:none; position:absolute; top:calc(100% + 8px); right:0; width:290px; background:#0d1117; border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:18px; z-index:9999; box-shadow:0 12px 40px rgba(0,0,0,0.6); animation: popover-in 0.15s ease-out;">
                             <style>
-                                @keyframes popover-in { from { opacity: 0; transform: translateY(-8px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+                                @keyframes popover-in {
+                                    from {
+                                        opacity: 0;
+                                        transform: translateY(-8px) scale(0.98);
+                                    }
+
+                                    to {
+                                        opacity: 1;
+                                        transform: translateY(0) scale(1);
+                                    }
+                                }
                             </style>
 
                             <!-- Plan banner (shown when subscription active) -->
-                            <div id="settings-plan-banner" style="background:linear-gradient(135deg,rgba(56,189,248,0.12),rgba(99,102,241,0.12)); border:1px solid rgba(56,189,248,0.25); border-radius:10px; padding:10px 14px; margin-bottom:16px; display:flex; align-items:center; gap:10px;">
+                            <div id="settings-plan-banner"
+                                style="background:linear-gradient(135deg,rgba(56,189,248,0.12),rgba(99,102,241,0.12)); border:1px solid rgba(56,189,248,0.25); border-radius:10px; padding:10px 14px; margin-bottom:16px; display:flex; align-items:center; gap:10px;">
                                 <span style="font-size:1.2rem;">✅</span>
                                 <div>
-                                    <div style="font-size:0.72rem; font-weight:700; color:#38bdf8; letter-spacing:0.5px;">GEMINI PLAN ACTIVE</div>
-                                    <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Pro models &amp; caching auto-managed</div>
+                                    <div
+                                        style="font-size:0.72rem; font-weight:700; color:#38bdf8; letter-spacing:0.5px;">
+                                        GEMINI PLAN ACTIVE</div>
+                                    <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Pro models &amp;
+                                        caching auto-managed</div>
                                 </div>
                             </div>
 
                             <!-- Account section -->
-                            <div style="font-size:0.58rem; font-weight:700; letter-spacing:1.2px; color:#8b949e; text-transform:uppercase; margin-bottom:10px;">Account</div>
-                            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+                            <div
+                                style="font-size:0.58rem; font-weight:700; letter-spacing:1.2px; color:#8b949e; text-transform:uppercase; margin-bottom:10px;">
+                                Account</div>
+                            <div
+                                style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
                                 <div>
                                     <div style="font-size:0.8rem; color:white; font-weight:500;">Gemini Plan</div>
-                                    <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Pro models, higher limits, auto-caching</div>
+                                    <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Pro models, higher
+                                        limits, auto-caching</div>
                                 </div>
-                                <div id="settings-sub-toggle" onclick="window.chatUI&&window.chatUI.toggleSettingsSub()" style="width:42px;height:24px;background:#238636;border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
-                                    <div id="settings-sub-knob" style="position:absolute;top:4px;left:22px;width:16px;height:16px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>
+                                <div id="settings-sub-toggle" onclick="window.chatUI&&window.chatUI.toggleSettingsSub()"
+                                    style="width:42px;height:24px;background:#238636;border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
+                                    <div id="settings-sub-knob"
+                                        style="position:absolute;top:4px;left:22px;width:16px;height:16px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);">
+                                    </div>
                                 </div>
                             </div>
 
                             <div style="border-top:1px solid rgba(255,255,255,0.07);margin:14px 0;"></div>
 
                             <!-- Display section -->
-                            <div style="font-size:0.58rem; font-weight:700; letter-spacing:1.2px; color:#8b949e; text-transform:uppercase; margin-bottom:10px;">Display</div>
-                            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+                            <div
+                                style="font-size:0.58rem; font-weight:700; letter-spacing:1.2px; color:#8b949e; text-transform:uppercase; margin-bottom:10px;">
+                                Display</div>
+                            <div
+                                style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
                                 <div style="font-size:0.8rem; color:white; font-weight:500;">Text Size</div>
                                 <div style="display:flex;gap:5px;">
-                                    <button onclick="adjustChatSize(-1)" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:white;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.75rem;">A−</button>
-                                    <button onclick="adjustChatSize(1)" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:white;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;">A+</button>
+                                    <button onclick="adjustChatSize(-1)"
+                                        style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:white;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.75rem;">A−</button>
+                                    <button onclick="adjustChatSize(1)"
+                                        style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:white;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;">A+</button>
                                 </div>
                             </div>
 
                             <!-- Advanced section (hidden for plan users) -->
                             <div id="settings-advanced-section">
                                 <div style="border-top:1px solid rgba(255,255,255,0.07);margin:14px 0;"></div>
-                                <div style="font-size:0.58rem; font-weight:700; letter-spacing:1.2px; color:#8b949e; text-transform:uppercase; margin-bottom:10px;">Advanced</div>
-                                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+                                <div
+                                    style="font-size:0.58rem; font-weight:700; letter-spacing:1.2px; color:#8b949e; text-transform:uppercase; margin-bottom:10px;">
+                                    Advanced</div>
+                                <div
+                                    style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
                                     <div>
-                                        <div style="font-size:0.8rem; color:white; font-weight:500;">Include Paid Models</div>
-                                        <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Show Pro/Preview tiers in selector</div>
+                                        <div style="font-size:0.8rem; color:white; font-weight:500;">Include Paid Models
+                                        </div>
+                                        <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Show Pro/Preview
+                                            tiers in selector</div>
                                     </div>
-                                    <div id="settings-paid-toggle" onclick="window.chatUI&&window.chatUI.toggleSettingsPaid()" style="width:42px;height:24px;background:#30363d;border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
-                                        <div id="settings-paid-knob" style="position:absolute;top:4px;left:4px;width:16px;height:16px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>
+                                    <div id="settings-paid-toggle"
+                                        onclick="window.chatUI&&window.chatUI.toggleSettingsPaid()"
+                                        style="width:42px;height:24px;background:#30363d;border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
+                                        <div id="settings-paid-knob"
+                                            style="position:absolute;top:4px;left:4px;width:16px;height:16px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);">
+                                        </div>
                                     </div>
                                 </div>
                                 <div style="display:flex; align-items:center; justify-content:space-between;">
                                     <div>
-                                        <div style="font-size:0.8rem; color:white; font-weight:500;">Context Caching</div>
-                                        <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Managed automatically by local runtime</div>
+                                        <div style="font-size:0.8rem; color:white; font-weight:500;">Context Caching
+                                        </div>
+                                        <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Managed
+                                            automatically by local runtime</div>
                                     </div>
-                                    <div id="settings-caching-toggle" onclick="window.chatUI&&window.chatUI.toggleSettingsCaching()" style="width:42px;height:24px;background:#238636;border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
-                                        <div id="settings-caching-knob" style="position:absolute;top:4px;left:22px;width:16px;height:16px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>
+                                    <div id="settings-caching-toggle"
+                                        onclick="window.chatUI&&window.chatUI.toggleSettingsCaching()"
+                                        style="width:42px;height:24px;background:#238636;border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
+                                        <div id="settings-caching-knob"
+                                            style="position:absolute;top:4px;left:22px;width:16px;height:16px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);">
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <button id="update-analysis-btn" title="Run fresh Council market & portfolio analysis" style="background:rgba(56,189,248,0.14);border:1px solid rgba(56,189,248,0.38);color:#7dd3fc;padding:0 12px;height:34px;border-radius:8px;cursor:pointer;font-size:0.78rem;font-weight:600;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span>🔄</span> UPDATE ANALYSIS</button>
-                    <button id="new-chat-btn" title="New Conversation" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:white;padding:0 14px;height:34px;border-radius:8px;cursor:pointer;font-size:0.78rem;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span>+</span> NEW</button>
-                    <button id="history-chat-btn" title="History" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:white;padding:0 14px;height:34px;border-radius:8px;cursor:pointer;font-size:0.78rem;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span>📂</span> SESSIONS</button>
+                    <button id="update-analysis-btn" title="Run fresh Council market & portfolio analysis"
+                        style="background:rgba(56,189,248,0.14);border:1px solid rgba(56,189,248,0.38);color:#7dd3fc;padding:0 12px;height:34px;border-radius:8px;cursor:pointer;font-size:0.78rem;font-weight:600;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span>🔄</span>
+                        UPDATE ANALYSIS</button>
+                    <button id="new-chat-btn" title="New Conversation"
+                        style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:white;padding:0 14px;height:34px;border-radius:8px;cursor:pointer;font-size:0.78rem;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span>+</span>
+                        NEW</button>
+                    <button id="history-chat-btn" title="History"
+                        style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:white;padding:0 14px;height:34px;border-radius:8px;cursor:pointer;font-size:0.78rem;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span>📂</span>
+                        SESSIONS</button>
                     <button class="modern-ctrl-btn" id="chat-close-btn">×</button>
                 </div>
             </div>
 
             <div class="modern-chat-messages" id="chat-messages">
-                <div class="modern-message ai">Welcome to the council. How can I help you analyze the markets today?</div>
+                <div class="modern-message ai">Welcome to the council. How can I help you analyze the markets today?
+                </div>
             </div>
 
             <div class="modern-input-area">
                 <textarea id="chat-input" placeholder="Ask Gemini..." rows="1"></textarea>
                 <div class="modern-input-footer">
                     <div class="modern-input-tools" style="display:flex;align-items:center;gap:20px;">
-                        <span id="chat-status-indicator" style="color:#8b949e;font-size:0.85rem;font-weight:500;letter-spacing:0.5px;">Status: Ready</span>
+                        <span id="chat-status-indicator"
+                            style="color:#8b949e;font-size:0.85rem;font-weight:500;letter-spacing:0.5px;">Status:
+                            Ready</span>
                     </div>
-                    <button class="modern-send-btn" id="send-chat-btn" style="width:auto;border-radius:12px;padding:10px 24px;font-weight:700;letter-spacing:1px;font-size:0.9rem;display:flex;align-items:center;gap:10px;"><span>✦</span> CHAT WITH THE COUNCIL</button>
-                    <button class="modern-stop-btn" id="stop-chat-btn" style="display:none;width:auto;border-radius:12px;padding:10px 24px;font-weight:700;letter-spacing:1px;font-size:0.9rem;background:#da3633;border:none;color:white;cursor:pointer;align-items:center;gap:10px;"><span>⏸</span> STOP</button>
+                    <button class="modern-send-btn" id="send-chat-btn"
+                        style="width:auto;border-radius:12px;padding:10px 24px;font-weight:700;letter-spacing:1px;font-size:0.9rem;display:flex;align-items:center;gap:10px;"><span>✦</span>
+                        CHAT WITH THE COUNCIL</button>
+                    <button class="modern-stop-btn" id="stop-chat-btn"
+                        style="display:none;width:auto;border-radius:12px;padding:10px 24px;font-weight:700;letter-spacing:1px;font-size:0.9rem;background:#da3633;border:none;color:white;cursor:pointer;align-items:center;gap:10px;"><span>⏸</span>
+                        STOP</button>
                 </div>
             </div>
         </div>
@@ -497,17 +614,24 @@
                 <div class="chart-modal-title">
                     <span id="chart-modal-ticker" class="chart-ticker-label">—</span>
                     <div class="chart-indicator-legend">
-                        <span class="legend-item"><span class="legend-dot" style="background:#f23645;"></span>EMA 9</span>
-                        <span class="legend-item"><span class="legend-dot" style="background:#2962ff;"></span>EMA 30</span>
-                        <span class="legend-item"><span class="legend-dot" style="background:#ffffff;"></span>EMA 200</span>
-                        <span class="legend-item"><span class="legend-dot" style="background:#ff9800;"></span>VWAP</span>
-                        <span class="legend-item"><span class="legend-dot" style="background:#089981;"></span>VWAP Bands</span>
-                        <span class="legend-item"><span class="legend-dot" style="background:#2962ff;"></span>Vol (20)</span>
+                        <span class="legend-item"><span class="legend-dot" style="background:#f23645;"></span>EMA
+                            9</span>
+                        <span class="legend-item"><span class="legend-dot" style="background:#2962ff;"></span>EMA
+                            30</span>
+                        <span class="legend-item"><span class="legend-dot" style="background:#ffffff;"></span>EMA
+                            200</span>
+                        <span class="legend-item"><span class="legend-dot"
+                                style="background:#ff9800;"></span>VWAP</span>
+                        <span class="legend-item"><span class="legend-dot" style="background:#089981;"></span>VWAP
+                            Bands</span>
+                        <span class="legend-item"><span class="legend-dot" style="background:#2962ff;"></span>Vol
+                            (20)</span>
                     </div>
                 </div>
                 <div class="chart-fib-toolbar" id="chart-fib-toolbar">
                     <button id="chart-fib-auto-btn" class="chart-tool-btn active" title="Auto Fib">🎯 Auto Fib</button>
-                    <button id="chart-fib-pick-btn" class="chart-tool-btn" title="Pick 3 Points">✏️ Pick 3 Points</button>
+                    <button id="chart-fib-pick-btn" class="chart-tool-btn" title="Pick 3 Points">✏️ Pick 3
+                        Points</button>
                     <button id="chart-fib-clear-btn" class="chart-tool-btn btn-clear" title="Clear">✕ Clear</button>
                 </div>
                 <button class="modal-close" id="chart-modal-close">&times;</button>
@@ -529,9 +653,12 @@
             <div class="chart-modal-footer">
                 <span id="chart-modal-meta" class="chart-meta-label">Loading chart data...</span>
                 <div style="display:flex;align-items:center;gap:10px;">
-                    <span class="chart-meta-label" style="color:var(--text-dim, #8b949e);">1m · US/Eastern (NYSE/NASDAQ)</span>
-                    <button id="chart-exec-plan-btn" type="button" class="chart-copy-btn" style="display:none;" title="Open Execution &amp; Risk Ticket">⚡ Execution Ticket</button>
-                    <button id="chart-copy-img-btn" class="chart-copy-btn" title="Copy chart image to clipboard — paste directly into Gemini">
+                    <span class="chart-meta-label" style="color:var(--text-dim, #8b949e);">1m · US/Eastern
+                        (NYSE/NASDAQ)</span>
+                    <button id="chart-exec-plan-btn" type="button" class="chart-copy-btn" style="display:none;"
+                        title="Open Execution &amp; Risk Ticket">⚡ Execution Ticket</button>
+                    <button id="chart-copy-img-btn" class="chart-copy-btn"
+                        title="Copy chart image to clipboard — paste directly into Gemini">
                         📋 Copy Image
                     </button>
                 </div>
@@ -540,10 +667,13 @@
     </div>
 
     <!-- Hidden Offscreen Container for Automated Chart Rendering & Capture -->
-    <div id="offscreen-chart-container" style="position: fixed; left: -9999px; top: -9999px; width: 920px; height: 500px; opacity: 0; pointer-events: none;"></div>
+    <div id="offscreen-chart-container"
+        style="position: fixed; left: -9999px; top: -9999px; width: 920px; height: 500px; opacity: 0; pointer-events: none;">
+    </div>
 
-    <script src="portfolio.js?v=18.61"></script>
-    <script src="app.js?v=18.71"></script>
+    <script src="portfolio.js?v=18.62"></script>
+    <script src="app.js?v=18.76"></script>
     <script src="modern_ui.js?v=18.64"></script>
 </body>
+
 </html>

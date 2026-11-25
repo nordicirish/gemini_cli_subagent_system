@@ -158,6 +158,60 @@ class TestAlertMonitor(unittest.TestCase):
         )
         self.assertEqual(inferred_no_whitelist, [])
 
+    def test_dedupes_unacknowledged_alerts_one_per_ticker_and_acknowledges_group(self):
+        self.monitor.add_rule(
+            {"ticker": "UMAC", "metric": "price", "op": ">=", "target": 9.0, "label": "UMAC Info", "severity": "info", "one_shot": True},
+            source="manual",
+        )
+        self.monitor.add_rule(
+            {"ticker": "UMAC", "metric": "price", "op": "<=", "target": 9.5, "label": "UMAC Critical Stop", "severity": "critical", "one_shot": True},
+            source="sentinel",
+        )
+        self.monitor.add_rule(
+            {"ticker": "UMAC", "metric": "rsi", "op": "<=", "target": 60.0, "label": "UMAC Warning RSI", "severity": "warning", "one_shot": True},
+            source="council",
+        )
+        self.monitor.add_rule(
+            {"ticker": "NVDA", "metric": "price", "op": ">=", "target": 120.0, "label": "NVDA Info", "severity": "info", "one_shot": True},
+            source="manual",
+        )
+
+        # Fire all four rules; UMAC has 3 conflicting alerts while NVDA has 1.
+        self.monitor.evaluate_snapshot(
+            [_valid_tick("UMAC", 9.10, rsi=45.0), _valid_tick("NVDA", 121.0)],
+            market_status="OPEN",
+            now_ts=1000.0,
+        )
+        # Fire a newer same-severity warning for NVDA to verify newest wins on severity ties.
+        self.monitor.add_rule(
+            {"ticker": "NVDA", "metric": "price", "op": ">=", "target": 120.5, "label": "NVDA Warning Old", "severity": "warning", "one_shot": True},
+            source="manual",
+        )
+        self.monitor.evaluate_snapshot([_valid_tick("NVDA", 122.0)], market_status="OPEN", now_ts=1010.0)
+        self.monitor.add_rule(
+            {"ticker": "NVDA", "metric": "price", "op": ">=", "target": 121.5, "label": "NVDA Warning New", "severity": "warning", "one_shot": True},
+            source="manual",
+        )
+        self.monitor.evaluate_snapshot([_valid_tick("NVDA", 123.0)], market_status="OPEN", now_ts=1020.0)
+
+        payload = self.monitor.get_dashboard_payload()
+        unacked = payload["unacknowledged_events"]
+        self.assertEqual(len(payload["events"]), 6)
+        self.assertEqual(payload["unacknowledged_count"], 2)
+        self.assertEqual(len(unacked), 2)
+
+        by_ticker = {ev["ticker"]: ev for ev in unacked}
+        self.assertEqual(set(by_ticker.keys()), {"UMAC", "NVDA"})
+        self.assertEqual(by_ticker["UMAC"]["label"], "UMAC Critical Stop")
+        self.assertEqual(by_ticker["UMAC"]["severity"], "critical")
+        self.assertEqual(by_ticker["NVDA"]["label"], "NVDA Warning New")
+
+        # Dismissing UMAC's visible alert clears ALL unacknowledged UMAC events (no stale resurface)
+        self.assertTrue(self.monitor.acknowledge_event(by_ticker["UMAC"]["event_id"]))
+        after_ack = self.monitor.get_dashboard_payload()
+        self.assertEqual(after_ack["unacknowledged_count"], 1)
+        self.assertEqual([ev["ticker"] for ev in after_ack["unacknowledged_events"]], ["NVDA"])
+
 
 class TestAlertSentinelFallbackAndPrivacy(unittest.TestCase):
     def setUp(self):

@@ -161,6 +161,28 @@ def _atomic_write_json(path: str, payload: Dict[str, Any]) -> None:
     os.replace(tmp_path, path)
 
 
+_SEVERITY_RANK: Dict[str, int] = {"critical": 3, "warning": 2, "info": 1}
+
+
+def _dedupe_unacknowledged_by_ticker(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Collapse unacknowledged events to at most one per ticker (highest severity, newest on tie)."""
+    order: List[str] = []
+    winners: Dict[str, tuple[int, Dict[str, Any]]] = {}
+    for idx, ev in enumerate(events):
+        if ev.get("acknowledged"):
+            continue
+        ticker = str(ev.get("ticker") or "").strip().upper()
+        key = ticker if ticker else f"__event__:{ev.get('event_id') or idx}"
+        rank = _SEVERITY_RANK.get(str(ev.get("severity") or "info").lower(), 1)
+        prev = winners.get(key)
+        if prev is None:
+            order.append(key)
+            winners[key] = (rank, dict(ev))
+        elif rank > prev[0]:
+            winners[key] = (rank, dict(ev))
+    return [winners[k][1] for k in order]
+
+
 class AlertMonitor:
     """Thread-safe key-level alert rule store and tick evaluator."""
 
@@ -324,13 +346,29 @@ class AlertMonitor:
 
     def acknowledge_event(self, event_id: str) -> bool:
         with self._lock:
+            target_ev = None
             for ev in self._events:
                 if ev.get("event_id") == event_id:
-                    if not ev.get("acknowledged"):
+                    target_ev = ev
+                    break
+            if target_ev is None:
+                return False
+
+            target_ticker = str(target_ev.get("ticker") or "").strip().upper()
+            changed = False
+            if target_ticker:
+                for ev in self._events:
+                    ev_ticker = str(ev.get("ticker") or "").strip().upper()
+                    if ev_ticker == target_ticker and not ev.get("acknowledged"):
                         ev["acknowledged"] = True
-                        self._persist()
-                    return True
-            return False
+                        changed = True
+            elif not target_ev.get("acknowledged"):
+                target_ev["acknowledged"] = True
+                changed = True
+
+            if changed:
+                self._persist()
+            return True
 
     def clear_events(self) -> int:
         with self._lock:
@@ -565,7 +603,7 @@ class AlertMonitor:
 
     def get_dashboard_payload(self) -> Dict[str, Any]:
         with self._lock:
-            unacked = [dict(e) for e in self._events if not e.get("acknowledged")]
+            unacked = _dedupe_unacknowledged_by_ticker(self._events)
             rules_copy = [dict(r) for r in self._rules]
             events_copy = [dict(e) for e in self._events]
             return {

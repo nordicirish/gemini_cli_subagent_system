@@ -16,11 +16,12 @@ from zoneinfo import ZoneInfo
 
 NY_TZ = ZoneInfo("America/New_York")
 DEFAULT_MACRO_CALENDAR_PATH = os.path.join("cache", "macro_calendar.json")
+POST_EVENT_GRACE_MINUTES = 30
 
 # Scheduled US Tier-1/Tier-2 releases (times in America/New_York HH:MM).
 # Custom or updated dates can be merged from cache/macro_calendar.json.
 DEFAULT_MACRO_EVENTS: List[Dict[str, str]] = [
-    {"name": "Core PCE", "date": "2026-11-25", "time_et": "10:00", "tier": "TIER_1"},
+    {"name": "Core PCE", "date": "2026-11-25", "time_et": "08:30", "tier": "TIER_1"},
     {"name": "Non-Farm Payrolls", "date": "2026-12-04", "time_et": "08:30", "tier": "TIER_1"},
     {"name": "FOMC Rate Decision", "date": "2026-12-09", "time_et": "14:00", "tier": "TIER_1"},
     {"name": "US CPI", "date": "2026-12-10", "time_et": "08:30", "tier": "TIER_1"},
@@ -81,7 +82,7 @@ def get_macro_calendar_status(
     else:
         current = current.astimezone(NY_TZ)
 
-    cutoff = current - timedelta(hours=2)
+    cutoff = current - timedelta(minutes=POST_EVENT_GRACE_MINUTES)
     upcoming: List[tuple[datetime, Dict[str, Any]]] = []
     for ev in _load_calendar_events(calendar_path):
         ev_dt = _parse_event_dt(ev)
@@ -96,6 +97,7 @@ def get_macro_calendar_status(
                 "time_et": ev.get("time_et", "08:30"),
                 "tier": ev.get("tier", "TIER_1"),
                 "hours_away": hours_away,
+                "in_release_window": bool(ev_dt <= current),
             },
         ))
 

@@ -2442,6 +2442,14 @@ async def system_logs_endpoint():
             
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+@app.middleware("http")
+async def set_static_html_no_cache(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.endswith(".html"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 # --- MOUNT STATIC AND RUN ---
 if __name__ == "__main__":
     if not os.path.exists("static"):

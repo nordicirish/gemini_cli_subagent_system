@@ -1110,22 +1110,61 @@ async function pollData() {
                 const vix = state.tickers.find(t => t.ticker === '^VIX');
                 const ief = state.tickers.find(t => t.ticker === 'IEF');
                 let alertsHtml = '';
+                const alertKeys = [];
+                const dynamicUpdates = {};
+                const renderedAlertTickers = new Set();
                 
-                if(vix && vix.price > 20 && vix.gap_percent > 2.0) {
-                    alertsHtml += `<div class="alert-item critical">⚠️ FEAR ALERT: VIX SPIKING (+${vix.gap_percent.toFixed(2)}%)</div>`;
+                const vixChangePct = vix
+                    ? (Number.isFinite(Number(vix.session_change_pct)) ? Number(vix.session_change_pct) : Number(vix.gap_percent))
+                    : NaN;
+                if (vix && Number(vix.price) > 20 && Number.isFinite(vixChangePct) && vixChangePct > 2.0) {
+                    const vixSign = vixChangePct >= 0 ? '+' : '';
+                    const vixLiveText = `${Number(vix.price).toFixed(2)} (${vixSign}${vixChangePct.toFixed(2)}%)`;
+                    alertsHtml += `<div class="alert-item critical" data-ticker="^VIX"><span>⚠️ FEAR ALERT: VIX SPIKING <span class="vix-spike-pct">${vixLiveText}</span></span></div>`;
+                    renderedAlertTickers.add('^VIX');
+                    alertKeys.push('^VIX:FEAR');
+                    dynamicUpdates['.vix-spike-pct'] = vixLiveText;
                 }
-                if(ief && ief.gap_percent < -0.15) {
-                    alertsHtml += `<div class="alert-item warning">📉 BOND ALERT: YIELDS RISING</div>`;
+                const iefChangePct = ief
+                    ? (Number.isFinite(Number(ief.session_change_pct)) ? Number(ief.session_change_pct) : Number(ief.gap_percent))
+                    : NaN;
+                if (ief && Number.isFinite(iefChangePct) && iefChangePct < -0.15) {
+                    const iefPctText = `${iefChangePct.toFixed(2)}%`;
+                    alertsHtml += `<div class="alert-item warning" data-ticker="IEF"><span>📉 BOND ALERT: YIELDS RISING (IEF <span class="ief-bond-pct">${iefPctText}</span>)</span></div>`;
+                    renderedAlertTickers.add('IEF');
+                    alertKeys.push('IEF:BOND');
+                    dynamicUpdates['.ief-bond-pct'] = iefPctText;
                 }
 
                 const alertState = state.alerts || {};
-                const unackedEvents = Array.isArray(alertState.unacknowledged_events) ? alertState.unacknowledged_events : [];
+                const rawUnacked = Array.isArray(alertState.unacknowledged_events) ? alertState.unacknowledged_events : [];
+                const sevRankMap = { critical: 3, warning: 2, info: 1 };
+                const dedupOrder = [];
+                const dedupBest = new Map();
+                rawUnacked.forEach((ev, idx) => {
+                    if (!ev || ev.acknowledged) return;
+                    const sym = String(ev.ticker || '').trim().toUpperCase();
+                    if (sym && renderedAlertTickers.has(sym)) return;
+                    const key = sym || `__event__:${ev.event_id || idx}`;
+                    const sev = (ev.severity === 'critical' || ev.severity === 'warning') ? ev.severity : 'info';
+                    const rank = sevRankMap[sev] || 1;
+                    const prev = dedupBest.get(key);
+                    if (!prev) {
+                        dedupOrder.push(key);
+                        dedupBest.set(key, { rank, ev });
+                    } else if (rank > prev.rank) {
+                        dedupBest.set(key, { rank, ev });
+                    }
+                });
+                const unackedEvents = dedupOrder.map((k) => dedupBest.get(k).ev);
                 unackedEvents.forEach((ev) => {
                     const sev = (ev.severity === 'critical' || ev.severity === 'warning') ? ev.severity : 'info';
                     const icon = sev === 'critical' ? '🚨' : (sev === 'warning' ? '⚠️' : '🔔');
                     const evId = _escAlertHtml(ev.event_id || '');
+                    const evTicker = _escAlertHtml(String(ev.ticker || '').trim().toUpperCase());
                     const evMsg = _escAlertHtml(ev.message || `${ev.ticker || ''} triggered`);
-                    alertsHtml += `<div class="alert-item ${sev}" data-event-id="${evId}"><span>${icon} ${evMsg}</span><button type="button" class="alert-dismiss-btn" onclick="ackAlertEvent('${evId}')" title="Acknowledge alert">&times;</button></div>`;
+                    alertsHtml += `<div class="alert-item ${sev}" data-event-id="${evId}" data-ticker="${evTicker}"><span>${icon} ${evMsg}</span><button type="button" class="alert-dismiss-btn" onclick="ackAlertEvent('${evId}')" title="Acknowledge alert">&times;</button></div>`;
+                    alertKeys.push(`ev:${ev.event_id || evTicker}:${sev}:${evMsg}`);
                     _notifyNewAlertEvent(ev);
                 });
 
@@ -1133,7 +1172,7 @@ async function pollData() {
                     renderAlertRules(alertState.rules);
                 }
                 
-                renderAlertTicker(alertsContent, alertsHtml);
+                renderAlertTicker(alertsContent, alertsHtml, alertKeys.join('|'), dynamicUpdates);
                 if (topBar) topBar.classList.toggle('has-alerts', Boolean(alertsHtml));
             }
 
@@ -1573,6 +1612,11 @@ async function ackAlertEvent(eventId) {
         if (!res.ok) return;
         // Remove the item and its marquee clone, then re-measure whether the bar still overflows.
         document.querySelectorAll(`.alert-item[data-event-id="${CSS.escape(eventId)}"]`).forEach(el => el.remove());
+        const alertsEl = document.getElementById('alerts-content');
+        if (alertsEl) {
+            delete alertsEl.dataset.renderedKey;
+            delete alertsEl.dataset.renderedHtml;
+        }
         updateAlertMarquee();
         pollData();
     } catch (e) { console.error('Ack alert failed:', e); }
@@ -1584,12 +1628,23 @@ async function ackAlertEvent(eventId) {
 // static, manually scrollable bar instead.
 const MARQUEE_PX_PER_SEC = 45;
 
-function renderAlertTicker(container, alertsHtml) {
+function renderAlertTicker(container, alertsHtml, structureKey, dynamicUpdates) {
     if (!container) return;
     const html = alertsHtml || '<span class="empty-state">NO ACTIVE ALERTS</span>';
-    // Compare against what we last rendered (innerHTML includes the clone), so a poll with
-    // unchanged alerts never restarts the scroll animation.
-    if (container.dataset.renderedHtml === html) return;
+    const key = (typeof structureKey === 'string' && structureKey.length > 0) ? structureKey : html;
+    // Compare against the structural key so live numeric jitter (e.g. VIX %) updates in place
+    // without tearing down .ticker-track or restarting the scroll animation.
+    if (container.dataset.renderedKey === key) {
+        if (dynamicUpdates && typeof dynamicUpdates === 'object') {
+            Object.entries(dynamicUpdates).forEach(([selector, text]) => {
+                container.querySelectorAll(selector).forEach((el) => {
+                    if (el.textContent !== text) el.textContent = text;
+                });
+            });
+        }
+        return;
+    }
+    container.dataset.renderedKey = key;
     container.dataset.renderedHtml = html;
     container.innerHTML = `<div class="ticker-track"><div class="ticker-group">${html}</div></div>`;
     updateAlertMarquee();
@@ -1602,20 +1657,42 @@ function updateAlertMarquee() {
     if (!container || !track || !group) return;
 
     track.querySelectorAll('.ticker-group[aria-hidden="true"]').forEach(el => el.remove());
-    container.classList.remove('is-scrolling');
+    container.classList.remove('is-scrolling', 'is-single-pass');
+    container.style.removeProperty('--marquee-start');
+    container.style.removeProperty('--marquee-delay');
 
     const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const hasAlerts = Boolean(group.querySelector('.alert-item'));
-    const overflows = group.scrollWidth > container.clientWidth;
-    if (!hasAlerts || !overflows || reduceMotion) return;
+    if (!hasAlerts || reduceMotion) return;
 
-    container.classList.add('is-scrolling'); // adds trailing spacing, so measure after this
-    const clone = group.cloneNode(true);
-    clone.setAttribute('aria-hidden', 'true');
-    clone.querySelectorAll('button').forEach(btn => { btn.tabIndex = -1; });
-    track.appendChild(clone);
-    const seconds = Math.max(12, group.scrollWidth / MARQUEE_PX_PER_SEC);
-    container.style.setProperty('--marquee-duration', `${seconds.toFixed(1)}s`);
+    let padX = 0;
+    try {
+        const cs = window.getComputedStyle ? window.getComputedStyle(container) : null;
+        if (cs) padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    } catch (_) {}
+    const availWidth = Math.max(0, container.clientWidth - padX);
+    const groupWidth = group.scrollWidth;
+
+    if (groupWidth > availWidth) {
+        container.classList.add('is-scrolling'); // adds trailing spacing, so measure after this
+        const clone = group.cloneNode(true);
+        clone.setAttribute('aria-hidden', 'true');
+        clone.querySelectorAll('button').forEach(btn => { btn.tabIndex = -1; });
+        track.appendChild(clone);
+        const seconds = Math.max(12, group.scrollWidth / MARQUEE_PX_PER_SEC);
+        container.style.setProperty('--marquee-duration', `${seconds.toFixed(1)}s`);
+    } else {
+        // Single-pass marquee: smoothly scroll alerts without cloning (never duplicates a ticker).
+        container.classList.add('is-scrolling', 'is-single-pass');
+        const startPx = Math.max(availWidth, 320);
+        const travelPx = startPx + Math.max(groupWidth, 1);
+        const seconds = Math.max(12, travelPx / MARQUEE_PX_PER_SEC);
+        const initOffsetPx = Math.max(0, startPx - Math.min(startPx * 0.12, 120));
+        const delaySec = initOffsetPx / MARQUEE_PX_PER_SEC;
+        container.style.setProperty('--marquee-start', `${startPx}px`);
+        container.style.setProperty('--marquee-duration', `${seconds.toFixed(1)}s`);
+        container.style.setProperty('--marquee-delay', `-${delaySec.toFixed(1)}s`);
+    }
 }
 
 let _alertMarqueeResizeTimer = null;
@@ -1763,9 +1840,18 @@ function updateMacroCalendarPill(macroCal) {
         .replace('Non-Farm Payrolls', 'NFP')
         .replace('US ', '');
     const hrs = Number(nextEv.hours_away);
-    const timeTag = Number.isFinite(hrs)
-        ? (hrs < 48 ? `${hrs.toFixed(0)}h` : `${Math.round(hrs / 24)}d`)
-        : '';
+    let timeTag = '';
+    if (nextEv.in_release_window || (Number.isFinite(hrs) && hrs <= 0)) {
+        timeTag = 'LIVE';
+    } else if (Number.isFinite(hrs)) {
+        if (hrs < 1) {
+            timeTag = `${Math.max(1, Math.round(hrs * 60))}m`;
+        } else if (hrs < 48) {
+            timeTag = `${Math.round(hrs)}h`;
+        } else {
+            timeTag = `${Math.round(hrs / 24)}d`;
+        }
+    }
     if (macroCal.shield_active) {
         pill.className = 'macro-cal-pill macro-cal-shield';
         pill.textContent = `🛡️ ${shortName} ${timeTag} (-50% stops)`.trim();

@@ -13,7 +13,7 @@ const read = (rel) => fs.readFileSync(rel, 'utf8');
 const nodeModules = path.join(__dirname, '..', '..', 'node_modules');
 
 const API = {
-    '/api/tickers': { tickers: ['NVDA'], macro: ['SPY'], macro_labels: { SPY: 'S&P 500' } },
+    '/api/tickers': { tickers: ['NVDA'], macro: ['SPY', '^VIX'], macro_labels: { SPY: 'S&P 500', '^VIX': 'CBOE VIX' } },
     '/api/basket': {
         portfolio: [{ ticker: 'NVDA', shares: 10, wac: 100.0 }],
         unallocated_cash_eur: 1000.0, unallocated_cash_usd: 1097.7,
@@ -42,6 +42,9 @@ const API = {
             {
                 ticker: 'SPY', price: 718.68, session_change_pct: -0.5, gap_percent: -0.2, atr_percent: 1.1, rsi: 48, vwap: 719.0, net_gex_total: -0.013,
             },
+            {
+                ticker: '^VIX', price: 33.42, session_change_pct: 26.75, gap_percent: 6.83, atr_percent: 15.0, rsi: 64,
+            },
             // Warm-up row: no numbers yet. Used to throw in renderRow and blank the whole table.
             { ticker: 'AMD', price: null, session_change_pct: null, gap_percent: null, atr_percent: null, rsi: null },
             {
@@ -61,9 +64,12 @@ const API = {
             ],
             unacknowledged_events: [
                 { event_id: 'evt-1', rule_id: 'trg-1', ticker: 'NVDA', severity: 'warning', label: 'HOD Break', message: 'NVDA: HOD Break (price=122.10 crosses_above 122.00)' },
+                { event_id: 'evt-2', rule_id: 'trg-2', ticker: 'NVDA', severity: 'info', label: 'Stale Support', message: 'NVDA: Stale Support Trigger' },
+                { event_id: 'evt-3', rule_id: 'trg-3', ticker: 'PLTR', severity: 'info', label: 'Minor Bounce', message: 'PLTR: Minor Bounce' },
+                { event_id: 'evt-4', rule_id: 'trg-4', ticker: 'PLTR', severity: 'critical', label: 'Stop Breach', message: 'PLTR: Stop Breach' },
             ],
             active_rules_count: 1,
-            unacknowledged_count: 1,
+            unacknowledged_count: 2,
         },
     },
     '/api/alerts': {
@@ -382,6 +388,14 @@ async function main() {
     check('Key-Level Triggers & Sentinel: renders fired alert banner, armed rule row, and fallback status', () => {
         const alertBanner = window.document.getElementById('alerts-content');
         assert(alertBanner && alertBanner.textContent.includes('NVDA: HOD Break'), 'triggered alert missing from top alert bar');
+        assert(alertBanner.textContent.includes('33.42 (+26.75%)'), `expected live VIX price & session % in alert bar, got: ${alertBanner.textContent}`);
+        assert(!alertBanner.textContent.includes('+6.83%'), 'VIX alert should show live session_change_pct, not static opening gap_percent');
+        const nvdaItems = alertBanner.querySelectorAll('.ticker-group:not([aria-hidden="true"]) .alert-item[data-ticker="NVDA"]');
+        const pltrItems = alertBanner.querySelectorAll('.ticker-group:not([aria-hidden="true"]) .alert-item[data-ticker="PLTR"]');
+        assert.strictEqual(nvdaItems.length, 1, `expected 1 NVDA alert, got ${nvdaItems.length}`);
+        assert(!nvdaItems[0].textContent.includes('Stale Support Trigger'), 'stale lower-severity NVDA alert should be collapsed');
+        assert.strictEqual(pltrItems.length, 1, `expected 1 PLTR alert, got ${pltrItems.length}`);
+        assert(pltrItems[0].textContent.includes('PLTR: Stop Breach'), `expected critical PLTR alert, got ${pltrItems[0].textContent}`);
         const rulesList = window.document.getElementById('alerts-rules-container');
         assert(rulesList && rulesList.textContent.includes('NVDA') && rulesList.textContent.includes('sentinel'), 'armed trigger missing from sidebar');
         const sentinelStatus = window.document.getElementById('sentinel-status-text');
@@ -455,30 +469,43 @@ async function main() {
         let groupWidth = 2000;
         Object.defineProperty(proto, 'scrollWidth', { configurable: true, get() { return this.classList && this.classList.contains('ticker-group') ? groupWidth : 0; } });
         Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return this.id === 'alerts-content' ? 800 : 0; } });
-        const many = '<div class="alert-item critical" data-event-id="e1"><span>A</span><button type="button" class="alert-dismiss-btn">&times;</button></div>'
+        const many = '<div class="alert-item critical" data-ticker="^VIX">⚠️ FEAR ALERT: (<span class="vix-spike-pct">+6.83%</span>)</div>'
+            + '<div class="alert-item critical" data-event-id="e1"><span>A</span><button type="button" class="alert-dismiss-btn">&times;</button></div>'
             + '<div class="alert-item warning">B</div>';
-        window.renderAlertTicker(content, many);
+        window.renderAlertTicker(content, many, 'vix|e1', { '.vix-spike-pct': '+6.83%' });
         const firstTrack = content.querySelector('.ticker-track');
-        window.renderAlertTicker(content, many); // unchanged poll
+        window.renderAlertTicker(content, many, 'vix|e1', { '.vix-spike-pct': '+7.12%' }); // live VIX % jitter
         const scrolling = content.classList.contains('is-scrolling');
         const clone = content.querySelector('.ticker-group[aria-hidden="true"]');
         const sameTrack = content.querySelector('.ticker-track') === firstTrack;
+        const vixPcts = [...content.querySelectorAll('.vix-spike-pct')].map((el) => el.textContent);
         const duration = content.style.getPropertyValue('--marquee-duration');
-        groupWidth = 300; // fits now
+        groupWidth = 300; // fits: single-pass scroll without cloning
         window.renderAlertTicker(content, '<div class="alert-item info">C</div>');
-        const fitsStatic = !content.classList.contains('is-scrolling') && !content.querySelector('.ticker-group[aria-hidden="true"]');
+        const fitsSinglePass = content.classList.contains('is-scrolling')
+            && content.classList.contains('is-single-pass')
+            && !content.querySelector('.ticker-group[aria-hidden="true"]');
         window.renderAlertTicker(content, '');
-        const emptyShown = content.textContent.includes('NO ACTIVE ALERTS');
+        const emptyCleared = !content.classList.contains('is-scrolling')
+            && !content.classList.contains('is-single-pass')
+            && content.textContent.includes('NO ACTIVE ALERTS');
         if (origSW) Object.defineProperty(proto, 'scrollWidth', origSW); else delete proto.scrollWidth;
         if (origCW) Object.defineProperty(proto, 'clientWidth', origCW); else delete proto.clientWidth;
-        check('Alert bar marquee: scrolls with a seamless clone only on overflow, survives unchanged polls, static when it fits', () => {
+        const cssText = read(path.join(staticDir, 'styles.css'));
+        check('Alert bar marquee: clones on overflow, single-pass scrolls when fitting, survives VIX % jitter', () => {
             assert(scrolling, 'overflowing alerts should scroll');
-            assert(clone, 'aria-hidden clone missing for seamless loop');
+            assert(clone, 'aria-hidden clone missing for overflow seamless loop');
             assert.strictEqual(clone.querySelector('button').tabIndex, -1, 'clone buttons must not take focus');
-            assert(sameTrack, 'unchanged poll must not re-render (would restart the animation)');
+            assert(sameTrack, 'live numeric update must not re-render .ticker-track (would restart animation)');
+            assert.deepStrictEqual(vixPcts, ['+7.12%', '+7.12%'], `VIX % should update in-place on primary and clone, got ${JSON.stringify(vixPcts)}`);
             assert(/^\d+(\.\d)?s$/.test(duration) && parseFloat(duration) >= 12, `bad duration ${duration}`);
-            assert(fitsStatic, 'alerts that fit should not scroll or clone');
-            assert(emptyShown, 'empty state should render');
+            assert(fitsSinglePass, 'fitting alerts should scroll via single-pass mode without creating a duplicate clone');
+            assert(emptyCleared, 'empty state should clear marquee classes and render placeholder');
+            assert(
+                cssText.includes('.top-alert-bar:hover .ticker-content.is-scrolling.is-single-pass .ticker-track')
+                && cssText.includes('animation-play-state: paused'),
+                'hover pause selector must match/exceed .is-scrolling.is-single-pass specificity',
+            );
         });
     }
 
