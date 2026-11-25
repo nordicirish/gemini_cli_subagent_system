@@ -37,7 +37,7 @@ The governance hierarchy is structured into three strictly isolated tiers:
                  └───────────────────X───────────────────────────┘
 ```
 
-1. **Human Authority:** The human repository owner holds exclusive authority over task/stage scope authorisation, Protected Financial Assets (`Protocol 06`), financial mandates, capital risk parameters, trading execution, git commits, git pushes, and releases.
+1. **Human Authority:** The human repository owner holds exclusive authority over task/stage scope authorisation, Protected Financial Assets (`Protocol 06`), financial mandates, capital risk parameters, trading execution, releases, and authorising any git commit or git push.
 2. **Instruction Precedence (Fail-Closed):**
    - Security Policies & Financial Boundary Rules (`.agents/protocols/03-security-policy.md`, `.agents/protocols/06-financial-boundaries.md`).
    - `.agents/AGENTS.md` and remaining engineering protocols (`.agents/protocols/01-agent-orchestration.md`, `02`, `04`, `05`).
@@ -45,8 +45,8 @@ The governance hierarchy is structured into three strictly isolated tiers:
    - [`INSTRUCTIONS.md`](../INSTRUCTIONS.md) (subordinate engineering execution guide; zero trading or financial authority), [`docs/governance/project-state.md`](../docs/governance/project-state.md) (curated Project State Brief), and approved session task prompts.
 3. **Operating Model (Native Orchestrator):**
    - **Gemini 4 Argon (Lead Architect, Planner & Independent Reviewer):** Performs read-only baseline inspection (`git rev-parse HEAD`, `git status --short`, `git diff`), authors compact delta-only stage prompts referencing `@INSTRUCTIONS.md`, independently audits Hydrogen's `git diff` and test results, and issues formal acceptance verdicts under the **Two-Pass Acceptance Cap** (maximum one independent Argon audit and at most one `.1` remediation pass per stage/sub-stage for concrete runtime, security, or data-integrity defects).
-   - **Gemini 4 Hydrogen (Bounded Implementation & Testing Worker):** Modifies ONLY explicitly authorised files, executes scope-proportional `unittest` suites (`Protocol 05`), delivers completion reports in chat only (zero report bloat in `docs/engineering/`), never expands scope, never self-approves work, and never executes Git write commands.
-   - **Human Owner:** Holds exclusive authority over stage authorisations, Protected Financial Assets (`Protocol 06`), and all Git write operations.
+   - **Gemini 4 Hydrogen (Bounded Implementation & Testing Worker):** Modifies ONLY explicitly authorised files, executes scope-proportional `unittest` suites (`Protocol 05`), delivers completion reports in chat only (zero report bloat in `docs/engineering/`), never expands scope, never self-approves work, and never executes autonomous Git write commands (`git add`, `git commit`, and `git push` are permitted only when explicitly requested by the Human Owner).
+   - **Human Owner:** Holds exclusive authority over stage authorisations, Protected Financial Assets (`Protocol 06`), and authorising any Git commit or push.
 
 ---
 
@@ -94,7 +94,7 @@ Every code change must traverse the fail-closed lifecycle:
  [Argon Independent Review] ◄─── Read-only diff & evidence audit (Protocol 04); max 1 remediation pass (.1) for concrete defects
           │
           ▼
-   [Human Sign-Off] ◄─── Reports delivered in chat only; human performs git commit & push and authorises next stage
+   [Human Sign-Off] ◄─── Reports delivered in chat only; human performs or explicitly authorises git commit & push and next stage
 ```
 
 **Fail-Closed Rule:** If required automated tests fail, if unresolved relevant defects remain, if review evidence is incomplete, if unapproved files or Protected Financial Assets (`Protocol 06`) are touched, if permitted blockers or deferrals lack explicit documentation and justification under Protocol 05, if stage reports are written to `docs/engineering/` without explicit authorisation, or if an agent attempts to self-approve or auto-advance stages, the task is marked `REJECTED` and execution terminates immediately.

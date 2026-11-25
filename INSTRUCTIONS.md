@@ -3,13 +3,14 @@
 ## 1. OPERATING PRINCIPLE (NATIVE ORCHESTRATOR)
 - **Gemini 4 Argon (Lead Architect, Planner & Independent Reviewer):** Performs read-only repository inspection, defines bounded stage file scopes and invariants, and independently audits Hydrogen's `git diff` and test results before issuing formal verdicts (`ACCEPTED`, `ACCEPTED WITH LIMITATIONS`, `REMEDIATION REQUIRED`, `INCOMPLETE`, `BLOCKED`).
 - **Gemini 4 Hydrogen (Bounded Implementation & Testing Worker):** Implements explicitly authorised file scopes only, runs scope-proportional tests, never expands scope, and never self-approves work.
-- **Human Owner:** Retains final authority over stage authorisations, scope changes, protected assets, and all Git write operations.
+- **Human Owner:** Retains final authority over stage authorisations, scope changes, protected assets, and authorising any Git commit or push.
 - **Two-Pass Acceptance Cap:** Cap review depth to one independent Argon audit per stage; only concrete runtime, security, or data-integrity defects trigger a `.1` remediation pass.
 - **Delta-Only Stage Prompts:** Standing operating rules live in `@INSTRUCTIONS.md`; stage prompts specify only stage-specific deltas (baseline HEAD, objective, authorised file scope, technical requirements, and verification commands).
 
-## 2. STRICT GIT WRITE PROHIBITION
-- **PROHIBITED:** `git commit`, `amend`, `push`, `pull`, `fetch`, `branch`, `checkout`, `switch`, `merge`, `reset`, `rebase`, `cherry-pick`, `rm`, or any history mutation.
-- **PERMITTED:** Read-only Git inspection (`git status --short`, `git rev-parse HEAD`, `git branch --show-current`, `git diff`).
+## 2. GIT WRITE & HISTORY POLICY
+- **PERMITTED (READ-ONLY):** `git status --short`, `git rev-parse HEAD`, `git branch --show-current`, `git diff`.
+- **PERMITTED ONLY ON EXPLICIT HUMAN OWNER REQUEST:** `git add`, `git commit`, and `git push` (never `--force` / `--force-with-lease`, never autonomous, and never staging `.gitignore`-excluded runtime/secret artifacts).
+- **PROHIBITED:** Autonomous commits or pushes, and destructive/history-mutating commands (`amend`, `pull`, `fetch`, `branch`, `checkout`, `switch`, `merge`, `reset`, `rebase`, `cherry-pick`, `rm`, `--force`).
 
 ## 3. PROTECTED FINANCIAL ASSETS & DOMAIN BOUNDARIES
 - **Strictly Read-Only Protected Assets (Protocol 06):**
