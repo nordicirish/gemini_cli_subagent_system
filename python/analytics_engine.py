@@ -789,6 +789,9 @@ class AnalyticsEngine:
             sizing["valid_telemetry"] = valid
             sizing["triggered_mandates"] = mandates
             sizing["tracker"] = tracker
+            sizing["dealer_posture"] = str(row.get("dealer_posture") or "NEUTRAL").strip().upper()
+            sizing["session_change_pct"] = _safe_float(row.get("session_change_pct"))
+            sizing["vwap"] = _safe_float(row.get("vwap"))
             positions_out.append(sizing)
 
         watchlist_out: List[Dict[str, Any]] = []

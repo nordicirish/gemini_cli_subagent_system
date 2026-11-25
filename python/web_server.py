@@ -56,7 +56,7 @@ from portfolio_proposals import (
     ProposalStateError,
 )
 try:
-    from alert_monitor import ALERT_MONITOR, extract_triggers_from_chat
+    from alert_monitor import ALERT_MONITOR, extract_hold_tickers_from_chat, extract_triggers_from_chat
     from alert_sentinel import ALERT_SENTINEL
     from analytics_engine import ANALYTICS_ENGINE
     from decision_backtester import backtest_decision_log, extract_chat_recommendations
@@ -71,7 +71,7 @@ try:
     from peak_predictor import predict_daily_peak
     from sec_edgar import fetch_recent_sec_filings
 except ImportError:
-    from python.alert_monitor import ALERT_MONITOR, extract_triggers_from_chat
+    from python.alert_monitor import ALERT_MONITOR, extract_hold_tickers_from_chat, extract_triggers_from_chat
     from python.alert_sentinel import ALERT_SENTINEL
     from python.analytics_engine import ANALYTICS_ENGINE
     from python.decision_backtester import backtest_decision_log, extract_chat_recommendations
@@ -1385,8 +1385,40 @@ def chat_endpoint(req: ChatRequest):
             # (the payload path stores one SESSION-level blob the backtester cannot evaluate).
             _log_chat_recommendations(full_response_original, turn_id, known_tickers)
 
-            # Auto-arm AI-identified key-level alert triggers (never from halted/vetoed turns)
+            # Reconcile active mandate alerts & auto-arm key-level triggers (never from halted/vetoed turns)
             if payload_result is None or payload_result.get("state") != "skipped":
+                try:
+                    hold_tickers = extract_hold_tickers_from_chat(
+                        full_response_original,
+                        raw_payload_json=raw_payload_json,
+                        known_tickers=known_tickers or None,
+                    )
+                    if hold_tickers:
+                        active_mandates_by_ticker: Dict[str, List[str]] = {}
+                        try:
+                            live_analytics = ANALYTICS_ENGINE.evaluate(*_load_live_analytics_context())
+                            for pos in live_analytics.get("positions", []) or []:
+                                sym = str(pos.get("ticker") or "").strip().upper()
+                                if sym:
+                                    active_mandates_by_ticker[sym] = [
+                                        str(m.get("rule_id") or "").strip()
+                                        for m in (pos.get("triggered_mandates") or [])
+                                        if isinstance(m, dict) and m.get("rule_id")
+                                    ]
+                        except Exception:
+                            active_mandates_by_ticker = {}
+                        hold_res = ALERT_MONITOR.reconcile_council_hold(
+                            hold_tickers,
+                            active_mandates_by_ticker=active_mandates_by_ticker,
+                        )
+                        if hold_res.get("acknowledged") or hold_res.get("suppressed"):
+                            framework.log(
+                                f"[AlertMonitor] Reconciled Council HOLD for {', '.join(hold_tickers)} "
+                                f"(ack={hold_res.get('acknowledged', 0)}, suppressed={len(hold_res.get('suppressed', []))})."
+                            )
+                except Exception as hold_err:
+                    framework.log(f"[System Warning] Council HOLD alert reconciliation skipped: {redact_secrets(str(hold_err))}")
+
                 try:
                     extracted_triggers = extract_triggers_from_chat(
                         full_response_original,

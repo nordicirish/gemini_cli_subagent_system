@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 import alert_monitor  # noqa: E402
 import alert_sentinel  # noqa: E402
 import web_server  # noqa: E402
-from alert_monitor import AlertMonitor, extract_triggers_from_chat  # noqa: E402
+from alert_monitor import AlertMonitor, extract_hold_tickers_from_chat, extract_triggers_from_chat  # noqa: E402
 from alert_sentinel import AlertSentinel, build_public_technicals_payload  # noqa: E402
 
 
@@ -211,6 +211,174 @@ class TestAlertMonitor(unittest.TestCase):
         after_ack = self.monitor.get_dashboard_payload()
         self.assertEqual(after_ack["unacknowledged_count"], 1)
         self.assertEqual([ev["ticker"] for ev in after_ack["unacknowledged_events"]], ["NVDA"])
+
+    def test_enh_16_e_recovered_non_long_gamma_skips_and_auto_clears_stale_event(self):
+        # Emit an active ENH_16_E while UMAC is red / LONG_GAMMA
+        red_pos = [{
+            "ticker": "UMAC",
+            "valid_telemetry": True,
+            "price": 7.95,
+            "vwap": 8.34,
+            "session_change_pct": -10.27,
+            "dealer_posture": "LONG_GAMMA",
+            "tranches": {},
+            "triggered_mandates": [{
+                "rule_id": "ENH_16_E",
+                "action": "LONG_GAMMA_SHIELD_INVALIDATED",
+                "severity": "critical",
+                "detail": "SEC Rule 201 SSR active / <= -10% drop; LONG_GAMMA shield overridden.",
+            }],
+        }]
+        emitted = self.monitor.record_mandate_alerts(red_pos, market_status="OPEN", now_ts=1795620000.0)
+        self.assertEqual(len(emitted), 1)
+        self.assertEqual(self.monitor.get_dashboard_payload()["unacknowledged_count"], 1)
+
+        # Once UMAC recovers green above VWAP under SHORT_GAMMA, ENH_16_E is auto-cleared & suppressed
+        recovered_pos = [{
+            "ticker": "UMAC",
+            "valid_telemetry": True,
+            "price": 8.98,
+            "vwap": 8.34,
+            "session_change_pct": 1.30,
+            "dealer_posture": "SHORT_GAMMA",
+            "tranches": {},
+            "triggered_mandates": red_pos[0]["triggered_mandates"],
+        }]
+        self.assertEqual(
+            self.monitor.record_mandate_alerts(recovered_pos, market_status="OPEN", cooldown_sec=900, now_ts=1795622000.0),
+            [],
+        )
+        self.assertEqual(self.monitor.get_dashboard_payload()["unacknowledged_count"], 0)
+
+        # Still fires if dealer_posture is LONG_GAMMA or session_change_pct is negative
+        fresh_monitor = AlertMonitor(state_path=os.path.join(self.tmp.name, "triggers_lg.json"))
+        lg_green = [dict(recovered_pos[0], dealer_posture="LONG_GAMMA")]
+        self.assertEqual(len(fresh_monitor.record_mandate_alerts(lg_green, market_status="OPEN", now_ts=1795622000.0)), 1)
+        sg_red_monitor = AlertMonitor(state_path=os.path.join(self.tmp.name, "triggers_sg_red.json"))
+        sg_red = [dict(recovered_pos[0], session_change_pct=-2.0)]
+        self.assertEqual(len(sg_red_monitor.record_mandate_alerts(sg_red, market_status="OPEN", now_ts=1795622000.0)), 1)
+
+    def test_manual_ack_suppresses_session_mandates_and_rearms_when_cleared(self):
+        t0 = 1795620000.0  # 2026-11-25 NY session
+        enh_pos = [{
+            "ticker": "UMAC",
+            "valid_telemetry": True,
+            "price": 8.40,
+            "vwap": 8.50,
+            "session_change_pct": -5.0,
+            "dealer_posture": "SHORT_GAMMA",
+            "tranches": {},
+            "triggered_mandates": [
+                {"rule_id": "ENH_16_E", "action": "LONG_GAMMA_SHIELD_INVALIDATED", "severity": "critical", "detail": "SSR active"},
+                {"rule_id": "MANDATE_52", "action": "MANDATORY_25PCT_SWEEP_TRIM", "trim_pct": 25, "severity": "critical", "detail": "Sub-VWAP"},
+            ],
+        }]
+        ev1 = self.monitor.record_mandate_alerts(enh_pos, market_status="OPEN", cooldown_sec=900, now_ts=t0)
+        self.assertEqual(len(ev1), 2)
+        self.assertTrue(self.monitor.acknowledge_event(ev1[0]["event_id"], now_ts=t0 + 5))
+
+        # Past 900s cooldown, both dismissed mandates stay suppressed (even after reload from disk)
+        reloaded = AlertMonitor(state_path=self.state_path)
+        self.assertEqual(
+            reloaded.record_mandate_alerts(enh_pos, market_status="OPEN", cooldown_sec=900, now_ts=t0 + 1200),
+            [],
+        )
+
+        # Non-sticky MANDATE_52 clears on next tick -> re-arms; ENH_16_E stays session-sticky
+        cleared_pos = [dict(enh_pos[0], triggered_mandates=[enh_pos[0]["triggered_mandates"][0]])]
+        self.assertEqual(
+            reloaded.record_mandate_alerts(cleared_pos, market_status="OPEN", cooldown_sec=900, now_ts=t0 + 1300),
+            [],
+        )
+        ev_rearmed = reloaded.record_mandate_alerts(enh_pos, market_status="OPEN", cooldown_sec=900, now_ts=t0 + 1400)
+        self.assertEqual([e["op"] for e in ev_rearmed], ["MANDATE_52"])
+
+        # Next NY session day resets session suppression so ENH_16_E can fire again
+        next_day_ts = t0 + 86400.0
+        ev_next_day = reloaded.record_mandate_alerts(enh_pos, market_status="OPEN", cooldown_sec=900, now_ts=next_day_ts)
+        self.assertEqual(len(ev_next_day), 2)
+
+    def test_extract_hold_tickers_and_reconcile_council_hold(self):
+        payload = json.dumps({
+            "EXECUTION_PAYLOAD": {
+                "state_context": {"directive": "HOLD"},
+                "portfolio_snapshot": [{"ticker": "UMAC", "shares": "1860", "wac": "12.6"}],
+                "forensic_intelligence": {
+                    "trailing_stop_audit": [
+                        {"ticker": "UMAC", "recommended_action": "HOLD_MONITOR_STOP", "trim_shares": 0}
+                    ]
+                },
+            }
+        })
+        self.assertEqual(
+            extract_hold_tickers_from_chat("", raw_payload_json=payload, known_tickers={"UMAC", "AMZN"}),
+            ["UMAC"],
+        )
+
+        prose_hold = (
+            "### 🎯 Actionable Recommendations\n"
+            "1. **Maintain Defensive HOLD on UMAC (1,860 Shares):** Retain current position intact. Do not initiate any sell orders while above VWAP.\n"
+            "- **[HOLD] AMZN** — Keep current allocation.\n"
+        )
+        self.assertEqual(
+            extract_hold_tickers_from_chat(prose_hold, known_tickers={"UMAC", "AMZN"}),
+            ["AMZN", "UMAC"],
+        )
+
+        # Fail closed when a defensive TRIM is present for UMAC
+        conflict_prose = (
+            "### 🎯 Actionable Recommendations\n"
+            "- **[TRIM] UMAC** — Sell 465 shares at $8.67.\n"
+        )
+        self.assertEqual(
+            extract_hold_tickers_from_chat(conflict_prose, raw_payload_json=payload, known_tickers={"UMAC"}),
+            [],
+        )
+
+        # Reconcile HOLD acknowledges UMAC ENH_16_E, suppresses it past cooldown, preserves NVDA, allows new MANDATE_54
+        t0 = 1795620000.0
+        umac_pos = {
+            "ticker": "UMAC",
+            "valid_telemetry": True,
+            "price": 8.40,
+            "vwap": 8.50,
+            "session_change_pct": -5.0,
+            "dealer_posture": "SHORT_GAMMA",
+            "tranches": {},
+            "triggered_mandates": [
+                {"rule_id": "ENH_16_E", "action": "LONG_GAMMA_SHIELD_INVALIDATED", "severity": "critical", "detail": "SSR active"}
+            ],
+        }
+        nvda_pos = {
+            "ticker": "NVDA",
+            "valid_telemetry": True,
+            "price": 120.0,
+            "vwap": 124.0,
+            "session_change_pct": -4.0,
+            "dealer_posture": "SHORT_GAMMA",
+            "tranches": {},
+            "triggered_mandates": [
+                {"rule_id": "MANDATE_52", "action": "MANDATORY_25PCT_SWEEP_TRIM", "trim_pct": 25, "severity": "critical", "detail": "Sub-VWAP"}
+            ],
+        }
+        self.monitor.record_mandate_alerts([umac_pos, nvda_pos], market_status="OPEN", cooldown_sec=900, now_ts=t0)
+        res = self.monitor.reconcile_council_hold(["UMAC"], active_mandates_by_ticker={"UMAC": ["ENH_16_E"]}, now_ts=t0 + 10)
+        self.assertEqual(res["acknowledged"], 1)
+        self.assertEqual(res["suppressed"], ["UMAC|ENH_16_E"])
+
+        dash = self.monitor.get_dashboard_payload()
+        self.assertEqual([e["ticker"] for e in dash["unacknowledged_events"]], ["NVDA"])
+
+        # Past cooldown, UMAC ENH_16_E stays suppressed, but a brand-new MANDATE_54 still fires
+        umac_worse = dict(
+            umac_pos,
+            triggered_mandates=[
+                umac_pos["triggered_mandates"][0],
+                {"rule_id": "MANDATE_54", "action": "MANDATORY_50PCT_TRIM", "trim_pct": 50, "severity": "critical", "detail": "<= -8%"},
+            ],
+        )
+        ev_after = self.monitor.record_mandate_alerts([umac_worse], market_status="OPEN", cooldown_sec=900, now_ts=t0 + 1200)
+        self.assertEqual([e["op"] for e in ev_after], ["MANDATE_54"])
 
 
 class TestAlertSentinelFallbackAndPrivacy(unittest.TestCase):

@@ -17,6 +17,16 @@ import threading
 import time
 import uuid
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from zoneinfo import ZoneInfo
+
+NY_TZ = ZoneInfo("America/New_York")
+SESSION_STICKY_MANDATES: Set[str] = {"ENH_16_E"}
+_HOLD_DEFENSIVE_ACTIONS: Set[str] = {"TRIM", "SELL", "EXIT", "REDUCE", "LIQUIDATE"}
+
+
+def _ny_session_date(now_ts: Optional[float] = None) -> str:
+    ts = time.time() if now_ts is None else float(now_ts)
+    return datetime.fromtimestamp(ts, tz=NY_TZ).strftime("%Y-%m-%d")
 
 VALID_METRICS: Set[str] = {
     "price",
@@ -192,6 +202,7 @@ class AlertMonitor:
         self._rules: List[Dict[str, Any]] = []
         self._events: List[Dict[str, Any]] = []
         self._mandate_cooldowns: Dict[str, float] = {}
+        self._suppressed_mandates: Dict[str, Dict[str, Any]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -199,6 +210,7 @@ class AlertMonitor:
             if not os.path.exists(self.state_path):
                 self._rules = []
                 self._events = []
+                self._suppressed_mandates = {}
                 return
             try:
                 with open(self.state_path, "r", encoding="utf-8") as f:
@@ -215,9 +227,19 @@ class AlertMonitor:
                     self._rules = loaded_rules[:MAX_TOTAL_RULES]
                     raw_events = data.get("events", [])
                     self._events = [e for e in raw_events if isinstance(e, dict)][:MAX_EVENTS] if isinstance(raw_events, list) else []
+                    raw_supp = data.get("suppressed_mandates", {})
+                    if isinstance(raw_supp, dict):
+                        self._suppressed_mandates = {
+                            str(k): dict(v)
+                            for k, v in raw_supp.items()
+                            if isinstance(k, str) and isinstance(v, dict) and v.get("session_date")
+                        }
+                    else:
+                        self._suppressed_mandates = {}
             except Exception:
                 self._rules = []
                 self._events = []
+                self._suppressed_mandates = {}
 
     def _persist(self) -> None:
         _atomic_write_json(
@@ -227,6 +249,7 @@ class AlertMonitor:
                 "updated_at_utc": _utc_now_iso(),
                 "rules": self._rules,
                 "events": self._events[:MAX_EVENTS],
+                "suppressed_mandates": self._suppressed_mandates,
             },
         )
 
@@ -344,7 +367,36 @@ class AlertMonitor:
                     return dict(r)
             return None
 
-    def acknowledge_event(self, event_id: str) -> bool:
+    def _prune_suppressed_mandates(self, today_ny: str) -> bool:
+        stale = [k for k, v in self._suppressed_mandates.items() if v.get("session_date") != today_ny]
+        for k in stale:
+            del self._suppressed_mandates[k]
+        return bool(stale)
+
+    def _record_event_suppression(
+        self,
+        ev: Dict[str, Any],
+        reason: str,
+        now_ts: Optional[float] = None,
+    ) -> Optional[str]:
+        if ev.get("source") != "analytics":
+            return None
+        rule_id_raw = str(ev.get("rule_id") or "")
+        if not rule_id_raw.startswith("mandate:"):
+            return None
+        ticker = _normalize_ticker(ev.get("ticker"))
+        mandate_id = rule_id_raw.split(":", 1)[1].strip()
+        if not ticker or not mandate_id:
+            return None
+        key = f"{ticker}|{mandate_id}"
+        self._suppressed_mandates[key] = {
+            "session_date": _ny_session_date(now_ts),
+            "reason": reason,
+            "at_utc": _utc_now_iso(now_ts),
+        }
+        return key
+
+    def acknowledge_event(self, event_id: str, now_ts: Optional[float] = None) -> bool:
         with self._lock:
             target_ev = None
             for ev in self._events:
@@ -361,25 +413,80 @@ class AlertMonitor:
                     ev_ticker = str(ev.get("ticker") or "").strip().upper()
                     if ev_ticker == target_ticker and not ev.get("acknowledged"):
                         ev["acknowledged"] = True
+                        self._record_event_suppression(ev, reason="acknowledged", now_ts=now_ts)
                         changed = True
             elif not target_ev.get("acknowledged"):
                 target_ev["acknowledged"] = True
+                self._record_event_suppression(target_ev, reason="acknowledged", now_ts=now_ts)
                 changed = True
 
             if changed:
                 self._persist()
             return True
 
-    def clear_events(self) -> int:
+    def clear_events(self, now_ts: Optional[float] = None) -> int:
         with self._lock:
             changed = 0
             for ev in self._events:
                 if not ev.get("acknowledged"):
                     ev["acknowledged"] = True
+                    self._record_event_suppression(ev, reason="acknowledged", now_ts=now_ts)
                     changed += 1
             if changed:
                 self._persist()
             return changed
+
+    def reconcile_council_hold(
+        self,
+        hold_tickers: Iterable[str],
+        active_mandates_by_ticker: Optional[Dict[str, Iterable[str]]] = None,
+        now_ts: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Acknowledges active deterministic mandate alerts and suppresses them for the NY session on Council HOLD."""
+        normalized = sorted({t for t in (_normalize_ticker(x) for x in (hold_tickers or [])) if t})
+        if not normalized:
+            return {"acknowledged": 0, "suppressed": []}
+
+        today_ny = _ny_session_date(now_ts)
+        now_utc = _utc_now_iso(now_ts)
+        acked = 0
+        suppressed_keys: Set[str] = set()
+
+        with self._lock:
+            mutated = self._prune_suppressed_mandates(today_ny)
+            target_set = set(normalized)
+            for ev in self._events:
+                if ev.get("acknowledged") or ev.get("source") != "analytics":
+                    continue
+                if _normalize_ticker(ev.get("ticker")) in target_set:
+                    ev["acknowledged"] = True
+                    acked += 1
+                    mutated = True
+                    s_key = self._record_event_suppression(ev, reason="council_hold", now_ts=now_ts)
+                    if s_key:
+                        suppressed_keys.add(s_key)
+
+            mandates_map = active_mandates_by_ticker or {}
+            for ticker in normalized:
+                for raw_mid in mandates_map.get(ticker, ()) or ():
+                    mid = str(raw_mid or "").strip()
+                    if not mid:
+                        continue
+                    s_key = f"{ticker}|{mid}"
+                    prev = self._suppressed_mandates.get(s_key)
+                    if prev is None or prev.get("session_date") != today_ny or prev.get("reason") != "council_hold":
+                        self._suppressed_mandates[s_key] = {
+                            "session_date": today_ny,
+                            "reason": "council_hold",
+                            "at_utc": now_utc,
+                        }
+                        mutated = True
+                    suppressed_keys.add(s_key)
+
+            if mutated:
+                self._persist()
+
+        return {"acknowledged": acked, "suppressed": sorted(suppressed_keys)}
 
     @staticmethod
     def _resolve_target_value(rule: Dict[str, Any], row: Dict[str, Any]) -> Optional[float]:
@@ -523,6 +630,19 @@ class AlertMonitor:
 
         return fired_events
 
+    @staticmethod
+    def _is_enh_16_e_recovered_non_long_gamma(pos: Dict[str, Any], price: Optional[float]) -> bool:
+        posture = str(pos.get("dealer_posture") or "").strip().upper()
+        chg_pct = _safe_float(pos.get("session_change_pct"))
+        vwap = _safe_float(pos.get("vwap"))
+        if not posture or posture == "LONG_GAMMA":
+            return False
+        if chg_pct is None or chg_pct < 0.0:
+            return False
+        if vwap is not None and vwap > 0 and (price is None or price < vwap):
+            return False
+        return True
+
     def record_mandate_alerts(
         self,
         positions_analytics: List[Dict[str, Any]],
@@ -536,9 +656,11 @@ class AlertMonitor:
 
         ts = time.time() if now_ts is None else float(now_ts)
         now_iso = _utc_now_iso(ts)
+        today_ny = _ny_session_date(ts)
         emitted: List[Dict[str, Any]] = []
 
         with self._lock:
+            mutated = self._prune_suppressed_mandates(today_ny)
             for pos in positions_analytics:
                 if not isinstance(pos, dict) or not pos.get("valid_telemetry"):
                     continue
@@ -548,6 +670,8 @@ class AlertMonitor:
                 price = _safe_float(pos.get("price"))
                 tranches = pos.get("tranches") if isinstance(pos.get("tranches"), dict) else {}
 
+                alertable_mandates: List[Tuple[Dict[str, Any], str, str, Any]] = []
+                active_alertable_ids: Set[str] = set()
                 for m in pos.get("triggered_mandates") or []:
                     if not isinstance(m, dict):
                         continue
@@ -558,8 +682,33 @@ class AlertMonitor:
                         continue
                     if trim_pct is None and rule_id not in ("ENH_16_E", "ENH_17_B", "ENH_111"):
                         continue
+                    if rule_id == "ENH_16_E" and self._is_enh_16_e_recovered_non_long_gamma(pos, price):
+                        for ev in self._events:
+                            if (
+                                not ev.get("acknowledged")
+                                and _normalize_ticker(ev.get("ticker")) == ticker
+                                and ev.get("rule_id") == "mandate:ENH_16_E"
+                            ):
+                                ev["acknowledged"] = True
+                                mutated = True
+                        continue
+                    alertable_mandates.append((m, rule_id, severity, trim_pct))
+                    active_alertable_ids.add(rule_id)
 
+                # Re-arm non-sticky mandates once their trigger condition clears
+                prefix = f"{ticker}|"
+                for k in list(self._suppressed_mandates.keys()):
+                    if not k.startswith(prefix):
+                        continue
+                    mid = k.split("|", 1)[1]
+                    if mid not in SESSION_STICKY_MANDATES and mid not in active_alertable_ids:
+                        del self._suppressed_mandates[k]
+                        mutated = True
+
+                for m, rule_id, severity, trim_pct in alertable_mandates:
                     cd_key = f"{ticker}|{rule_id}"
+                    if cd_key in self._suppressed_mandates:
+                        continue
                     last_ts = self._mandate_cooldowns.get(cd_key)
                     if last_ts is not None and (ts - last_ts) < max(0, int(cooldown_sec)):
                         continue
@@ -596,7 +745,7 @@ class AlertMonitor:
                     self._events = self._events[:MAX_EVENTS]
                     emitted.append(dict(event))
 
-            if emitted:
+            if emitted or mutated:
                 self._persist()
 
         return emitted
@@ -737,6 +886,125 @@ def extract_triggers_from_chat(
                     return prose_triggers
 
     return prose_triggers
+
+
+def _collect_hold_from_payload(parsed: Any, hold_set: Set[str], defensive_set: Set[str]) -> None:
+    if not isinstance(parsed, dict):
+        return
+    ep = parsed.get("EXECUTION_PAYLOAD") if isinstance(parsed.get("EXECUTION_PAYLOAD"), dict) else parsed
+
+    fi = ep.get("forensic_intelligence")
+    if isinstance(fi, dict):
+        for item in fi.get("trailing_stop_audit") or []:
+            if not isinstance(item, dict):
+                continue
+            ticker = _normalize_ticker(item.get("ticker"))
+            if not ticker:
+                continue
+            rec_act = str(item.get("recommended_action") or "").strip().upper()
+            trim_sh = _safe_float(item.get("trim_shares")) or 0.0
+            if trim_sh > 0 or any(tok in rec_act for tok in _HOLD_DEFENSIVE_ACTIONS):
+                defensive_set.add(ticker)
+            elif rec_act.startswith("HOLD"):
+                hold_set.add(ticker)
+
+    sc = ep.get("state_context")
+    raw_dir = sc.get("directive") if isinstance(sc, dict) else ep.get("directive")
+    directive = str(raw_dir or "").strip().upper()
+    if directive == "HOLD" or directive.startswith(("HOLD_", "HOLD ")):
+        for pos in ep.get("portfolio_snapshot") or []:
+            if not isinstance(pos, dict):
+                continue
+            ticker = _normalize_ticker(pos.get("ticker"))
+            shares = _safe_float(pos.get("shares"))
+            if ticker and (shares is None or shares > 0):
+                hold_set.add(ticker)
+
+
+_HOLD_RECO_HEADING_RE = re.compile(r"^\s*#{1,6}\s.*actionable recommendations?", re.IGNORECASE)
+_HOLD_SECTION_END_RE = re.compile(r"^\s*(?:#{1,6}\s|---+\s*$|<details)")
+_HOLD_PROSE_PHRASE_RE = re.compile(
+    r"\bHOLD\b(?:\s+on)?\s+(?P<sym>\^?[A-Z][A-Z0-9.\-]{0,9})\b"
+)
+_DEFENSIVE_LEAD_RE = re.compile(r"\b(?:TRIM|SELL|EXIT|REDUCE|LIQUIDATE)\b", re.IGNORECASE)
+
+
+def extract_hold_tickers_from_chat(
+    response_text: str,
+    raw_payload_json: Optional[str] = None,
+    known_tickers: Optional[Iterable[str]] = None,
+) -> List[str]:
+    """Extracts tickers whose final Council recommendation is HOLD (never returning tickers with TRIM/SELL/EXIT)."""
+    allowed_tickers: Optional[Set[str]] = (
+        {t for t in (_normalize_ticker(k) for k in known_tickers) if t}
+        if known_tickers is not None
+        else None
+    )
+    hold_set: Set[str] = set()
+    defensive_set: Set[str] = set()
+
+    if raw_payload_json:
+        try:
+            _collect_hold_from_payload(json.loads(raw_payload_json), hold_set, defensive_set)
+        except Exception:
+            pass
+
+    if response_text:
+        for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", response_text, flags=re.IGNORECASE):
+            block = match.group(1).strip()
+            if not block.startswith("{"):
+                continue
+            try:
+                _collect_hold_from_payload(json.loads(block), hold_set, defensive_set)
+            except Exception:
+                continue
+
+        try:
+            try:
+                from decision_backtester import extract_chat_recommendations
+            except ImportError:
+                from python.decision_backtester import extract_chat_recommendations
+            for reco in extract_chat_recommendations(response_text, known_tickers=allowed_tickers):
+                sym = _normalize_ticker(reco.get("ticker"))
+                act = str(reco.get("action") or "").strip().upper()
+                if not sym:
+                    continue
+                if act == "HOLD":
+                    hold_set.add(sym)
+                elif act in _HOLD_DEFENSIVE_ACTIONS:
+                    defensive_set.add(sym)
+        except Exception:
+            pass
+
+        in_section = False
+        for raw_line in response_text.splitlines():
+            if _HOLD_RECO_HEADING_RE.match(raw_line):
+                in_section = True
+                continue
+            if not in_section:
+                continue
+            if _HOLD_SECTION_END_RE.match(raw_line):
+                in_section = False
+                continue
+            clean_line = raw_line.replace("**", "").replace("__", "").replace("`", "")
+            lead = clean_line.split(":", 1)[0]
+            if not re.match(r"^\s*(?:[*\-+]|\d+[.)])\s+", clean_line):
+                continue
+            for m in _HOLD_PROSE_PHRASE_RE.finditer(lead):
+                sym = _normalize_ticker(m.group("sym"))
+                if not sym or sym in _PROSE_NON_TICKERS:
+                    continue
+                if allowed_tickers is not None and sym not in allowed_tickers:
+                    continue
+                if _DEFENSIVE_LEAD_RE.search(lead):
+                    defensive_set.add(sym)
+                else:
+                    hold_set.add(sym)
+
+    return sorted(
+        t for t in (hold_set - defensive_set)
+        if allowed_tickers is None or t in allowed_tickers
+    )
 
 
 ALERT_MONITOR = AlertMonitor()
