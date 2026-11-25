@@ -221,6 +221,7 @@ class AlertSentinel:
             "provider": "gemini_free",
             "interval_sec": 600,
             "market_hours_only": True,
+            "peak_predictor_enabled": False,
             "model_chain": env_models or list(DEFAULT_GEMINI_FREE_MODEL_CHAIN),
             "antigravity_model": DEFAULT_ANTIGRAVITY_FALLBACK_MODEL,
         }
@@ -290,6 +291,8 @@ class AlertSentinel:
                     self._config["interval_sec"] = max(60, min(3600, int(iv)))
             if "market_hours_only" in updates:
                 self._config["market_hours_only"] = bool(updates["market_hours_only"])
+            if "peak_predictor_enabled" in updates:
+                self._config["peak_predictor_enabled"] = bool(updates["peak_predictor_enabled"])
             if "model_chain" in updates and isinstance(updates["model_chain"], list):
                 cleaned = [str(m).strip() for m in updates["model_chain"] if str(m).strip()]
                 if cleaned:
@@ -337,7 +340,14 @@ class AlertSentinel:
         return changed
 
     @staticmethod
-    def _build_prompt(public_payload: Dict[str, Any]) -> str:
+    def _build_prompt(public_payload: Dict[str, Any], peak_predictor_enabled: bool = False) -> str:
+        peak_note = (
+            " When an entry has peak_zone (from 60d intraday peak prediction), also arm a '>=' trigger at "
+            "peak_zone.front_run_sell_limit_usd labeled 'Predicted Daily Peak Sell' whenever exhaustion_score >= 45 "
+            "or during morning RTH."
+            if peak_predictor_enabled
+            else ""
+        )
         return (
             "You are a concise intraday technical trigger tuner. "
             "Given ONLY public market technicals below, return JSON with key 'triggers' containing 1 to 6 "
@@ -346,7 +356,8 @@ class AlertSentinel:
             "Each item: {\"ticker\": str, \"metric\": \"price\", \"op\": \">=\"|\"<=\"|\"crosses_above\"|\"crosses_below\", "
             "\"target\": number (or omit if using target_ref), \"target_ref\": optional str, "
             "\"confirm\": {\"rvol_gte\": number, \"above_vwap\": bool}, "
-            "\"severity\": \"info\"|\"warning\"|\"critical\", \"label\": short str, \"one_shot\": true}.\n\n"
+            "\"severity\": \"info\"|\"warning\"|\"critical\", \"label\": short str, \"one_shot\": true}."
+            f"{peak_note}\n\n"
             f"MARKET_TECHNICALS_JSON:\n{json.dumps(public_payload, separators=(',', ':'))}"
         )
 
@@ -410,10 +421,34 @@ class AlertSentinel:
         if not public_payload["tickers"]:
             return self._finish_status("SKIPPED", skipped_reason="no_valid_tickers", now_ts=ts)
 
+        if cfg.get("peak_predictor_enabled"):
+            try:
+                try:
+                    from peak_predictor import predict_daily_peak
+                except ImportError:
+                    from python.peak_predictor import predict_daily_peak
+                raw_by_sym = {
+                    str(item.get("ticker") or "").strip().upper(): item
+                    for item in (snap.get("tickers") or [])
+                    if isinstance(item, dict) and item.get("ticker")
+                }
+                for pub in public_payload["tickers"][:5]:
+                    sym = pub["ticker"]
+                    pk = predict_daily_peak(sym, live_row=raw_by_sym.get(sym, {}))
+                    if pk.get("status") == "ok":
+                        pub["peak_zone"] = {
+                            "front_run_sell_limit_usd": pk.get("front_run_sell_limit_usd"),
+                            "median_peak_time_et": (pk.get("profile") or {}).get("median_peak_time_et"),
+                            "exhaustion_score": pk.get("exhaustion_score"),
+                            "exhaustion_state": pk.get("exhaustion_state"),
+                        }
+            except Exception:
+                pass
+
         if not force and not self._has_structural_change(public_payload, bool(sentinel_rules)):
             return self._finish_status("SKIPPED", skipped_reason="no_structural_change", now_ts=ts)
 
-        prompt = self._build_prompt(public_payload)
+        prompt = self._build_prompt(public_payload, peak_predictor_enabled=bool(cfg.get("peak_predictor_enabled")))
         provider_pref = cfg["provider"]
         api_key = _load_gemini_api_key(self.env_path)
 
@@ -539,6 +574,7 @@ class AlertSentinel:
                 "provider": self._config["provider"],
                 "interval_sec": int(self._config["interval_sec"]),
                 "market_hours_only": bool(self._config["market_hours_only"]),
+                "peak_predictor_enabled": bool(self._config.get("peak_predictor_enabled", False)),
                 "model_chain": list(self._config["model_chain"]),
                 "antigravity_model": self._config["antigravity_model"],
                 "api_key_configured": api_key_configured,

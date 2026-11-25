@@ -1467,6 +1467,7 @@ function renderSentinelStatus(sentinel) {
     const toggleBtn = document.getElementById('sentinel-toggle-btn');
     const providerSel = document.getElementById('sentinel-provider-select');
     const intervalSel = document.getElementById('sentinel-interval-select');
+    const peakToggle = document.getElementById('sentinel-peak-toggle');
     const statusText = document.getElementById('sentinel-status-text');
 
     const enabled = Boolean(sentinel.enabled);
@@ -1477,6 +1478,7 @@ function renderSentinelStatus(sentinel) {
     }
     if (providerSel && sentinel.provider) providerSel.value = sentinel.provider;
     if (intervalSel && sentinel.interval_sec) intervalSel.value = String(sentinel.interval_sec);
+    if (peakToggle) peakToggle.checked = Boolean(sentinel.peak_predictor_enabled);
     if (statusText) {
         const last = sentinel.last_run || {};
         const chainTop = Array.isArray(sentinel.model_chain) && sentinel.model_chain.length ? sentinel.model_chain[0] : 'gemini-2.5-flash-lite';
@@ -1567,10 +1569,12 @@ async function ackAlertEvent(eventId) {
 async function saveSentinelConfig(overrides = {}) {
     const providerSel = document.getElementById('sentinel-provider-select');
     const intervalSel = document.getElementById('sentinel-interval-select');
+    const peakToggle = document.getElementById('sentinel-peak-toggle');
     const statusEl = document.getElementById('alerts-panel-status');
     const payload = {
         provider: providerSel ? providerSel.value : 'gemini_free',
         interval_sec: intervalSel ? Number(intervalSel.value) : 600,
+        peak_predictor_enabled: peakToggle ? Boolean(peakToggle.checked) : false,
         ...overrides,
     };
     try {
@@ -1623,6 +1627,8 @@ const _sentinelProviderSel = document.getElementById('sentinel-provider-select')
 if (_sentinelProviderSel) _sentinelProviderSel.addEventListener('change', () => saveSentinelConfig());
 const _sentinelIntervalSel = document.getElementById('sentinel-interval-select');
 if (_sentinelIntervalSel) _sentinelIntervalSel.addEventListener('change', () => saveSentinelConfig());
+const _sentinelPeakToggle = document.getElementById('sentinel-peak-toggle');
+if (_sentinelPeakToggle) _sentinelPeakToggle.addEventListener('change', () => saveSentinelConfig());
 const _sentinelRunNowBtn = document.getElementById('sentinel-run-now-btn');
 if (_sentinelRunNowBtn) _sentinelRunNowBtn.addEventListener('click', runSentinelNow);
 
@@ -1970,9 +1976,17 @@ async function openExecutionPlanModal(ticker) {
     openModal(overlay);
 
     try {
-        const res = await fetch(`${API_BASE}/analytics/execution`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const plan = await res.json();
+        const [execRes, peakRes] = await Promise.allSettled([
+            fetch(`${API_BASE}/analytics/execution`),
+            sym ? fetch(`${API_BASE}/analytics/peak/${encodeURIComponent(sym)}`) : Promise.resolve(null),
+        ]);
+        if (execRes.status !== 'fulfilled' || !execRes.value || !execRes.value.ok) {
+            throw new Error(`HTTP ${execRes.status === 'fulfilled' && execRes.value ? execRes.value.status : 'error'}`);
+        }
+        const plan = await execRes.value.json();
+        const peakData = (peakRes.status === 'fulfilled' && peakRes.value && peakRes.value.ok)
+            ? await peakRes.value.json()
+            : null;
         const positions = Array.isArray(plan.positions) ? plan.positions : [];
         const pos = positions.find((p) => String(p.ticker || '').toUpperCase() === sym) || positions[0];
         const cash = plan.cash_reconciliation || {};
@@ -1992,6 +2006,48 @@ async function openExecutionPlanModal(ticker) {
         const armStopBtn = stop.effective_stop_price != null
             ? `<button type="button" class="exec-mini-btn arm" onclick="armQuickTriggerFromPlan('${pSym}', '<=', ${Number(stop.effective_stop_price)}, 'MANDATE_36 Trailing Stop')">🔔 Arm Stop (${stopPriceStr})</button>`
             : '';
+
+        let peakHtml = '';
+        if (peakData && peakData.status === 'ok') {
+            const prof = peakData.profile || {};
+            const exScore = Number(peakData.exhaustion_score || 0);
+            const exState = String(peakData.exhaustion_state || 'BUILDING');
+            const exCls = exState === 'SELL_ZONE' ? 'sell-zone' : (exState === 'APPROACHING_PEAK' ? 'approaching' : 'building');
+            const frLim = peakData.front_run_sell_limit_usd != null ? Number(peakData.front_run_sell_limit_usd).toFixed(2) : null;
+            const zoneTxt = (peakData.predicted_peak_low_usd != null && peakData.predicted_peak_high_usd != null)
+                ? `$${Number(peakData.predicted_peak_low_usd).toFixed(2)} – $${Number(peakData.predicted_peak_high_usd).toFixed(2)}`
+                : '—';
+            const t25Shares = (pos.tranches && pos.tranches['25pct']) ? pos.tranches['25pct'].sell_shares : null;
+            const copyPeakOrd = (frLim && t25Shares) ? `SELL ${t25Shares} ${pSym} LMT $${frLim}` : (frLim ? `SELL ${pSym} LMT $${frLim}` : '');
+            const sigChips = (Array.isArray(peakData.signals) ? peakData.signals : [])
+                .map((s) => `<span class="peak-signal-chip">${_escAlertHtml(s)}</span>`)
+                .join('');
+            const peakBtns = frLim
+                ? `<div class="exec-actions-cell" style="margin-top:6px;">
+                        <button type="button" class="exec-mini-btn arm" onclick="armQuickTriggerFromPlan('${pSym}', '>=', ${Number(frLim)}, 'Predicted Daily Peak Sell')">🔔 Arm Peak Sell ($${frLim})</button>
+                        <button type="button" class="exec-mini-btn" onclick="copyExecutionOrderText('${_escAlertHtml(copyPeakOrd)}', this)">📋 Copy Peak Limit</button>
+                   </div>`
+                : '';
+
+            peakHtml = `
+                <div class="exec-ticket-section">
+                    <div class="quant-section-title">🎯 Daily Peak Window &amp; Exhaustion Predictor (${Number(prof.sessions_analyzed || 0)}d 5m RTH)</div>
+                    <div class="peak-stat-grid">
+                        <div><span>Median HOD</span><strong>${_escAlertHtml(prof.median_peak_time_et || '—')} ET</strong></div>
+                        <div><span>Peak Window</span><strong>${_escAlertHtml(prof.peak_window_start_et || '—')}–${_escAlertHtml(prof.peak_window_end_et || '—')}</strong></div>
+                        <div><span>Before 10:30</span><strong>${prof.pct_peaking_before_1030 != null ? `${prof.pct_peaking_before_1030}%` : '—'}</strong></div>
+                        <div><span>Avg HOD Fade</span><strong>${prof.avg_fade_from_peak_pct != null ? `${prof.avg_fade_from_peak_pct}%` : '—'}</strong></div>
+                    </div>
+                    <div class="exec-kv-row" style="margin-top:6px;">
+                        <span>Peak Zone: <strong>${zoneTxt}</strong></span>
+                        <span>Front-Run Limit: <strong>${frLim ? `$${frLim}` : '—'}</strong></span>
+                        <span>Exhaustion: <strong>${exScore}/100 (${_escAlertHtml(exState)})</strong></span>
+                    </div>
+                    <div class="peak-meter-track"><div class="peak-meter-fill ${exCls}" style="width:${Math.max(4, Math.min(100, exScore))}%"></div></div>
+                    ${sigChips ? `<div class="peak-signal-chips">${sigChips}</div>` : ''}
+                    ${peakBtns}
+                </div>`;
+        }
 
         const ladderRows = ladder.length
             ? ladder.map((lvl) => {
@@ -2039,6 +2095,7 @@ async function openExecutionPlanModal(ticker) {
 
         bodyEl.innerHTML = `
             ${directivesBanner}
+            ${peakHtml}
             <div class="exec-ticket-section">
                 <div class="quant-section-title">🛡️ MANDATE_36 Trailing Stop Audit${macroCal.shield_active ? ' (ENH_259 -50% Active)' : ''}</div>
                 <div class="exec-kv-row">

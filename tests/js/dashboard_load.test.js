@@ -154,6 +154,27 @@ const API = {
             },
         ],
     },
+    '/api/analytics/peak/NVDA': {
+        status: 'ok',
+        ticker: 'NVDA',
+        p50_peak_usd: 123.50,
+        p75_peak_usd: 126.00,
+        predicted_peak_low_usd: 123.50,
+        predicted_peak_high_usd: 125.50,
+        front_run_sell_limit_usd: 123.19,
+        exhaustion_score: 76,
+        exhaustion_state: 'SELL_ZONE',
+        signals: ['TIME_WINDOW (10:05 ET inside peak corridor)', 'VWAP_EXTENDED (+3.20%)'],
+        profile: {
+            status: 'ok',
+            sessions_analyzed: 60,
+            median_peak_time_et: '10:05',
+            peak_window_start_et: '09:45',
+            peak_window_end_et: '10:45',
+            pct_peaking_before_1030: 68.3,
+            avg_fade_from_peak_pct: -2.4,
+        },
+    },
     '/api/list_models': { status: 'success', models: [], current_model: 'test-model' },
     '/api/chat': { status: 'success', response: 'Boot complete.', proposals: [], turn_id: 't1' },
     '/api/review': { status: 'success', response: '### 🎯 Actionable Recommendations\n- [LESSON] PORTFOLIO — Log per-ticker decisions.', turn_id: 't-review', improvement_proposals: [{ id: 'imp-1', kind: 'rule', rule_id: 'ENH_1', action: 'ADD', text: 'Halve size before PCE.', justification: 'row 3', source: 'Review Engine', status: 'pending' }] },
@@ -503,6 +524,15 @@ async function main() {
         assert(pillLi && pillLi.textContent.includes('LESSON UMAC'), `expected space after pill, got: ${pillLi && pillLi.textContent}`);
         assert(saveLessonBtn && calls.includes('POST /api/trade_lessons/add'), '1-click Save Lesson did not POST /api/trade_lessons/add');
         assert(armRecoBtn && armRecoBtn.textContent.includes('Armed') || armRecoBtn.textContent.includes('$118.50'), '1-click Arm Trigger missing');
+    });
+    check('Sentinel 1m Cadence & Daily Peak Predictor UI: exposes 1m option, peak checkbox & Execution modal peak window', () => {
+        const ivSelect = window.document.getElementById('sentinel-interval-select');
+        const opt1m = ivSelect && ivSelect.querySelector('option[value="60"]');
+        assert(opt1m && opt1m.textContent.trim() === '1m', '1m (60s) Sentinel interval option missing');
+        assert(window.document.getElementById('sentinel-peak-toggle'), '#sentinel-peak-toggle missing');
+        const execBody = window.document.getElementById('exec-modal-body');
+        assert(execBody && execBody.textContent.includes('10:05 ET'), 'Median peak time missing from Execution Ticket modal');
+        assert(execBody.textContent.includes('SELL_ZONE') && execBody.textContent.includes('Arm Peak Sell ($123.19)'), 'Peak exhaustion / Arm Peak Sell button missing');
     });
 
     window.close();

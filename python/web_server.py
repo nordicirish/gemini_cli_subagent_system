@@ -68,6 +68,7 @@ try:
         extract_rule_proposals,
     )
     from macro_calendar import get_macro_calendar_status
+    from peak_predictor import predict_daily_peak
     from sec_edgar import fetch_recent_sec_filings
 except ImportError:
     from python.alert_monitor import ALERT_MONITOR, extract_triggers_from_chat
@@ -82,6 +83,7 @@ except ImportError:
         extract_rule_proposals,
     )
     from python.macro_calendar import get_macro_calendar_status
+    from python.peak_predictor import predict_daily_peak
     from python.sec_edgar import fetch_recent_sec_filings
 
 # Import the existing FastAPI app from fetch_stocks
@@ -2403,6 +2405,20 @@ def get_execution_plan_endpoint():
 def get_macro_calendar_endpoint():
     """Read-only Tier-1 Macro Economic Calendar Shield status (ENH_47 / ENH_259)."""
     return get_macro_calendar_status(now_ny=agent_framework.ny_now())
+
+
+@app.get("/api/analytics/peak/{ticker}")
+def get_daily_peak_prediction(ticker: str):
+    """Read-only 60d empirical RTH peak timing & intraday exhaustion predictor."""
+    sym = str(ticker or "").strip().upper()
+    live_state, _ssot, _fx, ny_dt = _load_live_analytics_context()
+    tickers = live_state.get("tickers", []) if isinstance(live_state, dict) else []
+    live_row = next(
+        (t for t in tickers if isinstance(t, dict) and str(t.get("ticker") or "").strip().upper() == sym),
+        None,
+    )
+    tracker = ANALYTICS_ENGINE._get_tracker_snapshot(sym)
+    return predict_daily_peak(sym, live_row=live_row, tracker=tracker, ny_dt=ny_dt)
 
 
 @app.get("/api/system_logs")
