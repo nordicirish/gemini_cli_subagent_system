@@ -172,18 +172,52 @@ header.glass-panel {
 .ticker-content {
     display: flex;
     align-items: center;
-    gap: 10px;
     white-space: nowrap;
-    overflow-x: auto;
+    overflow: hidden;
     flex: 1;
     min-width: 0;
     padding: 0 10px;
     height: 100%;
-    scrollbar-width: none;
 }
 
-.ticker-content::-webkit-scrollbar {
-    display: none;
+/* Track holds one alert group, plus an aria-hidden clone while scrolling for a seamless loop. */
+.ticker-track {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.ticker-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+/* Scrolls only when the alerts overflow the bar (set by updateAlertMarquee in app.js). */
+.ticker-content.is-scrolling .ticker-group {
+    padding-right: 48px; /* spacing between the end of the list and its repeat */
+}
+
+.ticker-content.is-scrolling .ticker-track {
+    animation: marquee-scroll var(--marquee-duration, 30s) linear infinite;
+    will-change: transform;
+}
+
+/* Pause while the owner is reading or reaching for an acknowledge (×) button. */
+.top-alert-bar:hover .ticker-track,
+.ticker-content:focus-within .ticker-track {
+    animation-play-state: paused;
+}
+
+@keyframes marquee-scroll {
+    from { transform: translate3d(0, 0, 0); }
+    to   { transform: translate3d(-50%, 0, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ticker-content { overflow-x: auto; scrollbar-width: thin; }
+    .ticker-content.is-scrolling .ticker-track { animation: none; }
 }
 
 .alert-item {
@@ -1163,7 +1197,8 @@ textarea:focus {
     .header-content { flex-direction: column; gap: 12px; align-items: center; text-align: center; }
     .system-status { flex-wrap: wrap; justify-content: center; gap: 12px; }
     .top-alert-bar { height: auto; padding: 8px 16px; }
-    .ticker-content { overflow-x: auto; white-space: nowrap; }
+    /* Give the scrolling alerts most of the narrow bar instead of the label */
+    .ticker-label { padding: 0 8px 0 0; letter-spacing: 0.5px; box-shadow: 8px 0 12px rgba(13, 17, 23, 0.9); }
     .indices-grid { grid-template-columns: 1fr; }
 
     .desktop-only { display: none !important; }

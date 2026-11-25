@@ -446,6 +446,42 @@ async function main() {
         assert(window.document.getElementById('chart-exec-plan-btn'), 'chart-exec-plan-btn missing from chart modal');
     });
 
+    // Top alert bar marquee: scrolls only when alerts overflow, loops via an aria-hidden clone
+    {
+        const content = window.document.getElementById('alerts-content');
+        const proto = window.HTMLElement.prototype;
+        const origSW = Object.getOwnPropertyDescriptor(proto, 'scrollWidth');
+        const origCW = Object.getOwnPropertyDescriptor(proto, 'clientWidth');
+        let groupWidth = 2000;
+        Object.defineProperty(proto, 'scrollWidth', { configurable: true, get() { return this.classList && this.classList.contains('ticker-group') ? groupWidth : 0; } });
+        Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return this.id === 'alerts-content' ? 800 : 0; } });
+        const many = '<div class="alert-item critical" data-event-id="e1"><span>A</span><button type="button" class="alert-dismiss-btn">&times;</button></div>'
+            + '<div class="alert-item warning">B</div>';
+        window.renderAlertTicker(content, many);
+        const firstTrack = content.querySelector('.ticker-track');
+        window.renderAlertTicker(content, many); // unchanged poll
+        const scrolling = content.classList.contains('is-scrolling');
+        const clone = content.querySelector('.ticker-group[aria-hidden="true"]');
+        const sameTrack = content.querySelector('.ticker-track') === firstTrack;
+        const duration = content.style.getPropertyValue('--marquee-duration');
+        groupWidth = 300; // fits now
+        window.renderAlertTicker(content, '<div class="alert-item info">C</div>');
+        const fitsStatic = !content.classList.contains('is-scrolling') && !content.querySelector('.ticker-group[aria-hidden="true"]');
+        window.renderAlertTicker(content, '');
+        const emptyShown = content.textContent.includes('NO ACTIVE ALERTS');
+        if (origSW) Object.defineProperty(proto, 'scrollWidth', origSW); else delete proto.scrollWidth;
+        if (origCW) Object.defineProperty(proto, 'clientWidth', origCW); else delete proto.clientWidth;
+        check('Alert bar marquee: scrolls with a seamless clone only on overflow, survives unchanged polls, static when it fits', () => {
+            assert(scrolling, 'overflowing alerts should scroll');
+            assert(clone, 'aria-hidden clone missing for seamless loop');
+            assert.strictEqual(clone.querySelector('button').tabIndex, -1, 'clone buttons must not take focus');
+            assert(sameTrack, 'unchanged poll must not re-render (would restart the animation)');
+            assert(/^\d+(\.\d)?s$/.test(duration) && parseFloat(duration) >= 12, `bad duration ${duration}`);
+            assert(fitsStatic, 'alerts that fit should not scroll or clone');
+            assert(emptyShown, 'empty state should render');
+        });
+    }
+
     // Replies saved before payload stripping (e.g. archived sessions) must not show the SSoT JSON either
     window.chatUI.appendMessage('ai', [
         'Routine wrap.',

@@ -1112,18 +1112,8 @@ async function pollData() {
                     renderAlertRules(alertState.rules);
                 }
                 
-                if(alertsHtml) {
-                    if (alertsContent && alertsContent.innerHTML !== alertsHtml) {
-                        alertsContent.innerHTML = alertsHtml;
-                    }
-                    if (topBar) topBar.classList.add('has-alerts');
-                } else {
-                    const emptyState = '<span class="empty-state">NO ACTIVE ALERTS</span>';
-                    if (alertsContent && alertsContent.innerHTML !== emptyState) {
-                        alertsContent.innerHTML = emptyState;
-                    }
-                    if (topBar) topBar.classList.remove('has-alerts');
-                }
+                renderAlertTicker(alertsContent, alertsHtml);
+                if (topBar) topBar.classList.toggle('has-alerts', Boolean(alertsHtml));
             }
 
         } else {
@@ -1560,11 +1550,58 @@ async function ackAlertEvent(eventId) {
     try {
         const res = await fetch(`${API_BASE}/alerts/events/${encodeURIComponent(eventId)}/ack`, { method: 'POST' });
         if (!res.ok) return;
-        const el = document.querySelector(`.alert-item[data-event-id="${CSS.escape(eventId)}"]`);
-        if (el) el.remove();
+        // Remove the item and its marquee clone, then re-measure whether the bar still overflows.
+        document.querySelectorAll(`.alert-item[data-event-id="${CSS.escape(eventId)}"]`).forEach(el => el.remove());
+        updateAlertMarquee();
         pollData();
     } catch (e) { console.error('Ack alert failed:', e); }
 }
+
+// --- Top alert bar ticker -------------------------------------------------------------
+// Alerts scroll as a seamless marquee only when they overflow the bar; hovering or focusing
+// the bar pauses it so the acknowledge (×) buttons stay clickable. Reduced-motion users get a
+// static, manually scrollable bar instead.
+const MARQUEE_PX_PER_SEC = 45;
+
+function renderAlertTicker(container, alertsHtml) {
+    if (!container) return;
+    const html = alertsHtml || '<span class="empty-state">NO ACTIVE ALERTS</span>';
+    // Compare against what we last rendered (innerHTML includes the clone), so a poll with
+    // unchanged alerts never restarts the scroll animation.
+    if (container.dataset.renderedHtml === html) return;
+    container.dataset.renderedHtml = html;
+    container.innerHTML = `<div class="ticker-track"><div class="ticker-group">${html}</div></div>`;
+    updateAlertMarquee();
+}
+
+function updateAlertMarquee() {
+    const container = document.getElementById('alerts-content');
+    const track = container && container.querySelector('.ticker-track');
+    const group = track && track.querySelector('.ticker-group:not([aria-hidden])');
+    if (!container || !track || !group) return;
+
+    track.querySelectorAll('.ticker-group[aria-hidden="true"]').forEach(el => el.remove());
+    container.classList.remove('is-scrolling');
+
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const hasAlerts = Boolean(group.querySelector('.alert-item'));
+    const overflows = group.scrollWidth > container.clientWidth;
+    if (!hasAlerts || !overflows || reduceMotion) return;
+
+    container.classList.add('is-scrolling'); // adds trailing spacing, so measure after this
+    const clone = group.cloneNode(true);
+    clone.setAttribute('aria-hidden', 'true');
+    clone.querySelectorAll('button').forEach(btn => { btn.tabIndex = -1; });
+    track.appendChild(clone);
+    const seconds = Math.max(12, group.scrollWidth / MARQUEE_PX_PER_SEC);
+    container.style.setProperty('--marquee-duration', `${seconds.toFixed(1)}s`);
+}
+
+let _alertMarqueeResizeTimer = null;
+window.addEventListener('resize', () => {
+    clearTimeout(_alertMarqueeResizeTimer);
+    _alertMarqueeResizeTimer = setTimeout(updateAlertMarquee, 150);
+});
 
 async function saveSentinelConfig(overrides = {}) {
     const providerSel = document.getElementById('sentinel-provider-select');
