@@ -137,6 +137,70 @@ class TestRegimeAndSizing(unittest.TestCase):
         self.assertIn("Proof:", res["math_proof"])
         self.assertIn("Proof:", res["fx_proof"])
 
+    def test_live_immutable_snapshot_prices_held_positions(self):
+        # The server publishes GLOBAL_STATE as fetch_stocks.ImmutableDict / ImmutableList
+        # (Mapping / Sequence, not dict / list). Rows must not be dropped by dict-only checks.
+        import fetch_stocks
+        from analytics_engine import AnalyticsEngine
+
+        plain = {
+            "status": "OPEN",
+            "tickers": [_tick("UMAC", 8.25), _tick("^VIX", 31.0), _tick("SPY", 704.0)],
+            "local_storage_state": {"portfolio_snapshot": [{"ticker": "UMAC", "shares": "1860", "wac": "12.60"}]},
+        }
+        frozen = fetch_stocks.freeze_snapshot(plain)  # exactly how publish_global_state_snapshot freezes it
+        self.assertNotIsInstance(frozen, dict)
+        self.assertNotIsInstance(frozen["tickers"], list)
+
+        engine = AnalyticsEngine()
+        res = engine.evaluate(frozen, ssot=frozen["local_storage_state"], fx_info={"available": True, "eurusd_rate": 1.097})
+        pos = res["positions"][0]
+        self.assertTrue(pos["valid_telemetry"])
+        self.assertAlmostEqual(pos["price"], 8.25, places=2)
+        self.assertAlmostEqual(pos["unrealized_pnl_pct"], -40.31, places=2)
+
+        plan = engine.build_execution_plan(frozen, ssot=frozen["local_storage_state"], fx_info={"available": True, "eurusd_rate": 1.097})
+        self.assertAlmostEqual(plan["positions"][0]["price"], 8.25, places=2)
+        self.assertEqual(
+            classify_regime(frozen["tickers"], market_status="OPEN"),
+            classify_regime(plain["tickers"], market_status="OPEN"),
+        )
+
+    def test_engine_reads_rate_from_real_fx_public_snapshot(self):
+        # Production passes fx_rates.fx_public(...), which carries the rate under "rate" (a string).
+        from decimal import Decimal
+        import fx_rates
+        from analytics_engine import AnalyticsEngine
+
+        quote = fx_rates.FxQuote(rate=Decimal("1.097"), as_of_utc="2026-11-25T13:00:00Z", source="test")
+        fx_snapshot = fx_rates.fx_public(quote)
+        self.assertNotIn("eurusd_rate", fx_snapshot)
+        state = {"status": "OPEN", "tickers": [_tick("UMAC", 8.25)]}
+        ssot = {"portfolio_snapshot": [{"ticker": "UMAC", "shares": "1860", "wac": "12.60"}]}
+        pos = AnalyticsEngine().evaluate(state, ssot=ssot, fx_info=fx_snapshot)["positions"][0]
+        self.assertAlmostEqual(pos["unrealized_pnl_pct"], -40.31, places=2)
+        self.assertIsNotNone(pos["market_value_eur"])
+        unavailable = AnalyticsEngine().evaluate(state, ssot=ssot, fx_info=fx_rates.fx_public(None))["positions"][0]
+        self.assertIsNone(unavailable["unrealized_pnl_pct"])
+
+    def test_pnl_converts_eur_wac_to_usd_cost_basis(self):
+        # WAC €12.60 at 1.097 USD/EUR = $13.8222/share; spot $8.25 (USD).
+        res = compute_position_tranches(
+            ticker="UMAC", shares_raw="1860", wac_raw="12.60", price_raw="8.25", eurusd_rate_raw="1.097",
+        )
+        self.assertAlmostEqual(res["wac_usd"], 13.8222, places=4)
+        self.assertAlmostEqual(res["cost_basis_usd"], 25709.29, places=2)   # 1860 × 12.60 × 1.097
+        self.assertAlmostEqual(res["market_value_usd"], 15345.00, places=2)
+        self.assertAlmostEqual(res["unrealized_pnl_usd"], -10364.29, places=2)
+        self.assertAlmostEqual(res["unrealized_pnl_pct"], -40.31, places=2)  # not -34.52 (EUR WAC read as USD)
+
+        # No fresh FX quote: P&L is unknown rather than computed at a guessed rate.
+        no_fx = compute_position_tranches(ticker="UMAC", shares_raw="1860", wac_raw="12.60", price_raw="8.25")
+        self.assertIsNone(no_fx["unrealized_pnl_usd"])
+        self.assertIsNone(no_fx["unrealized_pnl_pct"])
+        self.assertIsNone(no_fx["cost_basis_usd"])
+        self.assertAlmostEqual(no_fx["market_value_usd"], 15345.00, places=2)
+
 
 class TestDeterministicMandatesAndTrackers(unittest.TestCase):
     def setUp(self):

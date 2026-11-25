@@ -13,6 +13,7 @@ from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP
 import json
 import math
 import threading
+from collections.abc import Mapping, Sequence
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -98,10 +99,40 @@ def _is_ticker_valid_and_fresh(row: Dict[str, Any]) -> bool:
     return price is not None and price > 0
 
 
+def _thaw(obj: Any) -> Any:
+    """Deep-converts read-only snapshot containers to plain dict/list.
+
+    The live GLOBAL_STATE snapshot is published as fetch_stocks.ImmutableDict / ImmutableList,
+    which are collections.abc Mapping / Sequence but not dict / list. This module's
+    isinstance(..., dict) checks would otherwise silently drop every ticker row, leaving held
+    positions unpriced (blank P&L, "Awaiting live price" tickets, regime without VIX).
+    """
+    if isinstance(obj, dict):
+        return {k: _thaw(v) for k, v in obj.items()}
+    if isinstance(obj, Mapping):
+        return {k: _thaw(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)) or (isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray))):
+        return [_thaw(v) for v in obj]
+    return obj
+
+
+def _fx_rate_from(fx_info: Any) -> Any:
+    """USD-per-EUR rate from an FX snapshot, or None when no fresh quote is available.
+
+    fx_rates.fx_public() publishes the rate under "rate"; older callers and tests use
+    "eurusd_rate". Reading only "eurusd_rate" left live P&L / EUR proofs permanently blank.
+    """
+    if not isinstance(fx_info, dict) or not fx_info.get("available"):
+        return None
+    rate = fx_info.get("rate")
+    return rate if rate is not None else fx_info.get("eurusd_rate")
+
+
 def classify_regime(tickers: List[Dict[str, Any]], market_status: str = "UNKNOWN") -> Dict[str, Any]:
     """Deterministic Volatility State & Strategy Permissibility routing matrix
     mirroring engine_instructions/regime_engine.md.
     """
+    tickers = _thaw(tickers)
     by_sym: Dict[str, Dict[str, Any]] = {
         str(t.get("ticker") or "").strip().upper(): t
         for t in (tickers or [])
@@ -227,11 +258,14 @@ def compute_position_tranches(
     tranches: Dict[str, Dict[str, Any]] = {}
     if price is not None and price > Decimal("0") and shares > Decimal("0"):
         mv_usd = _q2(shares * price)
-        cost_usd = _q2(shares * wac) if wac > Decimal("0") else None
+        # WAC is stored in EUR (positions.wac_eur) while the price is USD, so the cost basis is
+        # converted at the live EUR/USD rate. With no fresh rate, P&L stays unknown (never guessed).
+        wac_usd = (wac * fx_rate).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP) if (wac > Decimal("0") and has_fx) else None
+        cost_usd = _q2(shares * wac * fx_rate) if wac_usd is not None else None
         pnl_usd = _q2(mv_usd - cost_usd) if cost_usd is not None else None
         pnl_pct = (
-            float(((price - wac) / wac * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
-            if wac > Decimal("0")
+            float(((mv_usd - cost_usd) / cost_usd * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+            if cost_usd is not None and cost_usd > Decimal("0")
             else None
         )
         mv_eur = _q2(mv_usd / fx_rate) if has_fx else None
@@ -284,6 +318,8 @@ def compute_position_tranches(
             "price": float(_q2(price)),
             "market_value_usd": float(mv_usd),
             "market_value_eur": float(mv_eur) if mv_eur is not None else None,
+            "wac_usd": float(wac_usd) if wac_usd is not None else None,
+            "cost_basis_usd": float(cost_usd) if cost_usd is not None else None,
             "unrealized_pnl_usd": float(pnl_usd) if pnl_usd is not None else None,
             "unrealized_pnl_pct": pnl_pct,
             "front_run_limit_usd": float(front_run_limit),
@@ -300,6 +336,8 @@ def compute_position_tranches(
         "price": None,
         "market_value_usd": None,
         "market_value_eur": None,
+        "wac_usd": None,
+        "cost_basis_usd": None,
         "unrealized_pnl_usd": None,
         "unrealized_pnl_pct": None,
         "tranches": {},
@@ -434,6 +472,7 @@ class AnalyticsEngine:
         market_status: str = "UNKNOWN",
         ny_dt: Optional[datetime] = None,
     ) -> None:
+        tickers = _thaw(tickers)
         if not isinstance(tickers, list):
             return
         now_ny = ny_dt or datetime.now(NY_TZ)
@@ -703,6 +742,7 @@ class AnalyticsEngine:
         ny_dt: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """Builds a compact deterministic analytics bundle for DATA_PACKET & /api/analytics."""
+        live_state, ssot, fx_info = _thaw(live_state), _thaw(ssot), _thaw(fx_info)
         now_ny = ny_dt or datetime.now(NY_TZ)
         tickers = live_state.get("tickers", []) if isinstance(live_state, dict) else []
         market_status = str(live_state.get("status") or "UNKNOWN").upper() if isinstance(live_state, dict) else "UNKNOWN"
@@ -720,9 +760,7 @@ class AnalyticsEngine:
         portfolio_rows = ms.get("portfolio_snapshot", []) if isinstance(ms, dict) else []
         watched_raw = ms.get("watched_tickers", []) if isinstance(ms, dict) else []
 
-        eurusd_rate = None
-        if isinstance(fx_info, dict) and fx_info.get("available"):
-            eurusd_rate = fx_info.get("eurusd_rate")
+        eurusd_rate = _fx_rate_from(fx_info)
 
         held_symbols = set()
         positions_out: List[Dict[str, Any]] = []
@@ -995,11 +1033,12 @@ class AnalyticsEngine:
         ny_dt: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """Builds deterministic trailing stop audits, ENH_96 Fib ladders & cash proofs."""
+        live_state, ssot, fx_info = _thaw(live_state), _thaw(ssot), _thaw(fx_info)
         bundle = self.evaluate(live_state, ssot=ssot, fx_info=fx_info, ny_dt=ny_dt)
         macro_cal = bundle.get("macro_calendar") or {}
         ms = ssot.get("mutable_state", ssot) if isinstance(ssot, dict) and isinstance(ssot.get("mutable_state"), dict) else (ssot if isinstance(ssot, dict) else {})
         cash_eur = _to_decimal(ms.get("unallocated_cash_eur") if isinstance(ms, dict) else None) or Decimal("0.00")
-        fx_rate = _to_decimal(fx_info.get("eurusd_rate")) if isinstance(fx_info, dict) and fx_info.get("available") else None
+        fx_rate = _to_decimal(_fx_rate_from(fx_info))
         cash_usd = _q2(cash_eur * fx_rate) if (fx_rate is not None and fx_rate > Decimal("0")) else (_to_decimal(ms.get("unallocated_cash_usd") if isinstance(ms, dict) else None) or Decimal("0.00"))
         cash_proof = (
             f"Proof: Internally verified { _q2(cash_eur) } EUR Cash Active / "

@@ -293,10 +293,13 @@ async function addToPortfolio() {
     dAddPortfolioTicker.value = '';
 
     if (hasLivePrice) {
+        // WAC is stored in EUR; seed it from the USD quote at the live EUR/USD rate when known.
+        const rate = Number(currentEurUsdRate);
+        const seedWac = Number.isFinite(rate) && rate > 0 ? livePriceRaw / rate : livePriceRaw;
         portfolio.push({
             ticker,
             shares: 1,
-            wac: Number(livePriceRaw.toFixed(2)),
+            wac: Number(seedWac.toFixed(2)),
             _draft: false
         });
         const hasDraft = portfolio.some(i => Boolean(i._draft));

@@ -113,6 +113,27 @@ function initSidebarToggle() {
     if (btn && !btn._gemSidebarBound) {
         btn.addEventListener('click', toggleSidebarPanel);
         btn._gemSidebarBound = true;
+
+        // Overlay-drawer mode (below the docking breakpoint): Escape or a click outside closes it.
+        const isOverlayOpen = () => {
+            const main = document.getElementById('main-content');
+            const sidebar = document.getElementById('dashboard-sidebar');
+            return Boolean(main && sidebar && !main.classList.contains('sidebar-collapsed')
+                && getComputedStyle(sidebar).position === 'fixed');
+        };
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && isOverlayOpen() && !document.querySelector('.modal-overlay.active, .chart-modal-overlay.active')) {
+                setSidebarCollapsed(true);
+                btn.focus();
+            }
+        });
+        document.addEventListener('mousedown', (e) => {
+            const sidebar = document.getElementById('dashboard-sidebar');
+            if (!isOverlayOpen() || !sidebar || sidebar.contains(e.target) || btn.contains(e.target)) return;
+            // Clicks inside dialogs opened from the drawer must not close it.
+            if (e.target.closest && e.target.closest('[role="dialog"], .modal-overlay, .chart-modal-overlay')) return;
+            setSidebarCollapsed(true);
+        });
     }
 }
 
@@ -1791,8 +1812,9 @@ function renderPortfolioCommandStrip(analytics) {
         if (Number.isFinite(Number(p.unrealized_pnl_usd)) && p.unrealized_pnl_usd !== null) {
             totalPnlUsd += Number(p.unrealized_pnl_usd);
             hasPnl = true;
-            if (Number.isFinite(Number(p.shares)) && Number.isFinite(Number(p.wac))) {
-                totalCostUsd += Number(p.shares) * Number(p.wac);
+            // WAC is in EUR; the server supplies the USD cost basis converted at the live rate.
+            if (Number.isFinite(Number(p.cost_basis_usd)) && p.cost_basis_usd !== null) {
+                totalCostUsd += Number(p.cost_basis_usd);
             }
         }
     });
@@ -1815,7 +1837,8 @@ function renderPortfolioCommandStrip(analytics) {
             const sign = totalPnlUsd >= 0 ? '+' : '';
             const arrow = totalPnlUsd >= 0 ? '▲' : '▼';
             const pctTxt = pct !== null ? ` (${sign}${pct.toFixed(1)}%)` : '';
-            pnlEl.textContent = `${arrow} ${sign}$${totalPnlUsd.toFixed(0)}${pctTxt}`;
+            const absUsd = Math.abs(totalPnlUsd).toLocaleString('en-US', { maximumFractionDigits: 0 });
+            pnlEl.textContent = `${arrow} ${totalPnlUsd >= 0 ? '+' : '−'}$${absUsd}${pctTxt}`;
             pnlEl.className = totalPnlUsd >= 0 ? 'text-green' : 'text-red';
         } else {
             pnlEl.textContent = '—';
