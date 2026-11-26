@@ -37,10 +37,15 @@ try:
         normalize_for_json as _normalize_for_json,
     )
     from colab_calibration import (
+        ARTIFACT_REGISTRY,
         export_colab_bundle,
+        get_artifact_status,
         get_calibration_status,
+        import_colab_artifact,
         import_colab_calibration,
+        load_colab_artifact,
     )
+    from colab_jobs import ColabJobConflictError, get_colab_job_manager
 except ImportError:
     from python.chat_payload_parser import (
         PAYLOAD_MARKERS as _PAYLOAD_MARKERS,
@@ -50,10 +55,15 @@ except ImportError:
         normalize_for_json as _normalize_for_json,
     )
     from python.colab_calibration import (
+        ARTIFACT_REGISTRY,
         export_colab_bundle,
+        get_artifact_status,
         get_calibration_status,
+        import_colab_artifact,
         import_colab_calibration,
+        load_colab_artifact,
     )
+    from python.colab_jobs import ColabJobConflictError, get_colab_job_manager
 # cloud_sync removed — GDrive Decoupling Guardrail (ANTIGRAVITY v11.03)
 
 try:
@@ -2294,6 +2304,98 @@ async def import_colab_calibration_endpoint(req: Request):
 def get_colab_calibration_status_endpoint():
     """Returns currently loaded offline Colab calibration metadata."""
     return get_calibration_status()
+
+
+@app.get("/api/colab/status")
+def get_colab_mcp_status_endpoint():
+    """Returns Google Colab MCP transport readiness, active/recent jobs, and v2 artifact status."""
+    return get_colab_job_manager().get_status()
+
+
+@app.post("/api/colab/jobs/{job_type}")
+async def launch_colab_mcp_job_endpoint(job_type: str, req: Request):
+    """Launches a single-flight background Google Colab MCP quant job."""
+    raw_body = await req.body()
+    if not raw_body or not raw_body.strip():
+        body: Dict[str, Any] = {}
+    else:
+        try:
+            body = json.loads(raw_body.decode("utf-8"))
+        except Exception:
+            return JSONResponse({"status": "error", "detail": "Invalid JSON body."}, status_code=422)
+        if not isinstance(body, dict):
+            return JSONResponse({"status": "error", "detail": "Request body must be a JSON object."}, status_code=422)
+
+    unknown_keys = set(body.keys()) - {"options", "mode"}
+    if unknown_keys:
+        return JSONResponse(
+            {"status": "error", "detail": f"Unknown request key(s): {sorted(unknown_keys)}"},
+            status_code=422,
+        )
+
+    norm_type = str(job_type or "").strip().lower()
+    try:
+        record = get_colab_job_manager().submit_job(
+            norm_type,
+            options=body.get("options"),
+            mode=body.get("mode"),
+        )
+        framework.log(f"[Colab MCP] Queued {norm_type} job {record['job_id']} (mode={record['mode']}).")
+        return JSONResponse(content=record, status_code=202)
+    except ColabJobConflictError as ce:
+        return JSONResponse({"status": "error", "detail": redact_secrets(str(ce))}, status_code=409)
+    except ValueError as ve:
+        status_code = 400 if "Unknown Colab job_type" in str(ve) else 422
+        return JSONResponse({"status": "error", "detail": redact_secrets(str(ve))}, status_code=status_code)
+    except Exception as exc:
+        framework.log(f"[Colab MCP] Job launch failed: {redact_secrets(str(exc))}")
+        return JSONResponse({"status": "error", "detail": "Failed to launch Colab job."}, status_code=500)
+
+
+@app.get("/api/colab/jobs/{job_id}")
+def get_colab_mcp_job_endpoint(job_id: str):
+    """Returns status and progress of a previously queued Colab MCP job."""
+    record = get_colab_job_manager().get_job(job_id)
+    if record is None:
+        return JSONResponse({"status": "error", "detail": f"Unknown Colab job_id: {job_id}"}, status_code=404)
+    return record
+
+
+@app.get("/api/colab/artifacts/{artifact_type}")
+def get_colab_mcp_artifact_endpoint(artifact_type: str):
+    """Returns read-only Schema v2.0 cached Colab quant artifact and freshness metadata."""
+    norm_type = str(artifact_type or "").strip().lower()
+    if norm_type not in ARTIFACT_REGISTRY:
+        return JSONResponse({"status": "error", "detail": f"Unknown Colab artifact type: {artifact_type}"}, status_code=404)
+    status = get_artifact_status(norm_type)
+    data = load_colab_artifact(norm_type)
+    return {
+        "artifact_type": norm_type,
+        "loaded": bool(data),
+        "freshness": status["freshness"],
+        "data": data,
+    }
+
+
+@app.post("/api/colab/artifacts/{artifact_type}/import")
+async def import_colab_mcp_artifact_endpoint(artifact_type: str, req: Request):
+    """Fail-closed offline JSON import fallback for Schema v2.0 Colab artifacts."""
+    norm_type = str(artifact_type or "").strip().lower()
+    if norm_type not in ARTIFACT_REGISTRY:
+        return JSONResponse({"status": "error", "detail": f"Unknown Colab artifact type: {artifact_type}"}, status_code=404)
+    try:
+        payload = await req.json()
+    except Exception:
+        return JSONResponse({"status": "error", "detail": "Invalid JSON body."}, status_code=422)
+    try:
+        summary = import_colab_artifact(norm_type, payload)
+        framework.log(f"[Colab MCP] Imported offline {norm_type} artifact ({summary['item_count']} item(s)).")
+        return summary
+    except ValueError as ve:
+        return JSONResponse({"status": "error", "detail": redact_secrets(str(ve))}, status_code=422)
+    except Exception as exc:
+        framework.log(f"[Colab MCP] Artifact import failed: {redact_secrets(str(exc))}")
+        return JSONResponse({"status": "error", "detail": "Failed to import Colab artifact."}, status_code=500)
 
 
 @app.get("/api/system_logs")

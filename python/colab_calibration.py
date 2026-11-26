@@ -31,12 +31,30 @@ except ImportError:
 
 
 CALIBRATION_SCHEMA_VERSION = "1.0"
-DEFAULT_CALIBRATION_PATH = os.path.join("cache", "colab_calibration.json")
-DEFAULT_DAILY_CACHE_PATH = os.path.join("cache", "daily_history_cache.json")
-DEFAULT_PEAK_CACHE_PATH = os.path.join("cache", "peak_profiles_cache.json")
+ARTIFACT_SCHEMA_VERSION = "2.0"
+DEFAULT_CACHE_DIR = "cache"
+DEFAULT_CALIBRATION_PATH = os.path.join(DEFAULT_CACHE_DIR, "colab_calibration.json")
+DEFAULT_DAILY_CACHE_PATH = os.path.join(DEFAULT_CACHE_DIR, "daily_history_cache.json")
+DEFAULT_PEAK_CACHE_PATH = os.path.join(DEFAULT_CACHE_DIR, "peak_profiles_cache.json")
+
+ARTIFACT_REGISTRY: Dict[str, Tuple[str, float]] = {
+    "vol_surface": ("colab_vol_surface.json", 24.0),
+    "quant_scout": ("colab_scout_candidates.json", 48.0),
+    "sec_nlp": ("colab_sec_nlp.json", 72.0),
+    "backtest_evidence": ("colab_backtest_evidence.json", 168.0),
+}
+
+_VALID_DEALER_FLOW_REGIMES = frozenset({
+    "PINNING",
+    "VANNA_TAILWIND",
+    "CHARM_BLEED",
+    "VOL_ACCELERATION",
+    "NEUTRAL",
+})
 
 _TICKER_RE = re.compile(r"^[A-Z0-9.\-\^]{1,12}$")
 _HHMM_RE = re.compile(r"^\d{2}:\d{2}$")
+_ISO_UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$")
 
 _ALLOWED_TOP_KEYS = frozenset({
     "schema_version",
@@ -443,6 +461,473 @@ def get_calibration_status(calibration_path: str = DEFAULT_CALIBRATION_PATH) -> 
         "source": cal.get("source"),
         "merton_stress": cal.get("merton_stress", {}),
         "backtest_summary": cal.get("backtest_summary", {}),
+    }
+
+
+def _validate_iso_utc(val: Any, field_name: str, *, required: bool = True) -> Optional[str]:
+    if val is None or val == "":
+        if required:
+            raise ValueError(f"{field_name} is required and must be a UTC ISO-8601 string.")
+        return None
+    if not isinstance(val, str):
+        raise ValueError(f"{field_name} must be a UTC ISO-8601 string.")
+    s = val.strip()
+    if not _ISO_UTC_RE.match(s):
+        raise ValueError(f"{field_name} must match strict UTC ISO-8601 format (YYYY-MM-DDTHH:MM:SSZ).")
+    return s
+
+
+def _validate_v2_envelope(payload: Any, allowed_extra_keys: frozenset) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("Artifact payload must be a JSON object.")
+    base_keys = frozenset({"schema_version", "generated_at_utc", "imported_at_utc", "source", "notes"})
+    allowed_top = base_keys | allowed_extra_keys
+    unknown_top = set(payload.keys()) - allowed_top
+    if unknown_top:
+        raise ValueError(f"Unknown top-level artifact key(s): {sorted(unknown_top)}")
+    if payload.get("schema_version") != ARTIFACT_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported artifact schema_version {payload.get('schema_version')!r}; expected {ARTIFACT_SCHEMA_VERSION!r}."
+        )
+    out: Dict[str, Any] = {
+        "schema_version": ARTIFACT_SCHEMA_VERSION,
+        "generated_at_utc": _validate_iso_utc(payload.get("generated_at_utc"), "generated_at_utc", required=True),
+        "source": str(payload.get("source") or "google_colab_mcp").strip()[:64] or "google_colab_mcp",
+    }
+    imported_ts = _validate_iso_utc(payload.get("imported_at_utc"), "imported_at_utc", required=False)
+    if imported_ts is not None:
+        out["imported_at_utc"] = imported_ts
+    if payload.get("notes") is not None:
+        out["notes"] = str(payload["notes"]).strip()[:500]
+    return out
+
+
+def validate_vol_surface_artifact(payload: Any) -> Dict[str, Any]:
+    """Fail-closed validation for Schema v2.0 multi-expiry volatility surface & 2nd-order Greeks."""
+    out = _validate_v2_envelope(payload, frozenset({"tickers"}))
+    raw_tickers = payload.get("tickers")
+    if not isinstance(raw_tickers, dict):
+        raise ValueError("vol_surface.tickers must be a dictionary.")
+
+    float_bounds: Dict[str, Tuple[float, float]] = {
+        "atm_iv_30d": (0.0, 1000.0),
+        "svi_skew_25d": (-200.0, 200.0),
+        "term_structure_slope": (-200.0, 200.0),
+        "fit_rmse": (0.0, 100.0),
+        "gamma_flip_multi_expiry": (0.0, 1_000_000.0),
+        "net_gex_multi_expiry": (-1_000_000.0, 1_000_000.0),
+        "vanna_exposure": (-1_000_000.0, 1_000_000.0),
+        "charm_decay_bias": (-1_000_000.0, 1_000_000.0),
+    }
+    allowed_fields = set(float_bounds.keys()) | {"dealer_flow_regime", "expiries_analyzed"}
+    cleaned_tickers: Dict[str, Dict[str, Any]] = {}
+    for raw_sym, entry in raw_tickers.items():
+        sym = str(raw_sym or "").strip().upper()
+        if not _TICKER_RE.match(sym):
+            raise ValueError(f"Invalid ticker symbol in vol_surface: {raw_sym!r}")
+        if not isinstance(entry, dict):
+            raise ValueError(f"vol_surface.tickers[{sym}] must be a dictionary.")
+        unknown = set(entry.keys()) - allowed_fields
+        if unknown:
+            raise ValueError(f"Unknown field(s) in vol_surface.tickers[{sym}]: {sorted(unknown)}")
+        clean_entry: Dict[str, Any] = {}
+        for k, (lo, hi) in float_bounds.items():
+            if k in entry and entry[k] is not None:
+                if not _is_valid_number(entry[k], lo, hi):
+                    raise ValueError(f"vol_surface.tickers[{sym}].{k} must be a finite number in [{lo}, {hi}].")
+                clean_entry[k] = round(float(entry[k]), 6)
+        if "expiries_analyzed" in entry and entry["expiries_analyzed"] is not None:
+            if not _is_valid_int(entry["expiries_analyzed"], 1, 24):
+                raise ValueError(f"vol_surface.tickers[{sym}].expiries_analyzed must be in [1, 24].")
+            clean_entry["expiries_analyzed"] = int(entry["expiries_analyzed"])
+        if "dealer_flow_regime" in entry and entry["dealer_flow_regime"] is not None:
+            regime = str(entry["dealer_flow_regime"]).strip().upper()
+            if regime not in _VALID_DEALER_FLOW_REGIMES:
+                raise ValueError(f"vol_surface.tickers[{sym}].dealer_flow_regime invalid: {regime!r}")
+            clean_entry["dealer_flow_regime"] = regime
+        cleaned_tickers[sym] = clean_entry
+    out["tickers"] = cleaned_tickers
+    return out
+
+
+def validate_quant_scout_artifact(payload: Any) -> Dict[str, Any]:
+    """Fail-closed validation for Schema v2.0 broad 500+ ticker quantitative scout candidates."""
+    out = _validate_v2_envelope(payload, frozenset({"universe_size", "candidates"}))
+    if not _is_valid_int(payload.get("universe_size"), 1, 5000):
+        raise ValueError("quant_scout.universe_size must be an integer in [1, 5000].")
+    out["universe_size"] = int(payload["universe_size"])
+
+    raw_cands = payload.get("candidates")
+    if not isinstance(raw_cands, list) or len(raw_cands) > 100:
+        raise ValueError("quant_scout.candidates must be a list of at most 100 items.")
+
+    float_bounds: Dict[str, Tuple[float, float]] = {
+        "composite_score": (-100.0, 100.0),
+        "rs_1m_pct": (-100.0, 1000.0),
+        "rs_3m_pct": (-100.0, 2000.0),
+        "rs_6m_pct": (-100.0, 5000.0),
+        "corr_to_portfolio": (-1.0, 1.0),
+        "pead_score": (-100.0, 100.0),
+        "adv_usd_m": (0.0, 1_000_000.0),
+    }
+    allowed_fields = set(float_bounds.keys()) | {"ticker", "vol_regime", "cluster_label", "rationale"}
+    required_fields = {"ticker", "composite_score", "rs_3m_pct", "corr_to_portfolio", "vol_regime", "cluster_label"}
+    cleaned_cands: List[Dict[str, Any]] = []
+    seen_syms = set()
+    for idx, item in enumerate(raw_cands):
+        if not isinstance(item, dict):
+            raise ValueError(f"quant_scout.candidates[{idx}] must be a dictionary.")
+        unknown = set(item.keys()) - allowed_fields
+        if unknown:
+            raise ValueError(f"Unknown field(s) in quant_scout.candidates[{idx}]: {sorted(unknown)}")
+        missing = required_fields - set(item.keys())
+        if missing:
+            raise ValueError(f"Missing required field(s) in quant_scout.candidates[{idx}]: {sorted(missing)}")
+        sym = str(item.get("ticker") or "").strip().upper()
+        if not _TICKER_RE.match(sym) or sym in seen_syms:
+            raise ValueError(f"Invalid or duplicate ticker in quant_scout.candidates[{idx}]: {sym!r}")
+        seen_syms.add(sym)
+        clean_item: Dict[str, Any] = {"ticker": sym}
+        for k, (lo, hi) in float_bounds.items():
+            if k in item and item[k] is not None:
+                if not _is_valid_number(item[k], lo, hi):
+                    raise ValueError(f"quant_scout.candidates[{idx}].{k} must be finite in [{lo}, {hi}].")
+                clean_item[k] = round(float(item[k]), 4)
+        for str_k, max_len in (("vol_regime", 32), ("cluster_label", 64)):
+            sval = item.get(str_k)
+            if not isinstance(sval, str) or not sval.strip():
+                raise ValueError(f"quant_scout.candidates[{idx}].{str_k} must be a non-empty string.")
+            clean_item[str_k] = sval.strip()[:max_len]
+        if "rationale" in item and item["rationale"] is not None:
+            if not isinstance(item["rationale"], str):
+                raise ValueError(f"quant_scout.candidates[{idx}].rationale must be a string.")
+            clean_item["rationale"] = item["rationale"].strip()[:300]
+        cleaned_cands.append(clean_item)
+    out["candidates"] = cleaned_cands
+    return out
+
+
+def validate_sec_nlp_artifact(payload: Any) -> Dict[str, Any]:
+    """Fail-closed validation for Schema v2.0 zero-token GPU SEC/earnings NLP signals."""
+    out = _validate_v2_envelope(payload, frozenset({"model_used", "tickers"}))
+    model_used = payload.get("model_used")
+    if not isinstance(model_used, str) or not model_used.strip():
+        raise ValueError("sec_nlp.model_used must be a non-empty string.")
+    out["model_used"] = model_used.strip()[:120]
+
+    raw_tickers = payload.get("tickers")
+    if not isinstance(raw_tickers, dict):
+        raise ValueError("sec_nlp.tickers must be a dictionary.")
+
+    float_bounds: Dict[str, Tuple[float, float]] = {
+        "dilution_risk_score": (0.0, 100.0),
+        "catalyst_sentiment": (-1.0, 1.0),
+        "earnings_tone_delta": (-1.0, 1.0),
+        "shelf_remaining_usd_m": (0.0, 1_000_000.0),
+        "warrant_overhang_pct": (0.0, 500.0),
+    }
+    bool_fields = ("offering_overhang_flag", "going_concern_flag")
+    allowed_fields = set(float_bounds.keys()) | set(bool_fields) | {"filings_analyzed", "evidence_snippets"}
+    required_fields = {"dilution_risk_score", "catalyst_sentiment", "offering_overhang_flag", "going_concern_flag", "filings_analyzed"}
+    cleaned_tickers: Dict[str, Dict[str, Any]] = {}
+    for raw_sym, entry in raw_tickers.items():
+        sym = str(raw_sym or "").strip().upper()
+        if not _TICKER_RE.match(sym):
+            raise ValueError(f"Invalid ticker symbol in sec_nlp: {raw_sym!r}")
+        if not isinstance(entry, dict):
+            raise ValueError(f"sec_nlp.tickers[{sym}] must be a dictionary.")
+        unknown = set(entry.keys()) - allowed_fields
+        if unknown:
+            raise ValueError(f"Unknown field(s) in sec_nlp.tickers[{sym}]: {sorted(unknown)}")
+        missing = required_fields - set(entry.keys())
+        if missing:
+            raise ValueError(f"Missing required field(s) in sec_nlp.tickers[{sym}]: {sorted(missing)}")
+        clean_entry: Dict[str, Any] = {}
+        for k, (lo, hi) in float_bounds.items():
+            if k in entry and entry[k] is not None:
+                if not _is_valid_number(entry[k], lo, hi):
+                    raise ValueError(f"sec_nlp.tickers[{sym}].{k} must be finite in [{lo}, {hi}].")
+                clean_entry[k] = round(float(entry[k]), 4)
+        for bk in bool_fields:
+            if not isinstance(entry[bk], bool):
+                raise ValueError(f"sec_nlp.tickers[{sym}].{bk} must be a boolean.")
+            clean_entry[bk] = bool(entry[bk])
+        if not _is_valid_int(entry["filings_analyzed"], 0, 100):
+            raise ValueError(f"sec_nlp.tickers[{sym}].filings_analyzed must be in [0, 100].")
+        clean_entry["filings_analyzed"] = int(entry["filings_analyzed"])
+        if "evidence_snippets" in entry and entry["evidence_snippets"] is not None:
+            snips = entry["evidence_snippets"]
+            if not isinstance(snips, list) or len(snips) > 5:
+                raise ValueError(f"sec_nlp.tickers[{sym}].evidence_snippets must be a list of at most 5 strings.")
+            clean_snips: List[str] = []
+            for s_idx, snip in enumerate(snips):
+                if not isinstance(snip, str):
+                    raise ValueError(f"sec_nlp.tickers[{sym}].evidence_snippets[{s_idx}] must be a string.")
+                clean_snips.append(snip.strip()[:240])
+            clean_entry["evidence_snippets"] = clean_snips
+        cleaned_tickers[sym] = clean_entry
+    out["tickers"] = cleaned_tickers
+    return out
+
+
+def _validate_evidence_metrics_block(raw: Any, name: str) -> Dict[str, float]:
+    if not isinstance(raw, dict):
+        raise ValueError(f"backtest_evidence.{name} must be a dictionary.")
+    bounds: Dict[str, Tuple[float, float]] = {
+        "sharpe_ratio": (-10.0, 20.0),
+        "sortino_ratio": (-10.0, 40.0),
+        "max_drawdown_pct": (-100.0, 0.0),
+        "hit_rate_pct": (0.0, 100.0),
+        "profit_factor": (0.0, 100.0),
+    }
+    unknown = set(raw.keys()) - set(bounds.keys())
+    if unknown:
+        raise ValueError(f"Unknown key(s) in backtest_evidence.{name}: {sorted(unknown)}")
+    missing = set(bounds.keys()) - set(raw.keys())
+    if missing:
+        raise ValueError(f"Missing required key(s) in backtest_evidence.{name}: {sorted(missing)}")
+    out: Dict[str, float] = {}
+    for k, (lo, hi) in bounds.items():
+        if not _is_valid_number(raw[k], lo, hi):
+            raise ValueError(f"backtest_evidence.{name}.{k} must be finite in [{lo}, {hi}].")
+        out[k] = round(float(raw[k]), 4)
+    return out
+
+
+def validate_backtest_evidence_artifact(payload: Any) -> Dict[str, Any]:
+    """Fail-closed validation for Schema v2.0 walk-forward Protocol 06 Evidence Pack (strictly read-only)."""
+    extra = frozenset({
+        "protocol_06_read_only",
+        "folds",
+        "universe_count",
+        "friction_hurdle_pct",
+        "baseline_metrics",
+        "candidate_metrics",
+        "stability_score",
+        "proposed_rule_deltas",
+    })
+    out = _validate_v2_envelope(payload, extra)
+    if payload.get("protocol_06_read_only") is not True:
+        raise ValueError("backtest_evidence.protocol_06_read_only must be boolean True.")
+    out["protocol_06_read_only"] = True
+
+    if not _is_valid_int(payload.get("folds"), 1, 100):
+        raise ValueError("backtest_evidence.folds must be an integer in [1, 100].")
+    out["folds"] = int(payload["folds"])
+
+    if not _is_valid_int(payload.get("universe_count"), 1, 2000):
+        raise ValueError("backtest_evidence.universe_count must be an integer in [1, 2000].")
+    out["universe_count"] = int(payload["universe_count"])
+
+    if not _is_valid_number(payload.get("friction_hurdle_pct"), 0.0, 10.0):
+        raise ValueError("backtest_evidence.friction_hurdle_pct must be finite in [0.0, 10.0].")
+    out["friction_hurdle_pct"] = round(float(payload["friction_hurdle_pct"]), 4)
+
+    if not _is_valid_number(payload.get("stability_score"), 0.0, 1.0):
+        raise ValueError("backtest_evidence.stability_score must be finite in [0.0, 1.0].")
+    out["stability_score"] = round(float(payload["stability_score"]), 4)
+
+    out["baseline_metrics"] = _validate_evidence_metrics_block(payload.get("baseline_metrics"), "baseline_metrics")
+    out["candidate_metrics"] = _validate_evidence_metrics_block(payload.get("candidate_metrics"), "candidate_metrics")
+
+    raw_deltas = payload.get("proposed_rule_deltas")
+    if not isinstance(raw_deltas, list) or len(raw_deltas) > 25:
+        raise ValueError("backtest_evidence.proposed_rule_deltas must be a list of at most 25 entries.")
+    allowed_delta_keys = {"rule_id", "parameter", "current_value", "proposed_value", "rationale"}
+    cleaned_deltas: List[Dict[str, Any]] = []
+    for idx, d in enumerate(raw_deltas):
+        if not isinstance(d, dict):
+            raise ValueError(f"backtest_evidence.proposed_rule_deltas[{idx}] must be a dictionary.")
+        unknown = set(d.keys()) - allowed_delta_keys
+        if unknown:
+            raise ValueError(f"Unknown key(s) in proposed_rule_deltas[{idx}]: {sorted(unknown)}")
+        missing = allowed_delta_keys - set(d.keys())
+        if missing:
+            raise ValueError(f"Missing key(s) in proposed_rule_deltas[{idx}]: {sorted(missing)}")
+        for scalar_k in ("current_value", "proposed_value"):
+            if isinstance(d[scalar_k], float) and not math.isfinite(d[scalar_k]):
+                raise ValueError(f"proposed_rule_deltas[{idx}].{scalar_k} must be finite.")
+        rule_id = str(d["rule_id"] or "").strip()
+        param = str(d["parameter"] or "").strip()
+        rationale = str(d["rationale"] or "").strip()
+        if not rule_id or not param or not rationale:
+            raise ValueError(f"proposed_rule_deltas[{idx}] requires non-empty rule_id, parameter, and rationale.")
+        cleaned_deltas.append({
+            "rule_id": rule_id[:64],
+            "parameter": param[:64],
+            "current_value": d["current_value"] if not isinstance(d["current_value"], str) else d["current_value"].strip()[:64],
+            "proposed_value": d["proposed_value"] if not isinstance(d["proposed_value"], str) else d["proposed_value"].strip()[:64],
+            "rationale": rationale[:300],
+        })
+    out["proposed_rule_deltas"] = cleaned_deltas
+    return out
+
+
+_ARTIFACT_VALIDATORS = {
+    "vol_surface": validate_vol_surface_artifact,
+    "quant_scout": validate_quant_scout_artifact,
+    "sec_nlp": validate_sec_nlp_artifact,
+    "backtest_evidence": validate_backtest_evidence_artifact,
+}
+
+
+def get_artifact_cache_path(artifact_type: str, cache_dir: Optional[str] = None) -> str:
+    if artifact_type not in ARTIFACT_REGISTRY:
+        raise ValueError(f"Unknown Colab artifact type: {artifact_type!r}")
+    fname, _ = ARTIFACT_REGISTRY[artifact_type]
+    base_dir = cache_dir if cache_dir is not None else DEFAULT_CACHE_DIR
+    return os.path.join(base_dir, fname)
+
+
+def is_artifact_fresh(
+    as_of_utc: Optional[str],
+    ttl_hours: float,
+    now_utc: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Evaluates UTC freshness against TTL hours without crashing on malformed timestamps."""
+    ttl = float(ttl_hours)
+    if not as_of_utc or not isinstance(as_of_utc, str):
+        return {"fresh": False, "stale": True, "age_hours": None, "ttl_hours": ttl}
+    try:
+        parsed = datetime.fromisoformat(as_of_utc.strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        ref = now_utc or datetime.now(timezone.utc)
+        age_hours = max(0.0, (ref - parsed).total_seconds() / 3600.0)
+        is_fresh = age_hours <= ttl
+        return {
+            "fresh": is_fresh,
+            "stale": not is_fresh,
+            "age_hours": round(age_hours, 2),
+            "ttl_hours": ttl,
+        }
+    except Exception:
+        return {"fresh": False, "stale": True, "age_hours": None, "ttl_hours": ttl}
+
+
+def validate_colab_artifact(artifact_type: str, payload: Any) -> Dict[str, Any]:
+    if artifact_type not in _ARTIFACT_VALIDATORS:
+        raise ValueError(f"Unknown Colab artifact type: {artifact_type!r}")
+    return _ARTIFACT_VALIDATORS[artifact_type](payload)
+
+
+def import_colab_artifact(
+    artifact_type: str,
+    payload: Any,
+    cache_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Fail-closed validation and atomic persistence for Schema v2.0 Colab artifacts."""
+    validated = validate_colab_artifact(artifact_type, payload)
+    validated["imported_at_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    target_path = get_artifact_cache_path(artifact_type, cache_dir=cache_dir)
+    parent = os.path.dirname(os.path.abspath(target_path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    atomic_write_json(target_path, validated, indent=2)
+
+    try:
+        abs_path = os.path.abspath(target_path)
+        st = os.stat(abs_path)
+        with _CACHE_LOCK:
+            _CALIBRATION_CACHE[abs_path] = ((int(st.st_mtime_ns), int(st.st_size)), copy.deepcopy(validated))
+    except Exception:
+        pass
+
+    item_count = (
+        len(validated.get("tickers", {}))
+        if "tickers" in validated
+        else len(validated.get("candidates", validated.get("proposed_rule_deltas", [])))
+    )
+    return {
+        "status": "success",
+        "artifact_type": artifact_type,
+        "schema_version": validated["schema_version"],
+        "item_count": item_count,
+        "generated_at_utc": validated.get("generated_at_utc"),
+        "imported_at_utc": validated["imported_at_utc"],
+        "path": target_path,
+    }
+
+
+def load_colab_artifact(
+    artifact_type: str,
+    cache_dir: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Loads and validates a Schema v2.0 Colab artifact with mtime caching; fails closed to None."""
+    target_path = get_artifact_cache_path(artifact_type, cache_dir=cache_dir)
+    if not target_path or not os.path.exists(target_path):
+        return None
+    try:
+        abs_path = os.path.abspath(target_path)
+        st = os.stat(abs_path)
+        stat_key = (int(st.st_mtime_ns), int(st.st_size))
+        with _CACHE_LOCK:
+            hit = _CALIBRATION_CACHE.get(abs_path)
+            if hit is not None and hit[0] == stat_key:
+                return copy.deepcopy(hit[1])
+
+        with open(abs_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        validated = validate_colab_artifact(artifact_type, raw)
+
+        with _CACHE_LOCK:
+            _CALIBRATION_CACHE[abs_path] = (stat_key, copy.deepcopy(validated))
+        return validated
+    except Exception:
+        return None
+
+
+def get_artifact_status(
+    artifact_type: str,
+    cache_dir: Optional[str] = None,
+    now_utc: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    if artifact_type not in ARTIFACT_REGISTRY:
+        raise ValueError(f"Unknown Colab artifact type: {artifact_type!r}")
+    _, ttl_hours = ARTIFACT_REGISTRY[artifact_type]
+    data = load_colab_artifact(artifact_type, cache_dir=cache_dir)
+    if not data:
+        return {
+            "artifact_type": artifact_type,
+            "loaded": False,
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "freshness": is_artifact_fresh(None, ttl_hours, now_utc=now_utc),
+            "generated_at_utc": None,
+            "imported_at_utc": None,
+            "source": None,
+            "item_count": 0,
+        }
+    freshness = is_artifact_fresh(data.get("generated_at_utc"), ttl_hours, now_utc=now_utc)
+    item_count = (
+        len(data.get("tickers", {}))
+        if "tickers" in data
+        else len(data.get("candidates", data.get("proposed_rule_deltas", [])))
+    )
+    return {
+        "artifact_type": artifact_type,
+        "loaded": True,
+        "schema_version": data.get("schema_version"),
+        "freshness": freshness,
+        "generated_at_utc": data.get("generated_at_utc"),
+        "imported_at_utc": data.get("imported_at_utc"),
+        "source": data.get("source"),
+        "item_count": item_count,
+    }
+
+
+def get_all_colab_artifacts_status(
+    cache_dir: Optional[str] = None,
+    now_utc: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    cal_path = os.path.join(cache_dir, "colab_calibration.json") if cache_dir else DEFAULT_CALIBRATION_PATH
+    artifacts = {
+        art_type: get_artifact_status(art_type, cache_dir=cache_dir, now_utc=now_utc)
+        for art_type in ARTIFACT_REGISTRY
+    }
+    return {
+        "schema_version": ARTIFACT_SCHEMA_VERSION,
+        "artifacts": artifacts,
+        "calibration_v1": get_calibration_status(calibration_path=cal_path),
     }
 
 
