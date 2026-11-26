@@ -444,8 +444,33 @@ function _initTableToolbarAndShortcuts() {
     }
 }
 
+// Sidebar tabbed switcher for unified Discovery and Quant Lab cards
+function _initSidebarTabs() {
+    document.querySelectorAll('.sidebar-tabs').forEach((tablist) => {
+        if (tablist._gemTabsBound) return;
+        tablist._gemTabsBound = true;
+        tablist.addEventListener('click', (ev) => {
+            const btn = ev.target && ev.target.closest ? ev.target.closest('.sidebar-tab-btn[data-panel-tab]') : null;
+            if (!btn || !tablist.contains(btn)) return;
+            const target = btn.getAttribute('data-panel-tab');
+            const container = tablist.parentElement;
+            if (!target || !container) return;
+
+            tablist.querySelectorAll('.sidebar-tab-btn[data-panel-tab]').forEach((tabBtn) => {
+                const isActive = tabBtn === btn;
+                tabBtn.classList.toggle('active', isActive);
+                tabBtn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+            container.querySelectorAll(':scope > .sidebar-tab-pane[data-tab-pane]').forEach((pane) => {
+                pane.classList.toggle('hidden', pane.getAttribute('data-tab-pane') !== target);
+            });
+        });
+    });
+}
+
 // Initialization
 async function init() {
+    _initSidebarTabs();
     _initTableToolbarAndShortcuts();
     await fetchTickers();
     await fetchPortfolio();
@@ -2858,8 +2883,18 @@ async function fetchColabMcpStatus() {
     } catch (_) {}
 }
 
+function _setColabJobStatus(statusEls, text, className) {
+    statusEls.forEach((el) => {
+        if (!el) return;
+        el.textContent = text;
+        if (className) el.className = className;
+    });
+}
+
 async function launchColabJob(jobType, btnEl) {
     const jobStatusEl = document.getElementById('colab-mcp-job-status');
+    const scoutStatusEl = jobType === 'quant_scout' ? document.getElementById('colab-scout-job-status') : null;
+    const statusEls = [jobStatusEl, scoutStatusEl].filter(Boolean);
     const useLlmEl = document.getElementById('colab-sec-use-llm-toggle');
     const reqBody = (jobType === 'sec_nlp' && useLlmEl && useLlmEl.checked)
         ? { options: { use_llm: true } }
@@ -2874,10 +2909,7 @@ async function launchColabJob(jobType, btnEl) {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
         const jobId = data.job_id;
-        if (jobStatusEl) {
-            jobStatusEl.textContent = `Queued ${jobType} (${jobId})...`;
-            jobStatusEl.className = 'status-message inline-feedback';
-        }
+        _setColabJobStatus(statusEls, `Queued ${jobType} (${jobId})...`, 'status-message inline-feedback');
         if (jobId) {
             const timer = setInterval(async () => {
                 try {
@@ -2891,21 +2923,15 @@ async function launchColabJob(jobType, btnEl) {
                     if (pData.status === 'succeeded') {
                         clearInterval(timer);
                         if (btnEl) btnEl.disabled = false;
-                        if (jobStatusEl) {
-                            jobStatusEl.textContent = `${jobType} completed cleanly.`;
-                            jobStatusEl.className = 'status-message inline-feedback text-green';
-                        }
+                        _setColabJobStatus(statusEls, `${jobType} completed cleanly.`, 'status-message inline-feedback text-green');
                         await fetchColabMcpStatus();
                         if (typeof fetchAnalyticsAndBacktest === 'function') fetchAnalyticsAndBacktest();
                     } else if (pData.status === 'failed') {
                         clearInterval(timer);
                         if (btnEl) btnEl.disabled = false;
-                        if (jobStatusEl) {
-                            jobStatusEl.textContent = pData.error || `${jobType} failed.`;
-                            jobStatusEl.className = 'status-message inline-feedback text-red';
-                        }
-                    } else if (jobStatusEl && pData.progress) {
-                        jobStatusEl.textContent = pData.progress;
+                        _setColabJobStatus(statusEls, pData.error || `${jobType} failed.`, 'status-message inline-feedback text-red');
+                    } else if (pData.progress) {
+                        _setColabJobStatus(statusEls, pData.progress);
                     }
                 } catch (_) {
                     clearInterval(timer);
@@ -2915,10 +2941,7 @@ async function launchColabJob(jobType, btnEl) {
         }
     } catch (err) {
         if (btnEl) btnEl.disabled = false;
-        if (jobStatusEl) {
-            jobStatusEl.textContent = err.message || `Failed to start ${jobType}.`;
-            jobStatusEl.className = 'status-message inline-feedback text-red';
-        }
+        _setColabJobStatus(statusEls, err.message || `Failed to start ${jobType}.`, 'status-message inline-feedback text-red');
     }
 }
 

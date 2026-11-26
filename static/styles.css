@@ -3465,3 +3465,74 @@ td.num-col {
     font-size: 0.68rem;
     color: var(--text-secondary);
 }
+
+.sidebar-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 3px;
+    margin-bottom: 10px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+}
+
+.sidebar-tab-btn {
+    flex: 1;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    white-space: nowrap;
+}
+
+.sidebar-tab-btn:hover {
+    color: var(--text-main);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.sidebar-tab-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.sidebar-tab-btn.active {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: rgba(88, 166, 255, 0.35);
+}
+
+.sidebar-tab-pane.hidden {
+    display: none !important;
+}
+
+.colab-offline-details {
+    margin-top: 8px;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.colab-offline-details summary {
+    cursor: pointer;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    user-select: none;
+}
+
+.colab-offline-details[open] summary {
+    color: var(--text-secondary);
+}
+
+.watchlist-rescan-row {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--panel-border);
+}

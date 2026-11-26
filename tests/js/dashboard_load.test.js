@@ -887,6 +887,68 @@ async function main() {
         assert.strictEqual(sum.querySelectorAll('img, script').length, 0, 'XSS elements must never render in Evidence Pack');
     });
 
+    // UI Streamlining: Watchlist Rescan, unified Discovery tabs, unified Quant Lab tabs, slim Admin
+    const wlContent = window.document.getElementById('watchlist-content');
+    const scoutContent = window.document.getElementById('scout-content');
+    const quantContent = window.document.getElementById('analytics-quant-content');
+    const adminContent = window.document.getElementById('admin-content');
+    const scoutQuantTab = scoutContent.querySelector('.sidebar-tab-btn[data-panel-tab="scout-quant"]');
+    const scoutSectorTab = scoutContent.querySelector('.sidebar-tab-btn[data-panel-tab="scout-sector"]');
+    const scoutQuantPane = scoutContent.querySelector('.sidebar-tab-pane[data-tab-pane="scout-quant"]');
+    const scoutSectorPane = scoutContent.querySelector('.sidebar-tab-pane[data-tab-pane="scout-sector"]');
+    const quantLiveTab = quantContent.querySelector('.sidebar-tab-btn[data-panel-tab="quant-live"]');
+    const quantColabTab = quantContent.querySelector('.sidebar-tab-btn[data-panel-tab="quant-colab"]');
+    const quantLivePane = quantContent.querySelector('.sidebar-tab-pane[data-tab-pane="quant-live"]');
+    const quantColabPane = quantContent.querySelector('.sidebar-tab-pane[data-tab-pane="quant-colab"]');
+
+    const discoveryDefaultOk = scoutQuantTab.classList.contains('active')
+        && scoutQuantTab.getAttribute('aria-selected') === 'true'
+        && !scoutQuantPane.classList.contains('hidden')
+        && scoutSectorPane.classList.contains('hidden');
+    scoutSectorTab.click();
+    const discoverySwitchedOk = !scoutQuantTab.classList.contains('active')
+        && scoutSectorTab.classList.contains('active')
+        && scoutSectorTab.getAttribute('aria-selected') === 'true'
+        && scoutQuantPane.classList.contains('hidden')
+        && !scoutSectorPane.classList.contains('hidden');
+    scoutQuantTab.click();
+    const discoveryRestoredOk = scoutQuantTab.classList.contains('active')
+        && !scoutQuantPane.classList.contains('hidden')
+        && scoutSectorPane.classList.contains('hidden');
+
+    const quantDefaultOk = quantLiveTab.classList.contains('active')
+        && quantLiveTab.getAttribute('aria-selected') === 'true'
+        && !quantLivePane.classList.contains('hidden')
+        && quantColabPane.classList.contains('hidden');
+    quantColabTab.click();
+    const quantSwitchedOk = !quantLiveTab.classList.contains('active')
+        && quantColabTab.classList.contains('active')
+        && quantColabTab.getAttribute('aria-selected') === 'true'
+        && quantLivePane.classList.contains('hidden')
+        && !quantColabPane.classList.contains('hidden');
+
+    check('UI Streamlining: Watchlist Rescan, unified Discovery/Quant Lab tabs, and slim Admin work cleanly', () => {
+        assert(wlContent.contains(window.document.getElementById('scan-watchlist-btn')), '#scan-watchlist-btn should live inside #watchlist-content');
+        assert(!scoutContent.contains(window.document.getElementById('scan-watchlist-btn')), '#scan-watchlist-btn should not live inside #scout-content');
+        assert(scoutContent.contains(window.document.getElementById('colab-run-quant-scout-btn')), '#colab-run-quant-scout-btn should live inside #scout-content');
+        assert(scoutContent.contains(window.document.getElementById('colab-quant-scout-panel')), '#colab-quant-scout-panel should live inside #scout-content');
+        assert(scoutContent.contains(window.document.getElementById('run-ai-scout-btn')), '#run-ai-scout-btn should live inside #scout-content');
+        assert.strictEqual(discoveryDefaultOk, true, 'Discovery default tab should be scout-quant');
+        assert.strictEqual(discoverySwitchedOk, true, 'Discovery tab switch to scout-sector failed');
+        assert.strictEqual(discoveryRestoredOk, true, 'Discovery tab switch back to scout-quant failed');
+
+        assert(quantContent.contains(window.document.getElementById('analytics-quant-panel')), '#analytics-quant-panel should live inside #analytics-quant-content');
+        assert(quantContent.contains(window.document.getElementById('colab-evidence-panel')), '#colab-evidence-panel should live inside #analytics-quant-content');
+        assert(quantContent.contains(window.document.getElementById('colab-export-btn')), '#colab-export-btn should live inside #analytics-quant-content');
+        assert.strictEqual(quantDefaultOk, true, 'Quant Lab default tab should be quant-live');
+        assert.strictEqual(quantSwitchedOk, true, 'Quant Lab tab switch to quant-colab failed');
+
+        assert(adminContent.contains(window.document.getElementById('clear-log-btn')), '#clear-log-btn should remain inside #admin-content');
+        assert(!adminContent.contains(window.document.getElementById('colab-quant-scout-panel')), '#colab-quant-scout-panel should be removed from #admin-content');
+        assert(!adminContent.contains(window.document.getElementById('colab-evidence-panel')), '#colab-evidence-panel should be removed from #admin-content');
+        assert(!adminContent.contains(window.document.getElementById('colab-export-btn')), '#colab-export-btn should be removed from #admin-content');
+    });
+
     window.close();
     console.log(results.join('\n'));
     const failed = results.filter((r) => r.startsWith('FAIL')).length;

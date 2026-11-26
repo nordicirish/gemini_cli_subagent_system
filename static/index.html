@@ -7,7 +7,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.77">
+    <link rel="stylesheet" href="styles.css?v=18.78">
     <link rel="stylesheet" href="modern_ui.css?v=18.61">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
@@ -222,85 +222,92 @@
                             <!-- Tags injected by JS -->
                         </div>
                         <div id="watchlist-status" class="status-message inline-feedback" aria-live="polite" style="margin-top: 6px;"></div>
+                        <div class="watchlist-rescan-row">
+                            <button id="scan-watchlist-btn" type="button" class="glow-btn outline mini"
+                                title="Triggers a forced refresh cycle on your current Watchlist tickers">🎯 Scan Watchlist</button>
+                            <div id="scan-watchlist-status" class="status-message inline-feedback" style="margin-top: 5px;"></div>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Scout Intelligence Manager -->
+                <!-- Unified Discovery Manager (Quant Screen + Sector AI) -->
                 <div class="sidebar-card glass-panel manager-card minimized">
                     <div class="header-row">
                         <h3 onclick="toggleSection('scout-content', this)">
-                            <span class="icon">🔭</span> Scout Intelligence <span class="chevron"
+                            <span class="icon">🔭</span> Discovery <span class="chevron"
                                 style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
                         </h3>
                     </div>
                     <div id="scout-content" style="display: none;">
-
-                        <!-- Action 1: Scan Watchlist -->
-                        <div
-                            style="background: rgba(88,166,255,0.05); border: 1px solid rgba(88,166,255,0.2); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
-                            <p
-                                style="font-size: 0.6rem; color: var(--accent); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 6px;">
-                                🎯 Watchlist Rescan</p>
-                            <p
-                                style="font-size: 0.62rem; color: var(--text-dim); margin-bottom: 8px; line-height: 1.4;">
-                                Force a fresh signal evaluation on tickers already in your Watchlist.</p>
-                            <button id="scan-watchlist-btn" class="glow-btn outline"
-                                style="font-size: 0.7rem; padding: 5px 10px;"
-                                title="Triggers a forced refresh cycle on your current Watchlist tickers">🎯 Scan
-                                Watchlist</button>
-                            <div id="scan-watchlist-status" class="status-message inline-feedback"
-                                style="margin-top: 5px;"></div>
+                        <div class="sidebar-tabs" role="tablist" aria-label="Discovery Modes">
+                            <button type="button" class="sidebar-tab-btn active" role="tab" aria-selected="true"
+                                data-panel-tab="scout-quant">Quant Screen (500+)</button>
+                            <button type="button" class="sidebar-tab-btn" role="tab" aria-selected="false"
+                                data-panel-tab="scout-sector">Sector AI</button>
                         </div>
 
-                        <!-- Divider -->
-                        <div style="border-top: 1px solid var(--panel-border); margin: 2px 0 10px;"></div>
-
-                        <!-- Action 2: Scout New Sectors -->
-                        <p
-                            style="font-size: 0.6rem; color: var(--text-dim); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px;">
-                            🔭 Sector Discovery</p>
-                        <p style="font-size: 0.62rem; color: var(--text-dim); margin-bottom: 8px; line-height: 1.4;">
-                            Enable sectors below, then scan to discover new candidate tickers from those industries.</p>
-                        <div id="scout-categories-container" class="scout-grid-container"
-                            style="margin-top: 0; min-height: 40px; border: 1px dashed var(--panel-border); padding: 8px; border-radius: 4px; margin-bottom: 10px;">
-                            <!-- Grid injected by JS -->
-                        </div>
-                        <div
-                            style="background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
-                            <p
-                                style="font-size: 0.6rem; color: var(--text-dim); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 10px;">
-                                Filter Config</p>
-                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                <label for="scout-limit-select"
-                                    style="font-size: 0.65rem; color: var(--text-dim); font-weight: 600; flex: 1;">Max
-                                    Tickers (1–5):</label>
-                                <select id="scout-limit-select" class="mini-input"
-                                    style="width: auto; padding: 2px 6px; font-size: 0.7rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--accent); border-radius: 4px;">
-                                    <option value="1">1</option>
-                                    <option value="2" selected>2</option>
-                                    <option value="3">3</option>
-                                    <option value="4">4</option>
-                                    <option value="5">5</option>
-                                </select>
+                        <div class="sidebar-tab-pane" data-tab-pane="scout-quant" role="tabpanel">
+                            <div class="btn-row" style="gap: 6px; margin-bottom: 8px;">
+                                <button id="colab-run-quant-scout-btn" type="button" class="glow-btn outline mini"
+                                    title="Run Broad 500+ Ticker Quantitative Scout on Colab MCP">🔭 Run Quant Screen (500+)</button>
                             </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <label for="scout-max-rsi-select"
-                                    style="font-size: 0.65rem; color: var(--text-dim); font-weight: 600; flex: 1;">Max
-                                    RSI:</label>
-                                <select id="scout-max-rsi-select" class="mini-input"
-                                    style="min-width: 120px; width: auto; padding: 2px 6px; font-size: 0.7rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--accent); border-radius: 4px;">
-                                    <option value="50">50 — Strict</option>
-                                    <option value="60">60 — Guarded</option>
-                                    <option value="70">70 — Balanced</option>
-                                    <option value="75" selected>75 — Default</option>
-                                    <option value="80">80 — Lenient</option>
-                                    <option value="100">100 — None</option>
-                                </select>
+                            <div id="colab-scout-job-status" class="status-message inline-feedback" style="margin-bottom: 6px;"></div>
+                            <div id="colab-quant-scout-panel" class="colab-scout-panel">
+                                <div class="colab-scout-header">
+                                    <span class="subtitle">Quant Scout Candidates (Colab)</span>
+                                    <button id="colab-refresh-scout-btn" type="button" class="glow-btn outline mini"
+                                        title="Reload cached Quant Scout candidates">↻</button>
+                                </div>
+                                <div id="colab-quant-scout-list" class="colab-scout-list">
+                                    <div class="colab-scout-empty">No Colab Quant Scout candidates loaded.</div>
+                                </div>
                             </div>
                         </div>
-                        <button id="run-ai-scout-btn" class="glow-btn" style="margin-top: 0; font-size: 0.7rem;"
-                            title="Discover new tickers from enabled sectors above">🔭 Scout New Sectors</button>
-                        <div id="ai-scout-status" class="status-message inline-feedback" style="margin-top: 6px;"></div>
+
+                        <div class="sidebar-tab-pane hidden" data-tab-pane="scout-sector" role="tabpanel">
+                            <p style="font-size: 0.62rem; color: var(--text-muted); margin-bottom: 8px; line-height: 1.4;">
+                                Enable sectors below, then scan to discover new candidate tickers from those industries.</p>
+                            <div id="scout-categories-container" class="scout-grid-container"
+                                style="margin-top: 0; min-height: 40px; border: 1px dashed var(--panel-border); padding: 8px; border-radius: 4px; margin-bottom: 10px;">
+                                <!-- Grid injected by JS -->
+                            </div>
+                            <div
+                                style="background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+                                <p
+                                    style="font-size: 0.6rem; color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 10px;">
+                                    Filter Config</p>
+                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                    <label for="scout-limit-select"
+                                        style="font-size: 0.65rem; color: var(--text-muted); font-weight: 600; flex: 1;">Max
+                                        Tickers (1–5):</label>
+                                    <select id="scout-limit-select" class="mini-input"
+                                        style="width: auto; padding: 2px 6px; font-size: 0.7rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--accent); border-radius: 4px;">
+                                        <option value="1">1</option>
+                                        <option value="2" selected>2</option>
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                        <option value="5">5</option>
+                                    </select>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <label for="scout-max-rsi-select"
+                                        style="font-size: 0.65rem; color: var(--text-muted); font-weight: 600; flex: 1;">Max
+                                        RSI:</label>
+                                    <select id="scout-max-rsi-select" class="mini-input"
+                                        style="min-width: 120px; width: auto; padding: 2px 6px; font-size: 0.7rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--accent); border-radius: 4px;">
+                                        <option value="50">50 — Strict</option>
+                                        <option value="60">60 — Guarded</option>
+                                        <option value="70">70 — Balanced</option>
+                                        <option value="75" selected>75 — Default</option>
+                                        <option value="80">80 — Lenient</option>
+                                        <option value="100">100 — None</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button id="run-ai-scout-btn" class="glow-btn" style="margin-top: 0; font-size: 0.7rem;"
+                                title="Discover new tickers from enabled sectors above">🔭 Scout New Sectors</button>
+                            <div id="ai-scout-status" class="status-message inline-feedback" style="margin-top: 6px;"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -380,20 +387,77 @@
                     </div>
                 </div>
 
-                <!-- Quant Analytics & Decision Backtest Panel -->
+                <!-- Unified Quant Lab (Live Quant + Colab MCP Lab) -->
                 <div class="sidebar-card glass-panel manager-card desktop-only">
                     <div class="header-row">
                         <h3 onclick="toggleSection('analytics-quant-content', this)" style="white-space: nowrap;">
-                            <span class="icon">📊</span> Quant &amp; Backtest <span class="chevron"
+                            <span class="icon">📊</span> Quant Lab <span class="chevron"
                                 style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block;">▼</span>
                         </h3>
                     </div>
                     <div id="analytics-quant-content">
-                        <div id="analytics-quant-panel" class="quant-panel">
-                            <span class="empty-msg">Loading quant analytics...</span>
+                        <div class="sidebar-tabs" role="tablist" aria-label="Quant Lab Views">
+                            <button type="button" class="sidebar-tab-btn active" role="tab" aria-selected="true"
+                                data-panel-tab="quant-live">Live Quant</button>
+                            <button type="button" class="sidebar-tab-btn" role="tab" aria-selected="false"
+                                data-panel-tab="quant-colab">Colab MCP Lab</button>
                         </div>
-                        <button id="refresh-analytics-btn" type="button" class="alert-action-btn full"
-                            title="Refresh Quant Analytics & Decision Backtest">↻ Refresh Quant &amp; Backtest</button>
+
+                        <div class="sidebar-tab-pane" data-tab-pane="quant-live" role="tabpanel">
+                            <div id="analytics-quant-panel" class="quant-panel">
+                                <span class="empty-msg">Loading quant analytics...</span>
+                            </div>
+                            <button id="refresh-analytics-btn" type="button" class="alert-action-btn full"
+                                title="Refresh Quant Analytics & Decision Backtest">↻ Refresh Quant &amp; Backtest</button>
+                        </div>
+
+                        <div class="sidebar-tab-pane hidden" data-tab-pane="quant-colab" role="tabpanel">
+                            <div class="colab-mcp-panel">
+                                <div class="colab-mcp-header">
+                                    <span class="subtitle">Colab MCP GPU Compute</span>
+                                    <span id="colab-mcp-transport-status" class="colab-mcp-transport-pill">MCP: Checking...</span>
+                                </div>
+                                <div class="colab-job-grid">
+                                    <button id="colab-run-vol-surface-btn" type="button" class="glow-btn outline mini"
+                                        title="Run Multi-Expiry Vol Surface &amp; 2nd-Order Greeks on Colab MCP">⚡ Vol Surface</button>
+                                    <button id="colab-run-sec-nlp-btn" type="button" class="glow-btn outline mini"
+                                        title="Run Zero-Token GPU SEC/Earnings NLP on Colab MCP">📑 SEC NLP</button>
+                                    <button id="colab-run-walk-forward-btn" type="button" class="glow-btn outline mini"
+                                        title="Run Walk-Forward Rule Backtester on Colab MCP">📊 Backtest</button>
+                                </div>
+                                <label class="colab-llm-opt" title="Opt-in 4-bit quantized 7B LLM refinement when running SEC NLP on an L4 GPU">
+                                    <input type="checkbox" id="colab-sec-use-llm-toggle"> Use L4 7B LLM for SEC NLP
+                                </label>
+                                <div id="colab-mcp-job-status" class="status-message inline-feedback"></div>
+                                <div id="colab-evidence-panel" class="colab-evidence-panel">
+                                    <div class="colab-scout-header">
+                                        <span class="subtitle">Protocol 06 Evidence Pack</span>
+                                        <div class="btn-row" style="gap: 4px;">
+                                            <button id="colab-refresh-evidence-btn" type="button" class="glow-btn outline mini"
+                                                title="Reload Walk-Forward Evidence Pack">↻</button>
+                                            <button id="colab-copy-p06-btn" type="button" class="glow-btn outline mini"
+                                                title="Copy read-only Protocol 06 rule proposal summary">📋 Copy Proposal</button>
+                                        </div>
+                                    </div>
+                                    <div class="colab-p06-banner">Read-Only — Owner Approval Required (never mutates rules.md)</div>
+                                    <div id="colab-evidence-summary" class="colab-evidence-summary">
+                                        <div class="colab-scout-empty">No walk-forward evidence pack loaded.</div>
+                                    </div>
+                                </div>
+                                <details class="colab-offline-details">
+                                    <summary>Offline Colab Calibration (JSON)</summary>
+                                    <div class="btn-row" style="gap: 6px; flex-wrap: wrap; margin-top: 8px;">
+                                        <button id="colab-export-btn" type="button" class="glow-btn outline mini"
+                                            title="Export zero-secret market & history JSON for Google Colab">⬇ Export Colab JSON</button>
+                                        <button id="colab-import-btn" type="button" class="glow-btn outline mini"
+                                            title="Import schema-validated Colab calibration JSON">⬆ Import Calibration</button>
+                                        <input type="file" id="colab-import-file" accept="application/json,.json" hidden>
+                                    </div>
+                                    <div id="colab-calibration-status" class="status-message inline-feedback"
+                                        style="margin-top: 6px; font-size: 0.7rem;">No Colab calibration loaded</div>
+                                </details>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -401,73 +465,16 @@
                 <div class="sidebar-card glass-panel manager-card minimized desktop-only">
                     <div class="header-row">
                         <h3 onclick="toggleSection('admin-content', this)">
-                            <span class="icon">⚙️</span> Admin & Database <span class="chevron"
+                            <span class="icon">⚙️</span> Admin <span class="chevron"
                                 style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
                         </h3>
                     </div>
                     <div id="admin-content" style="display: none;">
-                        <p class="subtitle" style="margin-bottom: 8px;">Decision Log & Database Management</p>
+                        <p class="subtitle" style="margin-bottom: 8px;">Decision Log Maintenance</p>
                         <div class="btn-row">
                             <button id="clear-log-btn" class="glow-btn outline danger mini">🗑️ Clear Decision
                                 Log</button>
                             <div id="clear-log-status" class="status-message inline-feedback"></div>
-                        </div>
-                        <div style="border-top: 1px solid var(--panel-border); margin: 10px 0;"></div>
-                        <p class="subtitle" style="margin-bottom: 6px;">Offline Colab Calibration</p>
-                        <div class="btn-row" style="gap: 6px; flex-wrap: wrap;">
-                            <button id="colab-export-btn" type="button" class="glow-btn outline mini"
-                                title="Export zero-secret market & history JSON for Google Colab">⬇ Export Colab JSON</button>
-                            <button id="colab-import-btn" type="button" class="glow-btn outline mini"
-                                title="Import schema-validated Colab calibration JSON">⬆ Import Calibration</button>
-                            <input type="file" id="colab-import-file" accept="application/json,.json" hidden>
-                        </div>
-                        <div id="colab-calibration-status" class="status-message inline-feedback"
-                            style="margin-top: 6px; font-size: 0.7rem;">No Colab calibration loaded</div>
-                        <div class="colab-mcp-divider"></div>
-                        <div class="colab-mcp-panel">
-                            <div class="colab-mcp-header">
-                                <span class="subtitle">Colab MCP Quant Jobs</span>
-                                <span id="colab-mcp-transport-status" class="colab-mcp-transport-pill">MCP: Checking...</span>
-                            </div>
-                            <div class="colab-job-grid">
-                                <button id="colab-run-vol-surface-btn" type="button" class="glow-btn outline mini"
-                                    title="Run Multi-Expiry Vol Surface &amp; 2nd-Order Greeks on Colab MCP">⚡ Vol Surface</button>
-                                <button id="colab-run-quant-scout-btn" type="button" class="glow-btn outline mini"
-                                    title="Run Broad 500+ Ticker Quantitative Scout on Colab MCP">🔭 Quant Scout</button>
-                                <button id="colab-run-sec-nlp-btn" type="button" class="glow-btn outline mini"
-                                    title="Run Zero-Token GPU SEC/Earnings NLP on Colab MCP">📑 SEC NLP</button>
-                                <button id="colab-run-walk-forward-btn" type="button" class="glow-btn outline mini"
-                                    title="Run Walk-Forward Rule Backtester on Colab MCP">📊 Backtest</button>
-                            </div>
-                            <label class="colab-llm-opt" title="Opt-in 4-bit quantized 7B LLM refinement when running SEC NLP on an L4 GPU">
-                                <input type="checkbox" id="colab-sec-use-llm-toggle"> Use L4 7B LLM for SEC NLP
-                            </label>
-                            <div id="colab-mcp-job-status" class="status-message inline-feedback"></div>
-                            <div id="colab-quant-scout-panel" class="colab-scout-panel">
-                                <div class="colab-scout-header">
-                                    <span class="subtitle">Quant Scout Candidates (Colab)</span>
-                                    <button id="colab-refresh-scout-btn" type="button" class="glow-btn outline mini"
-                                        title="Reload cached Quant Scout candidates">↻</button>
-                                </div>
-                                <div id="colab-quant-scout-list" class="colab-scout-list">
-                                    <div class="colab-scout-empty">No Colab Quant Scout candidates loaded.</div>
-                                </div>
-                            </div>
-                            <div id="colab-evidence-panel" class="colab-evidence-panel">
-                                <div class="colab-scout-header">
-                                    <span class="subtitle">Protocol 06 Evidence Pack</span>
-                                    <div class="btn-row" style="gap: 4px;">
-                                        <button id="colab-refresh-evidence-btn" type="button" class="glow-btn outline mini"
-                                            title="Reload Walk-Forward Evidence Pack">↻</button>
-                                        <button id="colab-copy-p06-btn" type="button" class="glow-btn outline mini"
-                                            title="Copy read-only Protocol 06 rule proposal summary">📋 Copy Proposal</button>
-                                    </div>
-                                </div>
-                                <div class="colab-p06-banner">Read-Only — Owner Approval Required (never mutates rules.md)</div>
-                                <div id="colab-evidence-summary" class="colab-evidence-summary">
-                                    <div class="colab-scout-empty">No walk-forward evidence pack loaded.</div>
-                                </div>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -692,7 +699,7 @@
     </div>
 
     <script src="portfolio.js?v=18.63"></script>
-    <script src="app.js?v=18.83"></script>
+    <script src="app.js?v=18.84"></script>
     <script src="modern_ui.js?v=18.66"></script>
 </body>
 

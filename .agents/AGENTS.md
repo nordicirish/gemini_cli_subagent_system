@@ -115,6 +115,7 @@ Non-obvious traps verified in this repository (keep concise; remove items that s
 - **CDN pinning parity:** `marked` and `dompurify` CDN versions in `static/index.html` must match `package.json` `devDependencies` (`tests/test_chat_sanitizer.py`), with `purify.min.js` loaded before `modern_ui.js`.
 - **Extended & intermittent tests:** Run `test_database_backup_concurrency`, `test_database_migration`, and `test_database_projections` only under `RUN_EXTENDED_TESTS=1`; preserve `test_run_prompt_timeout_triggers_cleanup_and_preserves_exception` as *Intermittent Contention / Timing*.
 - **No blind HTTP User-Agent false positives in security scans:** `python/fetch_stocks.py` contains `Chrome/120.0.0.0` in HTTP headers; bind checks look specifically for socket/uvicorn `0.0.0.0` bindings.
+- **Colab MCP zero-secret egress & `audit_security.py` docstring scan:** Colab MCP outbound bundles must contain zero API keys, cash balances, or personal holdings (`export_colab_bundle`); `scripts/audit_security.py` flags any literal `shell=True` substring under `python/` (even inside comments or docstrings).
 
 ---
 
