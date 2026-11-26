@@ -7,7 +7,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.74">
+    <link rel="stylesheet" href="styles.css?v=18.75">
     <link rel="stylesheet" href="modern_ui.css?v=18.61">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
@@ -423,6 +423,34 @@
                         </div>
                         <div id="colab-calibration-status" class="status-message inline-feedback"
                             style="margin-top: 6px; font-size: 0.7rem;">No Colab calibration loaded</div>
+                        <div class="colab-mcp-divider"></div>
+                        <div class="colab-mcp-panel">
+                            <div class="colab-mcp-header">
+                                <span class="subtitle">Colab MCP Quant Jobs</span>
+                                <span id="colab-mcp-transport-status" class="colab-mcp-transport-pill">MCP: Checking...</span>
+                            </div>
+                            <div class="colab-job-grid">
+                                <button id="colab-run-vol-surface-btn" type="button" class="glow-btn outline mini"
+                                    title="Run Multi-Expiry Vol Surface &amp; 2nd-Order Greeks on Colab MCP">⚡ Vol Surface</button>
+                                <button id="colab-run-quant-scout-btn" type="button" class="glow-btn outline mini"
+                                    title="Run Broad 500+ Ticker Quantitative Scout on Colab MCP">🔭 Quant Scout</button>
+                                <button id="colab-run-sec-nlp-btn" type="button" class="glow-btn outline mini"
+                                    title="Run Zero-Token GPU SEC/Earnings NLP on Colab MCP">📑 SEC NLP</button>
+                                <button id="colab-run-walk-forward-btn" type="button" class="glow-btn outline mini"
+                                    title="Run Walk-Forward Rule Backtester on Colab MCP">📊 Backtest</button>
+                            </div>
+                            <div id="colab-mcp-job-status" class="status-message inline-feedback"></div>
+                            <div id="colab-quant-scout-panel" class="colab-scout-panel">
+                                <div class="colab-scout-header">
+                                    <span class="subtitle">Quant Scout Candidates (Colab)</span>
+                                    <button id="colab-refresh-scout-btn" type="button" class="glow-btn outline mini"
+                                        title="Reload cached Quant Scout candidates">↻</button>
+                                </div>
+                                <div id="colab-quant-scout-list" class="colab-scout-list">
+                                    <div class="colab-scout-empty">No Colab Quant Scout candidates loaded.</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </aside>
@@ -646,7 +674,7 @@
     </div>
 
     <script src="portfolio.js?v=18.63"></script>
-    <script src="app.js?v=18.80"></script>
+    <script src="app.js?v=18.81"></script>
     <script src="modern_ui.js?v=18.66"></script>
 </body>
 

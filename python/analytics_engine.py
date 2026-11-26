@@ -19,8 +19,10 @@ from zoneinfo import ZoneInfo
 
 try:
     from macro_calendar import get_macro_calendar_status
+    from colab_calibration import get_artifact_status, load_colab_artifact
 except ImportError:
     from python.macro_calendar import get_macro_calendar_status
+    from python.colab_calibration import get_artifact_status, load_colab_artifact
 
 NY_TZ = ZoneInfo("America/New_York")
 
@@ -806,6 +808,47 @@ class AnalyticsEngine:
 
         macro_cal = get_macro_calendar_status(now_ny=now_ny)
 
+        colab_vol_surface = {
+            "loaded": False,
+            "fresh": False,
+            "stale": True,
+            "age_hours": None,
+            "generated_at_utc": None,
+            "tickers": {},
+        }
+        try:
+            vs_data = load_colab_artifact("vol_surface")
+            vs_status = get_artifact_status("vol_surface")
+            vs_tickers = (vs_data or {}).get("tickers", {}) if isinstance(vs_data, dict) else {}
+            if isinstance(vs_data, dict) and vs_tickers:
+                freshness = (vs_status or {}).get("freshness", {}) if isinstance(vs_status, dict) else {}
+                gen_at = vs_data.get("generated_at_utc")
+                is_stale = bool(freshness.get("stale", True))
+                colab_vol_surface = {
+                    "loaded": True,
+                    "fresh": bool(freshness.get("fresh", False)),
+                    "stale": is_stale,
+                    "age_hours": freshness.get("age_hours"),
+                    "generated_at_utc": gen_at,
+                    "tickers": {
+                        sym: {**entry, "stale": is_stale, "as_of_utc": gen_at}
+                        for sym, entry in vs_tickers.items()
+                        if isinstance(entry, dict)
+                    },
+                }
+        except Exception:
+            pass
+
+        vs_lookup = colab_vol_surface["tickers"]
+        for pos_item in positions_out:
+            sym = pos_item.get("ticker")
+            if sym and sym in vs_lookup:
+                pos_item["vol_surface"] = dict(vs_lookup[sym])
+        for wl_item in watchlist_out:
+            sym = wl_item.get("ticker")
+            if sym and sym in vs_lookup:
+                wl_item["vol_surface"] = dict(vs_lookup[sym])
+
         return {
             "as_of_ny": now_ny.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "friction_hurdles": {
@@ -817,6 +860,7 @@ class AnalyticsEngine:
             "global_vetoes": global_vetoes,
             "positions": positions_out,
             "watchlist_signals": watchlist_out,
+            "colab_vol_surface": colab_vol_surface,
         }
 
     def format_regime_engine_response(
@@ -854,6 +898,7 @@ class AnalyticsEngine:
         bundle = self.evaluate(live_state, ssot=ssot, ny_dt=ny_dt)
         tickers = live_state.get("tickers", []) if isinstance(live_state, dict) else []
         gex_rows: List[Dict[str, Any]] = []
+        vs_lookup = (bundle.get("colab_vol_surface") or {}).get("tickers", {})
         for item in (tickers or []):
             if not isinstance(item, dict) or not item.get("ticker"):
                 continue
@@ -861,7 +906,7 @@ class AnalyticsEngine:
             tracker = self._get_tracker_snapshot(sym)
             chg_pct = _safe_float(item.get("session_change_pct")) or 0.0
             ssr_override = bool(item.get("ssr_active")) or chg_pct <= -10.0
-            gex_rows.append({
+            gex_entry = {
                 "ticker": sym,
                 "dealer_posture": str(item.get("dealer_posture") or "NEUTRAL").upper(),
                 "net_gex_total": _safe_float(item.get("net_gex_total")),
@@ -870,7 +915,10 @@ class AnalyticsEngine:
                 "ssr_override": ssr_override,
                 "gamma_whiplash_lock": tracker["gamma_whiplash_lock"],
                 "gamma_flicker_overbought": tracker["gamma_flicker_overbought"],
-            })
+            }
+            if sym in vs_lookup:
+                gex_entry["vol_surface"] = dict(vs_lookup[sym])
+            gex_rows.append(gex_entry)
         payload = {
             "source": "python_deterministic",
             "as_of_ny": bundle["as_of_ny"],

@@ -455,6 +455,7 @@ async function init() {
     await fetchAlertsAndSentinel();
     await fetchAnalyticsAndBacktest();
     if (typeof fetchCalibrationStatus === 'function') fetchCalibrationStatus();
+    if (typeof fetchColabMcpStatus === 'function') fetchColabMcpStatus();
     // Google Drive sync disabled in this repo
     pollData();
     setInterval(() => {
@@ -973,8 +974,20 @@ function renderTable(tickers, state) {
                     let dpClass = 'dealer-neutral';
                     if (gexVal > 0.005) dpClass = 'dealer-long';
                     else if (gexVal < -0.005) dpClass = 'dealer-short';
+
+                    const vsMap = _lastQuantAnalytics && _lastQuantAnalytics.colab_vol_surface && _lastQuantAnalytics.colab_vol_surface.tickers;
+                    const vs = vsMap && vsMap[sym] ? vsMap[sym] : null;
+                    let vsTitleAttr = '';
+                    let vsTagHtml = '';
+                    if (vs) {
+                        const staleTxt = vs.stale ? ' [STALE]' : '';
+                        const tip = `Vol Surface (${vs.dealer_flow_regime || 'NEUTRAL'}${staleTxt}): Flip $${Number(vs.gamma_flip_multi_expiry || 0).toFixed(2)} | Vanna ${Number(vs.vanna_exposure || 0).toFixed(2)} | Charm ${Number(vs.charm_decay_bias || 0).toFixed(2)} | 25d Skew ${Number(vs.svi_skew_25d || 0).toFixed(2)}%`;
+                        vsTitleAttr = ` title="${_escAlertHtml(tip)}"`;
+                        const tagLabel = vs.stale ? 'STALE' : (Number(vs.vanna_exposure || 0) >= 0 ? 'V+' : 'V-');
+                        vsTagHtml = `<span class="vol-surface-tag${vs.stale ? ' is-stale' : ''}">${tagLabel}</span>`;
+                    }
                     
-                    return `<span class="dealer-badge ${dpClass}">${gexVal.toFixed(3)}${chevron}</span>`;
+                    return `<span class="dealer-badge ${dpClass}"${vsTitleAttr}>${gexVal.toFixed(3)}${chevron}</span>${vsTagHtml}`;
                 })()}</td>
                 <td class="score-col">
                     <span class="score-badge ${scoreBadge}">${scoreStr}</span>${noteHtml}
@@ -2721,6 +2734,179 @@ if (dColabImportBtn && dColabImportFile) {
     });
 }
 window.fetchCalibrationStatus = fetchCalibrationStatus;
+
+// Google Colab MCP Quant Jobs & Quant Scout Review
+async function fetchQuantScoutCandidates() {
+    const listEl = document.getElementById('colab-quant-scout-list');
+    if (!listEl) return;
+    try {
+        const res = await fetch(`${API_BASE}/colab/artifacts/quant_scout`);
+        if (!res.ok) return;
+        const payload = await res.json();
+        const data = payload && payload.data;
+        const cands = data && Array.isArray(data.candidates) ? data.candidates : [];
+        if (!payload.loaded || !cands.length) {
+            listEl.innerHTML = '<div class="colab-scout-empty">No Colab Quant Scout candidates loaded.</div>';
+            return;
+        }
+        const staleBadge = payload.freshness && payload.freshness.stale
+            ? '<div class="colab-scout-empty">Cached scout data is stale (past 48h TTL).</div>'
+            : '';
+        listEl.innerHTML = staleBadge + cands.slice(0, 10).map((c) => {
+            const sym = _escAlertHtml(String(c.ticker || '').toUpperCase());
+            const score = Number.isFinite(Number(c.composite_score)) ? Number(c.composite_score).toFixed(1) : '—';
+            const rs3m = Number.isFinite(Number(c.rs_3m_pct)) ? Number(c.rs_3m_pct).toFixed(1) : '—';
+            const corr = Number.isFinite(Number(c.corr_to_portfolio)) ? Number(c.corr_to_portfolio).toFixed(2) : '—';
+            const cluster = _escAlertHtml(String(c.cluster_label || ''));
+            const rationale = _escAlertHtml(String(c.rationale || ''));
+            return `
+                <div class="colab-scout-row" title="${rationale}">
+                    <div class="colab-scout-meta">
+                        <strong>${sym} · ${score}</strong>
+                        <span>3m ${rs3m}% | ρ ${corr} | ${cluster}</span>
+                    </div>
+                    <button type="button" class="colab-scout-promote-btn" data-scout-ticker="${sym}">+ Watch</button>
+                </div>
+            `;
+        }).join('');
+    } catch (_) {}
+}
+
+async function promoteQuantScoutTicker(ticker, btnEl) {
+    const sym = String(ticker || '').trim().toUpperCase();
+    const jobStatusEl = document.getElementById('colab-mcp-job-status');
+    if (!sym) return;
+    if (btnEl) btnEl.disabled = true;
+    try {
+        const wlRes = await fetch(`${API_BASE}/watchlist`);
+        if (!wlRes.ok) throw new Error(`Failed to load watchlist (HTTP ${wlRes.status})`);
+        const wlData = await wlRes.json();
+        const rawList = Array.isArray(wlData) ? wlData : (Array.isArray(wlData.watchlist) ? wlData.watchlist : []);
+        const current = rawList.map((t) => String(t).trim().toUpperCase()).filter(Boolean);
+        if (!current.includes(sym)) current.push(sym);
+        const saveRes = await fetch(`${API_BASE}/watchlist`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(current),
+        });
+        const saveData = await saveRes.json().catch(() => ({}));
+        if (!saveRes.ok) throw new Error(saveData.detail || `HTTP ${saveRes.status}`);
+        if (btnEl) btnEl.textContent = '✓ Added';
+        if (jobStatusEl) {
+            jobStatusEl.textContent = `Promoted ${sym} to Watchlist.`;
+            jobStatusEl.className = 'status-message inline-feedback text-green';
+        }
+        if (typeof fetchWatchlist === 'function') fetchWatchlist();
+    } catch (err) {
+        if (btnEl) btnEl.disabled = false;
+        if (jobStatusEl) {
+            jobStatusEl.textContent = err.message || `Failed to promote ${sym}.`;
+            jobStatusEl.className = 'status-message inline-feedback text-red';
+        }
+    }
+}
+
+async function fetchColabMcpStatus() {
+    const pillEl = document.getElementById('colab-mcp-transport-status');
+    if (!pillEl) return;
+    try {
+        const res = await fetch(`${API_BASE}/colab/status`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const tr = data && data.transport ? data.transport : {};
+        const ready = Boolean(tr.ready);
+        pillEl.textContent = ready ? `MCP: Ready (${tr.mode})` : `MCP: Setup (${tr.mode})`;
+        pillEl.className = `colab-mcp-transport-pill${ready ? ' is-ready' : ''}`;
+        if (tr.setup_hint) pillEl.title = tr.setup_hint;
+        if (data && data.artifacts && data.artifacts.quant_scout && data.artifacts.quant_scout.loaded) {
+            await fetchQuantScoutCandidates();
+        }
+    } catch (_) {}
+}
+
+async function launchColabJob(jobType, btnEl) {
+    const jobStatusEl = document.getElementById('colab-mcp-job-status');
+    if (btnEl) btnEl.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/colab/jobs/${encodeURIComponent(jobType)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        const jobId = data.job_id;
+        if (jobStatusEl) {
+            jobStatusEl.textContent = `Queued ${jobType} (${jobId})...`;
+            jobStatusEl.className = 'status-message inline-feedback';
+        }
+        if (jobId) {
+            const timer = setInterval(async () => {
+                try {
+                    const pRes = await fetch(`${API_BASE}/colab/jobs/${encodeURIComponent(jobId)}`);
+                    if (!pRes.ok) {
+                        clearInterval(timer);
+                        if (btnEl) btnEl.disabled = false;
+                        return;
+                    }
+                    const pData = await pRes.json();
+                    if (pData.status === 'succeeded') {
+                        clearInterval(timer);
+                        if (btnEl) btnEl.disabled = false;
+                        if (jobStatusEl) {
+                            jobStatusEl.textContent = `${jobType} completed cleanly.`;
+                            jobStatusEl.className = 'status-message inline-feedback text-green';
+                        }
+                        await fetchColabMcpStatus();
+                        if (typeof fetchAnalyticsAndBacktest === 'function') fetchAnalyticsAndBacktest();
+                    } else if (pData.status === 'failed') {
+                        clearInterval(timer);
+                        if (btnEl) btnEl.disabled = false;
+                        if (jobStatusEl) {
+                            jobStatusEl.textContent = pData.error || `${jobType} failed.`;
+                            jobStatusEl.className = 'status-message inline-feedback text-red';
+                        }
+                    } else if (jobStatusEl && pData.progress) {
+                        jobStatusEl.textContent = pData.progress;
+                    }
+                } catch (_) {
+                    clearInterval(timer);
+                    if (btnEl) btnEl.disabled = false;
+                }
+            }, 2000);
+        }
+    } catch (err) {
+        if (btnEl) btnEl.disabled = false;
+        if (jobStatusEl) {
+            jobStatusEl.textContent = err.message || `Failed to start ${jobType}.`;
+            jobStatusEl.className = 'status-message inline-feedback text-red';
+        }
+    }
+}
+
+const dColabVolBtn = document.getElementById('colab-run-vol-surface-btn');
+const dColabScoutBtn = document.getElementById('colab-run-quant-scout-btn');
+const dColabSecBtn = document.getElementById('colab-run-sec-nlp-btn');
+const dColabBtBtn = document.getElementById('colab-run-walk-forward-btn');
+const dColabScoutRefreshBtn = document.getElementById('colab-refresh-scout-btn');
+const dColabScoutList = document.getElementById('colab-quant-scout-list');
+
+if (dColabVolBtn) dColabVolBtn.addEventListener('click', () => launchColabJob('vol_surface', dColabVolBtn));
+if (dColabScoutBtn) dColabScoutBtn.addEventListener('click', () => launchColabJob('quant_scout', dColabScoutBtn));
+if (dColabSecBtn) dColabSecBtn.addEventListener('click', () => launchColabJob('sec_nlp', dColabSecBtn));
+if (dColabBtBtn) dColabBtBtn.addEventListener('click', () => launchColabJob('walk_forward', dColabBtBtn));
+if (dColabScoutRefreshBtn) dColabScoutRefreshBtn.addEventListener('click', () => fetchQuantScoutCandidates());
+if (dColabScoutList) {
+    dColabScoutList.addEventListener('click', (ev) => {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('.colab-scout-promote-btn') : null;
+        if (btn) promoteQuantScoutTicker(btn.getAttribute('data-scout-ticker'), btn);
+    });
+}
+
+window.fetchColabMcpStatus = fetchColabMcpStatus;
+window.fetchQuantScoutCandidates = fetchQuantScoutCandidates;
+window.launchColabJob = launchColabJob;
+window.promoteQuantScoutTicker = promoteQuantScoutTicker;
 
 // Google Drive sync disabled in this repo
 

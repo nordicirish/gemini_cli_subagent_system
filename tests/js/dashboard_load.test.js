@@ -112,6 +112,25 @@ const API = {
         watchlist_signals: [
             { ticker: 'PLTR', setup: 'PULLBACK_CONTINUATION', strategy_permissible: false, rvol: 0.62 },
         ],
+        colab_vol_surface: {
+            loaded: true,
+            fresh: true,
+            stale: false,
+            generated_at_utc: '2026-11-26T20:00:00Z',
+            tickers: {
+                NVDA: {
+                    atm_iv_30d: 44.5,
+                    svi_skew_25d: -4.1,
+                    gamma_flip_multi_expiry: 118.5,
+                    net_gex_multi_expiry: 320.0,
+                    vanna_exposure: 18.5,
+                    charm_decay_bias: -3.2,
+                    dealer_flow_regime: 'VANNA_TAILWIND',
+                    expiries_analyzed: 5,
+                    stale: false,
+                },
+            },
+        },
     },
     '/api/analytics/execution': {
         source: 'python_deterministic',
@@ -150,6 +169,41 @@ const API = {
         schema_version: '1.0',
         tickers_calibrated: ['NVDA'],
         imported_at_utc: '2026-11-26T17:00:00Z',
+    },
+    '/api/colab/status': {
+        transport: {
+            mode: 'stdio',
+            ready: false,
+            mcp_sdk_available: true,
+            uvx_available: false,
+            setup_hint: 'Install uv',
+        },
+        artifacts: {
+            vol_surface: { loaded: true, freshness: { fresh: true, stale: false } },
+            quant_scout: { loaded: true, freshness: { fresh: true, stale: false } },
+            sec_nlp: { loaded: false },
+            backtest_evidence: { loaded: false },
+        },
+    },
+    '/api/colab/artifacts/quant_scout': {
+        artifact_type: 'quant_scout',
+        loaded: true,
+        freshness: { fresh: true, stale: false, age_hours: 1.0, ttl_hours: 48.0 },
+        data: {
+            schema_version: '2.0',
+            universe_size: 520,
+            candidates: [
+                {
+                    ticker: 'SMCI',
+                    composite_score: 77.5,
+                    rs_3m_pct: 29.4,
+                    corr_to_portfolio: 0.18,
+                    vol_regime: 'NORMAL',
+                    cluster_label: 'LOW_CORR<img src=x onerror=alert(1)>',
+                    rationale: 'Orthogonal alpha <script>evil()</script>',
+                },
+            ],
+        },
     },
     '/api/analytics/sec/NVDA': {
         status: 'ok',
@@ -207,11 +261,16 @@ async function main() {
     window.addEventListener('unhandledrejection', (e) => errors.push(`unhandled rejection: ${e.reason}`));
 
     const calls = [];
+    const watchlistPosts = [];
     let scoutCategories = [];
     window.fetch = async (url, opts = {}) => {
         const pathOnly = String(url).split('?')[0];
         const method = (opts.method || 'GET').toUpperCase();
         calls.push(`${method} ${pathOnly}`);
+        if (pathOnly === '/api/watchlist' && method === 'POST') {
+            watchlistPosts.push(JSON.parse(opts.body || '[]'));
+            return { ok: true, status: 200, json: async () => ({ status: 'success' }) };
+        }
         if (pathOnly === '/api/scout_categories') {
             if (method === 'POST') {
                 scoutCategories = JSON.parse(opts.body || '[]');
@@ -726,6 +785,31 @@ async function main() {
         const calSt = window.document.getElementById('colab-calibration-status');
         assert(expBtn && impBtn, 'Colab calibration export/import buttons missing');
         assert(calSt && calSt.textContent.includes('1 ticker priors'), `unexpected #colab-calibration-status: ${calSt && calSt.textContent}`);
+    });
+    const promoteBtn = window.document.querySelector('#colab-quant-scout-list .colab-scout-promote-btn[data-scout-ticker="SMCI"]');
+    if (promoteBtn) {
+        promoteBtn.click();
+        await new Promise((r) => setTimeout(r, 80));
+    }
+    check('Stage M2: Colab MCP panel, job buttons, Vol Surface GEX enrichment & XSS-safe Quant Scout promotion work', () => {
+        const pill = window.document.getElementById('colab-mcp-transport-status');
+        const btnIds = ['colab-run-vol-surface-btn', 'colab-run-quant-scout-btn', 'colab-run-sec-nlp-btn', 'colab-run-walk-forward-btn'];
+        btnIds.forEach((id) => assert(window.document.getElementById(id), `Missing ${id}`));
+        assert(pill && pill.textContent.includes('MCP: Setup (stdio)'), `Unexpected pill: ${pill && pill.textContent}`);
+
+        const vsTag = window.document.querySelector('.vol-surface-tag');
+        assert(vsTag && vsTag.textContent === 'V+', `Expected V+ vol-surface tag, got ${vsTag && vsTag.textContent}`);
+        const badgeWithTip = window.document.querySelector('.dealer-badge[title*="VANNA_TAILWIND"]');
+        assert(badgeWithTip, 'Expected GEX badge tooltip to include VANNA_TAILWIND');
+
+        const scoutList = window.document.getElementById('colab-quant-scout-list');
+        assert(scoutList && scoutList.textContent.includes('SMCI'), 'Expected SMCI in Quant Scout list');
+        assert.strictEqual(scoutList.querySelectorAll('img, script').length, 0, 'XSS elements must never render in Quant Scout list');
+
+        assert(promoteBtn, 'Missing + Watch button for SMCI');
+        assert(calls.includes('POST /api/watchlist'), 'Expected POST /api/watchlist on + Watch click');
+        const lastWlPost = watchlistPosts[watchlistPosts.length - 1];
+        assert.deepStrictEqual(lastWlPost, ['AMD', 'SMCI']);
     });
 
     window.close();
