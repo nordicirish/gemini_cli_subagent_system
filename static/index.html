@@ -7,8 +7,8 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.73">
-    <link rel="stylesheet" href="modern_ui.css?v=18.60">
+    <link rel="stylesheet" href="styles.css?v=18.74">
+    <link rel="stylesheet" href="modern_ui.css?v=18.61">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
         rel="stylesheet">
@@ -115,23 +115,48 @@
 
                 <!-- Data Table -->
                 <div class="table-container glass-panel" id="main-data-table-container" style="grid-area: 1 / 1;">
+                    <div class="table-toolbar" id="table-toolbar">
+                        <div class="table-toolbar-left">
+                            <div class="table-search-wrap">
+                                <input type="search" id="table-filter-input" class="table-search-input"
+                                    placeholder="Filter ticker… (/)" autocomplete="off"
+                                    aria-label="Filter market table">
+                                <button type="button" id="table-filter-clear" class="table-search-clear"
+                                    title="Clear filter" aria-label="Clear filter">&times;</button>
+                            </div>
+                            <div class="table-filter-pills" role="group" aria-label="Row filter">
+                                <button type="button" class="table-filter-pill active"
+                                    data-table-filter="all" aria-pressed="true">All</button>
+                                <button type="button" class="table-filter-pill"
+                                    data-table-filter="held" aria-pressed="false">Held</button>
+                                <button type="button" class="table-filter-pill"
+                                    data-table-filter="signals" aria-pressed="false">Signals (|Score|≥3)</button>
+                            </div>
+                        </div>
+                        <div class="table-toolbar-right">
+                            <span class="kbd-hint"
+                                title="Shortcuts: / filter, T toggle tools sidebar, C toggle AI Council, Esc close">/ Filter · T Tools · C Council</span>
+                            <button type="button" id="table-density-btn" class="table-density-btn"
+                                aria-pressed="false" title="Toggle compact table rows">Compact</button>
+                        </div>
+                    </div>
                     <table id="data-table">
                         <thead>
                             <tr>
-                                <th>Ticker</th>
-                                <th class="num-col">Price</th>
-                                <th class="num-col">Day %</th>
-                                <th class="num-col">Gap %</th>
-                                <th class="num-col">Volume</th>
-                                <th class="num-col" title="Relative Volume vs 20-day average (time-paced)">rVol</th>
-                                <th class="num-col">ATR %</th>
-                                <th class="num-col">RSI</th>
-                                <th class="num-col">VWAP</th>
+                                <th class="sortable-th" data-sort-key="ticker">Ticker<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th" data-sort-key="price">Price<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th" data-sort-key="session_change_pct">Day %<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th" data-sort-key="gap_percent">Gap %<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th" data-sort-key="volume">Volume<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th" data-sort-key="rvol" title="Relative Volume vs 20-day average (time-paced)">rVol<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th" data-sort-key="atr_percent">ATR %<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th" data-sort-key="rsi">RSI<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th" data-sort-key="vwap">VWAP<span class="sort-indicator" aria-hidden="true"></span></th>
                                 <th>MACD</th>
                                 <th>Trend</th>
                                 <th>Fib Target</th>
                                 <th>Dealer</th>
-                                <th class="score-col">Score</th>
+                                <th class="score-col sortable-th" data-sort-key="score">Score<span class="sort-indicator" aria-hidden="true"></span></th>
                             </tr>
                         </thead>
                         <tbody id="table-body">
@@ -433,154 +458,97 @@
     <div class="modern-chat-overlay" id="chat-window">
         <div class="modern-chat-panel">
             <div class="modern-chat-header">
-                <div class="modern-header-left" style="display: flex; align-items: center; gap: 14px;">
+                <div class="modern-header-left">
                     <div class="modern-logo-box">⚖️</div>
-                    <h2 style="margin: 0; font-size: 1.1rem; letter-spacing: 1px; white-space: nowrap;">GEMINI AI
-                        COUNCIL</h2>
+                    <h2 class="modern-header-title">GEMINI AI COUNCIL</h2>
                 </div>
-                <div class="modern-header-right" style="display: flex; align-items: center; gap: 8px;">
-                    <input type="checkbox" id="paid-tiers-toggle" style="display:none;">
-                    <input type="checkbox" id="gemini-subscription-toggle" checked style="display:none;">
-                    <span id="context-caching-toggle-container" style="display:none;"><input type="checkbox"
+                <div class="modern-header-right">
+                    <input type="checkbox" id="paid-tiers-toggle" hidden>
+                    <input type="checkbox" id="gemini-subscription-toggle" checked hidden>
+                    <span id="context-caching-toggle-container" hidden><input type="checkbox"
                             id="context-caching-toggle" checked></span>
 
-                    <script>
-                        let currentChatSize = 0.95;
-                        function adjustChatSize(dir) {
-                            currentChatSize = Math.min(1.6, Math.max(0.6, currentChatSize + dir * 0.1));
-                            let styleEl = document.getElementById('dynamic-chat-style');
-                            if (!styleEl) { styleEl = document.createElement('style'); styleEl.id = 'dynamic-chat-style'; document.head.appendChild(styleEl); }
-                            styleEl.textContent = `.modern-message { font-size: ${currentChatSize}rem !important; }`;
-                        }
-                    </script>
-
                     <!-- Model selector -->
-                    <select id="model-selector" autocomplete="off"
-                        style="background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15); color: white; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 0.72rem; outline: none; max-width: 210px; height: 34px;">
-                        <option value="" style="background:#1a1a1a;">Loading models...</option>
+                    <select id="model-selector" class="chat-model-select" autocomplete="off">
+                        <option value="">Loading models...</option>
                     </select>
 
                     <!-- ⚙️ Settings gear popover -->
-                    <div style="position: relative;">
-                        <button id="settings-gear-btn" title="Settings"
-                            style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: white; width: 34px; height: 34px; border-radius: 8px; cursor: pointer; font-size: 1rem; display: flex; align-items: center; justify-content: center; transition: background 0.2s; flex-shrink:0;">⚙️</button>
+                    <div class="chat-settings-wrap">
+                        <button id="settings-gear-btn" class="chat-gear-btn" type="button" title="Settings">⚙️</button>
 
-                        <div id="settings-popover"
-                            style="display:none; position:absolute; top:calc(100% + 8px); right:0; width:290px; background:#0d1117; border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:18px; z-index:9999; box-shadow:0 12px 40px rgba(0,0,0,0.6); animation: popover-in 0.15s ease-out;">
-                            <style>
-                                @keyframes popover-in {
-                                    from {
-                                        opacity: 0;
-                                        transform: translateY(-8px) scale(0.98);
-                                    }
-
-                                    to {
-                                        opacity: 1;
-                                        transform: translateY(0) scale(1);
-                                    }
-                                }
-                            </style>
+                        <div id="settings-popover" class="settings-popover">
 
                             <!-- Plan banner (shown when subscription active) -->
-                            <div id="settings-plan-banner"
-                                style="background:linear-gradient(135deg,rgba(56,189,248,0.12),rgba(99,102,241,0.12)); border:1px solid rgba(56,189,248,0.25); border-radius:10px; padding:10px 14px; margin-bottom:16px; display:flex; align-items:center; gap:10px;">
-                                <span style="font-size:1.2rem;">✅</span>
+                            <div id="settings-plan-banner" class="settings-plan-banner">
+                                <span class="settings-plan-icon">✅</span>
                                 <div>
-                                    <div
-                                        style="font-size:0.72rem; font-weight:700; color:#38bdf8; letter-spacing:0.5px;">
-                                        GEMINI PLAN ACTIVE</div>
-                                    <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Pro models &amp;
-                                        caching auto-managed</div>
+                                    <div class="settings-plan-title">GEMINI PLAN ACTIVE</div>
+                                    <div class="settings-plan-sub">Pro models &amp; caching auto-managed</div>
                                 </div>
                             </div>
 
                             <!-- Account section -->
-                            <div
-                                style="font-size:0.58rem; font-weight:700; letter-spacing:1.2px; color:#8b949e; text-transform:uppercase; margin-bottom:10px;">
-                                Account</div>
-                            <div
-                                style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+                            <div class="settings-section-label">Account</div>
+                            <div class="settings-row">
                                 <div>
-                                    <div style="font-size:0.8rem; color:white; font-weight:500;">Gemini Plan</div>
-                                    <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Pro models, higher
-                                        limits, auto-caching</div>
+                                    <div class="settings-item-title">Gemini Plan</div>
+                                    <div class="settings-item-sub">Pro models, higher limits, auto-caching</div>
                                 </div>
-                                <div id="settings-sub-toggle" onclick="window.chatUI&&window.chatUI.toggleSettingsSub()"
-                                    style="width:42px;height:24px;background:#238636;border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
-                                    <div id="settings-sub-knob"
-                                        style="position:absolute;top:4px;left:22px;width:16px;height:16px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);">
-                                    </div>
+                                <div id="settings-sub-toggle" class="settings-switch"
+                                    onclick="window.chatUI&&window.chatUI.toggleSettingsSub()">
+                                    <div id="settings-sub-knob" class="settings-switch-knob"></div>
                                 </div>
                             </div>
 
-                            <div style="border-top:1px solid rgba(255,255,255,0.07);margin:14px 0;"></div>
+                            <div class="settings-divider"></div>
 
                             <!-- Display section -->
-                            <div
-                                style="font-size:0.58rem; font-weight:700; letter-spacing:1.2px; color:#8b949e; text-transform:uppercase; margin-bottom:10px;">
-                                Display</div>
-                            <div
-                                style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
-                                <div style="font-size:0.8rem; color:white; font-weight:500;">Text Size</div>
-                                <div style="display:flex;gap:5px;">
-                                    <button onclick="adjustChatSize(-1)"
-                                        style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:white;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.75rem;">A−</button>
-                                    <button onclick="adjustChatSize(1)"
-                                        style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:white;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;">A+</button>
+                            <div class="settings-section-label">Display</div>
+                            <div class="settings-row compact">
+                                <div class="settings-item-title">Text Size</div>
+                                <div class="settings-size-actions">
+                                    <button type="button" class="settings-size-btn" onclick="adjustChatSize(-1)">A−</button>
+                                    <button type="button" class="settings-size-btn" onclick="adjustChatSize(1)">A+</button>
                                 </div>
                             </div>
 
                             <!-- Advanced section (hidden for plan users) -->
                             <div id="settings-advanced-section">
-                                <div style="border-top:1px solid rgba(255,255,255,0.07);margin:14px 0;"></div>
-                                <div
-                                    style="font-size:0.58rem; font-weight:700; letter-spacing:1.2px; color:#8b949e; text-transform:uppercase; margin-bottom:10px;">
-                                    Advanced</div>
-                                <div
-                                    style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+                                <div class="settings-divider"></div>
+                                <div class="settings-section-label">Advanced</div>
+                                <div class="settings-row">
                                     <div>
-                                        <div style="font-size:0.8rem; color:white; font-weight:500;">Include Paid Models
-                                        </div>
-                                        <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Show Pro/Preview
-                                            tiers in selector</div>
+                                        <div class="settings-item-title">Include Paid Models</div>
+                                        <div class="settings-item-sub">Show Pro/Preview tiers in selector</div>
                                     </div>
-                                    <div id="settings-paid-toggle"
-                                        onclick="window.chatUI&&window.chatUI.toggleSettingsPaid()"
-                                        style="width:42px;height:24px;background:#30363d;border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
-                                        <div id="settings-paid-knob"
-                                            style="position:absolute;top:4px;left:4px;width:16px;height:16px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);">
-                                        </div>
+                                    <div id="settings-paid-toggle" class="settings-switch off"
+                                        onclick="window.chatUI&&window.chatUI.toggleSettingsPaid()">
+                                        <div id="settings-paid-knob" class="settings-switch-knob"></div>
                                     </div>
                                 </div>
-                                <div style="display:flex; align-items:center; justify-content:space-between;">
+                                <div class="settings-row last">
                                     <div>
-                                        <div style="font-size:0.8rem; color:white; font-weight:500;">Context Caching
-                                        </div>
-                                        <div style="font-size:0.62rem; color:#8b949e; margin-top:2px;">Managed
-                                            automatically by local runtime</div>
+                                        <div class="settings-item-title">Context Caching</div>
+                                        <div class="settings-item-sub">Managed automatically by local runtime</div>
                                     </div>
-                                    <div id="settings-caching-toggle"
-                                        onclick="window.chatUI&&window.chatUI.toggleSettingsCaching()"
-                                        style="width:42px;height:24px;background:#238636;border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
-                                        <div id="settings-caching-knob"
-                                            style="position:absolute;top:4px;left:22px;width:16px;height:16px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);">
-                                        </div>
+                                    <div id="settings-caching-toggle" class="settings-switch"
+                                        onclick="window.chatUI&&window.chatUI.toggleSettingsCaching()">
+                                        <div id="settings-caching-knob" class="settings-switch-knob"></div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <button id="update-analysis-btn" title="Run fresh Council market & portfolio analysis"
-                        style="background:rgba(56,189,248,0.14);border:1px solid rgba(56,189,248,0.38);color:#7dd3fc;padding:0 12px;height:34px;border-radius:8px;cursor:pointer;font-size:0.78rem;font-weight:600;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span>🔄</span>
+                    <button id="update-analysis-btn" type="button" class="chat-header-pill primary"
+                        title="Run fresh Council market &amp; portfolio analysis"><span>🔄</span>
                         UPDATE ANALYSIS</button>
-                    <button id="new-chat-btn" title="New Conversation"
-                        style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:white;padding:0 14px;height:34px;border-radius:8px;cursor:pointer;font-size:0.78rem;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span>+</span>
-                        NEW</button>
-                    <button id="history-chat-btn" title="History"
-                        style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:white;padding:0 14px;height:34px;border-radius:8px;cursor:pointer;font-size:0.78rem;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span>📂</span>
-                        SESSIONS</button>
-                    <button class="modern-ctrl-btn" id="chat-close-btn">×</button>
+                    <button id="new-chat-btn" type="button" class="chat-header-pill"
+                        title="New Conversation"><span>+</span> NEW</button>
+                    <button id="history-chat-btn" type="button" class="chat-header-pill"
+                        title="History"><span>📂</span> SESSIONS</button>
+                    <button class="modern-ctrl-btn" type="button" id="chat-close-btn">×</button>
                 </div>
             </div>
 
@@ -592,16 +560,15 @@
             <div class="modern-input-area">
                 <textarea id="chat-input" placeholder="Ask Gemini..." rows="1"></textarea>
                 <div class="modern-input-footer">
-                    <div class="modern-input-tools" style="display:flex;align-items:center;gap:20px;">
-                        <span id="chat-status-indicator"
-                            style="color:#8b949e;font-size:0.85rem;font-weight:500;letter-spacing:0.5px;">Status:
-                            Ready</span>
+                    <div class="modern-input-tools">
+                        <span id="chat-status-indicator" class="chat-status-indicator">Status: Ready</span>
+                        <button type="button" id="toggle-intraday-ctx-btn" class="chat-ctx-toggle-btn"
+                            aria-pressed="false"
+                            title="Attach compact 1m intraday structure telemetry to next Council prompt">📈 1m Context: OFF</button>
                     </div>
-                    <button class="modern-send-btn" id="send-chat-btn"
-                        style="width:auto;border-radius:12px;padding:10px 24px;font-weight:700;letter-spacing:1px;font-size:0.9rem;display:flex;align-items:center;gap:10px;"><span>✦</span>
+                    <button class="modern-send-btn chat-action-btn" type="button" id="send-chat-btn"><span>✦</span>
                         CHAT WITH THE COUNCIL</button>
-                    <button class="modern-stop-btn" id="stop-chat-btn"
-                        style="display:none;width:auto;border-radius:12px;padding:10px 24px;font-weight:700;letter-spacing:1px;font-size:0.9rem;background:#da3633;border:none;color:white;cursor:pointer;align-items:center;gap:10px;"><span>⏸</span>
+                    <button class="modern-stop-btn chat-action-btn" type="button" id="stop-chat-btn"><span>⏸</span>
                         STOP</button>
                 </div>
             </div>
@@ -667,14 +634,9 @@
         </div>
     </div>
 
-    <!-- Hidden Offscreen Container for Automated Chart Rendering & Capture -->
-    <div id="offscreen-chart-container"
-        style="position: fixed; left: -9999px; top: -9999px; width: 920px; height: 500px; opacity: 0; pointer-events: none;">
-    </div>
-
     <script src="portfolio.js?v=18.63"></script>
-    <script src="app.js?v=18.78"></script>
-    <script src="modern_ui.js?v=18.65"></script>
+    <script src="app.js?v=18.79"></script>
+    <script src="modern_ui.js?v=18.66"></script>
 </body>
 
 </html>

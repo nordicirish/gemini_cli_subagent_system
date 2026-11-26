@@ -46,6 +46,26 @@ function escapeHtml(value) {
     ));
 }
 
+let currentChatSize = 0.95;
+function _applyChatFontSize(sizeRem) {
+    currentChatSize = Math.min(1.6, Math.max(0.6, Number(sizeRem) || 0.95));
+    let styleEl = document.getElementById('dynamic-chat-style');
+    if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'dynamic-chat-style';
+        document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = `.modern-message { font-size: ${currentChatSize.toFixed(2)}rem !important; }`;
+}
+
+function adjustChatSize(dir) {
+    _applyChatFontSize(currentChatSize + dir * 0.1);
+    try {
+        localStorage.setItem('gem_chat_font_size', String(currentChatSize.toFixed(2)));
+    } catch (_) {}
+}
+window.adjustChatSize = adjustChatSize;
+
 const ModernChat = {
     overlay: null,
     launcher: null,
@@ -130,6 +150,35 @@ const ModernChat = {
         if (this.newChatBtn) this.newChatBtn.onclick = () => this.startNewChat();
         if (this.historyBtn) this.historyBtn.onclick = () => this.showHistory();
         if (this.updateAnalysisBtn) this.updateAnalysisBtn.onclick = () => this.runUpdateAnalysis();
+
+        try {
+            const savedFontSize = parseFloat(localStorage.getItem('gem_chat_font_size'));
+            if (Number.isFinite(savedFontSize)) _applyChatFontSize(savedFontSize);
+        } catch (_) {}
+
+        this.intradayCtxBtn = document.getElementById('toggle-intraday-ctx-btn');
+        if (this.intradayCtxBtn) {
+            this.intradayCtxBtn.onclick = () => {
+                this.includeChartsNext = !this.includeChartsNext;
+                this._syncIntradayCtxBtn();
+            };
+            this._syncIntradayCtxBtn();
+        }
+
+        if (!window._gemChatEscapeBound) {
+            document.addEventListener('keydown', (e) => {
+                if (e.key !== 'Escape') return;
+                const pop = document.getElementById('settings-popover');
+                if (pop && pop.style.display && pop.style.display !== 'none') {
+                    pop.style.display = 'none';
+                    return;
+                }
+                if (this.overlay && this.overlay.classList.contains('active')) {
+                    this.hide();
+                }
+            });
+            window._gemChatEscapeBound = true;
+        }
 
         // --- Settings gear popover ---
         const gearBtn = document.getElementById('settings-gear-btn');
@@ -1465,6 +1514,15 @@ const ModernChat = {
         return cost;
     },
 
+    _syncIntradayCtxBtn() {
+        const btn = this.intradayCtxBtn || document.getElementById('toggle-intraday-ctx-btn');
+        if (!btn) return;
+        const on = Boolean(this.includeChartsNext);
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.textContent = on ? '📈 1m Context: ON' : '📈 1m Context: OFF';
+    },
+
     async sendMessage(isLogRequest = false, options = {}) {
         const text = this.input.value.trim();
         if (!text) return;
@@ -1472,6 +1530,7 @@ const ModernChat = {
         this.isAborted = false;
         const includeCharts = this.shouldCaptureCharts(text, options);
         this.includeChartsNext = false;
+        this._syncIntradayCtxBtn();
 
         // Show friendly label in the chat bubble for quick-prompts; full text goes to the API
         const displayLabel = this._pendingDisplayLabel || null;

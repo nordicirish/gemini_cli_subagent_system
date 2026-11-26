@@ -289,8 +289,164 @@ function renderIndicesModal() {
 let prevPrices = {};
 let prevGex = {};
 
+// Stage C: Interactive table filter, sort & density state
+let _tableFilterQuery = '';
+let _tableFilterMode = 'all';
+let _tableSortKey = null;
+let _tableSortDir = null;
+let _lastRenderTickers = null;
+let _lastRenderState = null;
+
+function _applyTableDensity(isCompact) {
+    if (dTableContainer) {
+        dTableContainer.classList.toggle('density-compact', Boolean(isCompact));
+    }
+    const densityBtn = document.getElementById('table-density-btn');
+    if (densityBtn) {
+        densityBtn.classList.toggle('active', Boolean(isCompact));
+        densityBtn.setAttribute('aria-pressed', isCompact ? 'true' : 'false');
+        densityBtn.textContent = isCompact ? 'Comfortable' : 'Compact';
+    }
+    try {
+        localStorage.setItem('gem_table_density', isCompact ? 'compact' : 'comfortable');
+    } catch (_) {}
+}
+
+function _rerenderCurrentTable() {
+    if (_lastRenderTickers && _lastRenderState) {
+        renderTable(_lastRenderTickers, _lastRenderState);
+    }
+}
+
+function _syncSortHeadersUi() {
+    document.querySelectorAll('#data-table thead th[data-sort-key]').forEach((th) => {
+        const key = th.getAttribute('data-sort-key');
+        if (_tableSortKey && key === _tableSortKey && _tableSortDir) {
+            th.setAttribute('aria-sort', _tableSortDir === 'asc' ? 'ascending' : 'descending');
+        } else {
+            th.removeAttribute('aria-sort');
+        }
+    });
+}
+
+function _initTableToolbarAndShortcuts() {
+    const filterInput = document.getElementById('table-filter-input');
+    const filterClear = document.getElementById('table-filter-clear');
+    const filterPills = document.querySelectorAll('.table-filter-pill[data-table-filter]');
+    const densityBtn = document.getElementById('table-density-btn');
+
+    let savedCompact = false;
+    try {
+        savedCompact = localStorage.getItem('gem_table_density') === 'compact';
+    } catch (_) {}
+    _applyTableDensity(savedCompact);
+
+    if (filterInput && !filterInput._gemBound) {
+        filterInput.addEventListener('input', () => {
+            _tableFilterQuery = String(filterInput.value || '').trim().toUpperCase();
+            _rerenderCurrentTable();
+        });
+        filterInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                if (filterInput.value) {
+                    filterInput.value = '';
+                    _tableFilterQuery = '';
+                    _rerenderCurrentTable();
+                } else {
+                    filterInput.blur();
+                }
+            }
+        });
+        filterInput._gemBound = true;
+    }
+
+    if (filterClear && !filterClear._gemBound) {
+        filterClear.addEventListener('click', () => {
+            _tableFilterQuery = '';
+            if (filterInput) {
+                filterInput.value = '';
+                filterInput.focus();
+            }
+            _rerenderCurrentTable();
+        });
+        filterClear._gemBound = true;
+    }
+
+    filterPills.forEach((pill) => {
+        if (pill._gemBound) return;
+        pill.addEventListener('click', () => {
+            const mode = pill.getAttribute('data-table-filter') || 'all';
+            _tableFilterMode = mode;
+            filterPills.forEach((btn) => {
+                const active = btn.getAttribute('data-table-filter') === mode;
+                btn.classList.toggle('active', active);
+                btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+            });
+            _rerenderCurrentTable();
+        });
+        pill._gemBound = true;
+    });
+
+    if (densityBtn && !densityBtn._gemBound) {
+        densityBtn.addEventListener('click', () => {
+            const currentlyCompact = dTableContainer ? dTableContainer.classList.contains('density-compact') : false;
+            _applyTableDensity(!currentlyCompact);
+        });
+        densityBtn._gemBound = true;
+    }
+
+    document.querySelectorAll('#data-table thead th[data-sort-key]').forEach((th) => {
+        if (th._gemSortBound) return;
+        th.addEventListener('click', () => {
+            const key = th.getAttribute('data-sort-key');
+            if (!key) return;
+            if (_tableSortKey !== key) {
+                _tableSortKey = key;
+                _tableSortDir = 'desc';
+            } else if (_tableSortDir === 'desc') {
+                _tableSortDir = 'asc';
+            } else {
+                _tableSortKey = null;
+                _tableSortDir = null;
+            }
+            _syncSortHeadersUi();
+            _rerenderCurrentTable();
+        });
+        th._gemSortBound = true;
+    });
+
+    if (!window._gemGlobalShortcutsBound) {
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            const target = e.target;
+            const tag = target && target.tagName ? target.tagName.toUpperCase() : '';
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (target && target.isContentEditable)) {
+                return;
+            }
+            if (e.key === '/') {
+                if (filterInput) {
+                    e.preventDefault();
+                    filterInput.focus();
+                    if (typeof filterInput.select === 'function') filterInput.select();
+                }
+            } else if (e.key === 't' || e.key === 'T') {
+                e.preventDefault();
+                toggleSidebarPanel();
+            } else if (e.key === 'c' || e.key === 'C') {
+                const otherModal = document.querySelector('.modal-overlay.active, .chart-modal-overlay.active');
+                if (!otherModal && window.chatUI && typeof window.chatUI.toggle === 'function') {
+                    e.preventDefault();
+                    window.chatUI.toggle();
+                }
+            }
+        });
+        window._gemGlobalShortcutsBound = true;
+    }
+}
+
 // Initialization
 async function init() {
+    _initTableToolbarAndShortcuts();
     await fetchTickers();
     await fetchPortfolio();
     await fetchWatchlist();
@@ -300,7 +456,15 @@ async function init() {
     await fetchAnalyticsAndBacktest();
     // Google Drive sync disabled in this repo
     pollData();
-    setInterval(pollData, 3000); // 3 sec polling
+    setInterval(() => {
+        if (!document.hidden) pollData();
+    }, 3000);
+    if (!window._gemVisibilityPollBound) {
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) pollData();
+        });
+        window._gemVisibilityPollBound = true;
+    }
 }
 
 
@@ -471,6 +635,8 @@ function formatVol(vol) {
 // Render the data table with bifurcated sections
 function renderTable(tickers, state) {
     if (!tickers || !tickers.length) return;
+    _lastRenderTickers = tickers;
+    _lastRenderState = state;
 
     // Get held tickers from portfolio snapshot across all SSOT schema keys
     const ssot = state.local_storage_state || {};
@@ -828,34 +994,71 @@ function renderTable(tickers, state) {
         }
     };
 
+    const matchesFilter = (row) => {
+        if (_tableFilterMode === 'signals') {
+            const scoreNum = Math.abs(Number(row && row.score) || 0);
+            if (scoreNum < 3) return false;
+        }
+        if (_tableFilterQuery) {
+            const hay = `${row.ticker || ''} ${row.note || ''} ${row.category || ''}`.toUpperCase();
+            if (!hay.includes(_tableFilterQuery)) return false;
+        }
+        return true;
+    };
+
+    const sortGroupRows = (rows) => {
+        if (!_tableSortKey || !_tableSortDir) return rows;
+        const key = _tableSortKey;
+        const mult = _tableSortDir === 'asc' ? 1 : -1;
+        return [...rows].sort((a, b) => {
+            if (key === 'ticker') {
+                return String(a.ticker || '').localeCompare(String(b.ticker || '')) * mult;
+            }
+            const rawA = key === 'rvol' && !(Number(a.volume) > 0) ? null : a[key];
+            const rawB = key === 'rvol' && !(Number(b.volume) > 0) ? null : b[key];
+            const numA = rawA !== null && rawA !== undefined && rawA !== '' ? Number(rawA) : NaN;
+            const numB = rawB !== null && rawB !== undefined && rawB !== '' ? Number(rawB) : NaN;
+            const validA = Number.isFinite(numA);
+            const validB = Number.isFinite(numB);
+            if (!validA && !validB) return 0;
+            if (!validA) return 1;
+            if (!validB) return -1;
+            return (numA - numB) * mult;
+        });
+    };
+
+    const heldRows = sortGroupRows(groups.held.filter(matchesFilter));
+    const watchRows = _tableFilterMode === 'held' ? [] : sortGroupRows(groups.watchlist.filter(matchesFilter));
+    const scoutRows = _tableFilterMode === 'held' ? [] : sortGroupRows(groups.scouts.filter(matchesFilter));
+
     const renderHeader = (label, cls = '') => `
         <tr class="table-section-header ${cls}">
             <td colspan="14">${label}</td>
         </tr>
     `;
 
-    if (groups.held.length > 0) {
+    if (heldRows.length > 0) {
         html += renderHeader('Your Portfolio', 'portfolio-header');
-        groups.held.forEach(t => {
+        heldRows.forEach(t => {
             t._isHeld = true;
             html += renderRow(t);
         });
     }
 
-    if (groups.watchlist.length > 0 || groups.scouts.length > 0) {
+    if (watchRows.length > 0 || scoutRows.length > 0) {
         html += renderHeader('Strategic Watchlist', 'watchlist-header');
         
-        if (groups.watchlist.length > 0) {
-            groups.watchlist.forEach(t => html += renderRow(t));
+        if (watchRows.length > 0) {
+            watchRows.forEach(t => html += renderRow(t));
         }
 
-        if (groups.scouts.length > 0) {
+        if (scoutRows.length > 0) {
             html += `
                 <tr class="table-sub-header scout-header">
                     <td colspan="14">Scout Intelligence Suggestions</td>
                 </tr>
             `;
-            groups.scouts.forEach(t => {
+            scoutRows.forEach(t => {
                 // Add scout indicator to the row object for renderRow to pick up
                 t._isScout = true; 
                 html += renderRow(t);
@@ -863,8 +1066,12 @@ function renderTable(tickers, state) {
         }
     }
 
+    if (!html && (_tableFilterQuery || _tableFilterMode !== 'all')) {
+        html = '<tr class="table-empty-filter-row"><td colspan="14">No matching tickers for current filter.</td></tr>';
+    }
+
     dTableBody.innerHTML = html;
-    prefetchSecDilutionBadges([...groups.held, ...groups.watchlist, ...groups.scouts].map(r => r && r.ticker));
+    prefetchSecDilutionBadges([...heldRows, ...watchRows, ...scoutRows].map(r => r && r.ticker));
 }
 
 async function pollData() {

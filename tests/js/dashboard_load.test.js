@@ -621,6 +621,100 @@ async function main() {
     });
     window.eval(`currentEurUsdRate = ${JSON.stringify(origRate)};`);
 
+    // Stage C: CSS/HTML unification & interactive trader UX checks
+    const rawHtmlText = read(path.join(staticDir, 'index.html'));
+    const modernCssText = read(path.join(staticDir, 'modern_ui.css'));
+    check('Stage C: CSS/HTML unification removes duplicate dashboard rules and inline style/script blocks', () => {
+        assert(!modernCssText.includes('--panel-bg:'), 'modern_ui.css should not define --panel-bg');
+        assert(!modernCssText.includes('--text-secondary:'), 'modern_ui.css should not define --text-secondary');
+        assert(!modernCssText.includes('.dashboard-grid'), 'modern_ui.css still contains dead .dashboard-grid');
+        assert(!modernCssText.includes('.modern-table'), 'modern_ui.css still contains dead .modern-table');
+        assert(!/<style\b/i.test(rawHtmlText), 'index.html should contain no inline <style> blocks');
+        assert(!/<script(?![^>]*\bsrc=)[^>]*>[^<\s]/i.test(rawHtmlText), 'index.html should contain no inline <script> body');
+    });
+
+    const filterInput = window.document.getElementById('table-filter-input');
+    const filterClearBtn = window.document.getElementById('table-filter-clear');
+    const getRenderedSymbols = () => [...window.document.querySelectorAll('#data-table tbody tr')]
+        .filter((r) => !r.querySelector('td[colspan="14"]'))
+        .map((r) => (r.querySelector('.ticker-symbol') || r.cells[0]).textContent.trim());
+    filterInput.value = 'PLTR';
+    filterInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    const filteredSyms = getRenderedSymbols();
+    filterClearBtn.click();
+    const restoredSyms = getRenderedSymbols();
+    check('Stage C: table search filter narrows rows to matching ticker and clears cleanly', () => {
+        assert.deepStrictEqual(filteredSyms, ['PLTR']);
+        assert.deepStrictEqual(restoredSyms, ['NVDA', 'AMD', 'PLTR', 'TSLA']);
+    });
+
+    const tickerTh = window.document.querySelector('#data-table thead th[data-sort-key="ticker"]');
+    tickerTh.click(); // desc within each section
+    const sortDescSyms = getRenderedSymbols();
+    const sortDescAttr = tickerTh.getAttribute('aria-sort');
+    tickerTh.click(); // asc within each section
+    const sortAscSyms = getRenderedSymbols();
+    const sortAscAttr = tickerTh.getAttribute('aria-sort');
+    tickerTh.click(); // clear sort
+    const sortResetAttr = tickerTh.getAttribute('aria-sort');
+    check('Stage C: sortable column headers sort per-section and reset on third click', () => {
+        assert.strictEqual(sortDescAttr, 'descending');
+        assert.deepStrictEqual(sortDescSyms, ['NVDA', 'TSLA', 'PLTR', 'AMD']);
+        assert.strictEqual(sortAscAttr, 'ascending');
+        assert.deepStrictEqual(sortAscSyms, ['NVDA', 'AMD', 'PLTR', 'TSLA']);
+        assert.strictEqual(sortResetAttr, null);
+    });
+
+    const densityBtn = window.document.getElementById('table-density-btn');
+    const tableContainer = window.document.getElementById('main-data-table-container');
+    densityBtn.click();
+    const compactOn = tableContainer.classList.contains('density-compact') && densityBtn.getAttribute('aria-pressed') === 'true';
+    densityBtn.click();
+    const compactOff = !tableContainer.classList.contains('density-compact') && densityBtn.getAttribute('aria-pressed') === 'false';
+    check('Stage C: table density button toggles compact mode cleanly', () => {
+        assert.strictEqual(compactOn, true);
+        assert.strictEqual(compactOff, true);
+    });
+
+    window.adjustChatSize(1);
+    const dynamicStyle = window.document.getElementById('dynamic-chat-style');
+    const intradayCtxBtn = window.document.getElementById('toggle-intraday-ctx-btn');
+    intradayCtxBtn.click();
+    const ctxOn = window.chatUI.includeChartsNext === true && intradayCtxBtn.getAttribute('aria-pressed') === 'true';
+    intradayCtxBtn.click();
+    const ctxOff = window.chatUI.includeChartsNext === false && intradayCtxBtn.getAttribute('aria-pressed') === 'false';
+    check('Stage C: adjustChatSize and 1m intraday context toggle work cleanly', () => {
+        assert(dynamicStyle && dynamicStyle.textContent.includes('1.05rem'), `unexpected dynamic-chat-style: ${dynamicStyle && dynamicStyle.textContent}`);
+        assert.strictEqual(ctxOn, true);
+        assert.strictEqual(ctxOff, true);
+    });
+
+    const closeExecBtn = window.document.getElementById('close-exec-modal');
+    if (closeExecBtn) closeExecBtn.click();
+    window.document.body.focus();
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: '/', bubbles: true }));
+    const slashFocusedFilter = window.document.activeElement === filterInput;
+    const chatInputEl = window.document.getElementById('chat-input');
+    chatInputEl.focus();
+    chatInputEl.dispatchEvent(new window.KeyboardEvent('keydown', { key: 't', bubbles: true }));
+    const sidebarIgnoredInsideInput = window.document.getElementById('main-content').classList.contains('sidebar-collapsed');
+    chatInputEl.blur();
+    window.document.body.focus();
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 't', bubbles: true }));
+    const sidebarToggledOpen = !window.document.getElementById('main-content').classList.contains('sidebar-collapsed');
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 't', bubbles: true }));
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'c', bubbles: true }));
+    const chatOpenedViaShortcut = window.document.getElementById('chat-window').classList.contains('active');
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const chatClosedViaEsc = !window.document.getElementById('chat-window').classList.contains('active');
+    check('Stage C: keyboard shortcuts (/, t, c, Esc) work and ignore editable inputs', () => {
+        assert.strictEqual(slashFocusedFilter, true);
+        assert.strictEqual(sidebarIgnoredInsideInput, true);
+        assert.strictEqual(sidebarToggledOpen, true);
+        assert.strictEqual(chatOpenedViaShortcut, true);
+        assert.strictEqual(chatClosedViaEsc, true);
+    });
+
     window.close();
     console.log(results.join('\n'));
     const failed = results.filter((r) => r.startsWith('FAIL')).length;
