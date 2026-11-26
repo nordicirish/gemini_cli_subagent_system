@@ -12,11 +12,13 @@ Preserves exact UnitOfWork atomicity, transaction poisoning semantics,
 and fail-closed authorization boundaries without modifying production databases.
 """
 
+import copy
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import json
 import os
 import re
+import threading
 from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
@@ -30,6 +32,8 @@ try:
         decimal_to_canonical_str,
         validate_timestamp_utc,
     )
+    from python.database.repositories.financial import PositionRepository, WatchlistRepository
+    from python.database.repositories.governance import TradeLessonRepository
     from python.database.projections import SSoTProjectionGenerator
     from python.tool_registry import authorize_financial_mutation, get_active_caller_role
 except ImportError:
@@ -42,6 +46,8 @@ except ImportError:
         decimal_to_canonical_str,
         validate_timestamp_utc,
     )
+    from database.repositories.financial import PositionRepository, WatchlistRepository
+    from database.repositories.governance import TradeLessonRepository
     from database.projections import SSoTProjectionGenerator
     from tool_registry import authorize_financial_mutation, get_active_caller_role
 
@@ -82,6 +88,9 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
             self._base_ssot_path = None
         else:
             self._base_ssot_path = str(base_ssot_path)
+        self._base_doc_lock = threading.Lock()
+        self._base_doc_cache_key: Optional[Tuple[str, int, int]] = None
+        self._base_doc_cache_value: Optional[Dict[str, Any]] = None
 
     @property
     def backend_name(self) -> str:
@@ -95,31 +104,102 @@ class SqlitePersistenceAdapter(PersistenceAdapter):
     # Portfolio State & SSoT Operations
     # -----------------------------------------------------------------------
 
-    def get_ssot_data(self) -> Dict[str, Any]:
-        """Projects current SQLite state into a canonical SSoT dictionary using SSoTProjectionGenerator."""
-        base_doc = None
-        if self._base_ssot_path is not None:
-            try:
-                with open(self._base_ssot_path, "r", encoding="utf-8") as source:
-                    base_doc = json.load(source)
+    def _load_base_ssot_document(self) -> Optional[Dict[str, Any]]:
+        """Loads and mtime-caches the non-tabular base SSoT JSON template."""
+        if self._base_ssot_path is None:
+            return None
+        try:
+            abs_path = os.path.abspath(self._base_ssot_path)
+            stat = os.stat(abs_path)
+            cache_key = (abs_path, int(stat.st_mtime_ns), int(stat.st_size))
+            with self._base_doc_lock:
+                if self._base_doc_cache_key == cache_key and self._base_doc_cache_value is not None:
+                    return copy.deepcopy(self._base_doc_cache_value)
 
-                if not isinstance(base_doc, dict):
-                    raise PersistenceValidationError(
-                        f"Base SSoT document at '{self._base_ssot_path}' must have a dictionary root."
-                    )
-            except (OSError, json.JSONDecodeError, UnicodeError, PersistenceValidationError) as exc:
-                raise PersistenceIntegrityError(
-                    f"Cannot generate canonical SSoT projection: base document at '{self._base_ssot_path}' is unavailable or invalid: {exc}"
-                ) from exc
+            with open(self._base_ssot_path, "r", encoding="utf-8") as source:
+                base_doc = json.load(source)
 
+            if not isinstance(base_doc, dict):
+                raise PersistenceValidationError(
+                    f"Base SSoT document at '{self._base_ssot_path}' must have a dictionary root."
+                )
+
+            with self._base_doc_lock:
+                self._base_doc_cache_key = cache_key
+                self._base_doc_cache_value = copy.deepcopy(base_doc)
+            return base_doc
+        except (OSError, json.JSONDecodeError, UnicodeError, PersistenceValidationError) as exc:
+            raise PersistenceIntegrityError(
+                f"Cannot generate canonical SSoT projection: base document at '{self._base_ssot_path}' is unavailable or invalid: {exc}"
+            ) from exc
+
+    def _generate_ssot_projection(self, *, include_history: bool = True) -> Dict[str, Any]:
+        base_doc = self._load_base_ssot_document()
         try:
             with self._db_manager.connection() as conn:
                 generator = SSoTProjectionGenerator(self._db_manager)
-                return generator.generate(conn, base_document=base_doc)
+                return generator.generate(conn, base_document=base_doc, include_history=include_history)
         except (PersistenceValidationError, PersistenceIntegrityError):
             raise
         except Exception as e:
             raise PersistenceError(f"Failed to retrieve canonical SSoT projection from SQLite: {e}") from e
+
+    def get_ssot_data(self) -> Dict[str, Any]:
+        """Projects current SQLite state into a canonical SSoT dictionary using SSoTProjectionGenerator."""
+        return self._generate_ssot_projection(include_history=True)
+
+    def get_ssot_data_slim(self) -> Dict[str, Any]:
+        """Projects SQLite state without decision_log or trade_lessons history arrays."""
+        return self._generate_ssot_projection(include_history=False)
+
+    def get_daemon_cycle_snapshot(self) -> Dict[str, Any]:
+        """Reads slim SSoT projection, trade lessons, and active tickers on one consistent connection."""
+        base_doc = self._load_base_ssot_document()
+        try:
+            with self._db_manager.connection() as conn:
+                caller_in_tx = bool(conn.in_transaction)
+                we_started_tx = False
+                if not caller_in_tx:
+                    conn.execute("BEGIN;")
+                    we_started_tx = True
+                try:
+                    generator = SSoTProjectionGenerator(self._db_manager)
+                    ssot_slim = generator.generate(conn, base_document=base_doc, include_history=False)
+
+                    lessons = TradeLessonRepository(conn).list_lessons()
+                    trade_lessons = [
+                        {
+                            "id": idx + 1,
+                            "rule_code": l.rule_code,
+                            "rule": f"{l.rule_code}: {l.directive_text}",
+                            "directive_text": l.directive_text,
+                            "category": l.category,
+                            "status": l.status,
+                        }
+                        for idx, l in enumerate(lessons)
+                    ]
+
+                    ssot_tickers: List[str] = []
+                    for p in PositionRepository(conn).list_positions("PRIMARY"):
+                        if p.shares > Decimal("0") and p.ticker not in ssot_tickers:
+                            ssot_tickers.append(p.ticker)
+                    for item in WatchlistRepository(conn).list_watchlist():
+                        if item.status == "ACTIVE" and item.ticker not in ssot_tickers:
+                            ssot_tickers.append(item.ticker)
+
+                    return {
+                        "ssot_slim": ssot_slim,
+                        "trade_lessons": trade_lessons,
+                        "ssot_tickers": ssot_tickers,
+                        "held_and_watched": {t.upper() for t in ssot_tickers},
+                    }
+                finally:
+                    if we_started_tx and conn.in_transaction:
+                        conn.rollback()
+        except (PersistenceValidationError, PersistenceIntegrityError):
+            raise
+        except Exception as e:
+            raise PersistenceError(f"Failed to retrieve daemon cycle snapshot from SQLite: {e}") from e
 
     def _normalize_portfolio_items(self, portfolio: Any) -> Dict[str, Dict[str, Decimal]]:
         if not isinstance(portfolio, list):

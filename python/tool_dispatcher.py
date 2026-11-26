@@ -5,6 +5,8 @@ Provides unified tool dispatching with loop bounds, cycle detection,
 role authorization, and structured audit logging for CLI, Web, and Subagents.
 """
 
+import concurrent.futures
+import contextvars
 import time
 import json
 import hashlib
@@ -15,6 +17,14 @@ from tool_registry import ToolRegistry, GLOBAL_TOOL_REGISTRY, execution_role_con
 from audit_logger import AuditLogger, AuditEvent, GLOBAL_AUDIT_LOGGER
 
 MAX_TOOL_TURNS = 5
+_active_tool_cancel_check: contextvars.ContextVar[Optional[Callable[[], bool]]] = contextvars.ContextVar(
+    "active_tool_cancel_check", default=None
+)
+
+
+def get_active_tool_cancel_check() -> Optional[Callable[[], bool]]:
+    """Returns the active turn's cancel_check callback inside dispatched tool execution."""
+    return _active_tool_cancel_check.get()
 
 
 @dataclass
@@ -115,67 +125,71 @@ class ToolDispatcher:
                 error=reason,
             )
 
-        # 2. Execution under audit trail
-        self.audit_logger.log_event(
-            AuditEvent(
-                action_category=action_cat,
-                status="ATTEMPTED",
-                agent_role=agent_role,
-                agent_id=agent_id,
-                task_id=task_id,
-                tool_name=tool_name,
-                permission_decision="GRANTED",
-                approval_status="APPROVED" if (tool_def and tool_def.requires_human_approval) else "NOT_REQUIRED",
-                details={"args": args},
-            )
-        )
-
+        token = _active_tool_cancel_check.set(cancel_check)
         try:
-            start_time = time.time()
-            result = self.registry.execute(
-                tool_name=tool_name,
-                agent_role=agent_role,
-                args=args,
-            )
-            elapsed = time.time() - start_time
-
+            # 2. Execution under audit trail
             self.audit_logger.log_event(
                 AuditEvent(
                     action_category=action_cat,
-                    status="SUCCESS",
+                    status="ATTEMPTED",
                     agent_role=agent_role,
                     agent_id=agent_id,
                     task_id=task_id,
                     tool_name=tool_name,
                     permission_decision="GRANTED",
-                    details={"latency_seconds": round(elapsed, 4)},
+                    approval_status="APPROVED" if (tool_def and tool_def.requires_human_approval) else "NOT_REQUIRED",
+                    details={"args": args},
                 )
             )
-            return ToolExecutionResult(
-                tool_name=tool_name,
-                args=args,
-                success=True,
-                result=result,
-            )
-        except Exception as e:
-            self.audit_logger.log_event(
-                AuditEvent(
-                    action_category=action_cat,
-                    status="FAILED",
-                    agent_role=agent_role,
-                    agent_id=agent_id,
-                    task_id=task_id,
+
+            try:
+                start_time = time.time()
+                result = self.registry.execute(
                     tool_name=tool_name,
-                    error_classification=type(e).__name__,
-                    details={"error_message": str(e)},
+                    agent_role=agent_role,
+                    args=args,
                 )
-            )
-            return ToolExecutionResult(
-                tool_name=tool_name,
-                args=args,
-                success=False,
-                error=str(e),
-            )
+                elapsed = time.time() - start_time
+
+                self.audit_logger.log_event(
+                    AuditEvent(
+                        action_category=action_cat,
+                        status="SUCCESS",
+                        agent_role=agent_role,
+                        agent_id=agent_id,
+                        task_id=task_id,
+                        tool_name=tool_name,
+                        permission_decision="GRANTED",
+                        details={"latency_seconds": round(elapsed, 4)},
+                    )
+                )
+                return ToolExecutionResult(
+                    tool_name=tool_name,
+                    args=args,
+                    success=True,
+                    result=result,
+                )
+            except Exception as e:
+                self.audit_logger.log_event(
+                    AuditEvent(
+                        action_category=action_cat,
+                        status="FAILED",
+                        agent_role=agent_role,
+                        agent_id=agent_id,
+                        task_id=task_id,
+                        tool_name=tool_name,
+                        error_classification=type(e).__name__,
+                        details={"error_message": str(e)},
+                    )
+                )
+                return ToolExecutionResult(
+                    tool_name=tool_name,
+                    args=args,
+                    success=False,
+                    error=str(e),
+                )
+        finally:
+            _active_tool_cancel_check.reset(token)
 
     def execute_multi_turn_session(
         self,
@@ -270,19 +284,50 @@ class ToolDispatcher:
 
             call_history_hashes.append(sig_hash)
 
-            for call in function_calls:
+            all_readonly = len(function_calls) > 1 and all(
+                (td := self.registry.get(fc.name)) is not None
+                and td.classification == "READ"
+                and not td.affects_financial_state
+                for fc in function_calls
+            )
+
+            if all_readonly:
+                def _run_call(fc):
+                    cname = fc.name
+                    cargs = getattr(fc, "args", {}) or {}
+                    log(f"[ToolDispatcher] Executing READ tool concurrently: '{cname}' (Role: {agent_role})")
+                    return self.dispatch_single_tool(
+                        tool_name=cname,
+                        args=cargs,
+                        agent_role=agent_role,
+                        cancel_check=cancel_check,
+                        allowed_tool_names=allowed_tool_names,
+                    )
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(function_calls), 6)) as pool:
+                    futures = [
+                        pool.submit(contextvars.copy_context().run, _run_call, call)
+                        for call in function_calls
+                    ]
+                    exec_results = [f.result() for f in futures]
+            else:
+                exec_results = []
+                for call in function_calls:
+                    name = call.name
+                    args = getattr(call, "args", {}) or {}
+                    log(f"[ToolDispatcher] Executing tool: '{name}' (Role: {agent_role})")
+                    exec_results.append(
+                        self.dispatch_single_tool(
+                            tool_name=name,
+                            args=args,
+                            agent_role=agent_role,
+                            cancel_check=cancel_check,
+                            allowed_tool_names=allowed_tool_names,
+                        )
+                    )
+
+            for call, exec_result in zip(function_calls, exec_results):
                 name = call.name
-                args = getattr(call, "args", {}) or {}
-                log(f"[ToolDispatcher] Executing tool: '{name}' (Role: {agent_role})")
-
-                exec_result = self.dispatch_single_tool(
-                    tool_name=name,
-                    args=args,
-                    agent_role=agent_role,
-                    cancel_check=cancel_check,
-                    allowed_tool_names=allowed_tool_names,
-                )
-
                 if exec_result.success:
                     tool_responses.append(
                         part_factory.from_function_response(

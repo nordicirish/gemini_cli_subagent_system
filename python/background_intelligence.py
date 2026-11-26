@@ -260,6 +260,7 @@ class WorkItem:
     child_sequences: Dict[WorkKey, int] = field(default_factory=dict)
     result_key: Optional[WorkKey] = None
     provenance: Optional[MarketDataProvenance] = None
+    accepts_cancel_check: bool = False
 
 
 @dataclass(frozen=True)
@@ -398,6 +399,24 @@ class BackgroundIntelligenceCoordinator:
         self._workers: List[threading.Thread] = []
 
         self._start_workers()
+
+    _MAX_TRACKED_KEYS = 512
+
+    def _prune_inactive_metadata_locked(self) -> None:
+        """Evicts oldest inactive key metadata when tracking exceeds _MAX_TRACKED_KEYS."""
+        if len(self._sequences) <= self._MAX_TRACKED_KEYS and len(self._key_locks) <= self._MAX_TRACKED_KEYS:
+            return
+        active = set(self._pending_keys.keys()) | set(self._in_flight_keys.keys()) | set(self._overflow_results.keys())
+        for d in (self._sequences, self._latest_issued_sequence, self._key_locks):
+            if len(d) <= self._MAX_TRACKED_KEYS:
+                continue
+            excess = len(d) - self._MAX_TRACKED_KEYS
+            for candidate in list(d.keys()):
+                if excess <= 0:
+                    break
+                if candidate not in active:
+                    d.pop(candidate, None)
+                    excess -= 1
 
     def get_key_lock(self, key: WorkKey) -> threading.RLock:
         """Returns per-key reentrant lock ensuring atomicity of sequence issuance and publication."""
@@ -543,6 +562,7 @@ class BackgroundIntelligenceCoordinator:
                     return False, None
 
                 # 5. Monotonic sequence assignment (staged, committed upon successful queue put)
+                self._prune_inactive_metadata_locked()
                 seq = self._sequences.get(key, 0) + 1
                 child_sequences: Dict[WorkKey, int] = {}
                 for ck in extra_keys:
@@ -550,6 +570,13 @@ class BackgroundIntelligenceCoordinator:
                         child_sequences[ck] = seq
                     else:
                         child_sequences[ck] = self._sequences.get(ck, 0) + 1
+
+                accepts_cancel_check = False
+                try:
+                    import inspect
+                    accepts_cancel_check = "cancel_check" in inspect.signature(fn).parameters
+                except Exception:
+                    accepts_cancel_check = False
 
                 item = WorkItem(
                     key=key,
@@ -563,6 +590,7 @@ class BackgroundIntelligenceCoordinator:
                     child_sequences=child_sequences,
                     result_key=result_key,
                     provenance=provenance,
+                    accepts_cancel_check=accepts_cancel_check,
                 )
                 self._pending_keys[key] = item
 
@@ -625,15 +653,10 @@ class BackgroundIntelligenceCoordinator:
                     was_cancelled = True
                     raise RuntimeError("Cancelled before execution")
 
-                # Inject cancel_check if accepted by fn
+                # Inject cancel_check only when precomputed signature accepts it
                 call_kwargs = dict(item.kwargs)
-                try:
-                    import inspect
-                    sig = inspect.signature(item.fn)
-                    if "cancel_check" in sig.parameters and "cancel_check" not in call_kwargs:
-                        call_kwargs["cancel_check"] = lambda: self._shutdown_event.is_set() or item.cancel_event.is_set()
-                except Exception:
-                    pass
+                if item.accepts_cancel_check and "cancel_check" not in call_kwargs:
+                    call_kwargs["cancel_check"] = lambda: self._shutdown_event.is_set() or item.cancel_event.is_set()
 
                 data = item.fn(*item.args, **call_kwargs)
 
@@ -1076,7 +1099,37 @@ class BackgroundResultApplicator:
                                 )
                         audit.append((r, True, "Applied successfully"))
 
+        with self._lock:
+            self._prune_inactive_metadata_locked()
+
         return audit
+
+    _MAX_TRACKED_KEYS = 512
+
+    def _prune_inactive_metadata_locked(self) -> None:
+        if len(self._last_applied_sequence) <= self._MAX_TRACKED_KEYS:
+            return
+        excess = len(self._last_applied_sequence) - self._MAX_TRACKED_KEYS
+        for candidate in list(self._last_applied_sequence.keys()):
+            if excess <= 0:
+                break
+            lock = self._key_locks.get(candidate)
+            if lock is not None:
+                # Never prune while another thread may hold the key lock
+                if not lock.acquire(blocking=False):
+                    continue
+                lock.release()
+            for d in (
+                self._last_applied_sequence,
+                self._last_applied_obs_dt,
+                self._last_applied_obs_time,
+                self._last_applied_session_date,
+                self._last_applied_provenance,
+                self._latest_issued_sequence,
+                self._key_locks,
+            ):
+                d.pop(candidate, None)
+            excess -= 1
 
     def reset(self) -> None:
         with self._lock:

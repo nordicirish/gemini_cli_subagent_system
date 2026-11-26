@@ -66,116 +66,21 @@ def main():
     from tool_registry import GLOBAL_OWNER_APPROVAL
     GLOBAL_OWNER_APPROVAL.interactive_cli_enabled = True
 
-    # Initialize the Framework
+    # Initialize the Framework and unified runtime bundle (CLI/Web 100% parity)
     framework = AgentFramework()
-
-    # ---------------------------------------------------------------------------
-    # Sub-agent registry — v10.03-ESA-Deadlock-Sync
-    # Mode tiers per terminal.md > Mode Selection Matrix (Canonical)
-    # ---------------------------------------------------------------------------
-    sub_agent_configs = {
-        # --- Tier 1: PRO chain ---
-        "Macro Sentinel":          {"file": "engine_instructions/macro_sentinel.md",          "mode": "PRO"},
-        "Data Analyst":            {"file": "engine_instructions/data_analyst.md",            "mode": "PRO"},
-        "State Validation Router": {"file": "engine_instructions/state_validation_router.md", "mode": "PRO"},
-
-        # --- Tier 2: THINKING chain (reasoning-heavy advocates & research) ---
-        "Research Engine":         {"file": "engine_instructions/research.md",                "mode": "THINKING"},
-        "Macro Narrative Engine":  {"file": "engine_instructions/macro_narrative_engine.md",  "mode": "THINKING"},
-        "Bullish Advocate":        {"file": "engine_instructions/bullish_gem.md",             "mode": "THINKING"},
-        "Red Team Pessimist":      {"file": "engine_instructions/red_team_gem.md",            "mode": "THINKING"},
-
-        # --- Tier 3: FAST chain ---
-        "Review Engine":           {"file": "engine_instructions/post_trade_review.md",       "mode": "FAST"},
-
-        # --- Tier 4: GEMMA chain (local / cost-efficient engines) ---
-        "Neutral Structuralist":   {"file": "engine_instructions/neutral_gem.md",             "mode": "GEMMA"},
-        "Sentiment Engine":        {"file": "engine_instructions/sentiment_engine.md",        "mode": "GEMMA"},
-        "Structural Engine":       {"file": "engine_instructions/structural_engine.md",       "mode": "GEMMA"},
-        "Rule Enforcer Engine":    {"file": "engine_instructions/rule_enforcer_engine.md",    "mode": "GEMMA"},
-        "Context Engine":          {"file": "engine_instructions/context_engine.md",          "mode": "GEMMA"},
-        "Execution Engine":        {"file": "engine_instructions/execution.md",               "mode": "GEMMA"},
-        "Technical Validator":     {"file": "engine_instructions/technical_validator.md",     "mode": "GEMMA"},
-        "GEX Engine":              {"file": "engine_instructions/gex_engine.md",              "mode": "GEMMA"},
-        "Regime Engine":           {"file": "engine_instructions/regime_engine.md",           "mode": "GEMMA"},
-        "Strategy Engine":         {"file": "engine_instructions/strategy_engine.md",         "mode": "GEMMA"},
-    }
-
-    # --- CONTEXT CACHING INITIALIZATION (ENH_CACHE_01) ---
-    # Must be called AFTER sub_agent_configs is defined (bug-fix vs. prior version)
-    subagent_files = [c["file"] for c in sub_agent_configs.values()] + ["engine_instructions/terminal.md"]
-
-    # ---------------------------------------------------------------------------
-    # Build tool list — start with core data tools
-    # ---------------------------------------------------------------------------
-    terminal_tools = [
-        tools.read_ssot,
-        tools.update_ssot,
-        tools.read_trade_lessons,
-        tools.get_market_data,
-    ]
-
-    print("Loading Sub-Agents...")
-    agents_dict = {}
-
-    for name, config in sub_agent_configs.items():
-        if os.path.exists(config["file"]):
-
-            # Per-agent toolsets — Tool Supremacy Hierarchy (ENH_31 / ENH_55)
-            if name == "Data Analyst":
-                sub_tools = [tools.perform_web_forensic_search, tools.get_market_data]
-            elif name == "Macro Narrative Engine":
-                sub_tools = [tools.perform_web_forensic_search, tools.read_ssot, tools.get_market_data]
-            elif name == "State Validation Router":
-                sub_tools = [tools.read_ssot, tools.update_ssot, tools.get_market_data]
-            elif name == "Structural Engine":
-                sub_tools = [tools.read_ssot, tools.get_market_data, tools.perform_web_forensic_search]
-            elif name == "Context Engine":
-                sub_tools = [
-                    tools.read_ssot, tools.update_ssot,
-                    tools.read_trade_lessons, tools.update_trade_lessons,
-                    tools.get_market_data, tools.perform_web_forensic_search,
-                    tools.update_rules,
-                ]
-            elif name == "Technical Validator":
-                sub_tools = [tools.read_ssot, tools.read_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search]
-            elif name in [
-                "Research Engine", "Sentiment Engine",
-                "Bullish Advocate", "Red Team Pessimist",
-                "Macro Sentinel", "Neutral Structuralist",
-                "Macro Narrative Engine",
-            ]:
-                sub_tools = [tools.perform_web_forensic_search]
-            else:
-                sub_tools = [tools.read_ssot, tools.read_trade_lessons, tools.get_market_data]
-
-            tool_func = framework.create_agent_tool(
-                name, config["file"], config["mode"], agent_tools=sub_tools
-            )
-            terminal_tools.append(tool_func)
-            agents_dict[f"ask_{name.lower().replace(' ', '_')}"] = tool_func
-        else:
-            print(f"Warning: {config['file']} not found. Skipping {name} sub-agent.")
-
-    # Register the parallel council dispatcher (ask_council)
-    ask_council = framework.create_parallel_council_tool(agents_dict)
-    terminal_tools.append(ask_council)
-
-    # ---------------------------------------------------------------------------
-    # Load Terminal Orchestrator instruction
-    # ---------------------------------------------------------------------------
-    print("Loading Terminal Orchestrator...")
     if not os.path.exists("engine_instructions/terminal.md"):
         print("Error: terminal.md not found!")
         sys.exit(1)
 
-    terminal_instruction = framework.load_system_instruction("engine_instructions/terminal.md")
+    try:
+        from agent_factory import build_agent_runtime
+    except ImportError:
+        from python.agent_factory import build_agent_runtime
 
-    all_tools = terminal_tools + [tools.perform_web_forensic_search]
-
-
-
-
+    runtime = build_agent_runtime(framework)
+    terminal_tools = runtime.terminal_tools
+    terminal_instruction = runtime.terminal_instruction
+    orchestrator_model = runtime.orchestrator_model
 
     # ---------------------------------------------------------------------------
     # Startup banner
@@ -183,24 +88,13 @@ def main():
     rules_path = os.path.join("gem_trading_rules", "rules.md")
     print("\n" + "=" * 60)
     print("💎 GEM CLI ORCHESTRATOR READY 💎")
-    print(f"   Version : v11.56-Pure-Antigravity-Engine-Cloud-Decoupled")
-    print(f"   Agents  : {len(sub_agent_configs)} loaded")
+    print("   Version : v11.56-Pure-Antigravity-Engine-Cloud-Decoupled")
+    print(f"   Council : {len(runtime.council_members)} read-only agents | 7 deterministic engines")
     print(f"   Rules   : {'✅ Attached' if os.path.exists(rules_path) else '⚠️  Missing'}")
     antigravity_path = os.path.join(".agents", "rules", "antigravity.md")
     print(f"   Antigravity: {'✅ Active' if os.path.exists(antigravity_path) else '⚠️  Missing'}")
     print("=" * 60)
     print("Type 'exit' or 'quit' to stop.\n")
-
-    # ---------------------------------------------------------------------------
-    # Resolve Orchestrator dynamically using _resolve_orchestrator
-    # ---------------------------------------------------------------------------
-    orchestrator_model = framework._resolve_orchestrator()
-
-    try:
-        import fetch_stocks
-        fetch_stocks.compile_master_document()
-    except Exception as e:
-        print(f"Failed to compile master document: {e}")
 
     sys_instruction = framework._get_sys_instruction(terminal_instruction)
 
@@ -222,25 +116,30 @@ def main():
             framework.reset_turn_usage()
             print("\n[Terminal Orchestrator] Thinking...")
             active_model_str = f"[ACTIVE_MODEL]: {orchestrator_model}\n"
-            current_message = f"{active_model_str}[USER_QUERY]: {user_input}"
-            
-            # Multimodal Chart Part Loading
-            chart_parts = []
-            chart_dir = "context/charts"
-            if os.path.exists(chart_dir):
-                import glob
-                for filepath in sorted(glob.glob(os.path.join(chart_dir, "chart_*_1m.png"))):
-                    try:
-                        with open(filepath, "rb") as f:
-                            data = f.read()
-                            if data:
-                                chart_parts.append(
-                                    agent_framework.types.Part.from_bytes(data=data, mime_type="image/png")
-                                )
-                    except Exception:
-                        pass
+            auto_data_block = ""
+            try:
+                from agent_factory import load_live_analytics_context
+                from analytics_engine import ANALYTICS_ENGINE
+                live_state, slim_ssot, fx_snapshot, ny_dt = load_live_analytics_context()
+                precomputed = ANALYTICS_ENGINE.evaluate(
+                    live_state, ssot=slim_ssot, fx_info=fx_snapshot, ny_dt=ny_dt
+                )
+                cli_packet = {
+                    "timestamp": live_state.get("timestamp", "") if isinstance(live_state, dict) else "",
+                    "market_status": live_state.get("status", "UNKNOWN") if isinstance(live_state, dict) else "UNKNOWN",
+                    "fx": fx_snapshot,
+                    "ssot": slim_ssot,
+                    "precomputed_analytics": precomputed,
+                }
+                auto_data_block = (
+                    "\n[SYSTEM AUTO-INJECT: LIVE_DATA_PACKET]\n```json\n"
+                    + json.dumps(cli_packet, separators=(",", ":"), default=str)
+                    + "\n```\n[END_DATA_PACKET]\n"
+                )
+            except Exception:
+                auto_data_block = ""
 
-            payload_to_send = [*chart_parts, current_message] if chart_parts else current_message
+            payload_to_send = f"{active_model_str}{auto_data_block}[USER_QUERY]: {user_input}"
 
             try:
                 from tool_dispatcher import GLOBAL_TOOL_DISPATCHER

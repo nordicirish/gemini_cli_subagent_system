@@ -44,9 +44,9 @@ except ImportError:
     )
 
 try:
-    from atomic_io import FileLock, atomic_update_json
+    from atomic_io import FileLock, atomic_read_json, atomic_update_json, atomic_write_json
 except ImportError:
-    from python.atomic_io import FileLock, atomic_update_json
+    from python.atomic_io import FileLock, atomic_read_json, atomic_update_json, atomic_write_json
 
 import fx_rates
 from portfolio_proposals import (
@@ -90,25 +90,8 @@ except ImportError:
 from fetch_stocks import app, run_daemon, GLOBAL_STATE, CHART_SCREENSHOTS_BUFFER
 
 def get_chart_parts() -> tuple[list, list]:
-    """Load latest 1-minute chart screenshots from context/charts/ as multimodal Parts."""
-    chart_parts = []
-    chart_symbols = []
-    chart_dir = "context/charts"
-    if os.path.exists(chart_dir):
-        for filepath in sorted(glob.glob(os.path.join(chart_dir, "chart_*_1m.png"))):
-            try:
-                base = os.path.basename(filepath)
-                sym = base.replace("chart_", "").replace("_1m.png", "")
-                with open(filepath, "rb") as f:
-                    data = f.read()
-                    if data:
-                        chart_parts.append(
-                            types.Part.from_bytes(data=data, mime_type="image/png")
-                        )
-                        chart_symbols.append(sym)
-            except Exception as e:
-                pass
-    return chart_parts, chart_symbols
+    """Chart PNG capture is disabled; intraday 1m text structure is injected instead when requested."""
+    return [], []
 
 class DecimalJSONResponse(JSONResponse):
     """JSONResponse preserving exact Decimal numeric representations without binary float conversion."""
@@ -177,7 +160,17 @@ class BasketSaveRequest(BaseModel):
 
 # --- LOGGING SYSTEM ---
 _system_logs_queue = None
+_log_subscribers: set[asyncio.Queue] = set()
+_log_subscribers_lock = threading.Lock()
 main_loop = None
+
+
+def _trigger_force_refresh(fetch_stocks_mod: Any) -> None:
+    if hasattr(fetch_stocks_mod, "trigger_force_refresh"):
+        fetch_stocks_mod.trigger_force_refresh()
+    else:
+        fetch_stocks_mod.FORCE_REFRESH = True
+
 
 def get_log_queue():
     global _system_logs_queue
@@ -185,13 +178,43 @@ def get_log_queue():
         _system_logs_queue = asyncio.Queue(maxsize=100)
     return _system_logs_queue
 
-def log_to_queue(message: str):
-    """Callback for AgentFramework to push logs to the async queue."""
-    global main_loop
-    if main_loop:
+
+def subscribe_log_queue() -> asyncio.Queue:
+    q: asyncio.Queue = asyncio.Queue(maxsize=256)
+    with _log_subscribers_lock:
+        _log_subscribers.add(q)
+    return q
+
+
+def unsubscribe_log_queue(q: asyncio.Queue) -> None:
+    with _log_subscribers_lock:
+        _log_subscribers.discard(q)
+
+
+def _enqueue_log_nonblocking(q: asyncio.Queue, message: str) -> None:
+    try:
+        q.put_nowait(message)
+    except asyncio.QueueFull:
         try:
-            main_loop.call_soon_threadsafe(_system_logs_queue.put_nowait, message)
-        except:
+            q.get_nowait()
+            q.put_nowait(message)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def log_to_queue(message: str):
+    """Callback for AgentFramework to push logs to all active SSE subscribers."""
+    global main_loop
+    if not main_loop:
+        return
+    with _log_subscribers_lock:
+        targets = list(_log_subscribers)
+    for q in targets:
+        try:
+            main_loop.call_soon_threadsafe(_enqueue_log_nonblocking, q, message)
+        except Exception:
             pass
 
 _MAX_TRACKED_TURN_IDS = 256
@@ -309,230 +332,50 @@ def check_invalid_tickers(symbols: List[str]) -> List[str]:
 # Subagent & Council Tool Definitions
 # ---------------------------------------------------------------------------
 
-# --- CONTEXT CACHING INITIALIZATION (ENH_CACHE_01) ---
-subagent_instructions = [
-    "engine_instructions/macro_sentinel.md", "engine_instructions/research.md", "engine_instructions/sentiment_engine.md",
-    "engine_instructions/structural_engine.md", "engine_instructions/context_engine.md", "engine_instructions/technical_validator.md",
-    "engine_instructions/bullish_gem.md", "engine_instructions/red_team_gem.md", "engine_instructions/neutral_gem.md", "engine_instructions/terminal.md",
-    "engine_instructions/post_trade_review.md", "engine_instructions/macro_narrative_engine.md",
-    "engine_instructions/data_analyst.md", "engine_instructions/state_validation_router.md", "engine_instructions/rule_enforcer_engine.md",
-    "engine_instructions/execution.md", "engine_instructions/gex_engine.md",
-    "engine_instructions/regime_engine.md", "engine_instructions/strategy_engine.md"
-]
-
-# 1. Define the Sub-Agents with their instructions and specific tools
-macro_sentinel = framework.create_agent_tool(
-    name="Macro Sentinel",
-    file_path="engine_instructions/macro_sentinel.md",
-    mode="PRO",
-    agent_tools=[tools.read_ssot, tools.perform_web_forensic_search]
-)
-
 def _load_live_analytics_context() -> tuple:
     try:
-        from fetch_stocks import get_global_state_snapshot
-        live_state = get_global_state_snapshot()
-    except Exception:
-        live_state = {}
-    ssot_data = live_state.get("local_storage_state") if isinstance(live_state, dict) else None
-    if not isinstance(ssot_data, dict):
-        try:
-            ssot_data = get_persistence_service().get_ssot_data()
-        except Exception:
-            ssot_data = {}
-    fx_snapshot = fx_rates.fx_public(fx_rates.get_eurusd())
-    return live_state, ssot_data, fx_snapshot, agent_framework.ny_now()
+        from agent_factory import load_live_analytics_context
+    except ImportError:
+        from python.agent_factory import load_live_analytics_context
+    return load_live_analytics_context()
 
 
-research_engine = framework.create_agent_tool(
-    name="Research Engine", 
-    file_path="engine_instructions/research.md", 
-    mode="THINKING", 
-    agent_tools=[tools.perform_web_forensic_search, tools.fetch_sec_filings]
+try:
+    from agent_factory import build_agent_runtime
+except ImportError:
+    from python.agent_factory import build_agent_runtime
+
+_runtime = build_agent_runtime(
+    framework,
+    analytics_context_loader=_load_live_analytics_context,
+    analytics_engine_provider=lambda: ANALYTICS_ENGINE,
+    sec_fetcher_provider=lambda: fetch_recent_sec_filings,
 )
-
-macro_narrative_engine = framework.create_agent_tool(
-    name="Macro Narrative Engine",
-    file_path="engine_instructions/macro_narrative_engine.md",
-    mode="THINKING",
-    agent_tools=[tools.perform_web_forensic_search, tools.read_ssot, tools.get_market_data]
-)
-
-data_analyst = framework.create_agent_tool(
-    name="Data Analyst",
-    file_path="engine_instructions/data_analyst.md",
-    mode="PRO",
-    agent_tools=[tools.perform_web_forensic_search, tools.get_market_data, tools.fetch_sec_filings]
-)
-
-state_validation_router = framework.create_deterministic_agent_tool(
-    name="State Validation Router",
-    handler_fn=lambda _q: ANALYTICS_ENGINE.format_state_validation_router_response(*_load_live_analytics_context()),
-    description="Deterministic Python State & Validation Router enforcing ENH_32 schema integrity, ENH_99 zero-share pruning, MANDATE_36 trailing stop audits, and canonical EXECUTION_PAYLOAD emission.",
-)
-
-rule_enforcer_engine = framework.create_deterministic_agent_tool(
-    name="Rule Enforcer Engine",
-    handler_fn=lambda _q: ANALYTICS_ENGINE.format_rule_enforcer_response(
-        *_load_live_analytics_context(),
-        sec_fetcher=lambda sym: fetch_recent_sec_filings(sym, limit=3),
-    ),
-    description="Deterministic Python Rule Enforcer evaluating global vetoes, position trim mandates, friction hurdles, and 72h SEC EDGAR dilution filings.",
-)
-
-execution = framework.create_deterministic_agent_tool(
-    name="Execution Engine",
-    handler_fn=lambda _q: ANALYTICS_ENGINE.format_execution_engine_response(*_load_live_analytics_context()),
-    description="Deterministic Python Execution Engine computing MANDATE_36 trailing stop audits, ENH_96 Fib front-run ladders, Decimal FX/cash proofs, and sweep trim tickets.",
-)
-
-gex_engine = framework.create_deterministic_agent_tool(
-    name="GEX Engine",
-    handler_fn=lambda _q: ANALYTICS_ENGINE.format_gex_engine_response(*_load_live_analytics_context()[:2], ny_dt=_load_live_analytics_context()[3]),
-    description="Deterministic Python GEX dealer posture, gamma flip proximity, SSR override, and ENH_17_B whiplash analyzer.",
-)
-
-regime_engine = framework.create_deterministic_agent_tool(
-    name="Regime Engine",
-    handler_fn=lambda _q: ANALYTICS_ENGINE.format_regime_engine_response(*_load_live_analytics_context()),
-    description="Deterministic Python Volatility State & Strategy Permissibility routing matrix.",
-)
-
-strategy_engine = framework.create_deterministic_agent_tool(
-    name="Strategy Engine",
-    handler_fn=lambda _q: ANALYTICS_ENGINE.format_strategy_engine_response(*_load_live_analytics_context()),
-    description="Deterministic Python setup classifier and Volatility Regime strategy permissibility validator.",
-)
-
-sentiment_engine = framework.create_agent_tool(
-    name="Sentiment Engine", 
-    file_path="engine_instructions/sentiment_engine.md", 
-    mode="GEMMA",
-    agent_tools=[tools.perform_web_forensic_search]
-)
-
-structural_engine = framework.create_agent_tool(
-    name="Structural Engine", 
-    file_path="engine_instructions/structural_engine.md", 
-    mode="GEMMA",
-    agent_tools=[tools.read_ssot, tools.get_market_data, tools.perform_web_forensic_search, tools.fetch_sec_filings]
-)
-
-context_engine = framework.create_agent_tool(
-    name="Context Engine", 
-    file_path="engine_instructions/context_engine.md", 
-    mode="GEMMA",
-    agent_tools=[tools.read_ssot, tools.update_ssot, tools.read_trade_lessons, tools.update_trade_lessons, tools.get_market_data, tools.perform_web_forensic_search, tools.update_rules]
-)
-
-technical_validator = framework.create_deterministic_agent_tool(
-    name="Technical Validator",
-    handler_fn=lambda _q: ANALYTICS_ENGINE.format_technical_validator_response(*_load_live_analytics_context()),
-    description="Deterministic Python technical alignment, MANDATE_06 Decimal math/FX proofs, and trim tranche validator.",
-)
-
-post_trade_review = framework.create_agent_tool(
-    name="Post-Trade Review Engine",
-    file_path="engine_instructions/post_trade_review.md",
-    mode="FAST",
-    agent_tools=[tools.read_decision_log, tools.run_decision_backtest, tools.read_trade_lessons, tools.update_trade_lessons, tools.perform_web_forensic_search]
-)
-
-# Read-only Review Engine behind the chat "Review Log" chip (/api/review). It is invoked directly,
-# bypassing the orchestrator's mandatory Final Council Decision template, and holds no write tools:
-# lessons persist only when the owner clicks "Save Lesson" on a [LESSON] line.
-review_log_engine = framework.create_agent_tool(
-    name="Review Engine",
-    file_path="engine_instructions/post_trade_review.md",
-    mode="FAST",
-    agent_tools=[tools.read_decision_log, tools.run_decision_backtest, tools.read_trade_lessons]
-)
-
-# Council Members
-bullish_advocate = framework.create_agent_tool(
-    name="Bullish Advocate", 
-    file_path="engine_instructions/bullish_gem.md",
-    mode="THINKING",
-    agent_tools=[tools.perform_web_forensic_search]
-)
-
-red_team_pessimist = framework.create_agent_tool(
-    name="Red Team Pessimist", 
-    file_path="engine_instructions/red_team_gem.md",
-    mode="THINKING",
-    agent_tools=[tools.perform_web_forensic_search]
-)
-
-
-neutral_structuralist = framework.create_agent_tool(
-    name="Neutral Structuralist", 
-    file_path="engine_instructions/neutral_gem.md", 
-    mode="GEMMA",
-    agent_tools=[tools.perform_web_forensic_search]
-)
-
-# 2. Create the Council Dispatcher (Strictly Read-Only Deliberative Agents; Stage 3.3.1)
-# Mutating / state-routing agents (State Validation Router, Context Engine, Post-Trade Review)
-# remain available strictly via sequential delegation in terminal_tools below.
-council_members = {
-    "ask_macro_sentinel": macro_sentinel,
-    "ask_research_engine": research_engine,
-    "ask_macro_narrative_engine": macro_narrative_engine,
-    "ask_data_analyst": data_analyst,
-    "ask_rule_enforcer_engine": rule_enforcer_engine,
-    "ask_execution_engine": execution,
-    "ask_gex_engine": gex_engine,
-    "ask_sentiment_engine": sentiment_engine,
-    "ask_structural_engine": structural_engine,
-    "ask_bullish_advocate": bullish_advocate,
-    "ask_red_team_pessimist": red_team_pessimist,
-    "ask_neutral_structuralist": neutral_structuralist,
-    "ask_technical_validator": technical_validator,
-    "ask_regime_engine": regime_engine,
-    "ask_strategy_engine": strategy_engine,
-}
-ask_council = framework.create_parallel_council_tool(council_members)
-
-# 3. Define the final toolset for the Orchestrator
-terminal_tools = [
-    tools.read_ssot,
-    tools.update_ssot,
-    tools.read_trade_lessons,
-    tools.update_trade_lessons,
-    tools.get_market_data,
-    tools.read_decision_log,
-    tools.run_decision_backtest,
-    tools.fetch_sec_filings,
-    macro_sentinel,
-    research_engine,
-    macro_narrative_engine,
-    data_analyst,
-    state_validation_router,
-    rule_enforcer_engine,
-    execution,
-    gex_engine,
-    sentiment_engine,
-    structural_engine,
-    context_engine,
-    technical_validator,
-    post_trade_review,
-    bullish_advocate,
-    red_team_pessimist,
-    neutral_structuralist,
-    regime_engine,
-    strategy_engine,
-    ask_council
-]
-
-# Load Orchestrator context
-terminal_instruction = framework.load_system_instruction("engine_instructions/terminal.md")
-
-all_tools = terminal_tools + [tools.perform_web_forensic_search]
-
-
-
-# Resolve Orchestrator dynamically using _resolve_orchestrator
-ORCHESTRATOR_MODEL = framework._resolve_orchestrator()
+macro_sentinel = _runtime.macro_sentinel
+research_engine = _runtime.research_engine
+macro_narrative_engine = _runtime.macro_narrative_engine
+data_analyst = _runtime.data_analyst
+state_validation_router = _runtime.state_validation_router
+rule_enforcer_engine = _runtime.rule_enforcer_engine
+execution = _runtime.execution
+gex_engine = _runtime.gex_engine
+regime_engine = _runtime.regime_engine
+strategy_engine = _runtime.strategy_engine
+sentiment_engine = _runtime.sentiment_engine
+structural_engine = _runtime.structural_engine
+context_engine = _runtime.context_engine
+technical_validator = _runtime.technical_validator
+post_trade_review = _runtime.post_trade_review
+review_log_engine = _runtime.review_log_engine
+bullish_advocate = _runtime.bullish_advocate
+red_team_pessimist = _runtime.red_team_pessimist
+neutral_structuralist = _runtime.neutral_structuralist
+refresh_analytics = _runtime.refresh_analytics_tool
+council_members = _runtime.council_members
+ask_council = _runtime.ask_council
+terminal_tools = _runtime.terminal_tools
+terminal_instruction = _runtime.terminal_instruction
+ORCHESTRATOR_MODEL = _runtime.orchestrator_model
 
 
 
@@ -1203,6 +1046,25 @@ def chat_endpoint(req: ChatRequest):
                     "trade_lessons": trade_lessons_list[-10:],
                     "decision_log": compact_decision_log,
                 }
+                if should_attach_charts(req):
+                    try:
+                        from fetch_stocks import build_compact_intraday_1m_summary
+                        summary_syms = []
+                        for p_item in portfolio:
+                            t_sym = p_item.get("ticker") if isinstance(p_item, collections.abc.Mapping) else None
+                            if t_sym and str(t_sym).strip().upper() not in summary_syms:
+                                summary_syms.append(str(t_sym).strip().upper())
+                        for w_sym in watched:
+                            if w_sym and str(w_sym).strip().upper() not in summary_syms:
+                                summary_syms.append(str(w_sym).strip().upper())
+                        if not summary_syms:
+                            summary_syms = ["SPY"]
+                        intraday_summary = build_compact_intraday_1m_summary(summary_syms, max_symbols=6)
+                        if intraday_summary:
+                            data_packet["intraday_1m_structure"] = intraday_summary
+                            framework.log(f"[Intraday] Attached compact 1m structure summary for {', '.join(intraday_summary.keys())}.")
+                    except Exception as intraday_err:
+                        framework.log(f"[Intraday] Optional 1m summary skipped: {intraday_err}")
                 data_packet_json = json.dumps(_normalize_for_json(data_packet), separators=(",", ":"), default=str)
                 auto_data_block = load_data_packet_injection_prompt(data_packet_json)
                 framework.log(f"[System] DATA_PACKET injected: {len(slim_tickers)} tickers, {len(portfolio)} positions.")
@@ -1415,7 +1277,11 @@ def chat_endpoint(req: ChatRequest):
                     if hold_tickers:
                         active_mandates_by_ticker: Dict[str, List[str]] = {}
                         try:
-                            live_analytics = ANALYTICS_ENGINE.evaluate(*_load_live_analytics_context())
+                            live_analytics = (
+                                precomputed_analytics
+                                if isinstance(precomputed_analytics, dict)
+                                else ANALYTICS_ENGINE.evaluate(*_load_live_analytics_context())
+                            )
                             for pos in live_analytics.get("positions", []) or []:
                                 sym = str(pos.get("ticker") or "").strip().upper()
                                 if sym:
@@ -1551,7 +1417,7 @@ def _refresh_live_portfolio_state() -> None:
         fetch_stocks.TICKERS = fetch_stocks._load_ssot_tickers()
         fetch_stocks.MACRO_TICKERS = fetch_stocks._load_macro_tickers()
         fetch_stocks.ALL_TICKERS = list(dict.fromkeys(fetch_stocks.TICKERS + fetch_stocks.MACRO_TICKERS))
-        fetch_stocks.FORCE_REFRESH = True
+        _trigger_force_refresh(fetch_stocks)
         if hasattr(fetch_stocks, "update_global_state_snapshot"):
             ssot_now = service.get_ssot_data()
             fetch_stocks.update_global_state_snapshot(lambda s: {**s, "local_storage_state": ssot_now})
@@ -1700,8 +1566,7 @@ def save_settings(req: SettingsRequest):
             
     req.macro = cleaned_macro
 
-    with open("context/user_config.json", "w") as f:
-        json.dump(req.dict(), f, indent=2)
+    atomic_write_json("context/user_config.json", req.model_dump() if hasattr(req, "model_dump") else req.dict(), indent=2)
         
     try:
         import fetch_stocks
@@ -1729,19 +1594,18 @@ def save_macro(req: MacroRequest):
             
     req.macro = cleaned_macro
 
-    # Load existing config to update just the macro list
     config_path = "context/user_config.json"
     config = {"tickers": [], "macro": []}
     if os.path.exists(config_path):
-        with open(config_path, "r") as f:
-            try:
-                config = json.load(f)
-            except:
-                pass
-                
+        try:
+            loaded_cfg = atomic_read_json(config_path, default=config)
+            if isinstance(loaded_cfg, dict):
+                config = loaded_cfg
+        except Exception:
+            pass
+
     config["macro"] = req.macro
-    with open(config_path, "w") as f:
-        json.dump(config, f, indent=2)
+    atomic_write_json(config_path, config, indent=2)
         
     try:
         import fetch_stocks
@@ -1832,7 +1696,7 @@ async def save_basket(request: Request):
             fetch_stocks.TICKERS = fetch_stocks._load_ssot_tickers()
             fetch_stocks.MACRO_TICKERS = fetch_stocks._load_macro_tickers()
             fetch_stocks.ALL_TICKERS = list(dict.fromkeys(fetch_stocks.TICKERS + fetch_stocks.MACRO_TICKERS))
-            fetch_stocks.FORCE_REFRESH = True
+            _trigger_force_refresh(fetch_stocks)
 
             # Immediately update in-memory GLOBAL_STATE so the next GET /api/data instantly reflects changes
             if hasattr(fetch_stocks, "update_global_state_snapshot"):
@@ -1927,7 +1791,7 @@ async def save_watch_list(req: Request):
             import fetch_stocks
             fetch_stocks.TICKERS = fetch_stocks._load_ssot_tickers()
             fetch_stocks.ALL_TICKERS = fetch_stocks.TICKERS + fetch_stocks.MACRO_TICKERS
-            fetch_stocks.FORCE_REFRESH = True
+            _trigger_force_refresh(fetch_stocks)
             if hasattr(fetch_stocks, "update_global_state_snapshot"):
                 def _update_watchlist_state(current):
                     new_state = dict(current)
@@ -1983,7 +1847,7 @@ async def run_ai_scout(request: Request, background_tasks: BackgroundTasks):
                 return JSONResponse({"status": "error", "message": "No tickers in Watchlist. Add tickers to the Watchlist first."})
 
             # Force a refresh cycle so daemon re-evaluates them
-            fetch_stocks.FORCE_REFRESH = True
+            _trigger_force_refresh(fetch_stocks)
             background_tasks.add_task(reload_scout_tickers_task)
             return JSONResponse({
                 "status": "success",
@@ -2004,7 +1868,7 @@ async def run_ai_scout(request: Request, background_tasks: BackgroundTasks):
                 return JSONResponse({"status": "error", "message": "No Scout Sectors enabled. Toggle at least one sector to scan."})
 
             # Trigger the dynamic scout ticker discovery in background
-            fetch_stocks.FORCE_REFRESH = True
+            _trigger_force_refresh(fetch_stocks)
             background_tasks.add_task(reload_scout_tickers_task)
 
             return JSONResponse({
@@ -2043,7 +1907,7 @@ def reload_scout_tickers_task():
         import fetch_stocks
         fetch_stocks.TICKERS = fetch_stocks._load_ssot_tickers()
         fetch_stocks.ALL_TICKERS = fetch_stocks.TICKERS + fetch_stocks.MACRO_TICKERS
-        fetch_stocks.FORCE_REFRESH = True
+        _trigger_force_refresh(fetch_stocks)
         print(f"[System] Tickers hot-reloaded and forced refresh triggered in background: {fetch_stocks.TICKERS}")
     except Exception as se:
         print(f"[Warning] Failed to hot-reload TICKERS in background: {se}")
@@ -2474,35 +2338,34 @@ def get_daily_peak_prediction(ticker: str):
 
 @app.get("/api/system_logs")
 async def system_logs_endpoint():
-    """SSE endpoint to stream system logs to the frontend."""
+    """SSE endpoint to stream system logs to each connected dashboard tab independently."""
     global main_loop
     main_loop = asyncio.get_running_loop()
-    queue = get_log_queue()
-    
-    # Flush existing queue messages to prevent stale logs from leaking into new chat sessions
-    while not queue.empty():
-        try:
-            queue.get_nowait()
-        except asyncio.QueueEmpty:
-            break
-            
+    queue = subscribe_log_queue()
+
     async def event_generator():
-        while True:
-            log_msg = await queue.get()
-            yield f"data: {log_msg}\n\n"
-            
+        try:
+            while True:
+                log_msg = await queue.get()
+                yield f"data: {log_msg}\n\n"
+        finally:
+            unsubscribe_log_queue(queue)
+
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.middleware("http")
 async def set_static_html_no_cache(request: Request, call_next):
     response = await call_next(request)
-    if request.url.path == "/" or request.url.path.endswith(".html"):
+    path = request.url.path
+    if path == "/" or path.endswith(".html"):
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    elif "v" in request.query_params and path.endswith((".js", ".css")):
+        response.headers["Cache-Control"] = "public, max-age=86400"
     return response
 
 
 # --- MOUNT STATIC AND RUN ---
-if __name__ == "__main__":
+def main() -> int:
     if not os.path.exists("static"):
         os.makedirs("static")
     app.mount("/", StaticFiles(directory="static", html=True), name="static")
@@ -2545,5 +2408,11 @@ if __name__ == "__main__":
 
     try:
         uvicorn.run(app, host="127.0.0.1", port=port)
+        return 0
     except Exception as e:
         print(f"CRITICAL: Web Server exited with error: {e}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

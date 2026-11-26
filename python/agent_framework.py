@@ -653,8 +653,6 @@ def _cleanup_subprocess(
 
     return cleanup_success
 
-    return cleanup_success
-
 
 MAX_AGY_STDIN_BYTES = 90_000
 
@@ -1181,7 +1179,19 @@ class AntigravityAgentRunner:
             err = err_holder[0] if err_holder else ""
 
         finally:
-            _cleanup_subprocess(proc)
+            if not cancelled and not timed_out and not exc_holder and proc.returncode == 0:
+                for stream in (
+                    getattr(proc, "stdin", None),
+                    getattr(proc, "stdout", None),
+                    getattr(proc, "stderr", None),
+                ):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
+            else:
+                _cleanup_subprocess(proc)
 
         if proc.returncode != 0:
             raise RuntimeError(f"Antigravity Agent failed (code {proc.returncode}): {err or out}")
@@ -1595,15 +1605,45 @@ class AgentFramework:
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text
 
+    _STATIC_FILE_CACHE_LOCK = threading.Lock()
+    _STATIC_FILE_CACHE: Dict[str, Tuple[int, int, str]] = {}
+
+    def _read_cached_text(self, file_path: str) -> Optional[str]:
+        """Reads and caches a static text file keyed by (mtime_ns, size)."""
+        try:
+            st = os.stat(file_path)
+            sig = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
+        with self._STATIC_FILE_CACHE_LOCK:
+            cached = self._STATIC_FILE_CACHE.get(file_path)
+            if cached is not None and cached[0] == sig[0] and cached[1] == sig[1]:
+                return cached[2]
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        with self._STATIC_FILE_CACHE_LOCK:
+            self._STATIC_FILE_CACHE[file_path] = (sig[0], sig[1], content)
+        return content
+
     def _get_sys_instruction(self, base_instruction: str) -> str:
         """Appends the full rules documentation to the system instruction without duplicating DATA_PACKET lessons."""
         parts = [base_instruction]
         rules_path = os.path.join("gem_trading_rules", "rules.md")
         if os.path.exists(rules_path):
             try:
-                with open(rules_path, "r", encoding="utf-8") as f:
-                    raw_rules = f.read()
-                    parts.append(f"\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{self._minify_payload(raw_rules)}")
+                raw_rules = self._read_cached_text(rules_path)
+                if raw_rules is not None:
+                    minified_key = f"{rules_path}::minified"
+                    st = os.stat(rules_path)
+                    with self._STATIC_FILE_CACHE_LOCK:
+                        cached_min = self._STATIC_FILE_CACHE.get(minified_key)
+                    if cached_min is not None and cached_min[0] == st.st_mtime_ns and cached_min[1] == st.st_size:
+                        minified = cached_min[2]
+                    else:
+                        minified = self._minify_payload(raw_rules)
+                        with self._STATIC_FILE_CACHE_LOCK:
+                            self._STATIC_FILE_CACHE[minified_key] = (st.st_mtime_ns, st.st_size, minified)
+                    parts.append(f"\n\n--- ATTACHED KNOWLEDGE BASE (GEM_Rules_Data) ---\n{minified}")
             except Exception as e:
                 self.log(f"[Warning] Failed to read rules.md: {e}")
         return "".join(parts)
@@ -1843,11 +1883,9 @@ class AgentFramework:
         """Loads the temporal anchor prompt from prompts/temporal_anchor_prompt.txt and templates the parameters."""
         prompt_path = "prompts/temporal_anchor_prompt.txt"
         template = ""
-        if os.path.exists(prompt_path):
-            try:
-                with open(prompt_path, "r", encoding="utf-8") as f:
-                    template = f.read().strip()
-            except Exception: pass
+        cached = self._read_cached_text(prompt_path)
+        if cached:
+            template = cached.strip()
         if not template:
             template = (
                 "[SYSTEM_TIME (NEW YORK / ET): {ny_iso}]\n"
@@ -1973,7 +2011,7 @@ class AgentFramework:
                     )
                     dispatch_res = GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session(
                         session=sub_session,
-                        initial_message=f"[SYSTEM_TIME (NEW YORK / ET): {ny_iso}] {sliced_query}",
+                        initial_message=sliced_query,
                         part_factory=types.Part,
                         agent_role=name,
                         cancel_check=lambda: getattr(self, "cancel_check", lambda: False)(),

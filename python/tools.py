@@ -5,6 +5,7 @@ import asyncio
 import threading
 import time
 from decimal import Decimal
+from typing import Dict, Optional
 
 from atomic_io import (
     atomic_write_json,
@@ -421,20 +422,85 @@ def load_forensic_search_prompt(query: str) -> str:
     return template.format(query=query)
 
 
+_WEB_SEARCH_CACHE_TTL_SECONDS = 120.0
+_WEB_SEARCH_CACHE_MAX_ENTRIES = 128
+_WEB_SEARCH_CACHE_LOCK = threading.Lock()
+_WEB_SEARCH_CACHE: Dict[str, tuple] = {}
+_WEB_SEARCH_INFLIGHT: Dict[str, threading.Event] = {}
+
+
 def perform_web_forensic_search(query: str) -> str:
     """
     Performs a live web search to fetch current market filings (424B, S-3),
-    news catalysts, or structural data. Use this for forensic verification.
+    news catalysts, or structural data. Deduplicates identical concurrent/recent
+    queries within a 120s TTL and respects active turn cancellation.
     """
+    norm_key = " ".join(str(query or "").strip().lower().split())
+    cancel_check = None
+    try:
+        from tool_dispatcher import get_active_tool_cancel_check
+        cancel_check = get_active_tool_cancel_check()
+    except Exception:
+        try:
+            from python.tool_dispatcher import get_active_tool_cancel_check
+            cancel_check = get_active_tool_cancel_check()
+        except Exception:
+            cancel_check = None
+
+    if cancel_check and cancel_check():
+        return "Error performing web search: Operation cancelled by user."
+
+    now_mono = time.monotonic()
+    is_owner = False
+    wait_evt: Optional[threading.Event] = None
+
+    if norm_key:
+        while True:
+            with _WEB_SEARCH_CACHE_LOCK:
+                cached = _WEB_SEARCH_CACHE.get(norm_key)
+                if cached is not None:
+                    ts_cached, cached_val = cached
+                    if (now_mono - ts_cached) < _WEB_SEARCH_CACHE_TTL_SECONDS:
+                        return cached_val
+                    _WEB_SEARCH_CACHE.pop(norm_key, None)
+
+                existing_evt = _WEB_SEARCH_INFLIGHT.get(norm_key)
+                if existing_evt is not None:
+                    wait_evt = existing_evt
+                else:
+                    wait_evt = threading.Event()
+                    _WEB_SEARCH_INFLIGHT[norm_key] = wait_evt
+                    is_owner = True
+                    break
+            if wait_evt is not None:
+                wait_evt.wait(timeout=30.0)
+                now_mono = time.monotonic()
+                if cancel_check and cancel_check():
+                    return "Error performing web search: Operation cancelled by user."
+    else:
+        is_owner = True
+
     try:
         from agent_framework import AntigravityAgentRunner
 
-        runner = AntigravityAgentRunner()
+        runner = AntigravityAgentRunner(cancel_check=cancel_check)
         prompt = load_forensic_search_prompt(query)
-        response = runner.run_prompt(prompt, mode="FAST")
-        return response.text
+        response = runner.run_prompt(prompt, mode="FAST", cancel_check=cancel_check)
+        result_text = (getattr(response, "text", None) or "").strip()
+        if norm_key and is_owner and result_text and not result_text.startswith("Error "):
+            with _WEB_SEARCH_CACHE_LOCK:
+                if len(_WEB_SEARCH_CACHE) >= _WEB_SEARCH_CACHE_MAX_ENTRIES:
+                    oldest_key = min(_WEB_SEARCH_CACHE.items(), key=lambda kv: kv[1][0])[0]
+                    _WEB_SEARCH_CACHE.pop(oldest_key, None)
+                _WEB_SEARCH_CACHE[norm_key] = (time.monotonic(), result_text)
+        return result_text
     except Exception as e:
         return f"Error performing web search: {str(e)}"
+    finally:
+        if norm_key and is_owner and wait_evt is not None:
+            with _WEB_SEARCH_CACHE_LOCK:
+                _WEB_SEARCH_INFLIGHT.pop(norm_key, None)
+            wait_evt.set()
 
 
 # ---------------------------------------------------------------------------

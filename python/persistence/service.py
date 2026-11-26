@@ -99,6 +99,34 @@ class PersistenceService:
     def get_ssot_data(self) -> Dict[str, Any]:
         return self._adapter.get_ssot_data()
 
+    def get_ssot_data_slim(self) -> Dict[str, Any]:
+        if hasattr(self._adapter, "get_ssot_data_slim"):
+            return self._adapter.get_ssot_data_slim()
+        return strip_ssot_history(self.get_ssot_data())
+
+    def get_daemon_cycle_snapshot(self) -> Dict[str, Any]:
+        if hasattr(self._adapter, "get_daemon_cycle_snapshot"):
+            return self._adapter.get_daemon_cycle_snapshot()
+        ssot_slim = strip_ssot_history(self.get_ssot_data())
+        held_and_watched = set()
+        try:
+            basket = self.get_portfolio_basket()
+            for p in basket.get("portfolio", []):
+                ticker = p.get("ticker")
+                if ticker:
+                    held_and_watched.add(str(ticker).upper())
+            for w in self.get_watchlist():
+                if w:
+                    held_and_watched.add(str(w).upper())
+        except Exception:
+            held_and_watched = {str(t).upper() for t in self.get_ssot_tickers() if t}
+        return {
+            "ssot_slim": ssot_slim,
+            "trade_lessons": self.get_trade_lessons(),
+            "ssot_tickers": sorted(held_and_watched),
+            "held_and_watched": held_and_watched,
+        }
+
     def get_portfolio_basket(self) -> Dict[str, Any]:
         return self._adapter.get_portfolio_basket()
 

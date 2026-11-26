@@ -31,6 +31,8 @@ import numpy as np
 import requests
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
+
+_NY_TZ = ZoneInfo("America/New_York")
 import base64
 from dataclasses import dataclass
 import os
@@ -436,28 +438,22 @@ def apply_background_intelligence_results(
     Drains results from BACKGROUND_COORDINATOR (or explicit coordinator) and applies them
     under monotonic sequence and observation timestamp validation.
     Constructs replacement intelligence state and publishes it atomically
-    through the immutable snapshot contract while holding the relevant per-key lock.
+    through the immutable snapshot contract in a single batch update per drain.
     """
     eff_coord = BACKGROUND_COORDINATOR if coordinator is None else coordinator
     eff_app = BACKGROUND_RESULT_APPLICATOR if applicator is None else applicator
     results = eff_coord.drain_results()
     if results:
         with DYNAMIC_SCOUT_CACHE_LOCK:
+            updated_grounding = False
+            updated_scout = False
+
             def _publish_result(res: WorkResult):
+                nonlocal updated_grounding, updated_scout
                 if res.key.work_type == WorkType.GROUNDING.value:
-                    cache.qualitative_grounding = dict(cache.qualitative_grounding)
-                    cache.qualitative_grounding[res.key.target] = res.data
-                    update_global_state_snapshot(
-                        lambda s: {**s, "qualitative_grounding": dict(cache.qualitative_grounding)}
-                    )
+                    updated_grounding = True
                 elif res.key.work_type == WorkType.SCOUT.value:
-                    DYNAMIC_SCOUT_CACHE.clear()
-                    DYNAMIC_SCOUT_CACHE.update(temp_scout_cache)
-                    SCOUTED_TICKER_TO_CATEGORY_MAP.clear()
-                    SCOUTED_TICKER_TO_CATEGORY_MAP.update(temp_scout_map)
-                    update_global_state_snapshot(
-                        lambda s: {**s, "scout_categories_loaded": list(PROCESSED_SCOUT_CATEGORIES)}
-                    )
+                    updated_scout = True
 
             temp_grounding = dict(cache.qualitative_grounding)
             temp_scout_cache = dict(DYNAMIC_SCOUT_CACHE)
@@ -470,6 +466,26 @@ def apply_background_intelligence_results(
                 scout_category_map=temp_scout_map,
                 on_publish=_publish_result
             )
+
+            if updated_grounding:
+                cache.qualitative_grounding = temp_grounding
+            if updated_scout:
+                DYNAMIC_SCOUT_CACHE.clear()
+                DYNAMIC_SCOUT_CACHE.update(temp_scout_cache)
+                SCOUTED_TICKER_TO_CATEGORY_MAP.clear()
+                SCOUTED_TICKER_TO_CATEGORY_MAP.update(temp_scout_map)
+
+            if updated_grounding or updated_scout:
+                grounding_snap = dict(cache.qualitative_grounding) if updated_grounding else None
+                scout_cats_snap = list(PROCESSED_SCOUT_CATEGORIES) if updated_scout else None
+                def _batch_updater(s):
+                    merged = dict(s)
+                    if grounding_snap is not None:
+                        merged["qualitative_grounding"] = grounding_snap
+                    if scout_cats_snap is not None:
+                        merged["scout_categories_loaded"] = scout_cats_snap
+                    return merged
+                update_global_state_snapshot(_batch_updater)
 
 
 MARKET_DATA_COORDINATOR = BackgroundIntelligenceCoordinator(
@@ -694,6 +710,15 @@ ACTIVE_SCOUT_TICKERS = set()
 PROCESSED_SCOUT_CATEGORIES = []
 SCOUTED_TICKER_TO_CATEGORY_MAP = {}
 FORCE_REFRESH = False
+FORCE_REFRESH_EVENT = threading.Event()
+_ORIG_TIME_SLEEP = t_time.sleep
+
+
+def trigger_force_refresh() -> None:
+    """Signals an immediate daemon cycle wakeup without 10 Hz busy-wait polling."""
+    global FORCE_REFRESH
+    FORCE_REFRESH = True
+    FORCE_REFRESH_EVENT.set()
 
 def _load_ssot_tickers():
     global ACTIVE_SCOUT_TICKERS, PROCESSED_SCOUT_CATEGORIES, SCOUTED_TICKER_TO_CATEGORY_MAP
@@ -924,6 +949,9 @@ GLOBAL_STATE = freeze_snapshot({
 })
 
 _SNAPSHOT_LOCK = threading.Lock()
+_SANITIZED_GLOBAL_STATE_CACHE: Optional[dict] = None
+_SANITIZED_SOURCE_REF: Any = None
+
 
 def get_global_state_snapshot() -> ImmutableDict:
     """
@@ -933,19 +961,23 @@ def get_global_state_snapshot() -> ImmutableDict:
     global GLOBAL_STATE
     return GLOBAL_STATE
 
+
 def publish_global_state_snapshot(new_snapshot: Any) -> ImmutableDict:
     """
-    Publishes a replacement GLOBAL_STATE snapshot via an atomic reference swap.
-    The caller must construct replacement snapshots separately.
-    Published snapshots must not subsequently be mutated in place.
+    Publishes a replacement GLOBAL_STATE snapshot via an atomic reference swap
+    and pre-computes the sanitized /api/data payload.
     """
-    global GLOBAL_STATE
+    global GLOBAL_STATE, _SANITIZED_GLOBAL_STATE_CACHE, _SANITIZED_SOURCE_REF
     if not isinstance(new_snapshot, collections.abc.Mapping):
         raise TypeError(f"Snapshot must be a mapping, got {type(new_snapshot).__name__}")
     frozen = freeze_snapshot(new_snapshot)
+    sanitized = sanitize_json_payload(frozen)
     with _SNAPSHOT_LOCK:
         GLOBAL_STATE = frozen
+        _SANITIZED_SOURCE_REF = frozen
+        _SANITIZED_GLOBAL_STATE_CACHE = sanitized
     return frozen
+
 
 def update_global_state_snapshot(updater_fn: Callable[[Any], Any]) -> ImmutableDict:
     """
@@ -953,15 +985,34 @@ def update_global_state_snapshot(updater_fn: Callable[[Any], Any]) -> ImmutableD
     and publishing through atomic reference swap.
     Preserves immutability of previously published snapshots.
     """
-    global GLOBAL_STATE
+    global GLOBAL_STATE, _SANITIZED_GLOBAL_STATE_CACHE, _SANITIZED_SOURCE_REF
     with _SNAPSHOT_LOCK:
         current = GLOBAL_STATE
         new_snapshot = updater_fn(current)
         if not isinstance(new_snapshot, collections.abc.Mapping):
             raise TypeError(f"Updater must return a mapping, got {type(new_snapshot).__name__}")
         frozen = freeze_snapshot(new_snapshot)
+        sanitized = sanitize_json_payload(frozen)
         GLOBAL_STATE = frozen
+        _SANITIZED_SOURCE_REF = frozen
+        _SANITIZED_GLOBAL_STATE_CACHE = sanitized
         return frozen
+
+
+def _get_cached_sanitized_snapshot() -> Any:
+    """Returns a shallow copy of the sanitized GLOBAL_STATE dict, recomputing only on external swaps."""
+    global _SANITIZED_GLOBAL_STATE_CACHE, _SANITIZED_SOURCE_REF
+    snap = get_global_state_snapshot()
+    with _SNAPSHOT_LOCK:
+        if snap is _SANITIZED_SOURCE_REF and _SANITIZED_GLOBAL_STATE_CACHE is not None:
+            cached = _SANITIZED_GLOBAL_STATE_CACHE
+            return dict(cached) if isinstance(cached, dict) else cached
+    sanitized = sanitize_json_payload(snap)
+    with _SNAPSHOT_LOCK:
+        if snap is GLOBAL_STATE:
+            _SANITIZED_SOURCE_REF = snap
+            _SANITIZED_GLOBAL_STATE_CACHE = sanitized
+    return dict(sanitized) if isinstance(sanitized, dict) else sanitized
 def get_trusted_local_origins() -> List[str]:
     """Returns explicit trusted local dashboard origins without wildcards."""
     origins: List[str] = [
@@ -1150,9 +1201,13 @@ def sanitize_json_payload(obj):
         return int(obj)
     return obj
 
+_INTRADAY_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_INTRADAY_CACHE_LOCK = threading.Lock()
+_INTRADAY_CACHE_TTL_SECONDS = 30.0
+
 @app.get("/api/data")
 def get_data():
-    snap = sanitize_json_payload(get_global_state_snapshot())
+    snap = _get_cached_sanitized_snapshot()
     if ALERT_MONITOR is not None and isinstance(snap, dict):
         snap["alerts"] = sanitize_json_payload(ALERT_MONITOR.get_dashboard_payload())
     return JSONResponse(snap)
@@ -1166,59 +1221,127 @@ CHART_SCREENSHOTS_BUFFER = {}
 CHARTS_DIR = os.path.join("context", "charts")
 os.makedirs(CHARTS_DIR, exist_ok=True)
 
+
+def _fetch_intraday_payload(sym: str) -> Dict[str, Any]:
+    """Synchronously fetches and parses 5d/1m intraday bars with a 30s in-memory TTL cache."""
+    clean_sym = sym.strip().upper()
+    now_mono = t_time.monotonic()
+    with _INTRADAY_CACHE_LOCK:
+        cached = _INTRADAY_CACHE.get(clean_sym)
+        if cached is not None and (now_mono - cached[0]) < _INTRADAY_CACHE_TTL_SECONDS:
+            return cached[1]
+
+    ticker_obj = yf.Ticker(clean_sym)
+    # Fetch 5 days of 1m data with extended hours (pre-market and post-market)
+    df = ticker_obj.history(interval="1m", period="5d", prepost=True, auto_adjust=True)
+    if df is None or df.empty:
+        payload = {"bars": [], "warmup_closes": [], "symbol": clean_sym}
+        with _INTRADAY_CACHE_LOCK:
+            _INTRADAY_CACHE[clean_sym] = (t_time.monotonic(), payload)
+        return payload
+
+    # Determine today's date in the exchange local timezone
+    last_ts = df.index[-1]
+    today_date = last_ts.date()
+
+    bars = []
+    warmup_closes = []
+
+    for ts, row in df.iterrows():
+        try:
+            t_unix = int(ts.timestamp())
+        except Exception:
+            continue
+
+        bar_date = ts.date()
+        close_val = round(float(row["Close"]), 4)
+
+        if bar_date == today_date:
+            # Today's bars: full OHLCV for candlestick rendering
+            bars.append({
+                "time":   t_unix,
+                "open":   round(float(row["Open"]),  4),
+                "high":   round(float(row["High"]),  4),
+                "low":    round(float(row["Low"]),   4),
+                "close":  close_val,
+                "volume": int(row["Volume"]) if not pd.isna(row["Volume"]) else 0
+            })
+        else:
+            # Prior-session bars: only the close price for EMA warmup
+            warmup_closes.append(close_val)
+
+    payload = {
+        "bars":           bars,
+        "warmup_closes":  warmup_closes,
+        "symbol":         clean_sym
+    }
+    with _INTRADAY_CACHE_LOCK:
+        _INTRADAY_CACHE[clean_sym] = (t_time.monotonic(), payload)
+    return payload
+
+
+def build_compact_intraday_1m_summary(
+    symbols: Sequence[str],
+    max_symbols: int = 6,
+) -> Dict[str, Any]:
+    """Builds compact 1m session structure metrics per symbol instead of chart PNG uploads."""
+    summary: Dict[str, Any] = {}
+    seen = set()
+    for raw_sym in symbols:
+        sym = str(raw_sym or "").strip().upper()
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        if len(summary) >= max(1, int(max_symbols)):
+            break
+        try:
+            payload = _fetch_intraday_payload(sym)
+        except Exception:
+            continue
+        bars = payload.get("bars") or []
+        if not bars:
+            continue
+        first_bar = bars[0]
+        last_bar = bars[-1]
+        session_open = float(first_bar.get("open", 0.0) or 0.0)
+        session_close = float(last_bar.get("close", 0.0) or 0.0)
+        session_high = max(float(b.get("high", 0.0) or 0.0) for b in bars)
+        session_low = min(float(b.get("low", 0.0) or 0.0) for b in bars)
+        total_vol = sum(int(b.get("volume", 0) or 0) for b in bars)
+        vwap_1m = (
+            round(
+                sum(float(b.get("close", 0.0) or 0.0) * int(b.get("volume", 0) or 0) for b in bars) / total_vol,
+                4,
+            )
+            if total_vol > 0
+            else None
+        )
+        lookback = bars[-min(5, len(bars))]
+        lookback_close = float(lookback.get("close", 0.0) or 0.0)
+        slope_5m_pct = (
+            round(((session_close - lookback_close) / lookback_close) * 100.0, 3)
+            if lookback_close > 0
+            else 0.0
+        )
+        summary[sym] = {
+            "bar_count_1m": len(bars),
+            "open": round(session_open, 4),
+            "high": round(session_high, 4),
+            "low": round(session_low, 4),
+            "last": round(session_close, 4),
+            "vwap_1m": vwap_1m,
+            "slope_5m_pct": slope_5m_pct,
+            "last_bar_unix": int(last_bar.get("time", 0) or 0),
+        }
+    return summary
+
+
 @app.get("/api/intraday/{symbol}")
 async def get_intraday_data(symbol: str):
-    """Return 1-minute OHLCV bars for a given symbol for use in the chart modal.
-
-    Returns:
-        bars:           Today's OHLCV bars for candlestick rendering.
-        warmup_closes:  Close prices from prior sessions (oldest first) used to
-                        seed the EMA 200 calculation on the frontend, so the EMA
-                        is valid from the first bar of the current session.
-    """
+    """Return 1-minute OHLCV bars for a given symbol via non-blocking thread pool and 30s TTL cache."""
     try:
-        sym = symbol.strip().upper()
-        ticker_obj = yf.Ticker(sym)
-        # Fetch 5 days of 1m data with extended hours (pre-market and post-market)
-        df = ticker_obj.history(interval="1m", period="5d", prepost=True, auto_adjust=True)
-        if df is None or df.empty:
-            return JSONResponse({"bars": [], "warmup_closes": [], "symbol": sym})
-
-        # Determine today's date in the exchange local timezone
-        last_ts = df.index[-1]
-        today_date = last_ts.date()
-
-        bars = []
-        warmup_closes = []
-
-        for ts, row in df.iterrows():
-            try:
-                t_unix = int(ts.timestamp())
-            except Exception:
-                continue
-
-            bar_date = ts.date()
-            close_val = round(float(row["Close"]), 4)
-
-            if bar_date == today_date:
-                # Today's bars: full OHLCV for candlestick rendering
-                bars.append({
-                    "time":   t_unix,
-                    "open":   round(float(row["Open"]),  4),
-                    "high":   round(float(row["High"]),  4),
-                    "low":    round(float(row["Low"]),   4),
-                    "close":  close_val,
-                    "volume": int(row["Volume"]) if not pd.isna(row["Volume"]) else 0
-                })
-            else:
-                # Prior-session bars: only the close price for EMA warmup
-                warmup_closes.append(close_val)
-
-        return JSONResponse({
-            "bars":           bars,
-            "warmup_closes":  warmup_closes,
-            "symbol":         sym
-        })
+        payload = await asyncio.to_thread(_fetch_intraday_payload, symbol)
+        return JSONResponse(payload)
     except Exception as e:
         return JSONResponse({"bars": [], "warmup_closes": [], "symbol": symbol, "error": str(e)})
 
@@ -1448,8 +1571,27 @@ BOLD = "\033[1m"
 BG_NORMAL = ""
 BG_STRIPE = "\033[48;5;236m"
 
-session = requests.Session()
-session.headers.update({
+class _ThreadLocalSessionProxy:
+    """Provides a separate requests.Session per worker thread while preserving mockability."""
+
+    def __init__(self, default_headers: Optional[Dict[str, str]] = None):
+        self._default_headers = dict(default_headers or {})
+        self._local = threading.local()
+
+    def _get_session(self) -> requests.Session:
+        sess = getattr(self._local, "session", None)
+        if sess is None:
+            sess = requests.Session()
+            if self._default_headers:
+                sess.headers.update(self._default_headers)
+            self._local.session = sess
+        return sess
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get_session(), name)
+
+
+session = _ThreadLocalSessionProxy({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 })
 
@@ -1510,13 +1652,16 @@ class MarketDataCache:
         if not active_tickers:
             return
         active_set = {sym.upper() for sym in active_tickers}
-        for dict_attr in ('history', 'technicals', 'last_history_fetch_date'):
-            d = getattr(self, dict_attr, {})
-            keys_to_remove = [k for k in list(d.keys()) if k.upper() not in active_set]
+        removed_tickers = set()
+        for attr_name, d in vars(self).items():
+            if not isinstance(d, dict):
+                continue
+            keys_to_remove = [k for k in list(d.keys()) if isinstance(k, str) and k.upper() not in active_set]
             for k in keys_to_remove:
                 d.pop(k, None)
-        if keys_to_remove:
-            print(f"[Cache] Garbage collected {len(keys_to_remove)} redundant tickers: {keys_to_remove}")
+                removed_tickers.add(k.upper())
+        if removed_tickers:
+            print(f"[Cache] Garbage collected {len(removed_tickers)} redundant tickers: {sorted(removed_tickers)}")
 
     def save_to_disk(self, active_tickers=None):
         try:
@@ -6704,13 +6849,21 @@ def get_ssot_json_payload():
     return sanitize_json_payload(get_global_state_snapshot())
 
 
+_MERTON_CACHE_LOCK = threading.Lock()
+_MERTON_CACHE_KEY: Any = None
+_MERTON_CACHE_VAL: Optional[dict] = None
+
+
 def compute_merton_allocation(gamma=3.0, r=0.04):
+    global _MERTON_CACHE_KEY, _MERTON_CACHE_VAL
     try:
+        history_sig = []
         prices_dict = {}
         for sym in ALL_TICKERS:
             sym_upper = sym.upper()
-            if sym_upper in cache.history and not cache.history[sym_upper].empty:
-                df = cache.history[sym_upper]
+            df = cache.history.get(sym_upper)
+            if df is not None and not df.empty:
+                history_sig.append((sym_upper, len(df), str(df.index[-1])))
                 if 'Close' in df.columns:
                     close = df['Close']
                     if isinstance(close, pd.DataFrame):
@@ -6718,7 +6871,12 @@ def compute_merton_allocation(gamma=3.0, r=0.04):
                     valid_close = close[close > 0.0]
                     if len(valid_close) > 10:
                         prices_dict[sym_upper] = valid_close
-                        
+
+        cache_key = (tuple(sorted(history_sig)), float(gamma), float(r))
+        with _MERTON_CACHE_LOCK:
+            if _MERTON_CACHE_KEY == cache_key and _MERTON_CACHE_VAL is not None:
+                return dict(_MERTON_CACHE_VAL)
+
         if not prices_dict:
             return {
                 "status": "error",
@@ -6775,7 +6933,7 @@ def compute_merton_allocation(gamma=3.0, r=0.04):
             expected_ret = mu[ticker]
             sharpe_ratios[ticker] = float((expected_ret - r) / vol) if vol > 0 else 0.0
             
-        return {
+        result = {
             "status": "success",
             "parameters": {
                 "risk_aversion_gamma": float(gamma),
@@ -6792,6 +6950,10 @@ def compute_merton_allocation(gamma=3.0, r=0.04):
                 } for ticker in df_prices.columns
             }
         }
+        with _MERTON_CACHE_LOCK:
+            _MERTON_CACHE_KEY = cache_key
+            _MERTON_CACHE_VAL = dict(result)
+        return result
     except Exception as e:
         return {
             "status": "error",
@@ -6830,6 +6992,7 @@ def build_daemon_final_output(
     status: str,
     authoritative_state_error: Optional[str] = None,
     service: Optional[Any] = None,
+    cycle_snapshot: Optional[Dict[str, Any]] = None,
 ) -> dict:
     """
     Constructs the final output dictionary for GLOBAL_STATE and the web dashboard.
@@ -6841,19 +7004,23 @@ def build_daemon_final_output(
     if service is None:
         service = get_persistence_service()
 
-    supplemental_lessons = []
-    try:
-        supplemental_lessons = service.get_trade_lessons()
-    except Exception as e:
-        print(f"[Warning] Failed to load trade lessons via persistence service (optional): {e}")
+    if isinstance(cycle_snapshot, dict):
+        supplemental_lessons = list(cycle_snapshot.get("trade_lessons", []))
+        supplemental_ssot = cycle_snapshot.get("ssot_slim")
+    else:
+        supplemental_lessons = []
+        try:
+            supplemental_lessons = service.get_trade_lessons()
+        except Exception as e:
+            print(f"[Warning] Failed to load trade lessons via persistence service (optional): {e}")
 
-    supplemental_ssot = None
-    try:
-        supplemental_ssot = service.get_ssot_data()
-    except Exception as e:
-        if not authoritative_state_error:
-            authoritative_state_error = f"Authoritative SSoT retrieval failure: {e}"
-        print(f"[Error] Failed to load SSoT data via persistence service: {e}")
+        supplemental_ssot = None
+        try:
+            supplemental_ssot = service.get_ssot_data()
+        except Exception as e:
+            if not authoritative_state_error:
+                authoritative_state_error = f"Authoritative SSoT retrieval failure: {e}"
+            print(f"[Error] Failed to load SSoT data via persistence service: {e}")
 
     non_scout_data = []
     scout_data = []
@@ -6898,7 +7065,7 @@ def build_daemon_final_output(
                 "reliability": "DEGRADED",
                 "persistence_error": authoritative_state_error,
             },
-            "timestamp": datetime.now(ZoneInfo("America/New_York")).strftime('%Y-%m-%d %H:%M:%S'),
+            "timestamp": datetime.now(_NY_TZ).strftime('%Y-%m-%d %H:%M:%S'),
             "status": f"DEGRADED - PERSISTENCE FAILURE: {authoritative_state_error}",
             "is_heavy_refresh": False,
             "financial_state_valid": False,
@@ -6918,7 +7085,7 @@ def build_daemon_final_output(
                 "source": "Real-time Exchange Feed",
                 "reliability": "High",
             },
-            "timestamp": datetime.now(ZoneInfo("America/New_York")).strftime('%Y-%m-%d %H:%M:%S'),
+            "timestamp": datetime.now(_NY_TZ).strftime('%Y-%m-%d %H:%M:%S'),
             "status": status,
             "is_heavy_refresh": False,
             "financial_state_valid": True,
@@ -6929,6 +7096,10 @@ def build_daemon_final_output(
             "trade_lessons": supplemental_lessons,
             "merton_optimal_allocation": merton_alloc,
         }
+
+
+_ORIG_RESOLVE_HELD_AND_WATCHED = resolve_held_and_watched
+_ORIG_BUILD_DAEMON_FINAL_OUTPUT = build_daemon_final_output
 
 
 def get_macro_telemetry_context():
@@ -7001,6 +7172,7 @@ def _select_next_vwap_batch(
 def run_daemon():
     global GLOBAL_STATE, FORCE_REFRESH, ALL_TICKERS, TICKERS, MACRO_TICKERS
     FORCE_REFRESH = False
+    FORCE_REFRESH_EVENT.clear()
     daemon_mkt_coord = MARKET_DATA_COORDINATOR
     daemon_mkt_app = MARKET_DATA_RESULT_APPLICATOR
     daemon_heavy_coord = HEAVY_MARKET_DATA_COORDINATOR
@@ -7197,8 +7369,21 @@ def run_daemon():
                 f"{'ATR%':<{w_atr}} {'RSI':<{w_rsi}} {'VWAP':<{w_vwp}} {'TREND':<{w_trd}} {'SCORE':^{w_scr}}"
             )
             print(header_str)
-            # Calculate held and watched tickers to identify scouts inline
-            held_and_watched, authoritative_state_error = resolve_held_and_watched()
+            # Calculate held and watched tickers & reuse single-connection snapshot when unpatched
+            cycle_snapshot = None
+            if (
+                resolve_held_and_watched is _ORIG_RESOLVE_HELD_AND_WATCHED
+                and build_daemon_final_output is _ORIG_BUILD_DAEMON_FINAL_OUTPUT
+            ):
+                try:
+                    cycle_snapshot = get_persistence_service().get_daemon_cycle_snapshot()
+                    held_and_watched = set(cycle_snapshot.get("held_and_watched", set()))
+                    authoritative_state_error = None
+                except Exception as cycle_err:
+                    cycle_snapshot = None
+                    held_and_watched, authoritative_state_error = resolve_held_and_watched()
+            else:
+                held_and_watched, authoritative_state_error = resolve_held_and_watched()
 
             data = []
 
@@ -7209,10 +7394,9 @@ def run_daemon():
             }
 
             needs_save = bool(heavy_stats.get("historical_applied", 0) > 0)
+            cur_vix_p, cur_vol_regime, cur_vixy_roc = get_macro_telemetry_context()
 
             for i, sym in enumerate(ALL_TICKERS):
-                t_time.sleep(0.05)
-
                 p = cache.prices.get(sym)
                 gap = float(cache.gaps.get(sym, 0.0))
                 session_change = float(cache.session_change.get(sym, 0.0))
@@ -7220,7 +7404,6 @@ def run_daemon():
                 vwap = cache.vwaps.get(sym, 0.0)
                 techs = cache.technicals.get(sym, {})
                 score, note = calculate_score(sym)
-                cur_vix_p, cur_vol_regime, cur_vixy_roc = get_macro_telemetry_context()
 
                 if p is None or p <= 0 or cache.price_validity.get(sym) in ("INVALID", "UNAVAILABLE"):
                     print(f"{sym:<8} {RED}NO DATA{RESET}")
@@ -7573,11 +7756,19 @@ def run_daemon():
             sleep_needed = REFRESH_RATE_SECONDS
             print("")
 
-            final_output = build_daemon_final_output(
-                data=data,
-                status=status,
-                authoritative_state_error=authoritative_state_error,
-            )
+            if cycle_snapshot is not None:
+                final_output = build_daemon_final_output(
+                    data=data,
+                    status=status,
+                    authoritative_state_error=authoritative_state_error,
+                    cycle_snapshot=cycle_snapshot,
+                )
+            else:
+                final_output = build_daemon_final_output(
+                    data=data,
+                    status=status,
+                    authoritative_state_error=authoritative_state_error,
+                )
             try:
                 if ALERT_MONITOR is not None:
                     ALERT_MONITOR.evaluate_snapshot(data, market_status=status)
@@ -7604,14 +7795,19 @@ def run_daemon():
 
             wait_start = t_time.time()
             while True:
-                if FORCE_REFRESH:
+                if FORCE_REFRESH or FORCE_REFRESH_EVENT.is_set():
                     FORCE_REFRESH = False
+                    FORCE_REFRESH_EVENT.clear()
                     break
                 remaining = sleep_needed - (t_time.time() - wait_start)
                 if remaining <= 0:
                     break
                 print(f"\r\033[?25l{CYAN}Next Update in {int(remaining)}s... Web Dashboard is active.{RESET}    ", end="", flush=True)
-                t_time.sleep(0.1)
+                wait_slice = min(1.0, remaining)
+                if t_time.sleep is not _ORIG_TIME_SLEEP:
+                    t_time.sleep(wait_slice)
+                else:
+                    FORCE_REFRESH_EVENT.wait(timeout=wait_slice)
 
     except KeyboardInterrupt:
         print(f"\033[?25h", end="")
