@@ -489,6 +489,97 @@ class TestColabJobManagerAndAPI(unittest.TestCase):
                 self.assertEqual(get_art.json()["data"]["tickers"]["NVDA"]["dealer_flow_regime"], "VANNA_TAILWIND")
                 self.assertEqual(client.get("/api/colab/artifacts/unknown").status_code, 404)
 
+    def test_run_pipeline_returns_setup_required_when_transport_not_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            mgr = colab_jobs.ColabJobManager(
+                cache_dir=td,
+                config_loader=lambda: colab_mcp_client.ColabMCPConfig(mode="stdio"),
+                transport_prober=lambda _cfg: {"mode": "stdio", "ready": False, "setup_hint": "Install uv first"},
+            )
+            pipe = mgr.run_pipeline(only_stale=True, trigger="startup")
+            self.assertEqual(pipe["state"], "setup_required")
+            self.assertEqual(pipe["percent"], 0)
+            self.assertEqual(pipe["step_label"], "Install uv first")
+            self.assertEqual(pipe["jobs"]["vol_surface"]["status"], "setup_required")
+
+    def test_run_pipeline_skips_fresh_and_runs_only_stale_sequentially(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            # Pre-seed 2 fresh artifacts (vol_surface, quant_scout); leave sec_nlp & walk_forward missing
+            colab_calibration.import_colab_artifact("vol_surface", _sample_vol_surface(), cache_dir=td)
+            colab_calibration.import_colab_artifact("quant_scout", _sample_quant_scout(), cache_dir=td)
+
+            mock_svc = MagicMock()
+            mock_svc.get_portfolio_basket.return_value = {"portfolio": [], "unallocated_cash_eur": 0.0}
+            mock_svc.get_watchlist.return_value = ["NVDA"]
+            mock_svc.get_decision_log.return_value = []
+
+            executed_types = []
+
+            class _SeqClient:
+                def execute_python_script_sync(self, script_source, job_inputs, accelerator="CPU"):
+                    jt = job_inputs["job_type"]
+                    executed_types.append(jt)
+                    if jt == "sec_nlp":
+                        return _sample_sec_nlp()
+                    if jt == "walk_forward":
+                        return _sample_backtest_evidence()
+                    return _sample_vol_surface()
+
+            mgr = colab_jobs.ColabJobManager(
+                cache_dir=td,
+                config_loader=lambda: colab_mcp_client.ColabMCPConfig(mode="stdio"),
+                client_factory=lambda _cfg: _SeqClient(),
+                worker_loader=lambda jt: f"print({jt!r})",
+                service_provider=lambda: mock_svc,
+            )
+            pipe = mgr.run_pipeline(only_stale=True, trigger="startup")
+            self.assertIn(pipe["state"], {"running", "succeeded"})
+
+            for _ in range(100):
+                status = mgr.get_status()["pipeline"]
+                if status["state"] in {"succeeded", "partial", "failed"}:
+                    break
+                time.sleep(0.02)
+
+            final_pipe = mgr.get_status()["pipeline"]
+            self.assertEqual(final_pipe["state"], "succeeded")
+            self.assertEqual(final_pipe["percent"], 100)
+            self.assertEqual(final_pipe["skipped_fresh_count"], 2)
+            self.assertEqual(final_pipe["jobs"]["vol_surface"]["status"], "skipped_fresh")
+            self.assertEqual(final_pipe["jobs"]["quant_scout"]["status"], "skipped_fresh")
+            self.assertEqual(final_pipe["jobs"]["sec_nlp"]["status"], "succeeded")
+            self.assertEqual(final_pipe["jobs"]["walk_forward"]["status"], "succeeded")
+            self.assertEqual(executed_types, ["sec_nlp", "walk_forward"])
+
+    def test_maybe_start_startup_pipeline_respects_disable_env(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            mgr = colab_jobs.ColabJobManager(cache_dir=td)
+            with patch.dict(os.environ, {"COLAB_AUTO_RUN_ON_STARTUP": "0"}):
+                res = mgr.maybe_start_startup_pipeline()
+            self.assertEqual(res["state"], "disabled")
+
+    def test_run_all_endpoint_accepts_request_and_rejects_unknown_keys(self) -> None:
+        from fastapi.testclient import TestClient
+        import web_server
+
+        with tempfile.TemporaryDirectory() as td:
+            mgr = colab_jobs.ColabJobManager(
+                cache_dir=td,
+                config_loader=lambda: colab_mcp_client.ColabMCPConfig(mode="stdio"),
+                transport_prober=lambda _cfg: {"mode": "stdio", "ready": False, "setup_hint": "Install uv"},
+            )
+            with patch.object(web_server, "get_colab_job_manager", return_value=mgr):
+                client = TestClient(web_server.app)
+                bad = client.post("/api/colab/jobs/run_all", json={"unexpected": True})
+                self.assertEqual(bad.status_code, 422)
+
+                ok = client.post("/api/colab/jobs/run_all", json={"only_stale": False})
+                self.assertEqual(ok.status_code, 202)
+                self.assertEqual(ok.json()["state"], "setup_required")
+                st = client.get("/api/colab/status")
+                self.assertEqual(st.status_code, 200)
+                self.assertIn("pipeline", st.json())
+
 
 if __name__ == "__main__":
     unittest.main()

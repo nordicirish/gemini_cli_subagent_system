@@ -80,6 +80,21 @@ function updateVolatilityRegimePill(state) {
         : '';
     const tooltip = ['Volatility Regime', rawRegime || 'Pending', vixVal, vixyRoc].filter(Boolean).join(' · ');
     pill.title = tooltip;
+
+    const moodEl = document.getElementById('brief-mood-summary');
+    if (moodEl) {
+        let friendlyMood = 'Checking market tone…';
+        if (/CRISIS|EXTREME|PANIC|STRESS|HIGH|BEAR_VOLATILE/.test(upper)) {
+            friendlyMood = 'High Risk — Defensive Posture';
+        } else if (/ELEVATED|CAUTION|MODERATE|GUARDED|BEAR_QUIET|BULL_VOLATILE/.test(upper)) {
+            friendlyMood = 'Cautious — Elevated Volatility';
+        } else if (/BULL_QUIET|NORMAL|LOW|CALM|STABLE/.test(upper)) {
+            friendlyMood = 'Calm Uptrend — Normal Risk';
+        } else if (upper) {
+            friendlyMood = `Market Tone: ${upper}`;
+        }
+        moodEl.textContent = friendlyMood;
+    }
 }
 
 function setSidebarCollapsed(collapsed) {
@@ -297,6 +312,26 @@ let _tableSortDir = null;
 let _lastRenderTickers = null;
 let _lastRenderState = null;
 
+function _applyTableView(viewMode) {
+    const mode = viewMode === 'pro' ? 'pro' : 'simple';
+    if (dTableContainer) {
+        dTableContainer.classList.toggle('view-simple', mode === 'simple');
+    }
+    const simpleBtn = document.getElementById('table-view-simple-btn');
+    const proBtn = document.getElementById('table-view-pro-btn');
+    if (simpleBtn) {
+        simpleBtn.classList.toggle('active', mode === 'simple');
+        simpleBtn.setAttribute('aria-pressed', mode === 'simple' ? 'true' : 'false');
+    }
+    if (proBtn) {
+        proBtn.classList.toggle('active', mode === 'pro');
+        proBtn.setAttribute('aria-pressed', mode === 'pro' ? 'true' : 'false');
+    }
+    try {
+        localStorage.setItem('gem_table_view', mode);
+    } catch (_) {}
+}
+
 function _applyTableDensity(isCompact) {
     if (dTableContainer) {
         dTableContainer.classList.toggle('density-compact', Boolean(isCompact));
@@ -336,10 +371,24 @@ function _initTableToolbarAndShortcuts() {
     const densityBtn = document.getElementById('table-density-btn');
 
     let savedCompact = false;
+    let savedView = 'simple';
     try {
         savedCompact = localStorage.getItem('gem_table_density') === 'compact';
+        savedView = localStorage.getItem('gem_table_view') || 'simple';
     } catch (_) {}
     _applyTableDensity(savedCompact);
+    _applyTableView(savedView);
+
+    const simpleBtn = document.getElementById('table-view-simple-btn');
+    const proBtn = document.getElementById('table-view-pro-btn');
+    if (simpleBtn && !simpleBtn._gemViewBound) {
+        simpleBtn.addEventListener('click', () => _applyTableView('simple'));
+        simpleBtn._gemViewBound = true;
+    }
+    if (proBtn && !proBtn._gemViewBound) {
+        proBtn.addEventListener('click', () => _applyTableView('pro'));
+        proBtn._gemViewBound = true;
+    }
 
     if (filterInput && !filterInput._gemBound) {
         filterInput.addEventListener('input', () => {
@@ -445,6 +494,35 @@ function _initTableToolbarAndShortcuts() {
 }
 
 // Sidebar tabbed switcher for unified Discovery and Quant Lab cards
+function _activateSidebarTab(container, target) {
+    if (!container || !target) return;
+    const tablist = container.querySelector('.sidebar-tabs');
+    if (tablist) {
+        tablist.querySelectorAll('.sidebar-tab-btn[data-panel-tab]').forEach((tabBtn) => {
+            const isActive = tabBtn.getAttribute('data-panel-tab') === target;
+            tabBtn.classList.toggle('active', isActive);
+            tabBtn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+    }
+    container.querySelectorAll(':scope > .sidebar-tab-pane[data-tab-pane]').forEach((pane) => {
+        pane.classList.toggle('hidden', pane.getAttribute('data-tab-pane') !== target);
+    });
+}
+
+function _openSidebarCardAndTab(contentId, tabKey) {
+    setSidebarCollapsed(false);
+    const content = document.getElementById(contentId);
+    if (content) {
+        if (content.style.display === 'none') {
+            const card = content.closest('.sidebar-card');
+            const header = card && card.querySelector('.header-row h3');
+            if (header) toggleSection(contentId, header);
+            else content.style.display = 'block';
+        }
+        if (tabKey) _activateSidebarTab(content, tabKey);
+    }
+}
+
 function _initSidebarTabs() {
     document.querySelectorAll('.sidebar-tabs').forEach((tablist) => {
         if (tablist._gemTabsBound) return;
@@ -452,20 +530,20 @@ function _initSidebarTabs() {
         tablist.addEventListener('click', (ev) => {
             const btn = ev.target && ev.target.closest ? ev.target.closest('.sidebar-tab-btn[data-panel-tab]') : null;
             if (!btn || !tablist.contains(btn)) return;
-            const target = btn.getAttribute('data-panel-tab');
-            const container = tablist.parentElement;
-            if (!target || !container) return;
-
-            tablist.querySelectorAll('.sidebar-tab-btn[data-panel-tab]').forEach((tabBtn) => {
-                const isActive = tabBtn === btn;
-                tabBtn.classList.toggle('active', isActive);
-                tabBtn.setAttribute('aria-selected', isActive ? 'true' : 'false');
-            });
-            container.querySelectorAll(':scope > .sidebar-tab-pane[data-tab-pane]').forEach((pane) => {
-                pane.classList.toggle('hidden', pane.getAttribute('data-tab-pane') !== target);
-            });
+            _activateSidebarTab(tablist.parentElement, btn.getAttribute('data-panel-tab'));
         });
     });
+    const briefAskBtn = document.getElementById('brief-ask-council-btn');
+    if (briefAskBtn && !briefAskBtn._gemBound) {
+        briefAskBtn.addEventListener('click', () => {
+            if (window.chatUI && typeof window.chatUI.open === 'function') window.chatUI.open();
+            else {
+                const launchBtn = document.getElementById('launch-chat-btn');
+                if (launchBtn) launchBtn.click();
+            }
+        });
+        briefAskBtn._gemBound = true;
+    }
 }
 
 // Initialization
@@ -970,6 +1048,17 @@ function renderTable(tickers, state) {
         }
         const rvolDisplay = hasRvol ? `${rvolNum.toFixed(2)}x` : '—';
         const safeSym = _escAlertHtml(sym);
+        const _plainSignalForRow = () => {
+            const rsiN = isNum(row.rsi) ? Number(row.rsi) : null;
+            const scN = Number(row.score || 0);
+            if (rsiN !== null && rsiN >= 75) return { cls: 'signal-warn', text: '🔥 Overheated' };
+            if (scN >= 5) return { cls: 'signal-bull', text: '▲ Strong Setup' };
+            if (scN >= 2) return { cls: 'signal-bull-soft', text: '↗ Favorable' };
+            if (scN <= -5) return { cls: 'signal-bear', text: '▼ High Risk' };
+            if (scN <= -2) return { cls: 'signal-bear-soft', text: '↘ Weakening' };
+            return { cls: 'signal-neutral', text: '— Steady' };
+        };
+        const plainSig = _plainSignalForRow();
         return `
             <tr class="chart-clickable" onclick="openChartModal('${safeSym}')" title="Click to view 1m TradingView chart">
                 <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}" data-sec-ticker="${safeSym}">
@@ -978,16 +1067,16 @@ function renderTable(tickers, state) {
                 </td>
                 <td class="num-col ${pClass}">${p}</td>
                 <td class="num-col ${dayColor}">${fmtSigned(row.session_change_pct, 2)}</td>
-                <td class="num-col ${gapColor}">${fmtSigned(row.gap_percent, 2)}</td>
-                <td class="num-col">${formatVol(row.volume)}</td>
-                <td class="num-col ${rvolClass}"${rvolStyle} title="Relative Volume vs 20d avg (time-paced)">${rvolDisplay}</td>
-                <td class="num-col">${isNum(row.atr_percent) ? `${fmt(row.atr_percent, 2)}%` : '—'}</td>
-                <td class="num-col ${rsiColor}">${fmt(row.rsi, 1)}</td>
-                <td class="${vwapClass}"${vwapTitle}>${hasVwap ? fmt(row.vwap, 2) : '—'}</td>
-                <td>${macdHtml}</td>
+                <td class="num-col pro-col ${gapColor}">${fmtSigned(row.gap_percent, 2)}</td>
+                <td class="num-col pro-col">${formatVol(row.volume)}</td>
+                <td class="num-col pro-col ${rvolClass}"${rvolStyle} title="Relative Volume vs 20d avg (time-paced)">${rvolDisplay}</td>
+                <td class="num-col pro-col">${isNum(row.atr_percent) ? `${fmt(row.atr_percent, 2)}%` : '—'}</td>
+                <td class="num-col pro-col ${rsiColor}">${fmt(row.rsi, 1)}</td>
+                <td class="pro-col ${vwapClass}"${vwapTitle}>${hasVwap ? fmt(row.vwap, 2) : '—'}</td>
+                <td class="pro-col">${macdHtml}</td>
                 <td>${trendHtml}</td>
                 <td>${fibTargetHtml}</td>
-                <td>${(() => {
+                <td class="pro-col">${(() => {
                     const gexVal = row.net_gex_total || 0;
                     const diff = row.gex_diff || 0;
                     let chevron = '';
@@ -1016,7 +1105,7 @@ function renderTable(tickers, state) {
                     return `<span class="dealer-badge ${dpClass}"${vsTitleAttr}>${gexVal.toFixed(3)}${chevron}</span>${vsTagHtml}`;
                 })()}</td>
                 <td class="score-col">
-                    <span class="score-badge ${scoreBadge}">${scoreStr}</span>${noteHtml}
+                    <span class="signal-plain-pill ${plainSig.cls}" title="Composite Signal Score: ${scoreStr} (scale -6 to +6)">${plainSig.text}</span><span class="score-badge ${scoreBadge}" title="Composite Signal Score (-6 to +6)">${scoreStr}</span>${noteHtml}
                 </td>
             </tr>
         `;
@@ -1271,6 +1360,7 @@ async function pollData() {
 
             // Render table with bifurcated sections
             renderTable(state.tickers, state);
+            renderActionBrief(state, _lastQuantAnalytics);
             
             // Render Macro HUD dynamic cards
             if (state.tickers) {
@@ -2384,6 +2474,7 @@ function renderQuantAnalyticsPanel(analytics, backtest) {
             ${btHtml}
         </div>
     `;
+    renderActionBrief(_lastRenderState, data);
 }
 
 async function copyExecutionOrderText(orderText, btn) {
@@ -2744,10 +2835,10 @@ async function fetchCalibrationStatus() {
         if (data && data.loaded) {
             const count = Array.isArray(data.tickers_calibrated) ? data.tickers_calibrated.length : 0;
             statusEl.textContent = `Colab calibration loaded (${count} ticker priors)`;
-            statusEl.className = 'status-message inline-feedback text-green';
+            statusEl.className = 'status-message inline-feedback active text-green';
         } else {
             statusEl.textContent = 'No Colab calibration loaded';
-            statusEl.className = 'status-message inline-feedback';
+            statusEl.className = 'status-message inline-feedback active';
         }
     } catch (_) {}
 }
@@ -2791,7 +2882,171 @@ if (dColabImportBtn && dColabImportFile) {
 }
 window.fetchCalibrationStatus = fetchCalibrationStatus;
 
-// Google Colab MCP Quant Jobs & Quant Scout Review
+// Google Colab MCP Quant Jobs, Auto-Pipeline Progress & Action Brief
+let _lastQuantScoutCandidates = [];
+let _lastColabStatus = null;
+let _colabPipelinePollTimer = null;
+
+function _briefActionClick(actionType, arg) {
+    if (actionType === 'chat') {
+        if (window.chatUI && typeof window.chatUI.open === 'function') window.chatUI.open();
+        else {
+            const btn = document.getElementById('launch-chat-btn');
+            if (btn) btn.click();
+        }
+    } else if (actionType === 'plan' && arg) {
+        openExecutionPlanModal(arg);
+    } else if (actionType === 'chart' && arg) {
+        openChartModal(arg);
+    } else if (actionType === 'discovery') {
+        _openSidebarCardAndTab('scout-content', 'scout-quant');
+    } else if (actionType === 'colab') {
+        _openSidebarCardAndTab('analytics-quant-content', 'quant-colab');
+    }
+}
+window._briefActionClick = _briefActionClick;
+
+function renderActionBrief(state, analytics) {
+    const listEl = document.getElementById('action-brief-list');
+    if (!listEl) return;
+    const st = state && typeof state === 'object' ? state : (_lastRenderState || {});
+    const data = analytics && typeof analytics === 'object' ? analytics : (_lastQuantAnalytics || {});
+    const tickers = Array.isArray(st.tickers) ? st.tickers : [];
+    const positions = Array.isArray(data.positions) ? data.positions : [];
+    const heldSet = new Set(positions.map((p) => String(p.ticker || '').toUpperCase()).filter(Boolean));
+    const items = [];
+
+    // 1. Global Risk Vetoes
+    const vetoes = Array.isArray(data.global_vetoes) ? data.global_vetoes : [];
+    vetoes.slice(0, 2).forEach((v) => {
+        const rid = _escAlertHtml(v.rule_id || 'Risk Guard');
+        const msg = _escAlertHtml(v.reason || v.action || 'Market risk guard is active — review stops before adding risk.');
+        items.push({
+            rank: 1,
+            severity: 'severity-critical',
+            title: `⚠️ Risk Alert Active (${rid})`,
+            desc: msg,
+            btnLabel: 'Ask AI Council',
+            action: 'chat',
+            arg: '',
+        });
+    });
+
+    // 2. Tier-1 Macro Calendar Shield
+    const macroCal = data.macro_calendar && typeof data.macro_calendar === 'object' ? data.macro_calendar : null;
+    if (macroCal && macroCal.shield_active && macroCal.next_event) {
+        const ne = macroCal.next_event;
+        const evName = _escAlertHtml(ne.name || 'Major Economic Release');
+        const hrsTxt = ne.hours_away != null ? ` in ${Number(ne.hours_away).toFixed(0)}h` : '';
+        items.push({
+            rank: 2,
+            severity: 'severity-warn',
+            title: `🛡️ Macro Protection (${evName}${hrsTxt})`,
+            desc: 'Major news window ahead — trailing stops tighten automatically by 50% to protect gains.',
+            btnLabel: 'Ask AI Council',
+            action: 'chat',
+            arg: '',
+        });
+    }
+
+    // 3. SEC Filing / Dilution Risk (Colab SEC NLP + Live 72h EDGAR warnings)
+    const nlpTickers = (data.colab_sec_nlp && data.colab_sec_nlp.tickers) || {};
+    const riskSyms = [];
+    Object.keys(nlpTickers).forEach((sym) => {
+        const info = nlpTickers[sym];
+        if (!info || typeof info !== 'object') return;
+        if (info.going_concern_flag || info.offering_overhang_flag || Number(info.dilution_risk_score || 0) >= 60) {
+            riskSyms.push({ sym, score: Number(info.dilution_risk_score || 0) });
+        }
+    });
+    if (typeof secDilutionCache === 'object' && secDilutionCache) {
+        Object.keys(secDilutionCache).forEach((sym) => {
+            if (secDilutionCache[sym] && secDilutionCache[sym].dilution_warning_72h && !riskSyms.some((x) => x.sym === sym)) {
+                riskSyms.push({ sym, score: 80 });
+            }
+        });
+    }
+    if (riskSyms.length > 0) {
+        const top = riskSyms.sort((a, b) => b.score - a.score)[0];
+        const safeSym = _escAlertHtml(top.sym);
+        items.push({
+            rank: 3,
+            severity: 'severity-warn',
+            title: `📑 Filing Risk Notice (${safeSym})`,
+            desc: `${riskSyms.length} stock(s) show dilution or financing filing risk. Review filings before sizing up.`,
+            btnLabel: `Review ${safeSym}`,
+            action: heldSet.has(top.sym) ? 'plan' : 'chart',
+            arg: safeSym,
+        });
+    }
+
+    // 4. Held Position Profit-Taking / Overheated Check
+    const peakHeld = tickers.find((t) => {
+        const sym = String((t && t.ticker) || '').toUpperCase();
+        const peakStatus = t && t.fib_forecast && t.fib_forecast.daily_peak_status;
+        return heldSet.has(sym) && (peakStatus === 'AT_PEAK_RESISTANCE' || peakStatus === 'PEAK_EXHAUSTED' || peakStatus === 'PARABOLIC_BLOW_OFF' || Number(t.rsi) >= 75);
+    });
+    if (peakHeld) {
+        const safeSym = _escAlertHtml(String(peakHeld.ticker).toUpperCase());
+        const rsiVal = Number.isFinite(Number(peakHeld.rsi)) ? ` (RSI ${Number(peakHeld.rsi).toFixed(0)})` : '';
+        items.push({
+            rank: 4,
+            severity: 'severity-warn',
+            title: `🎯 ${safeSym} Stretched Near Intraday Peak${rsiVal}`,
+            desc: 'Consider checking your scale-out limit levels or tightening trailing protection.',
+            btnLabel: 'Open Exit Plan',
+            action: 'plan',
+            arg: safeSym,
+        });
+    }
+
+    // 5. Stock Finder Ideas Ready
+    if (Array.isArray(_lastQuantScoutCandidates) && _lastQuantScoutCandidates.length > 0) {
+        const topCand = _lastQuantScoutCandidates[0];
+        const topSym = _escAlertHtml(String(topCand.ticker || '').toUpperCase());
+        const topScore = Number.isFinite(Number(topCand.composite_score)) ? Number(topCand.composite_score).toFixed(0) : '—';
+        items.push({
+            rank: 5,
+            severity: 'severity-opportunity',
+            title: `🔭 ${_lastQuantScoutCandidates.length} Stock Ideas Ready (Top: ${topSym} · ${topScore})`,
+            desc: 'Broad 500+ stock screen found low-correlation setups you can promote directly to your Watchlist.',
+            btnLabel: 'Inspect Ideas',
+            action: 'discovery',
+            arg: '',
+        });
+    }
+
+    // 6. Colab Setup Notice (only if setup is needed and nothing critical took all 4 slots)
+    const tr = _lastColabStatus && _lastColabStatus.transport ? _lastColabStatus.transport : null;
+    if (tr && !tr.ready && tr.mode !== 'offline') {
+        items.push({
+            rank: 6,
+            severity: 'severity-info',
+            title: '☁️ Cloud Research Setup Required',
+            desc: 'Automatic Google Colab GPU scans need one-time `uv` install or an offline JSON calibration upload.',
+            btnLabel: 'Show Setup',
+            action: 'colab',
+            arg: '',
+        });
+    }
+
+    if (items.length === 0) {
+        listEl.innerHTML = '<div class="action-brief-empty">All clear — no urgent risk alerts or overheated holdings right now. Review your holdings or ask the AI Council for a market briefing.</div>';
+        return;
+    }
+
+    listEl.innerHTML = items.slice(0, 4).map((it) => `
+        <div class="action-brief-item ${it.severity}">
+            <div class="action-brief-copy">
+                <strong>${it.title}</strong>
+                <span>${it.desc}</span>
+            </div>
+            <button type="button" class="brief-action-btn" onclick="_briefActionClick('${_escAlertHtml(it.action)}', '${_escAlertHtml(it.arg)}')">${_escAlertHtml(it.btnLabel)}</button>
+        </div>
+    `).join('');
+}
+window.renderActionBrief = renderActionBrief;
+
 async function fetchQuantScoutCandidates() {
     const listEl = document.getElementById('colab-quant-scout-list');
     if (!listEl) return;
@@ -2801,12 +3056,14 @@ async function fetchQuantScoutCandidates() {
         const payload = await res.json();
         const data = payload && payload.data;
         const cands = data && Array.isArray(data.candidates) ? data.candidates : [];
+        _lastQuantScoutCandidates = cands;
+        renderActionBrief(_lastRenderState, _lastQuantAnalytics);
         if (!payload.loaded || !cands.length) {
-            listEl.innerHTML = '<div class="colab-scout-empty">No Colab Quant Scout candidates loaded.</div>';
+            listEl.innerHTML = '<div class="colab-scout-empty">No Stock Finder ideas loaded yet.</div>';
             return;
         }
         const staleBadge = payload.freshness && payload.freshness.stale
-            ? '<div class="colab-scout-empty">Cached scout data is stale (past 48h TTL).</div>'
+            ? '<div class="colab-scout-empty">Cached ideas are stale (past 48h refresh window).</div>'
             : '';
         listEl.innerHTML = staleBadge + cands.slice(0, 10).map((c) => {
             const sym = _escAlertHtml(String(c.ticker || '').toUpperCase());
@@ -2819,7 +3076,7 @@ async function fetchQuantScoutCandidates() {
                 <div class="colab-scout-row" title="${rationale}">
                     <div class="colab-scout-meta">
                         <strong>${sym} · ${score}</strong>
-                        <span>3m ${rs3m}% | ρ ${corr} | ${cluster}</span>
+                        <span>3m ${rs3m}% | corr ${corr} | ${cluster}</span>
                     </div>
                     <button type="button" class="colab-scout-promote-btn" data-scout-ticker="${sym}">+ Watch</button>
                 </div>
@@ -2830,7 +3087,10 @@ async function fetchQuantScoutCandidates() {
 
 async function promoteQuantScoutTicker(ticker, btnEl) {
     const sym = String(ticker || '').trim().toUpperCase();
-    const jobStatusEl = document.getElementById('colab-mcp-job-status');
+    const statusEls = [
+        document.getElementById('colab-scout-job-status'),
+        document.getElementById('colab-mcp-job-status'),
+    ].filter(Boolean);
     if (!sym) return;
     if (btnEl) btnEl.disabled = true;
     try {
@@ -2848,17 +3108,66 @@ async function promoteQuantScoutTicker(ticker, btnEl) {
         const saveData = await saveRes.json().catch(() => ({}));
         if (!saveRes.ok) throw new Error(saveData.detail || `HTTP ${saveRes.status}`);
         if (btnEl) btnEl.textContent = '✓ Added';
-        if (jobStatusEl) {
-            jobStatusEl.textContent = `Promoted ${sym} to Watchlist.`;
-            jobStatusEl.className = 'status-message inline-feedback text-green';
-        }
+        _setColabJobStatus(statusEls, `Added ${sym} to your Watchlist.`, 'status-message inline-feedback active text-green');
         if (typeof fetchWatchlist === 'function') fetchWatchlist();
     } catch (err) {
         if (btnEl) btnEl.disabled = false;
-        if (jobStatusEl) {
-            jobStatusEl.textContent = err.message || `Failed to promote ${sym}.`;
-            jobStatusEl.className = 'status-message inline-feedback text-red';
+        _setColabJobStatus(statusEls, err.message || `Failed to add ${sym}.`, 'status-message inline-feedback active text-red');
+    }
+}
+
+function renderColabProgressAndSetup(data) {
+    _lastColabStatus = data;
+    const tr = data && data.transport ? data.transport : {};
+    const pipe = data && data.pipeline ? data.pipeline : {};
+    const setupBox = document.getElementById('colab-setup-guidance');
+    const setupTextEl = document.getElementById('colab-setup-guidance-text');
+    if (setupBox) {
+        const needsSetup = !tr.ready && tr.mode !== 'offline';
+        setupBox.style.display = needsSetup ? 'flex' : 'none';
+        if (needsSetup && setupTextEl && tr.setup_hint) {
+            setupTextEl.textContent = tr.setup_hint;
         }
+    }
+
+    const banner = document.getElementById('colab-progress-banner');
+    const stepEl = document.getElementById('colab-pipeline-step-label');
+    const pctEl = document.getElementById('colab-pipeline-percent');
+    const fillEl = document.getElementById('colab-pipeline-bar-fill');
+    const chipsEl = document.getElementById('colab-pipeline-chips');
+    const pipeState = String(pipe.state || 'idle');
+    const pct = Math.max(0, Math.min(100, Number(pipe.percent || 0)));
+
+    if (banner) {
+        const showBanner = pipeState === 'running' || pipeState === 'partial' || pipeState === 'failed'
+            || (pipeState === 'succeeded' && pipe.trigger === 'manual');
+        banner.classList.toggle('hidden', !showBanner);
+    }
+    if (stepEl) stepEl.textContent = pipe.step_label || 'Ready';
+    if (pctEl) pctEl.textContent = `${pct}%`;
+    if (fillEl) fillEl.style.width = `${pct}%`;
+    if (chipsEl) {
+        const jobs = pipe.jobs && typeof pipe.jobs === 'object' ? pipe.jobs : {};
+        const order = ['vol_surface', 'sec_nlp', 'quant_scout', 'walk_forward'];
+        const labels = {
+            vol_surface: 'Options Flow',
+            sec_nlp: 'Filing Risk',
+            quant_scout: 'Stock Finder',
+            walk_forward: 'Strategy Check',
+        };
+        chipsEl.innerHTML = order
+            .filter((k) => jobs[k])
+            .map((k) => {
+                const j = jobs[k];
+                const st = String(j.status || 'pending');
+                let cls = '';
+                let icon = '○';
+                if (st === 'running') { cls = 'is-running'; icon = '⟳'; }
+                else if (st === 'succeeded' || st === 'skipped_fresh') { cls = 'is-done'; icon = '✓'; }
+                else if (st === 'failed' || st === 'setup_required') { cls = 'is-failed'; icon = '!'; }
+                const lbl = _escAlertHtml(j.label || labels[k] || k);
+                return `<span class="colab-pipeline-chip ${cls}">${icon} ${lbl}</span>`;
+            }).join('');
     }
 }
 
@@ -2874,6 +3183,23 @@ async function fetchColabMcpStatus() {
         pillEl.textContent = ready ? `MCP: Ready (${tr.mode})` : `MCP: Setup (${tr.mode})`;
         pillEl.className = `colab-mcp-transport-pill${ready ? ' is-ready' : ''}`;
         if (tr.setup_hint) pillEl.title = tr.setup_hint;
+        renderColabProgressAndSetup(data);
+        renderActionBrief(_lastRenderState, _lastQuantAnalytics);
+
+        const pipeState = data && data.pipeline && data.pipeline.state;
+        const hasActiveJobs = data && data.active_jobs && Object.keys(data.active_jobs).length > 0;
+        if (pipeState === 'running' || hasActiveJobs) {
+            if (!_colabPipelinePollTimer) {
+                _colabPipelinePollTimer = setInterval(() => {
+                    fetchColabMcpStatus();
+                }, 2500);
+            }
+        } else if (_colabPipelinePollTimer) {
+            clearInterval(_colabPipelinePollTimer);
+            _colabPipelinePollTimer = null;
+            if (typeof fetchAnalyticsAndBacktest === 'function') fetchAnalyticsAndBacktest();
+        }
+
         if (data && data.artifacts && data.artifacts.quant_scout && data.artifacts.quant_scout.loaded) {
             await fetchQuantScoutCandidates();
         }
@@ -2886,9 +3212,57 @@ async function fetchColabMcpStatus() {
 function _setColabJobStatus(statusEls, text, className) {
     statusEls.forEach((el) => {
         if (!el) return;
-        el.textContent = text;
-        if (className) el.className = className;
+        el.textContent = text || '';
+        if (className) {
+            el.className = className;
+        } else {
+            el.classList.toggle('active', Boolean(text));
+        }
     });
+}
+
+function _setButtonBusy(btnEl, busyText) {
+    if (!btnEl) return;
+    if (!btnEl.dataset.origLabel) btnEl.dataset.origLabel = btnEl.textContent;
+    btnEl.disabled = true;
+    btnEl.textContent = busyText;
+}
+
+function _restoreButtonBusy(btnEl) {
+    if (!btnEl) return;
+    btnEl.disabled = false;
+    if (btnEl.dataset.origLabel) btnEl.textContent = btnEl.dataset.origLabel;
+}
+
+async function launchAllColabJobs(btnEl) {
+    const jobStatusEl = document.getElementById('colab-mcp-job-status');
+    const scoutStatusEl = document.getElementById('colab-scout-job-status');
+    const statusEls = [jobStatusEl, scoutStatusEl].filter(Boolean);
+    const useLlmEl = document.getElementById('colab-sec-use-llm-toggle');
+    _setButtonBusy(btnEl, '⏳ Running All...');
+    try {
+        const res = await fetch(`${API_BASE}/colab/jobs/run_all`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                only_stale: false,
+                use_llm: Boolean(useLlmEl && useLlmEl.checked),
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        renderColabProgressAndSetup({ transport: (_lastColabStatus && _lastColabStatus.transport) || {}, pipeline: data });
+        const st = String(data.state || 'running');
+        const cls = st === 'setup_required' || st === 'failed'
+            ? 'status-message inline-feedback active text-red'
+            : 'status-message inline-feedback active';
+        _setColabJobStatus(statusEls, data.step_label || 'Cloud research pipeline started…', cls);
+        await fetchColabMcpStatus();
+    } catch (err) {
+        _setColabJobStatus(statusEls, err.message || 'Failed to start Cloud Research pipeline.', 'status-message inline-feedback active text-red');
+    } finally {
+        _restoreButtonBusy(btnEl);
+    }
 }
 
 async function launchColabJob(jobType, btnEl) {
@@ -2899,7 +3273,8 @@ async function launchColabJob(jobType, btnEl) {
     const reqBody = (jobType === 'sec_nlp' && useLlmEl && useLlmEl.checked)
         ? { options: { use_llm: true } }
         : {};
-    if (btnEl) btnEl.disabled = true;
+    _setButtonBusy(btnEl, '⏳ Running...');
+    _setColabJobStatus(statusEls, `Starting ${jobType} on Cloud Research…`, 'status-message inline-feedback active');
     try {
         const res = await fetch(`${API_BASE}/colab/jobs/${encodeURIComponent(jobType)}`, {
             method: 'POST',
@@ -2909,42 +3284,47 @@ async function launchColabJob(jobType, btnEl) {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
         const jobId = data.job_id;
-        _setColabJobStatus(statusEls, `Queued ${jobType} (${jobId})...`, 'status-message inline-feedback');
+        _setColabJobStatus(statusEls, `Queued ${data.label || jobType} (${jobId})...`, 'status-message inline-feedback active');
         if (jobId) {
             const timer = setInterval(async () => {
                 try {
                     const pRes = await fetch(`${API_BASE}/colab/jobs/${encodeURIComponent(jobId)}`);
                     if (!pRes.ok) {
                         clearInterval(timer);
-                        if (btnEl) btnEl.disabled = false;
+                        _restoreButtonBusy(btnEl);
                         return;
                     }
                     const pData = await pRes.json();
                     if (pData.status === 'succeeded') {
                         clearInterval(timer);
-                        if (btnEl) btnEl.disabled = false;
-                        _setColabJobStatus(statusEls, `${jobType} completed cleanly.`, 'status-message inline-feedback text-green');
+                        _restoreButtonBusy(btnEl);
+                        _setColabJobStatus(statusEls, `${pData.label || jobType} completed cleanly.`, 'status-message inline-feedback active text-green');
                         await fetchColabMcpStatus();
                         if (typeof fetchAnalyticsAndBacktest === 'function') fetchAnalyticsAndBacktest();
                     } else if (pData.status === 'failed') {
                         clearInterval(timer);
-                        if (btnEl) btnEl.disabled = false;
-                        _setColabJobStatus(statusEls, pData.error || `${jobType} failed.`, 'status-message inline-feedback text-red');
+                        _restoreButtonBusy(btnEl);
+                        _setColabJobStatus(statusEls, pData.error || `${jobType} failed.`, 'status-message inline-feedback active text-red');
                     } else if (pData.progress) {
-                        _setColabJobStatus(statusEls, pData.progress);
+                        const pctTxt = Number.isFinite(Number(pData.progress_pct)) ? ` (${pData.progress_pct}%)` : '';
+                        _setColabJobStatus(statusEls, `${pData.progress}${pctTxt}`, 'status-message inline-feedback active');
                     }
                 } catch (_) {
                     clearInterval(timer);
-                    if (btnEl) btnEl.disabled = false;
+                    _restoreButtonBusy(btnEl);
                 }
             }, 2000);
+        } else {
+            _restoreButtonBusy(btnEl);
         }
     } catch (err) {
-        if (btnEl) btnEl.disabled = false;
-        _setColabJobStatus(statusEls, err.message || `Failed to start ${jobType}.`, 'status-message inline-feedback text-red');
+        _restoreButtonBusy(btnEl);
+        _setColabJobStatus(statusEls, err.message || `Failed to start ${jobType}.`, 'status-message inline-feedback active text-red');
     }
 }
 
+const dColabRunAllBtn = document.getElementById('colab-run-all-btn');
+const dColabCopySetupBtn = document.getElementById('colab-copy-setup-btn');
 const dColabVolBtn = document.getElementById('colab-run-vol-surface-btn');
 const dColabScoutBtn = document.getElementById('colab-run-quant-scout-btn');
 const dColabSecBtn = document.getElementById('colab-run-sec-nlp-btn');
@@ -2952,6 +3332,22 @@ const dColabBtBtn = document.getElementById('colab-run-walk-forward-btn');
 const dColabScoutRefreshBtn = document.getElementById('colab-refresh-scout-btn');
 const dColabScoutList = document.getElementById('colab-quant-scout-list');
 
+if (dColabRunAllBtn) dColabRunAllBtn.addEventListener('click', () => launchAllColabJobs(dColabRunAllBtn));
+if (dColabCopySetupBtn) {
+    dColabCopySetupBtn.addEventListener('click', async () => {
+        const codeEl = document.getElementById('colab-setup-cmd-code');
+        const cmdText = codeEl ? codeEl.textContent : 'winget install --id=astral-sh.uv -e';
+        const statusEl = document.getElementById('colab-mcp-job-status');
+        try {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                await navigator.clipboard.writeText(cmdText);
+            }
+            showFeedback(dColabCopySetupBtn, '✅ Copied', 'Copied setup command. Restart app after installing uv.', false, statusEl);
+        } catch (_) {
+            showFeedback(dColabCopySetupBtn, 'ℹ️ Cmd Shown', `Run in terminal: ${cmdText}`, false, statusEl);
+        }
+    });
+}
 if (dColabVolBtn) dColabVolBtn.addEventListener('click', () => launchColabJob('vol_surface', dColabVolBtn));
 if (dColabScoutBtn) dColabScoutBtn.addEventListener('click', () => launchColabJob('quant_scout', dColabScoutBtn));
 if (dColabSecBtn) dColabSecBtn.addEventListener('click', () => launchColabJob('sec_nlp', dColabSecBtn));
@@ -2967,6 +3363,7 @@ if (dColabScoutList) {
 window.fetchColabMcpStatus = fetchColabMcpStatus;
 window.fetchQuantScoutCandidates = fetchQuantScoutCandidates;
 window.launchColabJob = launchColabJob;
+window.launchAllColabJobs = launchAllColabJobs;
 window.promoteQuantScoutTicker = promoteQuantScoutTicker;
 
 let _lastBacktestEvidenceProposal = '';

@@ -2312,6 +2312,54 @@ def get_colab_mcp_status_endpoint():
     return get_colab_job_manager().get_status()
 
 
+@app.post("/api/colab/jobs/run_all")
+async def launch_all_colab_mcp_jobs_endpoint(req: Request):
+    """Launches the sequential Colab MCP research pipeline across all workers with progress tracking."""
+    raw_body = await req.body()
+    if not raw_body or not raw_body.strip():
+        body: Dict[str, Any] = {}
+    else:
+        try:
+            body = json.loads(raw_body.decode("utf-8"))
+        except Exception:
+            return JSONResponse({"status": "error", "detail": "Invalid JSON body."}, status_code=422)
+        if not isinstance(body, dict):
+            return JSONResponse({"status": "error", "detail": "Request body must be a JSON object."}, status_code=422)
+
+    unknown_keys = set(body.keys()) - {"only_stale", "job_types", "use_llm"}
+    if unknown_keys:
+        return JSONResponse(
+            {"status": "error", "detail": f"Unknown request key(s): {sorted(unknown_keys)}"},
+            status_code=422,
+        )
+
+    only_stale = body.get("only_stale", False)
+    if not isinstance(only_stale, bool):
+        return JSONResponse({"status": "error", "detail": "only_stale must be a boolean."}, status_code=422)
+    job_types = body.get("job_types")
+    if job_types is not None and not isinstance(job_types, list):
+        return JSONResponse({"status": "error", "detail": "job_types must be a list of strings."}, status_code=422)
+    use_llm = body.get("use_llm", False)
+    if not isinstance(use_llm, bool):
+        return JSONResponse({"status": "error", "detail": "use_llm must be a boolean."}, status_code=422)
+
+    options_by_job = {"sec_nlp": {"use_llm": True}} if use_llm else None
+    try:
+        pipeline = get_colab_job_manager().run_pipeline(
+            job_types=job_types,
+            only_stale=only_stale,
+            trigger="manual",
+            options_by_job=options_by_job,
+        )
+        framework.log(f"[Colab MCP] Pipeline state={pipeline.get('state')} ({pipeline.get('step_label')}).")
+        return JSONResponse(content=pipeline, status_code=202)
+    except ValueError as ve:
+        return JSONResponse({"status": "error", "detail": redact_secrets(str(ve))}, status_code=422)
+    except Exception as exc:
+        framework.log(f"[Colab MCP] Pipeline launch failed: {redact_secrets(str(exc))}")
+        return JSONResponse({"status": "error", "detail": "Failed to launch Colab pipeline."}, status_code=500)
+
+
 @app.post("/api/colab/jobs/{job_type}")
 async def launch_colab_mcp_job_endpoint(job_type: str, req: Request):
     """Launches a single-flight background Google Colab MCP quant job."""
@@ -2467,6 +2515,12 @@ def main() -> int:
         # Cloud sync daemon removed — GDrive Decoupling Guardrail (ANTIGRAVITY v11.03)
     except Exception as e:
         print(f"Failed to compile master document: {e}")
+
+    try:
+        pipe = get_colab_job_manager().maybe_start_startup_pipeline()
+        framework.log(f"[Colab MCP] Startup pipeline: {pipe.get('state')} — {pipe.get('step_label')}")
+    except Exception as e:
+        framework.log(f"[Colab MCP] Startup pipeline skipped: {redact_secrets(str(e))}")
 
     try:
         uvicorn.run(app, host="127.0.0.1", port=port)

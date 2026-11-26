@@ -204,6 +204,13 @@ const API = {
             sec_nlp: { loaded: false },
             backtest_evidence: { loaded: true, freshness: { fresh: true, stale: false } },
         },
+        pipeline: {
+            state: 'setup_required',
+            trigger: 'startup',
+            percent: 0,
+            step_label: 'Install uv',
+            jobs: {},
+        },
     },
     '/api/colab/artifacts/backtest_evidence': {
         artifact_type: 'backtest_evidence',
@@ -308,11 +315,38 @@ async function main() {
     const calls = [];
     const watchlistPosts = [];
     const colabJobPosts = [];
+    let mockColabPipeline = null;
     let scoutCategories = [];
     window.fetch = async (url, opts = {}) => {
         const pathOnly = String(url).split('?')[0];
         const method = (opts.method || 'GET').toUpperCase();
         calls.push(`${method} ${pathOnly}`);
+        if (pathOnly === '/api/colab/jobs/run_all' && method === 'POST') {
+            const body = JSON.parse(opts.body || '{}');
+            colabJobPosts.push({ path: pathOnly, body });
+            mockColabPipeline = {
+                state: 'running',
+                trigger: 'manual',
+                percent: 50,
+                step_label: 'Step 2/4: Running SEC Filing Risk Scan...',
+                jobs: {
+                    vol_surface: { status: 'succeeded', label: 'Options Flow & Vol Surface', progress_pct: 100 },
+                    sec_nlp: { status: 'running', label: 'SEC Filing Risk Scan', progress_pct: 55 },
+                    quant_scout: { status: 'pending', label: 'Stock Finder (500+)', progress_pct: 0 },
+                    walk_forward: { status: 'pending', label: 'Strategy Check (Backtest)', progress_pct: 0 },
+                },
+            };
+            return {
+                ok: true,
+                status: 202,
+                json: async () => mockColabPipeline,
+            };
+        }
+        if (pathOnly === '/api/colab/status' && mockColabPipeline) {
+            const base = JSON.parse(JSON.stringify(API['/api/colab/status']));
+            base.pipeline = mockColabPipeline;
+            return { ok: true, status: 200, json: async () => base };
+        }
         if (pathOnly.startsWith('/api/colab/jobs/') && method === 'POST') {
             colabJobPosts.push({ path: pathOnly, body: JSON.parse(opts.body || '{}') });
             return { ok: true, status: 202, json: async () => ({ job_id: 'colab-sec_nlp-test1', status: 'queued' }) };
@@ -947,6 +981,55 @@ async function main() {
         assert(!adminContent.contains(window.document.getElementById('colab-quant-scout-panel')), '#colab-quant-scout-panel should be removed from #admin-content');
         assert(!adminContent.contains(window.document.getElementById('colab-evidence-panel')), '#colab-evidence-panel should be removed from #admin-content');
         assert(!adminContent.contains(window.document.getElementById('colab-export-btn')), '#colab-export-btn should be removed from #admin-content');
+    });
+
+    const runAllBtn = window.document.getElementById('colab-run-all-btn');
+    if (runAllBtn) {
+        runAllBtn.click();
+        await new Promise((r) => setTimeout(r, 80));
+    }
+    check('Package 1: Colab job feedback becomes active, Setup Guidance shows when not ready, and Run All updates progress banner', () => {
+        const jobStatus = window.document.getElementById('colab-mcp-job-status');
+        assert(jobStatus && jobStatus.classList.contains('active'), '#colab-mcp-job-status must include .active so feedback is visible');
+        const setupBox = window.document.getElementById('colab-setup-guidance');
+        assert(setupBox && setupBox.style.display === 'flex', '#colab-setup-guidance should be visible when MCP transport is not ready');
+        assert(setupBox.textContent.includes('Install uv'), '#colab-setup-guidance should display transport setup_hint');
+        const runAllPost = colabJobPosts.find((p) => p.path === '/api/colab/jobs/run_all');
+        assert(runAllPost, 'Expected POST /api/colab/jobs/run_all on #colab-run-all-btn click');
+        const banner = window.document.getElementById('colab-progress-banner');
+        const fill = window.document.getElementById('colab-pipeline-bar-fill');
+        const chips = window.document.getElementById('colab-pipeline-chips');
+        assert(banner && !banner.classList.contains('hidden'), '#colab-progress-banner should show while pipeline is running');
+        assert(fill && fill.style.width === '50%', `Expected 50% progress width, got ${fill && fill.style.width}`);
+        assert(chips && chips.textContent.includes('Options Flow') && chips.textContent.includes('Filing Risk'), 'Pipeline chips missing expected job labels');
+    });
+
+    check('Package 2: Today\'s Brief & Suggested Next Steps synthesizes plain-English actionable items safely', () => {
+        const briefCard = window.document.getElementById('action-brief-card');
+        const briefList = window.document.getElementById('action-brief-list');
+        const moodPill = window.document.getElementById('brief-mood-summary');
+        assert(briefCard && briefList && moodPill, 'Action brief elements missing');
+        assert(!moodPill.textContent.includes('Analyzing market state'), `Mood summary did not update: ${moodPill.textContent}`);
+        assert(briefList.textContent.includes('SMCI'), `Expected Stock Finder top candidate SMCI in action brief, got: ${briefList.textContent}`);
+        assert(briefList.querySelectorAll('.brief-action-btn').length > 0, 'Expected actionable buttons in Today\'s Brief');
+        assert.strictEqual(briefList.querySelectorAll('img, script').length, 0, 'XSS elements must never render in Today\'s Brief');
+    });
+
+    const simpleBtn = window.document.getElementById('table-view-simple-btn');
+    const proBtn = window.document.getElementById('table-view-pro-btn');
+    const defaultSimple = tableContainer.classList.contains('view-simple') && simpleBtn.getAttribute('aria-pressed') === 'true';
+    proBtn.click();
+    const switchedPro = !tableContainer.classList.contains('view-simple') && proBtn.getAttribute('aria-pressed') === 'true';
+    simpleBtn.click();
+    const restoredSimple = tableContainer.classList.contains('view-simple') && simpleBtn.getAttribute('aria-pressed') === 'true';
+    check('Package 3 & 4: Simple/Pro table toggle, plain-English signal pills, and version v19.0 render cleanly', () => {
+        assert.strictEqual(defaultSimple, true, 'Table should default to Simple view (.view-simple)');
+        assert.strictEqual(switchedPro, true, 'Clicking Pro (14) should remove .view-simple');
+        assert.strictEqual(restoredSimple, true, 'Clicking Simple should restore .view-simple');
+        const plainPill = window.document.querySelector('#data-table tbody .signal-plain-pill');
+        assert(plainPill && plainPill.textContent.trim().length > 0, 'Plain-English signal pill missing in table row');
+        const verEl = window.document.querySelector('header .version');
+        assert(verEl && verEl.textContent.trim() === 'v19.0', `Expected version v19.0, got ${verEl && verEl.textContent}`);
     });
 
     window.close();

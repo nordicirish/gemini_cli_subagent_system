@@ -7,7 +7,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.78">
+    <link rel="stylesheet" href="styles.css?v=18.79">
     <link rel="stylesheet" href="modern_ui.css?v=18.61">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
@@ -35,7 +35,7 @@
             <div class="header-content">
                 <div class="brand">
                     <div class="pulse-indicator" id="live-indicator"></div>
-                    <h1>Gemini Gem Dashboard <span class="version">v18.2</span></h1>
+                    <h1>Gemini Gem Dashboard <span class="version">v19.0</span></h1>
                 </div>
                 <div class="system-status">
                     <div class="status-item">
@@ -43,7 +43,7 @@
                         <span id="market-status" class="value waiting">AWAITING CONNECTION...</span>
                     </div>
                     <div class="status-item" id="regime-status-container">
-                        <span class="label">Regime:</span>
+                        <span class="label">Market Mood:</span>
                         <span id="volatility-regime-pill" class="regime-pill regime-unknown">—</span>
                     </div>
                     <div class="status-item" id="macro-calendar-container">
@@ -61,7 +61,7 @@
                     </div>
                     <button id="toggle-sidebar-btn" class="glow-btn outline header-action-btn" type="button"
                         aria-expanded="false" aria-controls="dashboard-sidebar"
-                        title="Toggle Portfolio, Watchlist &amp; Scout tools panel">🧰 TOOLS</button>
+                        title="Toggle Portfolio, Watchlist &amp; Cloud Research tools panel">🧰 TOOLS</button>
                     <button id="open-indices-modal-btn" class="glow-btn outline header-action-btn" type="button"
                         title="Manage tracked macro indices">⚙️ INDICES</button>
                     <button id="launch-chat-btn" class="glow-btn chat-launcher header-action-btn" type="button"
@@ -85,10 +85,40 @@
                 <span class="cmd-metric"><span class="cmd-label">Unrealized P&amp;L</span><strong
                         id="cmd-pnl-val">—</strong></span>
                 <span class="cmd-metric"><span class="cmd-label">Cash</span><strong id="cmd-cash-val">—</strong></span>
-                <span class="cmd-metric"><span class="cmd-label">Vetoes</span><strong
+                <span class="cmd-metric"><span class="cmd-label" title="Active global risk circuit breakers">Risk Alerts</span><strong
                         id="cmd-vetoes-val">0</strong></span>
             </div>
             <div class="cmd-strip-actions" id="cmd-strip-actions"></div>
+        </section>
+
+        <!-- ─── Cloud Research Progress Banner (Auto-Shown on Pipeline Activity or Setup) ─── -->
+        <section id="colab-progress-banner" class="colab-progress-banner glass-panel hidden" aria-live="polite">
+            <div class="colab-progress-top">
+                <div class="colab-progress-title-row">
+                    <span class="colab-progress-badge">☁️ Cloud Research</span>
+                    <span id="colab-pipeline-step-label" class="colab-pipeline-step-label">Checking cloud status...</span>
+                </div>
+                <span id="colab-pipeline-percent" class="colab-pipeline-percent">0%</span>
+            </div>
+            <div class="colab-progress-track">
+                <div id="colab-pipeline-bar-fill" class="colab-progress-fill" style="width: 0%;"></div>
+            </div>
+            <div id="colab-pipeline-chips" class="colab-pipeline-chips"></div>
+        </section>
+
+        <!-- ─── Today's Brief & Suggested Next Steps ("Inform & Suggest") ─── -->
+        <section id="action-brief-card" class="action-brief-card glass-panel" aria-label="Today's Brief and Suggested Next Steps">
+            <div class="action-brief-header">
+                <div class="action-brief-title-group">
+                    <span class="action-brief-title">🧭 Today's Brief &amp; Suggested Next Steps</span>
+                    <span id="brief-mood-summary" class="brief-mood-pill">Analyzing market state…</span>
+                </div>
+                <button type="button" id="brief-ask-council-btn" class="brief-action-btn primary"
+                    title="Open AI Council for a plain-English portfolio briefing">💬 Ask AI Council</button>
+            </div>
+            <div id="action-brief-list" class="action-brief-list">
+                <div class="action-brief-empty">Scanning portfolio, filings, and market breadth…</div>
+            </div>
         </section>
 
         <!-- ─── Main Content ─── -->
@@ -130,10 +160,19 @@
                                 <button type="button" class="table-filter-pill"
                                     data-table-filter="held" aria-pressed="false">Held</button>
                                 <button type="button" class="table-filter-pill"
-                                    data-table-filter="signals" aria-pressed="false">Signals (|Score|≥3)</button>
+                                    data-table-filter="signals" aria-pressed="false"
+                                    title="Show stocks with strong bullish or bearish signal scores (|Score| >= 3)">Strong Signals</button>
                             </div>
                         </div>
                         <div class="table-toolbar-right">
+                            <div class="table-view-toggle" role="group" aria-label="Table detail level">
+                                <button type="button" id="table-view-simple-btn" class="table-view-btn active"
+                                    data-table-view="simple" aria-pressed="true"
+                                    title="Clean view with plain-English signals (hides advanced quant columns)">Simple</button>
+                                <button type="button" id="table-view-pro-btn" class="table-view-btn"
+                                    data-table-view="pro" aria-pressed="false"
+                                    title="Show all 14 technical, options flow, and momentum columns">Pro (14)</button>
+                            </div>
                             <span class="kbd-hint"
                                 title="Shortcuts: / filter, T toggle tools sidebar, C toggle AI Council, Esc close">/ Filter · T Tools · C Council</span>
                             <button type="button" id="table-density-btn" class="table-density-btn"
@@ -143,20 +182,20 @@
                     <table id="data-table">
                         <thead>
                             <tr>
-                                <th class="sortable-th" data-sort-key="ticker">Ticker<span class="sort-indicator" aria-hidden="true"></span></th>
-                                <th class="num-col sortable-th" data-sort-key="price">Price<span class="sort-indicator" aria-hidden="true"></span></th>
-                                <th class="num-col sortable-th" data-sort-key="session_change_pct">Day %<span class="sort-indicator" aria-hidden="true"></span></th>
-                                <th class="num-col sortable-th" data-sort-key="gap_percent">Gap %<span class="sort-indicator" aria-hidden="true"></span></th>
-                                <th class="num-col sortable-th" data-sort-key="volume">Volume<span class="sort-indicator" aria-hidden="true"></span></th>
-                                <th class="num-col sortable-th" data-sort-key="rvol" title="Relative Volume vs 20-day average (time-paced)">rVol<span class="sort-indicator" aria-hidden="true"></span></th>
-                                <th class="num-col sortable-th" data-sort-key="atr_percent">ATR %<span class="sort-indicator" aria-hidden="true"></span></th>
-                                <th class="num-col sortable-th" data-sort-key="rsi">RSI<span class="sort-indicator" aria-hidden="true"></span></th>
-                                <th class="num-col sortable-th" data-sort-key="vwap">VWAP<span class="sort-indicator" aria-hidden="true"></span></th>
-                                <th>MACD</th>
-                                <th>Trend</th>
-                                <th>Fib Target</th>
-                                <th>Dealer</th>
-                                <th class="score-col sortable-th" data-sort-key="score">Score<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="sortable-th" data-sort-key="ticker" title="Stock symbol plus risk &amp; filing alerts">Ticker<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th" data-sort-key="price" title="Latest share price in USD">Price<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th" data-sort-key="session_change_pct" title="Percent change during today's session">Day %<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th pro-col" data-sort-key="gap_percent" title="Overnight price jump between previous close and open">Gap %<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th pro-col" data-sort-key="volume" title="Total shares traded today">Volume<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th pro-col" data-sort-key="rvol" title="Relative Volume vs 20-day average — above 1.5x means unusual interest">rVol<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th pro-col" data-sort-key="atr_percent" title="Average Daily Swing % — measures normal daily volatility">ATR %<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th pro-col" data-sort-key="rsi" title="Momentum gauge (0–100): above 70 is stretched/overheated, below 30 is oversold">RSI<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="num-col sortable-th pro-col" data-sort-key="vwap" title="Volume-Weighted Average Price — institutional fair-value anchor">VWAP<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="pro-col" title="MACD momentum trend &amp; acceleration">MACD</th>
+                                <th title="Overall short-term price trend direction">Trend</th>
+                                <th title="Estimated next resistance or profit-taking target level">Target</th>
+                                <th class="pro-col" title="Options dealer hedging flow (GEX &amp; Colab Vanna Vol Surface)">Dealer</th>
+                                <th class="score-col sortable-th" data-sort-key="score" title="Plain-English setup verdict plus composite score (-6 to +6)">Signal<span class="sort-indicator" aria-hidden="true"></span></th>
                             </tr>
                         </thead>
                         <tbody id="table-body">
@@ -192,8 +231,8 @@
                                 <thead>
                                     <tr>
                                         <th>SYM</th>
-                                        <th>AMT</th>
-                                        <th>WAC</th>
+                                        <th title="Number of shares held">Shares</th>
+                                        <th title="Weighted Average Cost per share (EUR)">Avg Cost</th>
                                         <th></th>
                                     </tr>
                                 </thead>
@@ -241,22 +280,22 @@
                     <div id="scout-content" style="display: none;">
                         <div class="sidebar-tabs" role="tablist" aria-label="Discovery Modes">
                             <button type="button" class="sidebar-tab-btn active" role="tab" aria-selected="true"
-                                data-panel-tab="scout-quant">Quant Screen (500+)</button>
+                                data-panel-tab="scout-quant">Stock Finder (500+)</button>
                             <button type="button" class="sidebar-tab-btn" role="tab" aria-selected="false"
-                                data-panel-tab="scout-sector">Sector AI</button>
+                                data-panel-tab="scout-sector">Sector Themes</button>
                         </div>
 
                         <div class="sidebar-tab-pane" data-tab-pane="scout-quant" role="tabpanel">
                             <div class="btn-row" style="gap: 6px; margin-bottom: 8px;">
                                 <button id="colab-run-quant-scout-btn" type="button" class="glow-btn outline mini"
-                                    title="Run Broad 500+ Ticker Quantitative Scout on Colab MCP">🔭 Run Quant Screen (500+)</button>
+                                    title="Run Broad 500+ Ticker Quantitative Stock Finder on Colab MCP">🔭 Scan 500+ Stocks</button>
                             </div>
                             <div id="colab-scout-job-status" class="status-message inline-feedback" style="margin-bottom: 6px;"></div>
                             <div id="colab-quant-scout-panel" class="colab-scout-panel">
                                 <div class="colab-scout-header">
-                                    <span class="subtitle">Quant Scout Candidates (Colab)</span>
+                                    <span class="subtitle">Top Stock Finder Ideas (Colab)</span>
                                     <button id="colab-refresh-scout-btn" type="button" class="glow-btn outline mini"
-                                        title="Reload cached Quant Scout candidates">↻</button>
+                                        title="Reload cached Stock Finder candidates">↻</button>
                                 </div>
                                 <div id="colab-quant-scout-list" class="colab-scout-list">
                                     <div class="colab-scout-empty">No Colab Quant Scout candidates loaded.</div>
@@ -398,57 +437,69 @@
                     <div id="analytics-quant-content">
                         <div class="sidebar-tabs" role="tablist" aria-label="Quant Lab Views">
                             <button type="button" class="sidebar-tab-btn active" role="tab" aria-selected="true"
-                                data-panel-tab="quant-live">Live Quant</button>
+                                data-panel-tab="quant-live">Live Health</button>
                             <button type="button" class="sidebar-tab-btn" role="tab" aria-selected="false"
-                                data-panel-tab="quant-colab">Colab MCP Lab</button>
+                                data-panel-tab="quant-colab">Cloud Research</button>
                         </div>
 
                         <div class="sidebar-tab-pane" data-tab-pane="quant-live" role="tabpanel">
                             <div id="analytics-quant-panel" class="quant-panel">
-                                <span class="empty-msg">Loading quant analytics...</span>
+                                <span class="empty-msg">Loading portfolio health &amp; signals...</span>
                             </div>
                             <button id="refresh-analytics-btn" type="button" class="alert-action-btn full"
-                                title="Refresh Quant Analytics & Decision Backtest">↻ Refresh Quant &amp; Backtest</button>
+                                title="Refresh Portfolio Health &amp; Backtest">↻ Refresh Health &amp; Backtest</button>
                         </div>
 
                         <div class="sidebar-tab-pane hidden" data-tab-pane="quant-colab" role="tabpanel">
                             <div class="colab-mcp-panel">
                                 <div class="colab-mcp-header">
-                                    <span class="subtitle">Colab MCP GPU Compute</span>
+                                    <span class="subtitle">Google Colab Cloud Research</span>
                                     <span id="colab-mcp-transport-status" class="colab-mcp-transport-pill">MCP: Checking...</span>
                                 </div>
+                                <div id="colab-setup-guidance" class="colab-setup-guidance" style="display: none;">
+                                    <div id="colab-setup-guidance-text" class="colab-setup-guidance-text">
+                                        One-time setup needed to run automatic Cloud GPU scans: install <code>uv</code> or import an offline JSON pack below.
+                                    </div>
+                                    <div class="colab-setup-cmd-row">
+                                        <code id="colab-setup-cmd-code">winget install --id=astral-sh.uv -e</code>
+                                        <button id="colab-copy-setup-btn" type="button" class="glow-btn outline mini"
+                                            title="Copy install command to clipboard">📋 Copy Cmd</button>
+                                    </div>
+                                </div>
+                                <button id="colab-run-all-btn" type="button" class="glow-btn outline mini colab-run-all-btn"
+                                    title="Run all 4 Google Colab cloud research tasks sequentially with live progress">▶ Refresh All Cloud Insights</button>
                                 <div class="colab-job-grid">
                                     <button id="colab-run-vol-surface-btn" type="button" class="glow-btn outline mini"
-                                        title="Run Multi-Expiry Vol Surface &amp; 2nd-Order Greeks on Colab MCP">⚡ Vol Surface</button>
+                                        title="Run Multi-Expiry Options Vol Surface &amp; 2nd-Order Greeks on Colab MCP">⚡ Options Flow</button>
                                     <button id="colab-run-sec-nlp-btn" type="button" class="glow-btn outline mini"
-                                        title="Run Zero-Token GPU SEC/Earnings NLP on Colab MCP">📑 SEC NLP</button>
+                                        title="Run Zero-Token GPU SEC/Earnings NLP Risk Scan on Colab MCP">📑 Filing Risk</button>
                                     <button id="colab-run-walk-forward-btn" type="button" class="glow-btn outline mini"
-                                        title="Run Walk-Forward Rule Backtester on Colab MCP">📊 Backtest</button>
+                                        title="Run Walk-Forward Historical Strategy Backtester on Colab MCP">📊 Strategy Check</button>
                                 </div>
-                                <label class="colab-llm-opt" title="Opt-in 4-bit quantized 7B LLM refinement when running SEC NLP on an L4 GPU">
-                                    <input type="checkbox" id="colab-sec-use-llm-toggle"> Use L4 7B LLM for SEC NLP
+                                <label class="colab-llm-opt" title="Opt-in 4-bit quantized 7B LLM refinement when running Filing Risk NLP on an L4 GPU">
+                                    <input type="checkbox" id="colab-sec-use-llm-toggle"> Use deeper L4 7B AI for Filing Risk
                                 </label>
                                 <div id="colab-mcp-job-status" class="status-message inline-feedback"></div>
                                 <div id="colab-evidence-panel" class="colab-evidence-panel">
                                     <div class="colab-scout-header">
-                                        <span class="subtitle">Protocol 06 Evidence Pack</span>
+                                        <span class="subtitle">Suggested Rule Tweaks</span>
                                         <div class="btn-row" style="gap: 4px;">
                                             <button id="colab-refresh-evidence-btn" type="button" class="glow-btn outline mini"
-                                                title="Reload Walk-Forward Evidence Pack">↻</button>
+                                                title="Reload Walk-Forward Strategy Evidence Pack">↻</button>
                                             <button id="colab-copy-p06-btn" type="button" class="glow-btn outline mini"
                                                 title="Copy read-only Protocol 06 rule proposal summary">📋 Copy Proposal</button>
                                         </div>
                                     </div>
-                                    <div class="colab-p06-banner">Read-Only — Owner Approval Required (never mutates rules.md)</div>
+                                    <div class="colab-p06-banner">Read-Only — Your Approval Required (never changes trading rules automatically)</div>
                                     <div id="colab-evidence-summary" class="colab-evidence-summary">
-                                        <div class="colab-scout-empty">No walk-forward evidence pack loaded.</div>
+                                        <div class="colab-scout-empty">No strategy backtest evidence loaded yet.</div>
                                     </div>
                                 </div>
                                 <details class="colab-offline-details">
                                     <summary>Offline Colab Calibration (JSON)</summary>
                                     <div class="btn-row" style="gap: 6px; flex-wrap: wrap; margin-top: 8px;">
                                         <button id="colab-export-btn" type="button" class="glow-btn outline mini"
-                                            title="Export zero-secret market & history JSON for Google Colab">⬇ Export Colab JSON</button>
+                                            title="Export zero-secret market &amp; history JSON for Google Colab">⬇ Export Colab JSON</button>
                                         <button id="colab-import-btn" type="button" class="glow-btn outline mini"
                                             title="Import schema-validated Colab calibration JSON">⬆ Import Calibration</button>
                                         <input type="file" id="colab-import-file" accept="application/json,.json" hidden>
@@ -699,7 +750,7 @@
     </div>
 
     <script src="portfolio.js?v=18.63"></script>
-    <script src="app.js?v=18.84"></script>
+    <script src="app.js?v=18.85"></script>
     <script src="modern_ui.js?v=18.66"></script>
 </body>
 

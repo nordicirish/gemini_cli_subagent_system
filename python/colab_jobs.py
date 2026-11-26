@@ -15,8 +15,9 @@ import json
 import os
 import sys
 import threading
+import time
 import uuid
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, ".."))
@@ -60,29 +61,40 @@ except ImportError:
 MAX_JOB_HISTORY = 50
 _WORKERS_DIR = os.path.join(_THIS_DIR, "colab_workers")
 
+STARTUP_PIPELINE_ORDER: Tuple[str, ...] = (
+    "vol_surface",
+    "sec_nlp",
+    "quant_scout",
+    "walk_forward",
+)
+
 JOB_SPEC: Dict[str, Dict[str, Any]] = {
     "vol_surface": {
         "artifact_type": "vol_surface",
         "default_accelerator": "CPU",
         "worker_filename": "vol_surface_worker.py",
+        "label": "Options Flow & Vol Surface",
         "description": "Multi-expiry SVI volatility surface and 2nd-order Greeks (Vanna/Charm) sweep",
     },
     "quant_scout": {
         "artifact_type": "quant_scout",
         "default_accelerator": "CPU",
         "worker_filename": "quant_scout_worker.py",
+        "label": "Stock Finder (500+)",
         "description": "Broad 500+ ticker quantitative momentum, PEAD, and portfolio-correlation scout",
     },
     "sec_nlp": {
         "artifact_type": "sec_nlp",
         "default_accelerator": "T4",
         "worker_filename": "sec_nlp_worker.py",
+        "label": "SEC Filing Risk Scan",
         "description": "Zero-token GPU NLP risk & catalyst extraction across SEC filings and earnings releases",
     },
     "walk_forward": {
         "artifact_type": "backtest_evidence",
         "default_accelerator": "CPU",
         "worker_filename": "walk_forward_worker.py",
+        "label": "Strategy Check (Backtest)",
         "description": "Multi-year walk-forward rule parameter sweep producing read-only Protocol 06 Evidence Pack",
     },
 }
@@ -153,15 +165,41 @@ class ColabJobManager:
         client_factory: Optional[Callable[[ColabMCPConfig], ColabMCPClient]] = None,
         worker_loader: Optional[Callable[[str], str]] = None,
         service_provider: Optional[Callable[[], Any]] = None,
+        transport_prober: Optional[Callable[[ColabMCPConfig], Dict[str, Any]]] = None,
     ) -> None:
         self.cache_dir = cache_dir
         self._config_loader = config_loader or ColabMCPConfig.from_env
         self._client_factory = client_factory or (lambda cfg: ColabMCPClient(config=cfg))
         self._worker_loader = worker_loader or _default_worker_loader
         self._service_provider = service_provider or get_persistence_service
+        if transport_prober is not None:
+            self._transport_prober = transport_prober
+        elif client_factory is not None:
+            self._transport_prober = lambda cfg: {
+                "mode": cfg.mode,
+                "ready": cfg.mode != "offline",
+                "setup_hint": "Offline mode active; live Colab execution disabled.",
+            }
+        else:
+            self._transport_prober = probe_transport
         self._lock = threading.RLock()
         self._active_by_type: Dict[str, str] = {}
         self._jobs: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self._pipeline_active: bool = False
+        self._pipeline: Dict[str, Any] = {
+            "state": "idle",
+            "trigger": None,
+            "started_at_utc": None,
+            "finished_at_utc": None,
+            "current_job": None,
+            "completed_count": 0,
+            "total_count": 0,
+            "skipped_fresh_count": 0,
+            "failed_count": 0,
+            "percent": 0,
+            "step_label": "Idle",
+            "jobs": {},
+        }
 
     def _build_job_inputs(self, job_type: str, options: Dict[str, Any], service: Optional[Any]) -> Dict[str, Any]:
         eff_service = service if service is not None else self._service_provider()
@@ -234,11 +272,13 @@ class ColabJobManager:
             record: Dict[str, Any] = {
                 "job_id": job_id,
                 "job_type": norm_type,
+                "label": spec.get("label", norm_type),
                 "artifact_type": spec["artifact_type"],
                 "mode": cfg.mode,
                 "accelerator": accelerator,
                 "status": "queued",
                 "progress": "Queued for MCP dispatch",
+                "progress_pct": 5,
                 "created_at_utc": _utc_now_iso(),
                 "started_at_utc": None,
                 "finished_at_utc": None,
@@ -261,14 +301,24 @@ class ColabJobManager:
                     status="running",
                     started_at_utc=_utc_now_iso(),
                     progress="Loading worker script and connecting to Colab MCP",
+                    progress_pct=20,
                 )
                 script_source = self._worker_loader(norm_type)
                 client = self._client_factory(cfg)
-                self._update_job(job_id, progress=f"Executing {norm_type} on Colab ({accelerator})")
+                self._update_job(
+                    job_id,
+                    progress=f"Executing {spec.get('label', norm_type)} on Colab ({accelerator})",
+                    progress_pct=55,
+                )
                 result_payload = client.execute_python_script_sync(
                     script_source,
                     job_inputs,
                     accelerator=accelerator,
+                )
+                self._update_job(
+                    job_id,
+                    progress="Validating and saving Colab results",
+                    progress_pct=90,
                 )
                 summary = import_colab_artifact(
                     spec["artifact_type"],
@@ -280,6 +330,7 @@ class ColabJobManager:
                     status="succeeded",
                     finished_at_utc=_utc_now_iso(),
                     progress="Completed and validated into cache",
+                    progress_pct=100,
                     artifact_summary=summary,
                     error=None,
                 )
@@ -289,6 +340,7 @@ class ColabJobManager:
                     status="failed",
                     finished_at_utc=_utc_now_iso(),
                     progress="Failed (prior cached artifact preserved)",
+                    progress_pct=100,
                     error=redact_secrets(str(exc)),
                 )
             finally:
@@ -300,6 +352,256 @@ class ColabJobManager:
         t = threading.Thread(target=_worker, name=f"ColabJob-{norm_type}", daemon=daemon)
         t.start()
         return queued_snapshot
+
+    def run_pipeline(
+        self,
+        *,
+        job_types: Optional[List[str]] = None,
+        only_stale: bool = True,
+        trigger: str = "manual",
+        options_by_job: Optional[Dict[str, Dict[str, Any]]] = None,
+        service: Optional[Any] = None,
+        daemon: bool = True,
+    ) -> Dict[str, Any]:
+        """Sequentially run Colab quant workers with progress tracking and fresh-cache skipping."""
+        raw_types = list(job_types) if job_types else list(STARTUP_PIPELINE_ORDER)
+        targets: List[str] = []
+        for raw_jt in raw_types:
+            norm_jt = str(raw_jt or "").strip().lower()
+            if norm_jt not in JOB_SPEC:
+                raise ValueError(f"Unknown Colab job_type {raw_jt!r}; valid types: {sorted(JOB_SPEC.keys())}")
+            if norm_jt not in targets:
+                targets.append(norm_jt)
+
+        cfg = self._config_loader()
+        transport = self._transport_prober(cfg)
+        if cfg.mode == "offline" or not transport.get("ready"):
+            hint = str(transport.get("setup_hint") or "Colab MCP transport is not configured.")
+            with self._lock:
+                self._pipeline = {
+                    "state": "setup_required",
+                    "trigger": trigger,
+                    "started_at_utc": _utc_now_iso(),
+                    "finished_at_utc": _utc_now_iso(),
+                    "current_job": None,
+                    "completed_count": 0,
+                    "total_count": len(targets),
+                    "skipped_fresh_count": 0,
+                    "failed_count": 0,
+                    "percent": 0,
+                    "step_label": hint,
+                    "jobs": {
+                        jt: {
+                            "status": "setup_required",
+                            "label": JOB_SPEC[jt]["label"],
+                            "job_id": None,
+                            "error": hint,
+                            "progress_pct": 0,
+                        }
+                        for jt in targets
+                    },
+                }
+                return copy.deepcopy(self._pipeline)
+
+        artifacts_status = get_all_colab_artifacts_status(cache_dir=self.cache_dir).get("artifacts", {})
+        jobs_map: Dict[str, Dict[str, Any]] = {}
+        to_run: List[str] = []
+        skipped_fresh = 0
+
+        for jt in targets:
+            art_key = JOB_SPEC[jt]["artifact_type"]
+            art_info = artifacts_status.get(art_key, {}) if isinstance(artifacts_status, dict) else {}
+            is_fresh = bool(art_info.get("loaded")) and not bool((art_info.get("freshness") or {}).get("stale", True))
+            if only_stale and is_fresh:
+                skipped_fresh += 1
+                jobs_map[jt] = {
+                    "status": "skipped_fresh",
+                    "label": JOB_SPEC[jt]["label"],
+                    "job_id": None,
+                    "error": None,
+                    "progress_pct": 100,
+                }
+            else:
+                to_run.append(jt)
+                jobs_map[jt] = {
+                    "status": "pending",
+                    "label": JOB_SPEC[jt]["label"],
+                    "job_id": None,
+                    "error": None,
+                    "progress_pct": 0,
+                }
+
+        with self._lock:
+            if self._pipeline_active:
+                return copy.deepcopy(self._pipeline)
+            total_count = len(targets)
+            if not to_run:
+                self._pipeline = {
+                    "state": "succeeded",
+                    "trigger": trigger,
+                    "started_at_utc": _utc_now_iso(),
+                    "finished_at_utc": _utc_now_iso(),
+                    "current_job": None,
+                    "completed_count": total_count,
+                    "total_count": total_count,
+                    "skipped_fresh_count": skipped_fresh,
+                    "failed_count": 0,
+                    "percent": 100,
+                    "step_label": "All cloud insights are up to date",
+                    "jobs": jobs_map,
+                }
+                return copy.deepcopy(self._pipeline)
+
+            self._pipeline_active = True
+            self._pipeline = {
+                "state": "running",
+                "trigger": trigger,
+                "started_at_utc": _utc_now_iso(),
+                "finished_at_utc": None,
+                "current_job": to_run[0],
+                "completed_count": skipped_fresh,
+                "total_count": total_count,
+                "skipped_fresh_count": skipped_fresh,
+                "failed_count": 0,
+                "percent": round((skipped_fresh / max(1, total_count)) * 100),
+                "step_label": f"Starting {JOB_SPEC[to_run[0]]['label']}...",
+                "jobs": jobs_map,
+            }
+            snapshot = copy.deepcopy(self._pipeline)
+
+        opts_lookup = options_by_job or {}
+
+        def _recompute_percent_locked() -> int:
+            total = max(1, len(targets))
+            acc = 0.0
+            for t_name in targets:
+                entry = self._pipeline["jobs"].get(t_name, {})
+                acc += max(0.0, min(100.0, float(entry.get("progress_pct", 0))))
+            return max(0, min(100, int(round(acc / total))))
+
+        def _pipeline_worker() -> None:
+            failed_cnt = 0
+            completed_cnt = skipped_fresh
+            try:
+                for step_idx, jt in enumerate(targets, start=1):
+                    if jt not in to_run:
+                        continue
+                    label = JOB_SPEC[jt]["label"]
+                    with self._lock:
+                        self._pipeline["current_job"] = jt
+                        self._pipeline["step_label"] = f"Step {step_idx}/{len(targets)}: Running {label}..."
+                        self._pipeline["jobs"][jt]["status"] = "running"
+                        self._pipeline["jobs"][jt]["progress_pct"] = 5
+
+                    job_opts = dict(opts_lookup.get(jt) or {})
+                    job_id: Optional[str] = None
+                    try:
+                        sub = self.submit_job(
+                            jt,
+                            options=job_opts,
+                            service=service,
+                            daemon=daemon,
+                        )
+                        job_id = sub["job_id"]
+                    except ColabJobConflictError:
+                        with self._lock:
+                            job_id = self._active_by_type.get(jt)
+                    except Exception as exc:
+                        failed_cnt += 1
+                        completed_cnt += 1
+                        with self._lock:
+                            self._pipeline["jobs"][jt].update({
+                                "status": "failed",
+                                "progress_pct": 100,
+                                "error": redact_secrets(str(exc)),
+                            })
+                            self._pipeline["failed_count"] = failed_cnt
+                            self._pipeline["completed_count"] = completed_cnt
+                            self._pipeline["percent"] = _recompute_percent_locked()
+                        continue
+
+                    if not job_id:
+                        continue
+                    with self._lock:
+                        self._pipeline["jobs"][jt]["job_id"] = job_id
+
+                    # Poll until single-flight job completes
+                    deadline = time.monotonic() + float(cfg.timeout_sec) + 30.0
+                    while time.monotonic() < deadline:
+                        rec = self.get_job(job_id)
+                        if not rec:
+                            break
+                        j_status = rec.get("status")
+                        j_pct = int(rec.get("progress_pct", 50 if j_status == "running" else 100))
+                        with self._lock:
+                            self._pipeline["jobs"][jt]["progress_pct"] = j_pct
+                            if rec.get("progress"):
+                                self._pipeline["step_label"] = f"Step {step_idx}/{len(targets)}: {rec['progress']}"
+                            self._pipeline["percent"] = _recompute_percent_locked()
+                        if j_status in {"succeeded", "failed"}:
+                            completed_cnt += 1
+                            if j_status == "failed":
+                                failed_cnt += 1
+                            with self._lock:
+                                self._pipeline["jobs"][jt].update({
+                                    "status": j_status,
+                                    "progress_pct": 100,
+                                    "error": rec.get("error"),
+                                })
+                                self._pipeline["failed_count"] = failed_cnt
+                                self._pipeline["completed_count"] = completed_cnt
+                                self._pipeline["percent"] = _recompute_percent_locked()
+                            break
+                        time.sleep(0.1)
+
+                with self._lock:
+                    if failed_cnt == 0:
+                        final_state = "succeeded"
+                        final_label = f"All {len(targets)} cloud research steps complete"
+                    elif failed_cnt < len(targets):
+                        final_state = "partial"
+                        final_label = f"Completed with {failed_cnt} issue(s) across {len(targets)} steps"
+                    else:
+                        final_state = "failed"
+                        final_label = f"Cloud research finished with {failed_cnt} failure(s)"
+                    self._pipeline.update({
+                        "state": final_state,
+                        "finished_at_utc": _utc_now_iso(),
+                        "current_job": None,
+                        "completed_count": len(targets),
+                        "failed_count": failed_cnt,
+                        "percent": 100,
+                        "step_label": final_label,
+                    })
+            finally:
+                with self._lock:
+                    self._pipeline_active = False
+
+        pt = threading.Thread(target=_pipeline_worker, name="ColabPipelineWorker", daemon=daemon)
+        pt.start()
+        return snapshot
+
+    def maybe_start_startup_pipeline(self) -> Dict[str, Any]:
+        """Trigger automatic stale-only Colab research on startup unless disabled."""
+        raw_flag = (os.environ.get("COLAB_AUTO_RUN_ON_STARTUP") or "1").strip().lower()
+        if raw_flag in {"0", "false", "no", "off"}:
+            with self._lock:
+                self._pipeline = {
+                    "state": "disabled",
+                    "trigger": "startup",
+                    "started_at_utc": _utc_now_iso(),
+                    "finished_at_utc": _utc_now_iso(),
+                    "current_job": None,
+                    "completed_count": 0,
+                    "total_count": 0,
+                    "skipped_fresh_count": 0,
+                    "failed_count": 0,
+                    "percent": 0,
+                    "step_label": "Auto-run on startup disabled (COLAB_AUTO_RUN_ON_STARTUP=0)",
+                    "jobs": {},
+                }
+                return copy.deepcopy(self._pipeline)
+        return self.run_pipeline(only_stale=True, trigger="startup", daemon=True)
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -317,17 +619,20 @@ class ColabJobManager:
         with self._lock:
             active_jobs = {k: v for k, v in self._active_by_type.items()}
             recent_jobs = self.list_jobs(limit=10)
+            pipeline_snapshot = copy.deepcopy(self._pipeline)
         artifacts_status = get_all_colab_artifacts_status(cache_dir=self.cache_dir)
         return {
-            "transport": probe_transport(cfg),
+            "transport": self._transport_prober(cfg),
             "job_types": {
                 k: {
+                    "label": v.get("label", k),
                     "artifact_type": v["artifact_type"],
                     "default_accelerator": v["default_accelerator"],
                     "description": v["description"],
                 }
                 for k, v in JOB_SPEC.items()
             },
+            "pipeline": pipeline_snapshot,
             "active_jobs": active_jobs,
             "recent_jobs": recent_jobs,
             "artifacts": artifacts_status["artifacts"],
