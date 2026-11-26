@@ -3425,3 +3425,43 @@ td.num-col {
     border-style: dashed;
     opacity: 0.85;
 }
+
+.colab-evidence-panel {
+    border-top: 1px dashed var(--panel-border);
+    padding-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.colab-p06-banner {
+    font-size: 0.63rem;
+    color: #facc15;
+    opacity: 0.9;
+}
+
+.colab-evidence-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.7rem;
+}
+
+.colab-evidence-metrics {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--text-primary);
+    background: rgba(15, 23, 42, 0.45);
+    border: 1px solid var(--panel-border);
+    border-radius: 5px;
+    padding: 5px 7px;
+}
+
+.colab-evidence-delta {
+    padding: 4px 6px;
+    border-radius: 5px;
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+}

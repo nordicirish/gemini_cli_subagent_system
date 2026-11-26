@@ -25,8 +25,20 @@ from improvement_proposals import IMPROVEMENT_STORE, is_agent_caller, lesson_ite
 
 try:
     from persistence import get_persistence_service, PersistenceError, PersistenceValidationError, strip_ssot_history
+    from colab_calibration import (
+        ARTIFACT_REGISTRY,
+        get_all_colab_artifacts_status,
+        get_artifact_status,
+        load_colab_artifact,
+    )
 except ImportError:
     from python.persistence import get_persistence_service, PersistenceError, PersistenceValidationError, strip_ssot_history
+    from python.colab_calibration import (
+        ARTIFACT_REGISTRY,
+        get_all_colab_artifacts_status,
+        get_artifact_status,
+        load_colab_artifact,
+    )
 
 # We import from the existing fetch_stocks to leverage its battle-tested logic
 from fetch_stocks import handle_paste, run_daemon
@@ -664,4 +676,73 @@ GLOBAL_TOOL_REGISTRY.register(
     affects_financial_state=False,
     parameters={"ticker": str, "limit": int},
     target_resource="sec_edgar",
+)
+
+
+def read_colab_quant_signals(
+    artifact_type: str = "all",
+    ticker: str = "",
+    cache_dir: Optional[str] = None,
+) -> str:
+    """
+    Strictly read-only (<1ms) lookup of cached Google Colab quant artifacts
+    (`vol_surface`, `quant_scout`, `sec_nlp`, `backtest_evidence`) with TTL freshness.
+    Never triggers remote Colab execution and never mutates context/rules.
+    """
+    norm_type = str(artifact_type or "all").strip().lower()
+    sym = str(ticker or "").strip().upper()
+    if norm_type != "all" and norm_type not in ARTIFACT_REGISTRY:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": f"Unknown Colab artifact_type {artifact_type!r}; expected 'all' or {sorted(ARTIFACT_REGISTRY.keys())}",
+            },
+            indent=2,
+        )
+
+    targets = tuple(ARTIFACT_REGISTRY.keys()) if norm_type == "all" else (norm_type,)
+    artifacts_out: Dict[str, Any] = {}
+    for atype in targets:
+        st = get_artifact_status(atype, cache_dir=cache_dir)
+        data = load_colab_artifact(atype, cache_dir=cache_dir)
+        filtered = data
+        if isinstance(data, dict) and sym:
+            if "tickers" in data and isinstance(data["tickers"], dict):
+                filtered = {**data, "tickers": ({sym: data["tickers"][sym]} if sym in data["tickers"] else {})}
+            elif "candidates" in data and isinstance(data["candidates"], list):
+                filtered = {
+                    **data,
+                    "candidates": [c for c in data["candidates"] if isinstance(c, dict) and str(c.get("ticker") or "").upper() == sym],
+                }
+        artifacts_out[atype] = {
+            "loaded": bool(st.get("loaded")),
+            "freshness": st.get("freshness"),
+            "generated_at_utc": st.get("generated_at_utc"),
+            "data": filtered,
+        }
+
+    return json.dumps(
+        {
+            "source": "colab_cache_read_only",
+            "artifact_type": norm_type,
+            "ticker_filter": sym or None,
+            "status_overview": get_all_colab_artifacts_status(cache_dir=cache_dir),
+            "artifacts": artifacts_out,
+        },
+        indent=2,
+        default=str,
+    )
+
+
+GLOBAL_TOOL_REGISTRY.register(
+    name="read_colab_quant_signals",
+    func=read_colab_quant_signals,
+    description="Reads cached Google Colab quant artifacts (vol_surface, quant_scout, sec_nlp, backtest_evidence) strictly read-only (<1ms).",
+    classification="READ",
+    required_permission="read_market",
+    requires_human_approval=False,
+    allowed_roles=ALL_VALID_ROLES,
+    affects_financial_state=False,
+    parameters={"artifact_type": str, "ticker": str},
+    target_resource="cache/colab_*.json",
 )

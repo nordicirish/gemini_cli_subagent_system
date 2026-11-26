@@ -2852,6 +2852,9 @@ async function fetchColabMcpStatus() {
         if (data && data.artifacts && data.artifacts.quant_scout && data.artifacts.quant_scout.loaded) {
             await fetchQuantScoutCandidates();
         }
+        if (data && data.artifacts && data.artifacts.backtest_evidence && data.artifacts.backtest_evidence.loaded) {
+            await fetchBacktestEvidence();
+        }
     } catch (_) {}
 }
 
@@ -2942,6 +2945,76 @@ window.fetchColabMcpStatus = fetchColabMcpStatus;
 window.fetchQuantScoutCandidates = fetchQuantScoutCandidates;
 window.launchColabJob = launchColabJob;
 window.promoteQuantScoutTicker = promoteQuantScoutTicker;
+
+let _lastBacktestEvidenceProposal = '';
+
+async function fetchBacktestEvidence() {
+    const sumEl = document.getElementById('colab-evidence-summary');
+    if (!sumEl) return;
+    try {
+        const res = await fetch(`${API_BASE}/colab/artifacts/backtest_evidence`);
+        if (!res.ok) return;
+        const payload = await res.json();
+        const data = payload && payload.data;
+        if (!payload.loaded || !data) {
+            _lastBacktestEvidenceProposal = '';
+            sumEl.innerHTML = '<div class="colab-scout-empty">No walk-forward evidence pack loaded.</div>';
+            return;
+        }
+        const b = data.baseline_metrics || {};
+        const c = data.candidate_metrics || {};
+        const staleTxt = payload.freshness && payload.freshness.stale ? ' [STALE]' : '';
+        const deltas = Array.isArray(data.proposed_rule_deltas) ? data.proposed_rule_deltas : [];
+
+        const metricsLine = `Sharpe ${Number(b.sharpe_ratio || 0).toFixed(2)} -> ${Number(c.sharpe_ratio || 0).toFixed(2)} | DD ${Number(b.max_drawdown_pct || 0).toFixed(1)}% -> ${Number(c.max_drawdown_pct || 0).toFixed(1)}% | Hit ${Number(c.hit_rate_pct || 0).toFixed(1)}% | Stab ${Number(data.stability_score || 0).toFixed(2)}${staleTxt}`;
+        const deltasHtml = deltas.length
+            ? deltas.map((d) => {
+                const rid = _escAlertHtml(String(d.rule_id || ''));
+                const param = _escAlertHtml(String(d.parameter || ''));
+                const curV = _escAlertHtml(String(d.current_value ?? ''));
+                const propV = _escAlertHtml(String(d.proposed_value ?? ''));
+                const rat = _escAlertHtml(String(d.rationale || ''));
+                return `<div class="colab-evidence-delta" title="${rat}"><strong>${rid}</strong> · <code>${param}</code>: ${curV} → <strong>${propV}</strong></div>`;
+            }).join('')
+            : '<div class="colab-scout-empty">Baseline parameters remain optimal across OOS folds.</div>';
+
+        sumEl.innerHTML = `<div class="colab-evidence-metrics">${_escAlertHtml(metricsLine)}</div>${deltasHtml}`;
+
+        const mdLines = [
+            `# Protocol 06 Walk-Forward Evidence Proposal (${data.generated_at_utc || ''})`,
+            `- Folds: ${data.folds} | Universe: ${data.universe_count} | Friction Hurdle: ${data.friction_hurdle_pct}% | Stability: ${data.stability_score}`,
+            `- Baseline OOS: Sharpe ${b.sharpe_ratio}, MaxDD ${b.max_drawdown_pct}%, Hit ${b.hit_rate_pct}%`,
+            `- Candidate OOS: Sharpe ${c.sharpe_ratio}, MaxDD ${c.max_drawdown_pct}%, Hit ${c.hit_rate_pct}%`,
+            '',
+            '## Proposed Rule Deltas (Owner Sign-Off Required)',
+            ...(deltas.length
+                ? deltas.map((d) => `- **${d.rule_id}** \`${d.parameter}\`: \`${d.current_value}\` -> \`${d.proposed_value}\` (${d.rationale})`)
+                : ['- None (keep baseline parameters).']),
+        ];
+        _lastBacktestEvidenceProposal = mdLines.join('\n');
+    } catch (_) {}
+}
+
+async function copyProtocol06Proposal(btnEl) {
+    const text = _lastBacktestEvidenceProposal || 'No Protocol 06 walk-forward evidence pack loaded.';
+    const statusEl = document.getElementById('colab-mcp-job-status');
+    try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(text);
+        }
+        showFeedback(btnEl, '✅ Copied', 'Copied read-only Protocol 06 proposal.', false, statusEl);
+    } catch (err) {
+        showFeedback(btnEl, '❌ Copy Failed', err.message || 'Clipboard copy failed.', true, statusEl);
+    }
+}
+
+const dColabEvRefreshBtn = document.getElementById('colab-refresh-evidence-btn');
+const dColabCopyP06Btn = document.getElementById('colab-copy-p06-btn');
+if (dColabEvRefreshBtn) dColabEvRefreshBtn.addEventListener('click', () => fetchBacktestEvidence());
+if (dColabCopyP06Btn) dColabCopyP06Btn.addEventListener('click', () => copyProtocol06Proposal(dColabCopyP06Btn));
+
+window.fetchBacktestEvidence = fetchBacktestEvidence;
+window.copyProtocol06Proposal = copyProtocol06Proposal;
 
 // Google Drive sync disabled in this repo
 

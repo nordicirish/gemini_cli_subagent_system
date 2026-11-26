@@ -300,6 +300,7 @@ def build_agent_runtime(
         tools.read_decision_log,
         tools.run_decision_backtest,
         tools.fetch_sec_filings,
+        tools.read_colab_quant_signals,
         refresh_analytics,
         macro_sentinel,
         research_engine,

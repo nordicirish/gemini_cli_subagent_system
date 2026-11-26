@@ -7,7 +7,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.76">
+    <link rel="stylesheet" href="styles.css?v=18.77">
     <link rel="stylesheet" href="modern_ui.css?v=18.61">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
@@ -453,6 +453,21 @@
                                     <div class="colab-scout-empty">No Colab Quant Scout candidates loaded.</div>
                                 </div>
                             </div>
+                            <div id="colab-evidence-panel" class="colab-evidence-panel">
+                                <div class="colab-scout-header">
+                                    <span class="subtitle">Protocol 06 Evidence Pack</span>
+                                    <div class="btn-row" style="gap: 4px;">
+                                        <button id="colab-refresh-evidence-btn" type="button" class="glow-btn outline mini"
+                                            title="Reload Walk-Forward Evidence Pack">↻</button>
+                                        <button id="colab-copy-p06-btn" type="button" class="glow-btn outline mini"
+                                            title="Copy read-only Protocol 06 rule proposal summary">📋 Copy Proposal</button>
+                                    </div>
+                                </div>
+                                <div class="colab-p06-banner">Read-Only — Owner Approval Required (never mutates rules.md)</div>
+                                <div id="colab-evidence-summary" class="colab-evidence-summary">
+                                    <div class="colab-scout-empty">No walk-forward evidence pack loaded.</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -677,7 +692,7 @@
     </div>
 
     <script src="portfolio.js?v=18.63"></script>
-    <script src="app.js?v=18.82"></script>
+    <script src="app.js?v=18.83"></script>
     <script src="modern_ui.js?v=18.66"></script>
 </body>
 

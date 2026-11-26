@@ -202,7 +202,32 @@ const API = {
             vol_surface: { loaded: true, freshness: { fresh: true, stale: false } },
             quant_scout: { loaded: true, freshness: { fresh: true, stale: false } },
             sec_nlp: { loaded: false },
-            backtest_evidence: { loaded: false },
+            backtest_evidence: { loaded: true, freshness: { fresh: true, stale: false } },
+        },
+    },
+    '/api/colab/artifacts/backtest_evidence': {
+        artifact_type: 'backtest_evidence',
+        loaded: true,
+        freshness: { fresh: true, stale: false, age_hours: 1.0, ttl_hours: 168.0 },
+        data: {
+            schema_version: '2.0',
+            generated_at_utc: '2026-11-26T20:00:00Z',
+            protocol_06_read_only: true,
+            folds: 6,
+            universe_count: 15,
+            friction_hurdle_pct: 0.85,
+            stability_score: 0.83,
+            baseline_metrics: { sharpe_ratio: 1.18, sortino_ratio: 1.5, max_drawdown_pct: -14.0, hit_rate_pct: 53.0, profit_factor: 1.4 },
+            candidate_metrics: { sharpe_ratio: 1.44, sortino_ratio: 1.9, max_drawdown_pct: -10.2, hit_rate_pct: 58.0, profit_factor: 1.75 },
+            proposed_rule_deltas: [
+                {
+                    rule_id: 'ENH_104',
+                    parameter: 'trailing_stop_vwap_ext_pct',
+                    current_value: 2.0,
+                    proposed_value: 2.5,
+                    rationale: 'OOS improvement <img src=x onerror=alert(1)>',
+                },
+            ],
         },
     },
     '/api/colab/artifacts/quant_scout': {
@@ -850,6 +875,16 @@ async function main() {
         assert(nlpBadge.getAttribute('title').includes('424B5 shelf'), 'Expected escaped snippet in SEC NLP tooltip');
         const secPost = colabJobPosts.find((p) => p.path === '/api/colab/jobs/sec_nlp');
         assert(secPost && secPost.body && secPost.body.options && secPost.body.options.use_llm === true, 'Expected use_llm:true option on SEC NLP POST');
+    });
+    check('Stage M4: Read-only Protocol 06 Evidence Pack renders metrics, escapes deltas & exposes Copy Proposal button', () => {
+        const panel = window.document.getElementById('colab-evidence-panel');
+        const sum = window.document.getElementById('colab-evidence-summary');
+        const copyBtn = window.document.getElementById('colab-copy-p06-btn');
+        assert(panel && sum && copyBtn, 'Missing Stage M4 Evidence Pack elements');
+        assert(panel.textContent.includes('Read-Only'), 'Missing Protocol 06 Read-Only notice');
+        assert(sum.textContent.includes('1.18 -> 1.44'), `Expected Sharpe comparison, got: ${sum.textContent}`);
+        assert(sum.textContent.includes('ENH_104'), 'Expected ENH_104 delta row');
+        assert.strictEqual(sum.querySelectorAll('img, script').length, 0, 'XSS elements must never render in Evidence Pack');
     });
 
     window.close();
