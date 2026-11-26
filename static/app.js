@@ -454,6 +454,7 @@ async function init() {
     await fetchScoutConfig();
     await fetchAlertsAndSentinel();
     await fetchAnalyticsAndBacktest();
+    if (typeof fetchCalibrationStatus === 'function') fetchCalibrationStatus();
     // Google Drive sync disabled in this repo
     pollData();
     setInterval(() => {
@@ -2662,6 +2663,64 @@ if (dClearLogBtn) {
         }
     });
 }
+
+// Offline Colab Calibration Handlers
+async function fetchCalibrationStatus() {
+    const statusEl = document.getElementById('colab-calibration-status');
+    if (!statusEl) return;
+    try {
+        const res = await fetch(`${API_BASE}/calibration/status`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && data.loaded) {
+            const count = Array.isArray(data.tickers_calibrated) ? data.tickers_calibrated.length : 0;
+            statusEl.textContent = `Colab calibration loaded (${count} ticker priors)`;
+            statusEl.className = 'status-message inline-feedback text-green';
+        } else {
+            statusEl.textContent = 'No Colab calibration loaded';
+            statusEl.className = 'status-message inline-feedback';
+        }
+    } catch (_) {}
+}
+
+const dColabExportBtn = document.getElementById('colab-export-btn');
+const dColabImportBtn = document.getElementById('colab-import-btn');
+const dColabImportFile = document.getElementById('colab-import-file');
+
+if (dColabExportBtn) {
+    dColabExportBtn.addEventListener('click', () => {
+        window.open(`${API_BASE}/calibration/export`, '_blank', 'noopener');
+    });
+}
+
+if (dColabImportBtn && dColabImportFile) {
+    dColabImportBtn.addEventListener('click', () => dColabImportFile.click());
+    dColabImportFile.addEventListener('change', async () => {
+        const file = dColabImportFile.files && dColabImportFile.files[0];
+        if (!file) return;
+        const statusEl = document.getElementById('colab-calibration-status');
+        dColabImportBtn.disabled = true;
+        try {
+            const rawText = await file.text();
+            const parsed = JSON.parse(rawText);
+            const res = await fetch(`${API_BASE}/calibration/import`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(parsed),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+            const cnt = Array.isArray(data.tickers_calibrated) ? data.tickers_calibrated.length : 0;
+            showFeedback(dColabImportBtn, '✅ Imported', `Imported calibration for ${cnt} ticker(s).`, false, statusEl);
+        } catch (err) {
+            showFeedback(dColabImportBtn, '❌ Invalid', err.message || 'Calibration import failed.', true, statusEl);
+        } finally {
+            dColabImportFile.value = '';
+            dColabImportBtn.disabled = false;
+        }
+    });
+}
+window.fetchCalibrationStatus = fetchCalibrationStatus;
 
 // Google Drive sync disabled in this repo
 

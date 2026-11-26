@@ -190,44 +190,8 @@ def load_background_news_grounding_prompt() -> str:
     )
 
 def compile_master_document():
-    """Aggregates gem_trading_rules/rules.md and all engine instruction markdown files
-    into a single master document at scratch/master_trading_knowledge.md to optimize cloud uploads.
-    """
-    master_doc_path = os.path.join("scratch", "master_trading_knowledge.md")
-    os.makedirs("scratch", exist_ok=True)
-    
-    print("[System] Compiling Master Trading Knowledge Document...")
-    try:
-        with open(master_doc_path, 'w', encoding='utf-8') as master_file:
-            master_file.write("# Master Trading Knowledge Document\n\n")
-            master_file.write("This document contains the Single Source of Truth (SSoT) rules and all engine instructions.\n\n")
-            
-            # Append rules.md
-            rules_local_path = os.path.join("gem_trading_rules", "rules.md")
-            if os.path.exists(rules_local_path):
-                master_file.write("## 1. TRADING RULES (SSoT)\n\n")
-                with open(rules_local_path, 'r', encoding='utf-8') as rules_file:
-                    content = rules_file.read()
-                    demoted_lines = [('##' + line) if line.startswith('#') else line for line in content.splitlines()]
-                    master_file.write('\n'.join(demoted_lines))
-                master_file.write("\n\n---\n\n")
-                
-            # Append engine instructions
-            master_file.write("## 2. ENGINE INSTRUCTIONS\n\n")
-            engine_dir = "engine_instructions"
-            if os.path.exists(engine_dir):
-                for filename in sorted(os.listdir(engine_dir)):
-                    if filename.endswith('.md'):
-                        local_path = os.path.join(engine_dir, filename)
-                        master_file.write(f"### Component: {filename}\n\n")
-                        with open(local_path, 'r', encoding='utf-8') as engine_file:
-                            content = engine_file.read()
-                            demoted_lines = [('###' + line) if line.startswith('#') else line for line in content.splitlines()]
-                            master_file.write('\n'.join(demoted_lines))
-                        master_file.write("\n\n---\n\n")
-        print(f"[System] Master Document compiled successfully: {master_doc_path}")
-    except Exception as e:
-        print(f"[System Warning] Failed to compile master document: {e}")
+    """Retired legacy master-document exporter preserved as a no-op for caller compatibility."""
+    return None
 
 def initialize_context_files():
     """Bootstraps missing context files for fresh repository clones."""
@@ -358,7 +322,6 @@ def initialize_context_files():
             pass
 
 initialize_context_files()
-compile_master_document()
 
 # Load configuration from JSON file
 with open('context/config.json', 'r') as f:
@@ -6849,116 +6812,12 @@ def get_ssot_json_payload():
     return sanitize_json_payload(get_global_state_snapshot())
 
 
-_MERTON_CACHE_LOCK = threading.Lock()
-_MERTON_CACHE_KEY: Any = None
-_MERTON_CACHE_VAL: Optional[dict] = None
-
-
 def compute_merton_allocation(gamma=3.0, r=0.04):
-    global _MERTON_CACHE_KEY, _MERTON_CACHE_VAL
     try:
-        history_sig = []
-        prices_dict = {}
-        for sym in ALL_TICKERS:
-            sym_upper = sym.upper()
-            df = cache.history.get(sym_upper)
-            if df is not None and not df.empty:
-                history_sig.append((sym_upper, len(df), str(df.index[-1])))
-                if 'Close' in df.columns:
-                    close = df['Close']
-                    if isinstance(close, pd.DataFrame):
-                        close = close.iloc[:, 0]
-                    valid_close = close[close > 0.0]
-                    if len(valid_close) > 10:
-                        prices_dict[sym_upper] = valid_close
-
-        cache_key = (tuple(sorted(history_sig)), float(gamma), float(r))
-        with _MERTON_CACHE_LOCK:
-            if _MERTON_CACHE_KEY == cache_key and _MERTON_CACHE_VAL is not None:
-                return dict(_MERTON_CACHE_VAL)
-
-        if not prices_dict:
-            return {
-                "status": "error",
-                "message": "No historical price data found in cache for active tickers."
-            }
-            
-        df_prices = pd.DataFrame(prices_dict).ffill().bfill()
-        df_returns = df_prices.pct_change().dropna(how='all')
-        if df_returns.empty:
-            return {
-                "status": "error",
-                "message": "Calculated returns dataframe is empty."
-            }
-            
-        stds = df_returns.std()
-        valid_cols = stds[stds > 1e-7].index.tolist()
-        if len(valid_cols) < 1:
-            return {
-                "status": "error",
-                "message": "Insufficient variance in asset price history to compute covariance matrix."
-            }
-            
-        df_returns = df_returns[valid_cols]
-        df_prices = df_prices[valid_cols]
-        
-        mean_daily = df_returns.mean()
-        mu = mean_daily * 252
-        
-        cov_daily = df_returns.cov()
-        Sigma = cov_daily * 252
-        
-        n_assets = Sigma.shape[0]
-        Sigma_reg = Sigma + np.eye(n_assets) * 1e-4
-        
-        excess_returns = mu - r
-        
-        weights = np.linalg.solve(Sigma_reg, excess_returns) / gamma
-        
-        raw_allocation = {ticker: float(w) for ticker, w in zip(df_prices.columns, weights)}
-        
-        clipped_weights = np.clip(weights, 0, None)
-        sum_clipped = np.sum(clipped_weights)
-        if sum_clipped > 0:
-            normalized_weights = clipped_weights / sum_clipped
-        else:
-            normalized_weights = np.zeros_like(weights)
-            
-        normalized_allocation = {ticker: float(w) for ticker, w in zip(df_prices.columns, normalized_weights)}
-        
-        vols = df_returns.std() * np.sqrt(252)
-        sharpe_ratios = {}
-        for ticker in df_prices.columns:
-            vol = vols[ticker]
-            expected_ret = mu[ticker]
-            sharpe_ratios[ticker] = float((expected_ret - r) / vol) if vol > 0 else 0.0
-            
-        result = {
-            "status": "success",
-            "parameters": {
-                "risk_aversion_gamma": float(gamma),
-                "annual_risk_free_rate": float(r),
-                "trading_days": 252
-            },
-            "raw_merton_weights": raw_allocation,
-            "normalized_long_only_weights": normalized_allocation,
-            "annualized_statistics": {
-                ticker: {
-                    "expected_return": float(mu[ticker]),
-                    "volatility": float(vols[ticker]),
-                    "sharpe_ratio": sharpe_ratios[ticker]
-                } for ticker in df_prices.columns
-            }
-        }
-        with _MERTON_CACHE_LOCK:
-            _MERTON_CACHE_KEY = cache_key
-            _MERTON_CACHE_VAL = dict(result)
-        return result
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Calculation failed: {str(e)}"
-        }
+        from merton_optimizer import compute_merton_from_history
+    except ImportError:
+        from python.merton_optimizer import compute_merton_from_history
+    return compute_merton_from_history(cache.history, ALL_TICKERS, gamma=gamma, r=r)
 
 
 def resolve_held_and_watched(service: Optional[Any] = None) -> tuple[set, Optional[str]]:

@@ -28,6 +28,32 @@ from agent_framework import AgentFramework
 import agent_framework
 import tools
 from audit_logger import redact_secrets
+try:
+    from chat_payload_parser import (
+        PAYLOAD_MARKERS as _PAYLOAD_MARKERS,
+        assemble_slim_tickers,
+        is_halted_execution_payload as _is_halted_execution_payload,
+        looks_like_execution_payload as _looks_like_execution_payload,
+        normalize_for_json as _normalize_for_json,
+    )
+    from colab_calibration import (
+        export_colab_bundle,
+        get_calibration_status,
+        import_colab_calibration,
+    )
+except ImportError:
+    from python.chat_payload_parser import (
+        PAYLOAD_MARKERS as _PAYLOAD_MARKERS,
+        assemble_slim_tickers,
+        is_halted_execution_payload as _is_halted_execution_payload,
+        looks_like_execution_payload as _looks_like_execution_payload,
+        normalize_for_json as _normalize_for_json,
+    )
+    from python.colab_calibration import (
+        export_colab_bundle,
+        get_calibration_status,
+        import_colab_calibration,
+    )
 # cloud_sync removed — GDrive Decoupling Guardrail (ANTIGRAVITY v11.03)
 
 try:
@@ -419,46 +445,6 @@ def should_attach_charts(req: ChatRequest) -> bool:
     return bool(getattr(req, "include_charts", False))
 
 
-def _is_halted_execution_payload(raw_json: str) -> Optional[str]:
-    """
-    Returns a reason string if an extracted EXECUTION_PAYLOAD represents a halted,
-    truncated, or ENH_12 state-absence veto response that must never overwrite SSoT.
-    """
-    try:
-        parsed = json.loads(raw_json, parse_float=Decimal)
-    except Exception:
-        return None
-    if not isinstance(parsed, dict):
-        return None
-
-    ep = parsed.get("EXECUTION_PAYLOAD") if isinstance(parsed.get("EXECUTION_PAYLOAD"), dict) else parsed
-    runtime_flags = ep.get("runtime_flags") if isinstance(ep.get("runtime_flags"), dict) else {}
-    if runtime_flags.get("halt_active") is True or runtime_flags.get("data_gap") is True:
-        return "Council halt / data-gap veto active"
-
-    state_ctx = ep.get("state_context") if isinstance(ep.get("state_context"), dict) else {}
-    state_status = str(state_ctx.get("status", "")).upper()
-    state_err = str(state_ctx.get("error", "")).upper()
-    if state_status == "CRITICAL_SYNC_ALERT" or "STATE_ABSENCE_VETO" in state_err:
-        return "CRITICAL_SYNC_ALERT / ENH_12 state-absence veto active"
-
-    forensic = ep.get("forensic_intelligence") if isinstance(ep.get("forensic_intelligence"), dict) else {}
-    active_flags = forensic.get("active_flags", [])
-    if isinstance(active_flags, list):
-        for flag in active_flags:
-            flag_u = str(flag).upper()
-            if any(marker in flag_u for marker in ("CRITICAL_SYNC_ALERT", "STATE_ABSENCE_VETO", "INPUT_TRUNCATION")):
-                return "Council truncation / state-absence veto active"
-
-    return None
-
-
-_PAYLOAD_MARKERS = ("EXECUTION_PAYLOAD", "thoughtSignature", "portfolio_snapshot")
-
-def _looks_like_execution_payload(text: str) -> bool:
-    return any(marker in text for marker in _PAYLOAD_MARKERS)
-
-
 def _known_tickers() -> set:
     """Tracked + live-feed ticker symbols, used to filter symbols parsed out of model prose."""
     try:
@@ -787,57 +773,6 @@ def set_model(data: dict):
             raise
 
         return {"status": "success", "current_model": ORCHESTRATOR_MODEL, "warning": active_model_warning}
-
-def _normalize_for_json(obj: Any) -> Any:
-    """Recursively converts read-only Mapping/Sequence views into plain JSON-serializable structures."""
-    try:
-        from fetch_stocks import sanitize_json_payload
-        return sanitize_json_payload(obj)
-    except ImportError:
-        if isinstance(obj, collections.abc.Mapping):
-            return {k: _normalize_for_json(v) for k, v in obj.items()}
-        if isinstance(obj, collections.abc.Sequence) and not isinstance(obj, (str, bytes)):
-            return [_normalize_for_json(x) for x in obj]
-        return obj
-
-
-def assemble_slim_tickers(raw_tickers: Any) -> list[dict]:
-    """
-    Assembles non-authoritative market feed telemetry for DATA_PACKET injection.
-    Fails closed: missing price_validity and freshness explicitly default to UNAVAILABLE.
-    """
-    slim_tickers = []
-    if isinstance(raw_tickers, collections.abc.Sequence) and not isinstance(raw_tickers, (str, bytes)):
-        for t in raw_tickers:
-            if isinstance(t, collections.abc.Mapping):
-                slim_tickers.append({
-                    "ticker": t.get("ticker"),
-                    "price": t.get("price"),
-                    "price_validity": t.get("price_validity", "UNAVAILABLE"),
-                    "freshness": t.get("freshness", "UNAVAILABLE"),
-                    "price_source": t.get("price_source"),
-                    "observation_time": t.get("observation_time"),
-                    "retrieval_time": t.get("retrieval_time"),
-                    "session_change_pct": t.get("session_change_pct"),
-                    "gap_percent": t.get("gap_percent"),
-                    "rsi": t.get("rsi"),
-                    "macd": t.get("macd", 0.0),
-                    "macd_signal": t.get("macd_signal", 0.0),
-                    "macd_hist": t.get("macd_hist", 0.0),
-                    "macd_slope": t.get("macd_slope", "EXPANDING_POSITIVE"),
-                    "macd_status": t.get("macd_status", "NEUTRAL"),
-                    "atr_percent": t.get("atr_percent"),
-                    "vwap": t.get("vwap"),
-                    "trend": t.get("trend"),
-                    "signal": t.get("signal"),
-                    "score": t.get("score"),
-                    "dealer_posture": t.get("dealer_posture"),
-                    "net_gex_total": round(t.get("net_gex_total", 0.0), 3) if t.get("net_gex_total") is not None else 0.0,
-                    "fib_forecast": t.get("fib_forecast"),
-                    "note": t.get("note"),
-                })
-    return slim_tickers
-
 
 @app.post("/api/chat")
 def chat_endpoint(req: ChatRequest):
@@ -1331,15 +1266,6 @@ def chat_endpoint(req: ChatRequest):
                 full_response, 
                 flags=re.IGNORECASE
             )
-
-            try:
-                with open("scratch/debug_output.txt", "w", encoding="utf-8") as df:
-                    df.write("=== RAW FULL RESPONSE ===\n")
-                    df.write(full_response_original + "\n\n")
-                    df.write("=== CLEANED RESPONSE ===\n")
-                    df.write(full_response + "\n")
-            except Exception as e:
-                framework.log(f"Debug write failed: {e}")
 
             global active_model_warning
             active_model_warning = check_model_validity(ORCHESTRATOR_MODEL)
@@ -2334,6 +2260,40 @@ def get_daily_peak_prediction(ticker: str):
     )
     tracker = ANALYTICS_ENGINE._get_tracker_snapshot(sym)
     return predict_daily_peak(sym, live_row=live_row, tracker=tracker, ny_dt=ny_dt)
+
+
+@app.get("/api/calibration/export")
+def export_colab_calibration_endpoint():
+    """Exports zero-secret quant telemetry and history bundle for offline Google Colab analysis."""
+    bundle = export_colab_bundle(service=get_persistence_service())
+    return JSONResponse(
+        content=bundle,
+        headers={"Content-Disposition": 'attachment; filename="gem_colab_export.json"'},
+    )
+
+
+@app.post("/api/calibration/import")
+async def import_colab_calibration_endpoint(req: Request):
+    """Fail-closed import of schema-validated Google Colab calibration JSON into cache/."""
+    try:
+        payload = await req.json()
+    except Exception:
+        return JSONResponse({"status": "error", "detail": "Invalid JSON body."}, status_code=422)
+    try:
+        summary = import_colab_calibration(payload)
+        framework.log(f"[Colab Calibration] Imported priors for {len(summary.get('tickers_calibrated', []))} ticker(s).")
+        return summary
+    except ValueError as ve:
+        return JSONResponse({"status": "error", "detail": redact_secrets(str(ve))}, status_code=422)
+    except Exception as exc:
+        framework.log(f"[Colab Calibration] Import failed: {redact_secrets(str(exc))}")
+        return JSONResponse({"status": "error", "detail": "Failed to import calibration."}, status_code=500)
+
+
+@app.get("/api/calibration/status")
+def get_colab_calibration_status_endpoint():
+    """Returns currently loaded offline Colab calibration metadata."""
+    return get_calibration_status()
 
 
 @app.get("/api/system_logs")

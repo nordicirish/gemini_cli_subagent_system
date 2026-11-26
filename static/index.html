@@ -412,6 +412,17 @@
                                 Log</button>
                             <div id="clear-log-status" class="status-message inline-feedback"></div>
                         </div>
+                        <div style="border-top: 1px solid var(--panel-border); margin: 10px 0;"></div>
+                        <p class="subtitle" style="margin-bottom: 6px;">Offline Colab Calibration</p>
+                        <div class="btn-row" style="gap: 6px; flex-wrap: wrap;">
+                            <button id="colab-export-btn" type="button" class="glow-btn outline mini"
+                                title="Export zero-secret market & history JSON for Google Colab">⬇ Export Colab JSON</button>
+                            <button id="colab-import-btn" type="button" class="glow-btn outline mini"
+                                title="Import schema-validated Colab calibration JSON">⬆ Import Calibration</button>
+                            <input type="file" id="colab-import-file" accept="application/json,.json" hidden>
+                        </div>
+                        <div id="colab-calibration-status" class="status-message inline-feedback"
+                            style="margin-top: 6px; font-size: 0.7rem;">No Colab calibration loaded</div>
                     </div>
                 </div>
             </aside>
@@ -635,7 +646,7 @@
     </div>
 
     <script src="portfolio.js?v=18.63"></script>
-    <script src="app.js?v=18.79"></script>
+    <script src="app.js?v=18.80"></script>
     <script src="modern_ui.js?v=18.66"></script>
 </body>
 

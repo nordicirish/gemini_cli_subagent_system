@@ -224,8 +224,9 @@ def predict_daily_peak(
     bars_df: Any = None,
     ny_dt: Optional[datetime] = None,
     cache_path: Optional[str] = DEFAULT_PEAK_CACHE_PATH,
+    calibration_path: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Combines 60d empirical RTH profile + live telemetry into peak price & exhaustion score."""
+    """Combines 60d empirical RTH profile + live telemetry (and optional Colab priors) into peak price & exhaustion score."""
     sym = str(ticker or "").strip().upper()
     now_ny = ny_dt or datetime.now(NY_TZ)
     if now_ny.tzinfo is None:
@@ -236,6 +237,26 @@ def predict_daily_peak(
     row = live_row if isinstance(live_row, dict) else {}
     trk = tracker if isinstance(tracker, dict) else {}
     profile = compute_historical_peak_profile(sym, bars_df=bars_df, cache_path=cache_path, now_ts=now_ny.timestamp())
+
+    colab_prior = None
+    try:
+        try:
+            from colab_calibration import DEFAULT_CALIBRATION_PATH, get_ticker_peak_prior
+        except ImportError:
+            from python.colab_calibration import DEFAULT_CALIBRATION_PATH, get_ticker_peak_prior
+        eff_cal_path = DEFAULT_CALIBRATION_PATH if calibration_path is None else calibration_path
+        colab_prior = get_ticker_peak_prior(sym, calibration_path=eff_cal_path)
+    except Exception:
+        colab_prior = None
+
+    if profile.get("status") != "ok" and isinstance(colab_prior, dict) and colab_prior:
+        profile = {
+            "status": "ok",
+            "ticker": sym,
+            "source": "colab_calibration",
+            **colab_prior,
+            "cached": False,
+        }
 
     price = _safe_float(row.get("price"))
     open_px = _safe_float(row.get("open"))
@@ -346,7 +367,7 @@ def predict_daily_peak(
     else:
         ex_state = "BUILDING"
 
-    return {
+    result = {
         "status": profile.get("status", "unavailable"),
         "ticker": sym,
         "as_of_ny": now_ny.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -362,3 +383,6 @@ def predict_daily_peak(
         "signals": signals,
         "profile": profile,
     }
+    if colab_prior is not None:
+        result["colab_prior"] = colab_prior
+    return result

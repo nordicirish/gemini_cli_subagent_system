@@ -145,6 +145,12 @@ const API = {
         hit_rate_pct: 60.0,
         avg_ret_5d_pct: 2.45,
     },
+    '/api/calibration/status': {
+        loaded: true,
+        schema_version: '1.0',
+        tickers_calibrated: ['NVDA'],
+        imported_at_utc: '2026-11-26T17:00:00Z',
+    },
     '/api/analytics/sec/NVDA': {
         status: 'ok',
         ticker: 'NVDA',
@@ -713,6 +719,13 @@ async function main() {
         assert.strictEqual(sidebarToggledOpen, true);
         assert.strictEqual(chatOpenedViaShortcut, true);
         assert.strictEqual(chatClosedViaEsc, true);
+    });
+    check('Colab & Stage D: offline calibration buttons render and status hydrates cleanly', () => {
+        const expBtn = window.document.getElementById('colab-export-btn');
+        const impBtn = window.document.getElementById('colab-import-btn');
+        const calSt = window.document.getElementById('colab-calibration-status');
+        assert(expBtn && impBtn, 'Colab calibration export/import buttons missing');
+        assert(calSt && calSt.textContent.includes('1 ticker priors'), `unexpected #colab-calibration-status: ${calSt && calSt.textContent}`);
     });
 
     window.close();
