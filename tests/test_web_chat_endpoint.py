@@ -2908,6 +2908,53 @@ const panel = sandbox.window.PortfolioPanel;
             self.assertNotIn("synchronized successfully", res_brace["response"])
             self.assertIn("SSoT update skipped", res_brace["response"])
 
+    @patch("web_server.get_chart_parts", return_value=([], []))
+    @patch("tool_dispatcher.GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session")
+    def test_stage_a_slim_data_packet_and_multi_turn_payload_extraction(self, mock_dispatch, mock_charts):
+        """Stage A: DATA_PACKET strips history from ssot & multi-turn function_calls blocks don't corrupt Markdown/payload."""
+        captured_prompts = []
+
+        def fake_dispatch(**kwargs):
+            captured_prompts.append(kwargs.get("initial_message", ""))
+            return {
+                "status": "success",
+                "response": (
+                    '```json\n{"function_calls": [{"name": "get_market_data", "args": {}}]}\n```\n\n---\n\n'
+                    "### Verdict\nHold NVDA.\n\n"
+                    '```json\n{"EXECUTION_PAYLOAD": {"directive": "HOLD", "portfolio_snapshot": [], "unallocated_cash_eur": "100.00"}}\n```'
+                ),
+                "turn_count": 2,
+            }
+
+        mock_dispatch.side_effect = fake_dispatch
+        bloated_state = {
+            "financial_state_valid": True,
+            "local_storage_state": {
+                "mutable_state": {"portfolio_snapshot": [], "watched_tickers": ["NVDA"]},
+                "decision_log": [{"id": 1, "transcript_text": "HUGE" * 500}],
+                "trade_lessons": [{"rule_code": "L-1", "directive_text": "Test"}],
+            },
+            "tickers": [],
+        }
+        mock_svc = MagicMock()
+        mock_svc.get_trade_lessons.return_value = [{"rule_code": "L-1", "directive_text": "Test"}]
+        mock_svc.get_decision_log.return_value = [
+            {"id": 1, "ticker": "NVDA", "action_proposed": "HOLD", "decision_outcome": "RECOMMENDED", "transcript_text": "GIANT_TRANSCRIPT"}
+        ]
+        with patch_global_state(bloated_state), \
+             patch("web_server.get_persistence_service", return_value=mock_svc), \
+             patch.object(web_server.PROPOSAL_STORE, "submit", return_value={"status": "no_changes"}) as mock_submit:
+            res = web_server.chat_endpoint(web_server.ChatRequest(message="Status?"))
+
+        self.assertEqual(res["status"], "success")
+        self.assertIn("### Verdict", res["response"])
+        self.assertIn("Hold NVDA.", res["response"])
+        self.assertNotIn("function_calls", res["response"])
+        self.assertEqual(mock_submit.call_count, 1)
+        sent_msg = captured_prompts[0]
+        self.assertNotIn("GIANT_TRANSCRIPT", sent_msg)
+        self.assertNotIn("HUGE" * 10, sent_msg)
+
 
 if __name__ == "__main__":
     unittest.main()

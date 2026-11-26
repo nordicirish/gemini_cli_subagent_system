@@ -171,6 +171,22 @@ def load_news_scan_prompt() -> str:
         "Return ONLY a clean JSON object with keys: \"headline\", \"summary\", \"catalyst_type\", \"sentiment_score\"."
     )
 
+def load_background_news_grounding_prompt() -> str:
+    """Loads the compact background news grounding prompt from prompts/background_news_grounding_prompt.txt."""
+    prompt_path = os.path.join(BASE_DIR, "prompts/background_news_grounding_prompt.txt")
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except Exception as e:
+            print(f"[Warning] Failed to read background news grounding prompt from {prompt_path}: {e}")
+    return (
+        "SYSTEM DIRECTIVE: BACKGROUND STOCK NEWS GROUNDING\n"
+        "Perform a live web search for stock ticker '{symbol}' and return a concise, high-signal catalyst summary.\n"
+        "Identify: (1) Main catalyst or news driver today, (2) Earnings/SEC/analyst updates, (3) Market sentiment score (-1.0 Bearish to +1.0 Bullish).\n"
+        "Return ONLY a single valid JSON object with keys: \"headline\", \"summary\", \"catalyst_type\", \"sentiment_score\"."
+    )
+
 def compile_master_document():
     """Aggregates gem_trading_rules/rules.md and all engine instruction markdown files
     into a single master document at scratch/master_trading_knowledge.md to optimize cloud uploads.
@@ -535,7 +551,22 @@ def _execute_scout_discovery_raw(category: str, cancel_check: Optional[Callable[
         service = get_persistence_service()
         ssot_data = service.get_ssot_data()
         if ssot_data:
-            ssot_content = json.dumps(ssot_data, indent=2)
+            ms = ssot_data.get("mutable_state") if isinstance(ssot_data.get("mutable_state"), dict) else ssot_data
+            raw_portfolio = ms.get("portfolio_snapshot") or ssot_data.get("portfolio_snapshot") or []
+            held_tickers = [
+                str(p.get("ticker")).strip().upper()
+                for p in raw_portfolio
+                if isinstance(p, dict) and p.get("ticker")
+            ]
+            watched = ms.get("watched_tickers") or ssot_data.get("watched_tickers") or []
+            scouts = ms.get("scout_categories") or ssot_data.get("scout_categories") or []
+            slim_scout_ssot = {
+                "system_time": datetime.now(ZoneInfo("America/New_York")).isoformat(),
+                "held_tickers": held_tickers,
+                "watched_tickers": list(watched),
+                "scout_categories": list(scouts),
+            }
+            ssot_content = json.dumps(slim_scout_ssot, separators=(",", ":"))
     except Exception as e:
         print(f"[Warning] Failed to load SSoT for scout prompt via persistence service: {e}")
 
@@ -1014,14 +1045,14 @@ def _execute_news_grounding_raw(symbol: str, cancel_check: Optional[Callable[[],
     Executed by background worker threads; does not touch coordinator state directly.
     """
     symbol_clean = symbol.strip().upper()
-    template = load_news_scan_prompt()
+    template = load_background_news_grounding_prompt()
     if "{symbol}" in template:
         prompt = template.format(symbol=symbol_clean)
     else:
         prompt = (
             f"{template}\n\n"
             f"TARGET SYMBOL FOR SEARCH: {symbol_clean}\n"
-            f"Return ONLY a clean JSON object with keys: \"headline\", \"summary\", \"catalyst_type\", \"sentiment_score\"."
+            f"Return ONLY a single valid JSON object with keys: \"headline\", \"summary\", \"catalyst_type\", \"sentiment_score\"."
         )
 
     text = ""
@@ -6026,6 +6057,7 @@ def coordinate_heavy_market_data_cycle(
     now_ts: Optional[float] = None,
     coordinator: Optional[BackgroundIntelligenceCoordinator] = None,
     applicator: Optional[BackgroundResultApplicator] = None,
+    force: Optional[bool] = None,
 ) -> Dict[str, int]:
     """
     Non-blocking heavy market-data cycle orchestrator run on the coordinating thread.
@@ -6060,10 +6092,11 @@ def coordinate_heavy_market_data_cycle(
                 continue
             t_obj = ticker_map.get(sym_clean) if sym_clean in ticker_map else ticker_map.get(sym)
 
+            eff_force = bool(is_heavy) if force is None else bool(force)
             if include_historical:
                 cur_hist = cache.history.get(sym_clean)
                 need_hist = (
-                    is_heavy
+                    eff_force
                     or cur_hist is None
                     or (isinstance(cur_hist, pd.DataFrame) and cur_hist.empty)
                     or cache.last_history_fetch_date.get(sym_clean) != eff_today
@@ -6074,20 +6107,20 @@ def coordinate_heavy_market_data_cycle(
                         t_obj=t_obj,
                         today_str=eff_today,
                         now_ny=now_ny,
-                        force=is_heavy,
+                        force=eff_force,
                         coordinator=coordinator,
                     )
                     if acc:
                         historical_enqueued += 1
 
             if include_gex:
-                if is_heavy or sym_clean not in cache.last_gex_fetch:
+                if is_heavy or eff_force or sym_clean not in cache.last_gex_fetch:
                     acc, _ = enqueue_options_gex(
                         sym_clean,
                         ticker_obj=t_obj,
                         spot_price=cache.prices.get(sym_clean),
                         now_ts=eff_now,
-                        force=is_heavy,
+                        force=eff_force,
                         coordinator=coordinator,
                     )
                     if acc:
@@ -7030,6 +7063,7 @@ def run_daemon():
             now_ny=startup_ny_now,
             coordinator=daemon_heavy_coord,
             applicator=daemon_heavy_app,
+            force=False,
         )
         print(f"{GREEN}Initial live and heavy market-data workloads queued.{RESET}")
 
@@ -7153,6 +7187,7 @@ def run_daemon():
                 now_ny=ny_now,
                 coordinator=daemon_heavy_coord,
                 applicator=daemon_heavy_app,
+                force=False,
             )
 
             sep_line = "-" * table_width
@@ -7582,16 +7617,23 @@ def run_daemon():
         print(f"\033[?25h", end="")
         print(f"\n{YELLOW}Daemon Shutdown.{RESET}")
     finally:
-        try:
-            shutdown_ok = daemon_heavy_coord.shutdown(timeout=5.0)
-            if not shutdown_ok:
-                logger.warning(
-                    "[HeavyMarketDataCoordinator] Shutdown timed out after 5.0s during daemon exit"
+        for label, coord in (
+            ("HeavyMarketDataCoordinator", daemon_heavy_coord),
+            ("LiveMarketDataCoordinator", daemon_mkt_coord),
+            ("BackgroundIntelligenceCoordinator", daemon_bg_coord),
+        ):
+            if coord is None:
+                continue
+            try:
+                shutdown_ok = coord.shutdown(timeout=5.0)
+                if not shutdown_ok:
+                    logger.warning(
+                        f"[{label}] Shutdown timed out after 5.0s during daemon exit"
+                    )
+            except Exception as exc:
+                logger.error(
+                    f"[{label}] Error shutting down coordinator during daemon exit: {exc}"
                 )
-        except Exception as exc:
-            logger.error(
-                f"[HeavyMarketDataCoordinator] Error shutting down coordinator during daemon exit: {exc}"
-            )
 
 if __name__ == "__main__":
     if not os.path.exists("static"):

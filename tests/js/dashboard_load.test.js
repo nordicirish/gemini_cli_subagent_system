@@ -598,6 +598,29 @@ async function main() {
         assert(execBody.textContent.includes('SELL_ZONE') && execBody.textContent.includes('Arm Peak Sell ($123.19)'), 'Peak exhaustion / Arm Peak Sell button missing');
     });
 
+    // Stage A UI regressions: watchlist save without ReferenceError, Command Strip EUR cash, FX-missing draft guard
+    await window.saveWatchlist(['AMD', 'MSFT']);
+    check('Stage A: saveWatchlist succeeds without dDataStatus ReferenceError and updates #watchlist-status', () => {
+        const st = window.document.getElementById('watchlist-status');
+        assert(st && st.textContent.includes('Watchlist updated'), `unexpected watchlist status: ${st && st.textContent}`);
+    });
+    check('Stage A: Command Strip cash reads #cash-input-eur instead of missing #cash-val-eur', () => {
+        const cmdCash = window.document.getElementById('cmd-cash-val');
+        assert(cmdCash && cmdCash.textContent.includes('€1,000.00'), `unexpected #cmd-cash-val: ${cmdCash && cmdCash.textContent}`);
+    });
+    const origRate = window.eval('currentEurUsdRate');
+    window.eval('currentEurUsdRate = null;');
+    const addInput = window.document.getElementById('add-portfolio-ticker');
+    addInput.value = 'PLTR';
+    await window.addToPortfolio();
+    const draftPltr = window.document.querySelector('tr.portfolio-item-row[data-draft="true"]');
+    const pfHint = window.document.getElementById('portfolio-feedback');
+    check('Stage A: addToPortfolio opens draft row when live FX rate is unavailable', () => {
+        assert(draftPltr && draftPltr.textContent.includes('PLTR'), 'PLTR should open as draft row without FX rate');
+        assert(pfHint && pfHint.textContent.includes('FX unavailable'), `expected FX warning, got: ${pfHint && pfHint.textContent}`);
+    });
+    window.eval(`currentEurUsdRate = ${JSON.stringify(origRate)};`);
+
     window.close();
     console.log(results.join('\n'));
     const failed = results.filter((r) => r.startsWith('FAIL')).length;

@@ -245,6 +245,7 @@ class SSoTProjectionGenerator:
         conn: sqlite3.Connection,
         base_document: Optional[Dict[str, Any]] = None,
         generation_timestamp: Optional[str] = None,
+        include_history: bool = True,
     ) -> Dict[str, Any]:
         """
         Produces a canonical JSON-compatible representation of the authoritative SQLite state.
@@ -386,37 +387,40 @@ class SSoTProjectionGenerator:
                 for c in sorted(scout_cats, key=lambda x: x.category_name)
             ]
 
-            # 6. Trade Lessons Domain
-            lesson_repo = TradeLessonRepository(conn)
-            lessons = lesson_repo.list_lessons()
-            trade_lessons_records = [
-                {
-                    "category": l.category,
-                    "created_at_utc": l.created_at_utc,
-                    "directive_text": l.directive_text,
-                    "last_reviewed_at_utc": l.last_reviewed_at_utc,
-                    "rule_code": l.rule_code,
-                    "status": l.status,
-                }
-                for l in sorted(lessons, key=lambda x: x.rule_code)
-            ]
+            # 6. Trade Lessons Domain & 7. Decision Log Domain (optional for lightweight runtime prompt slices)
+            trade_lessons_records: List[Dict[str, Any]] = []
+            decision_log_records: List[Dict[str, Any]] = []
+            if include_history:
+                lesson_repo = TradeLessonRepository(conn)
+                lessons = lesson_repo.list_lessons()
+                trade_lessons_records = [
+                    {
+                        "category": l.category,
+                        "created_at_utc": l.created_at_utc,
+                        "directive_text": l.directive_text,
+                        "last_reviewed_at_utc": l.last_reviewed_at_utc,
+                        "rule_code": l.rule_code,
+                        "status": l.status,
+                    }
+                    for l in sorted(lessons, key=lambda x: x.rule_code)
+                ]
 
-            # 7. Decision Log Domain (Chronological primary-key order)
-            decision_repo = DecisionLogRepository(conn)
-            decisions = decision_repo.list_decisions()
-            decision_log_records = [
-                {
-                    "action_proposed": d.action_proposed,
-                    "decision_outcome": d.decision_outcome,
-                    "id": d.id,
-                    "session_id": d.session_id,
-                    "ticker": d.ticker,
-                    "timestamp_utc": d.timestamp_utc,
-                    "transcript_text": d.transcript_text,
-                    "votes": d.votes,
-                }
-                for d in sorted(decisions, key=lambda x: x.id)
-            ]
+                # 7. Decision Log Domain (Chronological primary-key order)
+                decision_repo = DecisionLogRepository(conn)
+                decisions = decision_repo.list_decisions()
+                decision_log_records = [
+                    {
+                        "action_proposed": d.action_proposed,
+                        "decision_outcome": d.decision_outcome,
+                        "id": d.id,
+                        "session_id": d.session_id,
+                        "ticker": d.ticker,
+                        "timestamp_utc": d.timestamp_utc,
+                        "transcript_text": d.transcript_text,
+                        "votes": d.votes,
+                    }
+                    for d in sorted(decisions, key=lambda x: x.id)
+                ]
 
         except BaseException as operation_error:
             if we_started_tx:
@@ -480,8 +484,9 @@ class SSoTProjectionGenerator:
         projection["watchlist"] = watchlist_records
         projection["scout_categories"] = scout_category_names
         projection["scout_category_records"] = scout_category_records
-        projection["trade_lessons"] = trade_lessons_records
-        projection["decision_log"] = decision_log_records
+        if include_history:
+            projection["trade_lessons"] = trade_lessons_records
+            projection["decision_log"] = decision_log_records
 
         # 3. Assemble mutable_state
         mutable_state: Dict[str, Any] = {}

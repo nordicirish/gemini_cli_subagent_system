@@ -774,6 +774,121 @@ def _compact_rules_for_budget(rules_text: str, max_bytes: int) -> str:
     return "".join(selected).rstrip() + note
 
 
+def _clip_head_tail_utf8(text: str, max_bytes: int, marker: str = "\n...[TRUNCATED TO FIT CLI STDIN BUDGET]...\n") -> str:
+    """Clips text to <= max_bytes UTF-8 while keeping both head (context start) and tail (USER_QUERY)."""
+    if max_bytes <= 0:
+        return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    marker_bytes = len(marker.encode("utf-8"))
+    if max_bytes <= marker_bytes + 64:
+        return _truncate_utf8_lines(text, max_bytes)
+    usable = max_bytes - marker_bytes
+    # Give 40% to head (DATA_PACKET header / framing) and 60% to tail ([USER_QUERY] & latest results)
+    head_budget = usable * 2 // 5
+    tail_budget = usable - head_budget
+    head = encoded[:head_budget].decode("utf-8", errors="ignore").rstrip()
+    tail = encoded[-tail_budget:].decode("utf-8", errors="ignore").lstrip() if tail_budget > 0 else ""
+    combined = f"{head}{marker}{tail}"
+    if len(combined.encode("utf-8")) > max_bytes:
+        return _truncate_utf8_lines(combined, max_bytes)
+    return combined
+
+
+def _clip_base_instruction_preserving_output(base_part: str, max_bytes: int) -> str:
+    """Clips base instruction (e.g., terminal.md) while preserving top header and trailing ## Output Format / ## Routing Logic."""
+    if max_bytes <= 0:
+        return ""
+    if len(base_part.encode("utf-8")) <= max_bytes:
+        return base_part
+    for marker in ("\n## Output Format", "\n## Routing Logic"):
+        idx = base_part.find(marker)
+        if idx != -1:
+            tail = base_part[idx:]
+            tail_bytes = len(tail.encode("utf-8"))
+            if tail_bytes < max_bytes - 256:
+                head_budget = max_bytes - tail_bytes - 40
+                head = _truncate_utf8_lines(base_part[:idx], head_budget)
+                combined = f"{head}\n...[base instruction compacted]...\n{tail}"
+                if len(combined.encode("utf-8")) <= max_bytes:
+                    return combined
+    return _truncate_utf8_lines(base_part, max_bytes)
+
+
+def _strip_function_call_blocks(text: str) -> str:
+    """Removes fenced JSON blocks containing a 'function_calls' array from model prose."""
+    if not text:
+        return ""
+    decoder = json.JSONDecoder()
+    out_parts: List[str] = []
+    pos = 0
+    for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE):
+        block_inner = match.group(1).strip()
+        is_fc_block = False
+        if '"function_calls"' in block_inner:
+            try:
+                obj, _ = decoder.raw_decode(block_inner)
+                if isinstance(obj, dict) and isinstance(obj.get("function_calls"), list):
+                    is_fc_block = True
+            except Exception:
+                is_fc_block = bool(re.search(r'"function_calls"\s*:\s*\[', block_inner))
+        if is_fc_block:
+            out_parts.append(text[pos:match.start()])
+            pos = match.end()
+    out_parts.append(text[pos:])
+    return re.sub(r"\n{3,}", "\n\n", "".join(out_parts)).strip()
+
+
+def _extract_function_calls_from_text(text: str) -> List[SimpleNamespace]:
+    """Extracts function_calls list from fenced JSON blocks or balanced JSON objects."""
+    if not text or '"function_calls"' not in text:
+        return []
+    decoder = json.JSONDecoder()
+    candidates: List[str] = []
+    for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE):
+        inner = match.group(1).strip()
+        if '"function_calls"' in inner:
+            candidates.append(inner)
+    for cand in candidates:
+        brace_idx = cand.find("{")
+        while brace_idx != -1:
+            try:
+                parsed, _ = decoder.raw_decode(cand, brace_idx)
+                if isinstance(parsed, dict) and isinstance(parsed.get("function_calls"), list):
+                    return [
+                        SimpleNamespace(name=fc.get("name"), args=fc.get("args", {}) or {})
+                        for fc in parsed["function_calls"]
+                        if isinstance(fc, dict) and fc.get("name")
+                    ]
+            except Exception:
+                pass
+            brace_idx = cand.find("{", brace_idx + 1)
+
+    # Fallback: scan top-level braces in full text if unfenced
+    search_from = 0
+    while True:
+        fc_pos = text.find('"function_calls"', search_from)
+        if fc_pos == -1:
+            break
+        # Walk backward to enclosing '{' candidates
+        brace_pos = text.rfind("{", 0, fc_pos)
+        while brace_pos != -1:
+            try:
+                parsed, _ = decoder.raw_decode(text, brace_pos)
+                if isinstance(parsed, dict) and isinstance(parsed.get("function_calls"), list):
+                    return [
+                        SimpleNamespace(name=fc.get("name"), args=fc.get("args", {}) or {})
+                        for fc in parsed["function_calls"]
+                        if isinstance(fc, dict) and fc.get("name")
+                    ]
+            except Exception:
+                pass
+            brace_pos = text.rfind("{", 0, brace_pos)
+        search_from = fc_pos + 16
+    return []
+
+
 def _build_bounded_prompt(
     analytical_output_instruction: str,
     system_instruction: str,
@@ -796,9 +911,20 @@ def _build_bounded_prompt(
     if len(full_prompt.encode("utf-8")) <= max_bytes:
         return full_prompt
 
-    # Preserve the trailing Task / User Prompt and tool-calling protocol suffix intact.
+    # If no system instruction, still strictly enforce max_bytes while preserving [USER_QUERY] tail.
     if not system_instruction:
-        return full_prompt
+        framing = f"{analytical_output_instruction}\n\nTask / User Prompt:\n\n"
+        prompt_budget = max_bytes - len(framing.encode("utf-8"))
+        if prompt_budget > 128:
+            clipped_prompt = _clip_head_tail_utf8(prompt, prompt_budget)
+            candidate = f"{analytical_output_instruction}\n\nTask / User Prompt:\n{clipped_prompt}\n"
+            if len(candidate.encode("utf-8")) <= max_bytes:
+                llm_logger.warning(
+                    "Bounded prompt clipped dynamic user prompt to fit %d-byte CLI stdin budget (no system instruction).",
+                    max_bytes,
+                )
+                return candidate
+        return _truncate_utf8_lines(full_prompt, max_bytes)
 
     tools_markers = (
         "\n\nAvailable Tools:\n",
@@ -820,12 +946,12 @@ def _build_bounded_prompt(
         rules_part = ""
         kb_header = ""
 
-    def _assemble(b_part: str, r_part: str) -> str:
-        sys_body = f"{b_part}{kb_header}{r_part}{tools_suffix}"
+    def _assemble(b_part: str, r_part: str, p_part: str = prompt, t_part: str = tools_suffix, kb_hdr: str = kb_header) -> str:
+        sys_body = f"{b_part}{kb_hdr}{r_part}{t_part}"
         return (
             f"{analytical_output_instruction}\n\n"
             f"System Instructions:\n{sys_body}\n\n"
-            f"Task / User Prompt:\n{prompt}\n"
+            f"Task / User Prompt:\n{p_part}\n"
         )
 
     if rules_part:
@@ -836,22 +962,51 @@ def _build_bounded_prompt(
             candidate = _assemble(base_part, compacted_rules)
             if len(candidate.encode("utf-8")) <= max_bytes:
                 return candidate
+        llm_logger.warning(
+            "Static rules.md omitted from inline prompt (rules_budget=%d) to preserve live DATA_PACKET and user query.",
+            rules_budget,
+        )
         brief_note = "[Static rules.md omitted from inline prompt to preserve live DATA_PACKET and user query; canonical rules remain in gem_trading_rules/rules.md.]\n"
         candidate = _assemble(base_part, brief_note)
         if len(candidate.encode("utf-8")) <= max_bytes:
             return candidate
-        # Re-check omitting kb_header too before touching base_part
         kb_header = ""
-        candidate = _assemble(base_part, "")
+        candidate = _assemble(base_part, "", kb_hdr="")
         if len(candidate.encode("utf-8")) <= max_bytes:
             return candidate
 
-    overhead_without_base = len(_assemble("", "").encode("utf-8"))
-    base_budget = max_bytes - overhead_without_base
-    if base_budget > 0:
-        clipped_base = _truncate_utf8_lines(base_part, base_budget)
-        return _assemble(clipped_base, "")
-    return _assemble("", "")
+    # Oversized dynamic prompt or base instruction: reserve protected budget for base_part + tools_suffix,
+    # then clip oversized prompt head/tail so neither terminal.md Output Format nor [USER_QUERY] is lost.
+    framing_only = _assemble("", "", "", tools_suffix, "")
+    framing_bytes = len(framing_only.encode("utf-8"))
+    eff_tools = tools_suffix
+    if framing_bytes >= max_bytes - 256:
+        # Extreme case: tools_suffix + analytical instruction alone exceed budget
+        avail_tools = max(0, max_bytes - len(_assemble("", "", "", "", "").encode("utf-8")) - 512)
+        eff_tools = _truncate_utf8_lines(tools_suffix, avail_tools)
+        framing_bytes = len(_assemble("", "", "", eff_tools, "").encode("utf-8"))
+
+    remaining = max(0, max_bytes - framing_bytes)
+    base_bytes = len(base_part.encode("utf-8"))
+    prompt_bytes = len(prompt.encode("utf-8"))
+
+    if base_bytes + prompt_bytes <= remaining:
+        candidate = _assemble(base_part, "", prompt, eff_tools, "")
+    else:
+        # Reserve up to 45% of remaining budget (or full base_part if smaller) for base instruction
+        base_target = min(base_bytes, max(2048, (remaining * 45) // 100)) if remaining > 4096 else min(base_bytes, remaining // 2)
+        kept_base = _clip_base_instruction_preserving_output(base_part, base_target)
+        prompt_budget = max(0, remaining - len(kept_base.encode("utf-8")))
+        kept_prompt = _clip_head_tail_utf8(prompt, prompt_budget)
+        llm_logger.warning(
+            "Prompt exceeded %d-byte CLI stdin budget (base=%dB, prompt=%dB); clipped dynamically (kept_base=%dB, kept_prompt=%dB).",
+            max_bytes, base_bytes, prompt_bytes, len(kept_base.encode("utf-8")), len(kept_prompt.encode("utf-8")),
+        )
+        candidate = _assemble(kept_base, "", kept_prompt, eff_tools, "")
+
+    if len(candidate.encode("utf-8")) > max_bytes:
+        return _truncate_utf8_lines(candidate, max_bytes)
+    return candidate
 
 
 class AntigravityAgentRunner:
@@ -1237,19 +1392,8 @@ class AntigravityChatSession:
         if not hasattr(resp, "function_calls"):
             resp.function_calls = []
 
-        # Detect tool call requests
-        fc_match = re.search(r"```json\s*(\{[\s\S]*?\"function_calls\"[\s\S]*?\})\s*```", text, re.IGNORECASE)
-        if fc_match:
-            try:
-                parsed = json.loads(fc_match.group(1))
-                calls = []
-                for fc in parsed.get("function_calls", []):
-                    name = fc.get("name")
-                    args = fc.get("args", {})
-                    calls.append(SimpleNamespace(name=name, args=args))
-                resp.function_calls = calls
-            except Exception:
-                pass
+        # Detect tool call requests (balanced JSON decoding handles nested braces inside args)
+        resp.function_calls = _extract_function_calls_from_text(text)
 
         exchange["steps"].append(("ASSISTANT", text))
         self.history.append(SimpleNamespace(parts=[SimpleNamespace(text=text)]))
@@ -1402,13 +1546,23 @@ class AgentFramework:
         self.log(f"[Framework] Pure Antigravity App Agent Engine active: {self.antigravity_runner.agy_path} (Cloud Gemini completely decoupled)")
 
     def create_chat_session(self, sys_instruction: str, tools: list, model_name: str = None):
-        """Creates an AntigravityChatSession for the Master Orchestrator."""
-        return AntigravityChatSession(
+        """Creates an AntigravityChatSession for the Master Orchestrator with unified telemetry & handshake logging."""
+        session = AntigravityChatSession(
             self.antigravity_runner,
             sys_instruction,
             tools,
             model_name=model_name,
         )
+        session.generate_fn = lambda p, sys_inst, m: self.generate_response_with_fallback(
+            prompt=p,
+            instruction=sys_inst,
+            mode=m,
+            tools=tools,
+            timeout=session.turn_timeout,
+            model_name=session.model_name,
+            runner=session.runner,
+        )
+        return session
 
     def load_chart_parts(self) -> list:
         """Load latest 1-minute chart screenshots from context/charts/ as multimodal Part instances."""
@@ -1595,20 +1749,40 @@ class AgentFramework:
     # -----------------------------------------------------------------------
     # Core generation method — Pure Antigravity App Agent Engine
     # -----------------------------------------------------------------------
-    def generate_response_with_fallback(self, prompt, instruction, mode, tools=None):
+    def generate_response_with_fallback(
+        self,
+        prompt,
+        instruction,
+        mode,
+        tools=None,
+        timeout=None,
+        model_name=None,
+        runner=None,
+    ):
         """Generate a response using the local Antigravity App Agent runtime."""
         if getattr(self, "cancel_check", None) and self.cancel_check():
             self.log("[Framework] Cancel signal active before starting call.")
             raise RuntimeError("Operation cancelled by user.")
 
-        target_model = "gemini-3.8-flash-high" if mode in ("PRO", "THINKING") else "gemini-3.8-flash-low"
+        target_model = model_name or ("gemini-3.8-flash-high" if mode in ("PRO", "THINKING") else "gemini-3.8-flash-low")
         self.log(f"[Antigravity App Agent] Delegating turn with model: {target_model} (mode: {mode})...")
         start_time = time.time()
+        handshake_cfg = SimpleNamespace(system_instruction=instruction) if instruction else None
+        eff_runner = runner if runner is not None else self.antigravity_runner
         try:
-            self._log_handshake("REQUEST", target_model, "Antigravity Local", prompt, None)
-            resp = self.antigravity_runner.run_prompt(prompt, system_instruction=instruction, mode=mode, tools=tools)
+            self._log_handshake("REQUEST", target_model, "Antigravity Local", prompt, handshake_cfg)
+            run_kwargs: Dict[str, Any] = {
+                "system_instruction": instruction,
+                "mode": mode,
+                "tools": tools,
+            }
+            if timeout is not None:
+                run_kwargs["timeout"] = timeout
+            if model_name is not None:
+                run_kwargs["model_name"] = model_name
+            resp = eff_runner.run_prompt(prompt, **run_kwargs)
             elapsed = time.time() - start_time
-            self._log_handshake("RESPONSE", target_model, "Antigravity Local", prompt, None, response=resp, latency=elapsed)
+            self._log_handshake("RESPONSE", target_model, "Antigravity Local", prompt, handshake_cfg, response=resp, latency=elapsed)
 
             # Zero marginal cost for local Antigravity sessions; distinguish heuristic estimates from measured usage
             usage_meta = getattr(resp, "usage_metadata", None)
@@ -1711,7 +1885,11 @@ class AgentFramework:
                             if isinstance(data, dict) and ("tickers" in data or "ssot" in data):
                                 sliced_data = {}
                                 if "ssot" in data:
-                                    sliced_data["ssot"] = data["ssot"]
+                                    try:
+                                        from persistence.service import strip_ssot_history
+                                    except ImportError:
+                                        from python.persistence.service import strip_ssot_history
+                                    sliced_data["ssot"] = strip_ssot_history(data["ssot"])
 
                                 if name == "GEX Engine":
                                     if "tickers" in data:
@@ -1753,26 +1931,44 @@ class AgentFramework:
                                 else:
                                     continue
 
-                                sliced_query = sliced_query.replace(block, json.dumps(sliced_data, indent=2))
+                                sliced_query = sliced_query.replace(block, json.dumps(sliced_data, separators=(",", ":")))
                         except Exception:
                             pass
                 except Exception as e:
                     self.log(f"[Warning] Slicing failure: {e}")
 
                 if agent_tools:
+                    import inspect as _inspect
                     from tool_dispatcher import GLOBAL_TOOL_DISPATCHER
                     allowed_tool_names = {getattr(t, "__name__", str(t)) for t in agent_tools}
+
+                    def _subagent_gen(p, sys_inst, m):
+                        gen_fn = self.generate_response_with_fallback
+                        try:
+                            accepts_timeout = "timeout" in _inspect.signature(gen_fn).parameters
+                        except Exception:
+                            accepts_timeout = False
+                        if accepts_timeout:
+                            return gen_fn(
+                                prompt=p,
+                                instruction=sys_inst,
+                                mode=m,
+                                tools=agent_tools,
+                                timeout=SUBAGENT_TURN_TIMEOUT_SECONDS,
+                            )
+                        return gen_fn(
+                            prompt=p,
+                            instruction=sys_inst,
+                            mode=m,
+                            tools=agent_tools,
+                        )
+
                     sub_session = AntigravityChatSession(
                         runner=self.antigravity_runner,
                         sys_instruction=final_instruction,
                         tools=agent_tools,
                         mode=mode,
-                        generate_fn=lambda p, sys_inst, m: self.generate_response_with_fallback(
-                            prompt=p,
-                            instruction=sys_inst,
-                            mode=m,
-                            tools=agent_tools,
-                        ),
+                        generate_fn=_subagent_gen,
                         is_subagent=True,
                     )
                     dispatch_res = GLOBAL_TOOL_DISPATCHER.execute_multi_turn_session(
@@ -1791,12 +1987,7 @@ class AgentFramework:
                     captured_text = dispatch_res.get("captured_text", [])
                     non_fc_texts = []
                     for txt in captured_text:
-                        stripped = re.sub(
-                            r"```json\s*(\{[\s\S]*?\"function_calls\"[\s\S]*?\})\s*```",
-                            "",
-                            txt,
-                            flags=re.IGNORECASE,
-                        ).strip()
+                        stripped = _strip_function_call_blocks(txt)
                         if stripped:
                             non_fc_texts.append(stripped)
 

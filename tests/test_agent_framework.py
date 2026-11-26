@@ -890,6 +890,46 @@ class TestContextAndTokenEfficiency(unittest.TestCase):
             self.assertNotIn("GEMMA (Gemma4 via Cloud)", txt, f"Stale GEMMA ref in {rel_path}")
             self.assertNotIn("Gemini 3.8 Flash Extended", txt, f"Stale Gemini 3.8 ref in {rel_path}")
 
+    def test_stage_a_bounded_prompt_hard_cap_and_orchestrator_telemetry(self):
+        """Stage A: _build_bounded_prompt enforces <= max_bytes on huge prompts and create_chat_session records usage + Instruct Len."""
+        huge_body = "X" * 120_000
+        huge_prompt = f"--- LIVE MARKET DATA_PACKET ---\n{huge_body}\n[USER_QUERY]: Final query survives"
+        bounded_no_sys = agent_framework._build_bounded_prompt("OUT:", "", huge_prompt)
+        self.assertLessEqual(len(bounded_no_sys.encode("utf-8")), agent_framework.MAX_AGY_STDIN_BYTES)
+        self.assertIn("[USER_QUERY]: Final query survives", bounded_no_sys)
+
+        base_with_output = "HEADER LINE\n" + ("Detail line\n" * 4000) + "\n## Output Format\nPreserve me"
+        bounded_with_sys = agent_framework._build_bounded_prompt("OUT:", base_with_output, huge_prompt)
+        self.assertLessEqual(len(bounded_with_sys.encode("utf-8")), agent_framework.MAX_AGY_STDIN_BYTES)
+        self.assertIn("## Output Format", bounded_with_sys)
+        self.assertIn("[USER_QUERY]: Final query survives", bounded_with_sys)
+
+        fc_text = (
+            'Thinking...\n```json\n'
+            '{"function_calls": [{"name": "update_ssot", "args": {"payload_json": "{\\"a\\": 1}"}}]}\n'
+            '```\nProse kept.'
+        )
+        calls = agent_framework._extract_function_calls_from_text(fc_text)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].name, "update_ssot")
+        self.assertEqual(calls[0].args, {"payload_json": '{"a": 1}'})
+        self.assertEqual(agent_framework._strip_function_call_blocks(fc_text), "Thinking...\n\nProse kept.")
+
+        self.framework.reset_turn_usage()
+        mock_runner = MagicMock()
+        mock_runner.run_prompt.return_value = AntigravityResponse(
+            "Orchestrator output", prompt_tokens=321, candidate_tokens=64, is_estimated=True
+        )
+        session = self.framework.create_chat_session("SYSTEM_INSTRUCTION_BODY", [], model_name="gemini-4-neon-high")
+        session.runner = mock_runner
+        with patch.object(self.framework, "_log_handshake") as mock_log:
+            resp = session.send_message("Check NVDA")
+        self.assertEqual(resp.text, "Orchestrator output")
+        self.assertEqual(self.framework.turn_usage["prompt_tokens"], 321)
+        self.assertEqual(self.framework.turn_usage["candidates_tokens"], 64)
+        req_cfg = mock_log.call_args_list[0][0][4]
+        self.assertIn("SYSTEM_INSTRUCTION_BODY", getattr(req_cfg, "system_instruction", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

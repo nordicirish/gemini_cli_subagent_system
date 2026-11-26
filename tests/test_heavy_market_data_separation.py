@@ -1855,11 +1855,65 @@ class TestDashboardRvolColumn(unittest.TestCase):
         self.assertGreaterEqual((int(app_ver.group(1)), int(app_ver.group(2))), (18, 56))
 
         self.assertIn("rvol: 0,", app_js)
-        self.assertIn("<td>${formatVol(row.volume)}</td>\n                <td class=\"${rvolClass}\"", app_js.replace("\r\n", "\n"))
+        self.assertIn("<td class=\"num-col\">${formatVol(row.volume)}</td>\n                <td class=\"num-col ${rvolClass}\"", app_js.replace("\r\n", "\n"))
         self.assertIn("Number(row.volume) > 0 && Number.isFinite(rvolNum) && rvolNum > 0", app_js)
         self.assertIn("<td colspan=\"14\">${label}</td>", app_js)
         self.assertIn("<td colspan=\"14\">Scout Intelligence Suggestions</td>", app_js)
         self.assertNotIn("colspan=\"13\"", app_js)
+
+    def test_routine_is_heavy_respects_daily_history_and_gex_ttls(self):
+        """Routine is_heavy=True cycles (force=False) must honor daily history and 1800s GEX TTLs; force=True overrides."""
+        now_ny = datetime(2026, 4, 20, 11, 0, tzinfo=NY_TZ)
+        sample_df = _make_sample_history_df(days=220, end_date=now_ny)
+
+        fs.cache.prices["AAPL"] = 200.0
+        fs.cache.price_validity["AAPL"] = "VALID"
+        fs.cache.freshness["AAPL"] = "CURRENT"
+        fs.cache.observation_times["AAPL"] = "2026-04-20T15:00:00Z"
+        fs.cache.retrieval_times["AAPL"] = "2026-04-20T15:00:01Z"
+        fs.cache.history["AAPL"] = sample_df
+        fs.cache.last_history_fetch_date["AAPL"] = "2026-04-20"
+        fs.cache.gex_cache["AAPL"] = {"net_gex_total": 0.1}
+        fs.cache.last_gex_fetch["AAPL"] = 1000.0
+
+        with _isolated_all_coordinators() as (heavy_coord, _, _, _, _, _):
+            stats_routine = fs.coordinate_heavy_market_data_cycle(
+                ["AAPL"],
+                tickers_obj={"AAPL": SimpleNamespace()},
+                is_heavy=True,
+                force=False,
+                today_str="2026-04-20",
+                now_ny=now_ny,
+                now_ts=1300.0,  # within 1800s TTL
+                coordinator=heavy_coord,
+            )
+            self.assertEqual(stats_routine["historical_enqueued"], 0)
+            self.assertEqual(stats_routine["gex_enqueued"], 0)
+
+            stats_forced = fs.coordinate_heavy_market_data_cycle(
+                ["AAPL"],
+                tickers_obj={"AAPL": SimpleNamespace()},
+                is_heavy=True,
+                force=True,
+                today_str="2026-04-20",
+                now_ny=now_ny,
+                now_ts=1300.0,
+                coordinator=heavy_coord,
+            )
+            self.assertEqual(stats_forced["historical_enqueued"], 1)
+            self.assertEqual(stats_forced["gex_enqueued"], 1)
+
+            stats_default = fs.coordinate_heavy_market_data_cycle(
+                ["AAPL"],
+                tickers_obj={"AAPL": SimpleNamespace()},
+                is_heavy=True,
+                today_str="2026-04-20",
+                now_ny=now_ny,
+                now_ts=1300.0,
+                coordinator=heavy_coord,
+            )
+            self.assertEqual(stats_default["historical_enqueued"], 1)
+            self.assertEqual(stats_default["gex_enqueued"], 1)
 
 
 if __name__ == "__main__":

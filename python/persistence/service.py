@@ -8,6 +8,7 @@ Delegates to:
 - SqlitePersistenceAdapter (controlled integration / test isolation)
 """
 
+import collections.abc
 import gc
 import hashlib
 import os
@@ -15,6 +16,28 @@ from pathlib import Path
 import threading
 from typing import Any, Dict, List, Optional, Union
 import uuid
+
+
+def strip_ssot_history(ssot: Any) -> Dict[str, Any]:
+    """
+    Returns a shallow dict copy of an SSoT payload without unbounded historical
+    arrays ('decision_log' and 'trade_lessons') for prompt/tool budgeting.
+    """
+    if not isinstance(ssot, collections.abc.Mapping):
+        return {}
+    stripped = {
+        k: v
+        for k, v in ssot.items()
+        if k not in ("decision_log", "trade_lessons")
+    }
+    ms = stripped.get("mutable_state")
+    if isinstance(ms, collections.abc.Mapping) and ("decision_log" in ms or "trade_lessons" in ms):
+        stripped["mutable_state"] = {
+            mk: mv
+            for mk, mv in ms.items()
+            if mk not in ("decision_log", "trade_lessons")
+        }
+    return stripped
 
 try:
     from python.atomic_io import FileLock, FileLockTimeoutError

@@ -31,13 +31,13 @@ from audit_logger import redact_secrets
 # cloud_sync removed — GDrive Decoupling Guardrail (ANTIGRAVITY v11.03)
 
 try:
-    from persistence import get_persistence_service, PersistenceValidationError
+    from persistence import get_persistence_service, PersistenceValidationError, strip_ssot_history
     from persistence.contracts import (
         serialize_json_with_exact_decimals,
         validate_financial_decimal,
     )
 except ImportError:
-    from python.persistence import get_persistence_service, PersistenceValidationError
+    from python.persistence import get_persistence_service, PersistenceValidationError, strip_ssot_history
     from python.persistence.contracts import (
         serialize_json_with_exact_decimals,
         validate_financial_decimal,
@@ -1129,18 +1129,6 @@ def chat_endpoint(req: ChatRequest):
                         f"Authoritative scout_categories must be a list, got {type(raw_scouts).__name__}"
                     )
                 scouts = list(raw_scouts) if raw_scouts is not None else []
-
-                # Slim portfolio
-                slim_portfolio = [
-                    {
-                        "ticker": p.get("ticker"),
-                        "shares": p.get("shares"),
-                        "wac": p.get("wac"),
-                        "status": p.get("status"),
-                        "action": p.get("action"),
-                    }
-                    for p in portfolio
-                ]
             except Exception as ssot_err:
                 framework.log(f"[Security Alert] Authoritative SSoT structure validation failed: {ssot_err}")
                 return {
@@ -1190,6 +1178,19 @@ def chat_endpoint(req: ChatRequest):
                 except Exception as ae:
                     framework.log(f"[System Warning] Optional precomputed analytics failed: {redact_secrets(str(ae))}")
 
+                slim_ssot = strip_ssot_history(ssot)
+                compact_decision_log = []
+                for entry in decision_log[-5:]:
+                    if isinstance(entry, collections.abc.Mapping):
+                        compact_decision_log.append({
+                            "id": entry.get("id"),
+                            "ticker": entry.get("ticker"),
+                            "action_proposed": entry.get("action_proposed"),
+                            "decision_outcome": entry.get("decision_outcome"),
+                            "timestamp_utc": entry.get("timestamp_utc") or entry.get("timestamp"),
+                            "trigger_context": entry.get("trigger_context"),
+                        })
+
                 data_packet = {
                     "_meta": raw_meta if isinstance(raw_meta, (dict, collections.abc.Mapping)) else {},
                     "timestamp": live_state.get("timestamp", current_iso),
@@ -1197,14 +1198,14 @@ def chat_endpoint(req: ChatRequest):
                     # Live EUR/USD (USD per EUR); available=false means no fresh quote
                     "fx": fx_snapshot,
                     "tickers": slim_tickers,
-                    "ssot": ssot,
+                    "ssot": slim_ssot,
                     "precomputed_analytics": precomputed_analytics,
                     "trade_lessons": trade_lessons_list[-10:],
-                    "decision_log": decision_log[-10:],
+                    "decision_log": compact_decision_log,
                 }
                 data_packet_json = json.dumps(_normalize_for_json(data_packet), separators=(",", ":"), default=str)
                 auto_data_block = load_data_packet_injection_prompt(data_packet_json)
-                framework.log(f"[System] DATA_PACKET injected: {len(slim_tickers)} tickers, {len(slim_portfolio)} positions.")
+                framework.log(f"[System] DATA_PACKET injected: {len(slim_tickers)} tickers, {len(portfolio)} positions.")
             except Exception as enrichment_err:
                 auto_data_block = f"\n[SYSTEM NOTE: Live market telemetry partially unavailable — {enrichment_err}]\n"
                 framework.log(f"[System] Non-authoritative DATA_PACKET enrichment failed: {enrichment_err}")
@@ -1285,7 +1286,7 @@ def chat_endpoint(req: ChatRequest):
                     "turn_id": turn_id,
                 }
 
-            full_response = dispatch_res["response"]
+            full_response = agent_framework._strip_function_call_blocks(dispatch_res["response"])
             if not full_response:
                 framework.log("[Orchestrator] WARNING: No text captured across all turns.")
                 return {
@@ -1301,20 +1302,24 @@ def chat_endpoint(req: ChatRequest):
             payload_result: Optional[Dict[str, Any]] = None
             raw_payload_json: Optional[str] = None
 
-            # 1. Fenced code block (```json ... ``` or ``` ... ```), tolerating a truncated closing fence
-            idx = full_response.find("```json")
-            if idx == -1:
-                idx = full_response.find("```")
-
-            if idx != -1:
-                close_idx = full_response.find("```", idx + 3)
+            # 1. Scan all fenced code blocks (```json ... ``` or ``` ... ```), tolerating a truncated closing fence
+            fenced_matches = []
+            search_pos = 0
+            while search_pos < len(full_response):
+                f_idx = full_response.find("```", search_pos)
+                if f_idx == -1:
+                    break
+                close_idx = full_response.find("```", f_idx + 3)
                 is_truncated = (close_idx == -1)
                 block_end = len(full_response) if is_truncated else close_idx + 3
+                block_content = full_response[f_idx:block_end]
+                fenced_matches.append((f_idx, block_end, is_truncated, block_content))
+                search_pos = block_end
 
-                block_content = full_response[idx:block_end]
+            for f_idx, block_end, is_truncated, block_content in reversed(fenced_matches):
                 if _looks_like_execution_payload(block_content):
                     inner_json = block_content
-                    if inner_json.startswith("```json"):
+                    if inner_json.lower().startswith("```json"):
                         inner_json = inner_json[7:]
                     elif inner_json.startswith("```"):
                         inner_json = inner_json[3:]
@@ -1325,32 +1330,46 @@ def chat_endpoint(req: ChatRequest):
 
                     payload_result = _process_execution_payload(inner_json, turn_id)
                     # The payload is machine data for the proposal store: strip it from the reply entirely.
-                    cleaned_response = full_response[:idx] + "\n\n" + full_response[block_end:]
+                    cleaned_response = full_response[:f_idx] + "\n\n" + full_response[block_end:]
+                    break
 
-            # 2. Fallback: unfenced JSON object located by outermost braces
+            # 2. Fallback: balanced JSON object extraction (preferring the last valid EXECUTION_PAYLOAD object)
             if payload_result is None:
-                start_idx = full_response.find('{')
-                end_idx = full_response.rfind('}')
-                if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                    candidate = full_response[start_idx:end_idx + 1]
-                    if _looks_like_execution_payload(candidate):
-                        prefix = full_response[:start_idx].strip()
-                        clean_start_idx = start_idx
-                        if prefix.endswith("```json"):
-                            clean_start_idx = full_response[:start_idx].rfind("```json")
-                        elif prefix.endswith("```"):
-                            clean_start_idx = full_response[:start_idx].rfind("```")
+                decoder = json.JSONDecoder()
+                candidates = []
+                brace_pos = full_response.find("{")
+                while brace_pos != -1:
+                    try:
+                        parsed_obj, end_pos = decoder.raw_decode(full_response, brace_pos)
+                        if isinstance(parsed_obj, dict):
+                            cand_str = full_response[brace_pos:end_pos]
+                            if _looks_like_execution_payload(cand_str):
+                                candidates.append((brace_pos, end_pos, cand_str))
+                        brace_pos = full_response.find("{", end_pos)
+                        continue
+                    except Exception:
+                        pass
+                    brace_pos = full_response.find("{", brace_pos + 1)
 
-                        suffix = full_response[end_idx + 1:].strip()
-                        clean_end_idx = end_idx + 1
-                        if suffix.startswith("```"):
-                            rel_idx = full_response[end_idx + 1:].find("```")
-                            if rel_idx != -1:
-                                clean_end_idx = end_idx + 1 + rel_idx + 3
+                if candidates:
+                    start_idx, end_idx, candidate = candidates[-1]
+                    prefix = full_response[:start_idx].strip()
+                    clean_start_idx = start_idx
+                    if prefix.lower().endswith("```json"):
+                        clean_start_idx = full_response[:start_idx].lower().rfind("```json")
+                    elif prefix.endswith("```"):
+                        clean_start_idx = full_response[:start_idx].rfind("```")
 
-                        raw_payload_json = candidate
-                        payload_result = _process_execution_payload(candidate, turn_id)
-                        cleaned_response = full_response[:clean_start_idx] + "\n\n" + full_response[clean_end_idx:]
+                    suffix = full_response[end_idx:].strip()
+                    clean_end_idx = end_idx
+                    if suffix.startswith("```"):
+                        rel_idx = full_response[end_idx:].find("```")
+                        if rel_idx != -1:
+                            clean_end_idx = end_idx + rel_idx + 3
+
+                    raw_payload_json = candidate
+                    payload_result = _process_execution_payload(candidate, turn_id)
+                    cleaned_response = full_response[:clean_start_idx] + "\n\n" + full_response[clean_end_idx:]
 
             if payload_result is not None:
                 import re
@@ -2508,9 +2527,8 @@ if __name__ == "__main__":
 
     print(f"Starting Web Server on http://localhost:{port}")
     
-    # Start the background data daemon
-    daemon_thread = threading.Thread(target=run_daemon, daemon=True)
-    daemon_thread.start()
+    # Start the background data daemon once
+    tools.start_market_daemon(suppress_daemon_stdout=False)
 
     # Live EUR/USD rate (refreshes every 5 minutes; replaces the former hardcoded 1.08)
     fx_rates.start_background_refresher(log=framework.log)

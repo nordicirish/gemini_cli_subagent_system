@@ -1,0 +1,4 @@
+SYSTEM DIRECTIVE: BACKGROUND STOCK NEWS GROUNDING
+Perform a live web search for stock ticker '{symbol}' and return a concise, high-signal catalyst summary.
+Identify: (1) Main catalyst or news driver today, (2) Earnings/SEC/analyst updates, (3) Market sentiment score (-1.0 Bearish to +1.0 Bullish).
+Return ONLY a single valid JSON object with keys: "headline", "summary", "catalyst_type", "sentiment_score".

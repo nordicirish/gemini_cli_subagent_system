@@ -183,12 +183,13 @@ def _default_invoke_gemini(model_name: str, prompt: str, api_key: str) -> str:
 
 def _default_invoke_antigravity(model_name: str, prompt: str) -> str:
     try:
-        from agent_framework import AntigravityAppAgent
+        from agent_framework import AntigravityAgentRunner
     except ImportError:
-        from python.agent_framework import AntigravityAppAgent
+        from python.agent_framework import AntigravityAgentRunner
 
-    agent = AntigravityAppAgent(model_name=model_name)
-    return agent.run_prompt(prompt) or ""
+    runner = AntigravityAgentRunner()
+    resp = runner.run_prompt(prompt, mode="FAST", model_name=model_name)
+    return getattr(resp, "text", "") or ""
 
 
 class AlertSentinel:

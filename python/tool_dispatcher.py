@@ -225,15 +225,20 @@ class ToolDispatcher:
                 response = session.send_message(current_message)
 
             # Capture text content
+            turn_texts: List[str] = []
             if hasattr(response, "text") and response.text:
                 txt = response.text.strip()
                 if txt:
                     all_text.append(txt)
+                    turn_texts.append(txt)
             elif getattr(response, "candidates", None):
                 try:
                     for part in response.candidates[0].content.parts:
                         if getattr(part, "text", None):
-                            all_text.append(part.text.strip())
+                            t = part.text.strip()
+                            if t:
+                                all_text.append(t)
+                                turn_texts.append(t)
                 except Exception:
                     pass
 
@@ -295,7 +300,17 @@ class ToolDispatcher:
 
             current_message = tool_responses
 
-        final_response_text = "\n\n---\n\n".join(all_text)
+        try:
+            from agent_framework import _strip_function_call_blocks
+        except ImportError:
+            from python.agent_framework import _strip_function_call_blocks
+
+        stripped_parts = []
+        for t in all_text:
+            cleaned = _strip_function_call_blocks(t)
+            if cleaned:
+                stripped_parts.append(cleaned)
+        final_response_text = "\n\n---\n\n".join(stripped_parts if stripped_parts else all_text)
         return {
             "status": "success",
             "response": final_response_text,

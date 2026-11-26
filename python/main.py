@@ -207,6 +207,7 @@ def main():
     # Live EUR/USD rate for USD cash derivation (replaces the former hardcoded 1.08)
     import fx_rates
     fx_rates.start_background_refresher(log=framework.log)
+    tools.start_market_daemon(suppress_daemon_stdout=True)
 
     chat = framework.create_chat_session(sys_instruction, terminal_tools, orchestrator_model)
 

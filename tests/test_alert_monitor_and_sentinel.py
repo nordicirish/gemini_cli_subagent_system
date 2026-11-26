@@ -482,6 +482,16 @@ class TestAlertSentinelFallbackAndPrivacy(unittest.TestCase):
         self.assertTrue(status["api_key_configured"])
         self.assertNotIn("super-secret-value-123", json.dumps(status))
 
+    def test_default_invoke_antigravity_uses_antigravity_agent_runner(self):
+        """Stage A: _default_invoke_antigravity delegates via AntigravityAgentRunner (not missing AntigravityAppAgent)."""
+        from types import SimpleNamespace
+        with patch("agent_framework.AntigravityAgentRunner") as mock_runner_cls:
+            mock_runner = mock_runner_cls.return_value
+            mock_runner.run_prompt.return_value = SimpleNamespace(text='{"triggers": []}')
+            out = alert_sentinel._default_invoke_antigravity("gemini-3.8-flash-low", "Check NVDA")
+        self.assertEqual(out, '{"triggers": []}')
+        mock_runner.run_prompt.assert_called_once_with("Check NVDA", mode="FAST", model_name="gemini-3.8-flash-low")
+
 
 class TestAlertApiRoutes(unittest.TestCase):
     def test_alert_and_sentinel_http_routes(self):

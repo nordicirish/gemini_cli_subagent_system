@@ -411,6 +411,49 @@ class TestToolDispatcher(unittest.TestCase):
                         with self.assertRaises(PersistenceError):
                             tools.intercept_and_log_decision({"portfolio_snapshot": [{"ticker": "SPY", "action": "HOLD"}]})
 
+    def test_stage_a_slim_tools_and_idempotent_daemon_start(self):
+        """Stage A: read_ssot/get_market_data strip history, read_decision_log respects limit, and start_market_daemon is idempotent."""
+        mock_svc = MagicMock()
+        mock_svc.get_ssot_data.return_value = {
+            "mutable_state": {"watched_tickers": ["SPY"]},
+            "decision_log": [{"id": 1}, {"id": 2}, {"id": 3}],
+            "trade_lessons": [{"rule_code": "L-1"}],
+        }
+        mock_svc.get_decision_log.return_value = [{"id": 1}, {"id": 2}, {"id": 3}]
+
+        with patch("tools.get_persistence_service", return_value=mock_svc):
+            ssot_out = json.loads(tools.read_ssot())
+            self.assertNotIn("decision_log", ssot_out)
+            self.assertNotIn("trade_lessons", ssot_out)
+            log_out = json.loads(tools.read_decision_log(limit=2))
+            self.assertEqual([r["id"] for r in log_out], [2, 3])
+
+        fake_state = {
+            "status": "OPEN",
+            "timestamp": "2026-11-26T10:00:00Z",
+            "tickers": [],
+            "local_storage_state": {
+                "mutable_state": {"watched_tickers": ["NVDA"]},
+                "decision_log": [{"id": 99}],
+                "trade_lessons": [{"rule_code": "L-9"}],
+            },
+        }
+        with patch.object(tools.fetch_stocks, "get_global_state_snapshot", return_value=fake_state):
+            mkt_out = json.loads(tools.get_market_data())
+            self.assertNotIn("decision_log", mkt_out["ssot"])
+            self.assertNotIn("trade_lessons", mkt_out["ssot"])
+
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = True
+        mock_thread.ident = 4242
+        with patch.object(tools, "daemon_thread", None), \
+             patch("tools.threading.Thread", return_value=mock_thread) as mock_thread_cls:
+            t1 = tools.start_market_daemon(suppress_daemon_stdout=False)
+            t2 = tools.start_market_daemon(suppress_daemon_stdout=False)
+            self.assertIs(t1, t2)
+            self.assertEqual(mock_thread_cls.call_count, 1)
+            mock_thread.start.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

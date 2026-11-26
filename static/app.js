@@ -160,12 +160,21 @@ const dAiScoutStatus = document.getElementById('ai-scout-status');
 
 
 
+function getWatchlistStatusEl() {
+    return (
+        document.getElementById('watchlist-status')
+        || document.getElementById('portfolio-feedback')
+        || document.getElementById('portfolio-hint')
+        || null
+    );
+}
+
 // Helper for consistent UI feedback on copy/paste actions
 function showFeedback(btn, btnText, statusMsg, isError = false, statusEl = null) {
     if (btn && btn.dataset && btn.dataset.isFeedback === "true") return; // Prevent re-triggering during active feedback
     
-    // Use per-button inline feedback if available, otherwise fallback
-    const target = statusEl || dDataStatus;
+    // Use per-button inline feedback if available, otherwise fallback safely
+    const target = statusEl || getWatchlistStatusEl();
     if (target) {
         target.textContent = statusMsg;
         target.className = `status-message inline-feedback active ${isError ? 'text-red' : 'text-green'}`;
@@ -239,11 +248,11 @@ function renderIndicesModal() {
     const html = currentMacroTickers.map(ticker => {
         const d = latestMacroData[ticker] || latestTickersMap[ticker.toUpperCase()] || (latestMacroData && latestMacroData[ticker.replace('^', '')]);
         const label = MACRO_LABELS[ticker] || ticker;
-        const title = `${label} (${ticker})`;
+        const safeTitle = _escAlertHtml(`${label} (${ticker})`);
         
         if (!d) return `
             <div class="index-card">
-                <div class="index-name">${title}</div>
+                <div class="index-name">${safeTitle}</div>
                 <div class="index-price text-muted">—</div>
                 <div class="index-gap text-muted">Awaiting data</div>
             </div>`;
@@ -266,10 +275,10 @@ function renderIndicesModal() {
 
         return `
             <div class="index-card">
-                <div class="index-name">${title}</div>
+                <div class="index-name">${safeTitle}</div>
                 <div class="index-price">${(d.price || 0).toFixed(2)}</div>
                 <div class="index-gap ${changeColor}">${changeStr}${trendStr}</div>
-                <div class="index-details">${detailsArr.join(' · ')}</div>
+                <div class="index-details">${_escAlertHtml(detailsArr.join(' · '))}</div>
             </div>`;
     }).join('');
 
@@ -591,7 +600,7 @@ function renderTable(tickers, state) {
         if (row.score >= 5) scoreBadge = 'positive';
         else if (row.score <= -5) scoreBadge = 'negative';
         
-        const noteHtml = row.note ? `<span class="note-tag">${row.note}</span>` : '';
+        const noteHtml = row.note ? `<span class="note-tag">${_escAlertHtml(row.note)}</span>` : '';
         
         const isMacroInv = ['^VIX', 'UUP', 'IEF'].includes(sym);
         let trendHtml = '';
@@ -635,7 +644,7 @@ function renderTable(tickers, state) {
             ? `MACD: ${macdVal.toFixed(2)} | Signal: ${macdSig.toFixed(2)} | Hist: ${macdHist > 0 ? '+' : ''}${macdHist.toFixed(2)}${macdSlope ? ' (' + macdSlope.replace(/_/g, ' ') + ')' : ''}`
             : 'MACD: Calculating...';
 
-        macdHtml = `<span class="macd-tag ${macdClass}" title="${tooltip}">${macdLabel}</span>`;
+        macdHtml = `<span class="macd-tag ${macdClass}" title="${_escAlertHtml(tooltip)}">${macdLabel}</span>`;
 
         // Fib Target Indicator
         let fibTargetHtml = '<span class="fib-target-tag none" title="Fib calculation pending">—</span>';
@@ -700,6 +709,7 @@ function renderTable(tickers, state) {
             const atrCapStr = fib.daily_peak_atr ? `$${Number(fib.daily_peak_atr).toFixed(2)}` : '—';
             const peakCapStr = fib.daily_peak_target ? `$${Number(fib.daily_peak_target).toFixed(2)}` : '—';
             const tooltip = `Mode: ${fib.mode || 'EXTENSION'} | Anchors: A=$${fib.pA || '—'}, B=$${fib.pB || '—'}, C=$${fib.pC || '—'} | Next: ${label} $${nextPrice} (${distStr}) | Cap=${peakCapStr} | ATR Cap=${atrCapStr} | Status=${fib.daily_peak_status || '—'}`;
+            const safeFibTip = _escAlertHtml(tooltip);
             if (fib.daily_peak_target && Number(fib.daily_peak_target) > 0) {
                 const peakTarget = `$${Number(fib.daily_peak_target).toFixed(2)}`;
                 const atrConfBadge = fib.atr_confluence ? `<span class="fib-atr-confluence-badge" title="ATR Confluence detected">⚡ ATR</span>` : '';
@@ -709,7 +719,7 @@ function renderTable(tickers, state) {
                         : (fib.daily_peak_status === 'PULLBACK' ? 'Pullback' : 'At HOD');
                     fibTargetHtml = `
                         <div class="fib-target-cell-wrapper">
-                            <span class="fib-target-tag ${tagClass}" title="${tooltip}">${tagPrefix} $${nextPrice} (${distStr})</span>
+                            <span class="fib-target-tag ${tagClass}" title="${safeFibTip}">${tagPrefix} $${nextPrice} (${distStr})</span>
                             <div class="fib-peak-indicator" title="Session HOD / ATR Cap: ${peakTarget}">HOD Cap: <strong>${peakTarget}</strong> <span class="fib-status-pill pullback">${statusLabel}</span> ${atrConfBadge}</div>
                         </div>
                     `;
@@ -719,13 +729,13 @@ function renderTable(tickers, state) {
                         : '';
                     fibTargetHtml = `
                         <div class="fib-target-cell-wrapper">
-                            <span class="fib-target-tag ${tagClass}" title="${tooltip}">${tagPrefix} $${nextPrice} (${distStr})</span>
+                            <span class="fib-target-tag ${tagClass}" title="${safeFibTip}">${tagPrefix} $${nextPrice} (${distStr})</span>
                             <div class="fib-peak-indicator" title="ATR-Capped Intraday Target: ${peakTarget}">Target Cap: <strong>${peakTarget}</strong>${exhaustedPill} ${atrConfBadge}</div>
                         </div>
                     `;
                 }
             } else {
-                fibTargetHtml = `<span class="fib-target-tag ${tagClass}" title="${tooltip}">${tagPrefix} $${nextPrice} (${distStr})</span>`;
+                fibTargetHtml = `<span class="fib-target-tag ${tagClass}" title="${safeFibTip}">${tagPrefix} $${nextPrice} (${distStr})</span>`;
             }
         }
 
@@ -765,10 +775,11 @@ function renderTable(tickers, state) {
             }
         }
         const rvolDisplay = hasRvol ? `${rvolNum.toFixed(2)}x` : '—';
+        const safeSym = _escAlertHtml(sym);
         return `
-            <tr class="chart-clickable" onclick="openChartModal('${sym}')" title="Click to view 1m TradingView chart">
-                <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}" data-sec-ticker="${_escAlertHtml(sym)}">
-                    <span class="ticker-symbol ${dayColor}">${sym}</span>
+            <tr class="chart-clickable" onclick="openChartModal('${safeSym}')" title="Click to view 1m TradingView chart">
+                <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}" data-sec-ticker="${safeSym}">
+                    <span class="ticker-symbol ${dayColor}">${safeSym}</span>
                     ${scoutIndicator}${heldPlanHtml}${secBadgeHtml}
                 </td>
                 <td class="num-col ${pClass}">${p}</td>
@@ -1207,9 +1218,10 @@ function renderWatchlist(list) {
     if (!dWatchlistContainer || !Array.isArray(list)) return;
     let html = '';
     list.forEach((ticker, index) => {
+        const safeTicker = _escAlertHtml(ticker);
         html += `
             <div class="watch-tag">
-                <span>${ticker}</span>
+                <span>${safeTicker}</span>
                 <button class="delete-btn" onclick="deleteFromWatchlist(${index})" style="font-size: 0.9rem;">&times;</button>
             </div>
         `;
@@ -1239,6 +1251,23 @@ async function deleteFromWatchlist(index) {
     } catch (e) {}
 }
 
+function _setWatchlistStatus(msg, isError = false, autoClearMs = 0) {
+    const statusEl = getWatchlistStatusEl();
+    if (!statusEl) return;
+    statusEl.textContent = msg;
+    statusEl.className = msg
+        ? `status-message inline-feedback active ${isError ? 'text-red' : 'text-green'}`
+        : 'status-message inline-feedback';
+    if (msg && autoClearMs > 0) {
+        setTimeout(() => {
+            if (statusEl.textContent === msg) {
+                statusEl.textContent = '';
+                statusEl.className = 'status-message inline-feedback';
+            }
+        }, autoClearMs);
+    }
+}
+
 async function saveWatchlist(list) {
     try {
         const res = await fetch(`${API_BASE}/watchlist`, {
@@ -1248,21 +1277,17 @@ async function saveWatchlist(list) {
         });
         if (res.ok) {
             await fetchWatchlist();
-            dDataStatus.textContent = "Watchlist updated! (Table refreshing...)";
-            dDataStatus.className = "status-message text-green";
-            setTimeout(() => { dDataStatus.textContent = ""; }, 3000);
+            _setWatchlistStatus("Watchlist updated! (Table refreshing...)", false, 3000);
             pollData(); // Force immediate refresh
         } else {
             // e.g. 400 invalid ticker, 503 persistence failure: say so and resync to what is stored
             const data = await res.json().catch(() => ({}));
             await fetchWatchlist();
-            dDataStatus.textContent = `Watchlist not saved: ${data.detail || `HTTP ${res.status}`}`;
-            dDataStatus.className = "status-message text-red";
+            _setWatchlistStatus(`Watchlist not saved: ${data.detail || `HTTP ${res.status}`}`, true);
         }
     } catch (e) {
         console.error("Watchlist update failed", e);
-        dDataStatus.textContent = "Watchlist not saved: connection failed.";
-        dDataStatus.className = "status-message text-red";
+        _setWatchlistStatus("Watchlist not saved: connection failed.", true);
     }
 }
 
@@ -1310,6 +1335,7 @@ function renderScoutCategories(activeList) {
     let html = '';
     VERIFIED_SCOUT_SECTORS.forEach(sector => {
         const isActive = activeSet.has(sector);
+        const safeSector = _escAlertHtml(sector);
         const style = isActive 
             ? 'background: rgba(0, 255, 148, 0.2); border-color: var(--green); color: var(--green);' 
             : 'background: rgba(255, 255, 255, 0.03); border-color: var(--panel-border); color: var(--text-dim);';
@@ -1318,10 +1344,10 @@ function renderScoutCategories(activeList) {
             <button type="button"
                     class="scout-toggle-btn${isActive ? ' active' : ''}"
                     aria-pressed="${isActive ? 'true' : 'false'}"
-                    data-sector="${sector}"
-                    onclick="toggleScoutCategory('${sector}')" 
+                    data-sector="${safeSector}"
+                    onclick="toggleScoutCategory('${safeSector}')" 
                     style="padding: 4px 8px; border-radius: 4px; border: 1px solid; font-size: 0.65rem; font-weight: 600; cursor: pointer; transition: all 0.2s; ${style}">
-                ${sector}
+                ${safeSector}
             </button>
         `;
     });
@@ -1445,6 +1471,8 @@ function _escAlertHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+let _alertAudioContext = null;
+
 function _notifyNewAlertEvent(ev) {
     if (!ev || !ev.event_id || _seenAlertEventIds.has(ev.event_id)) return;
     _seenAlertEventIds.add(ev.event_id);
@@ -1456,7 +1484,13 @@ function _notifyNewAlertEvent(ev) {
     try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (AudioCtx) {
-            const ctx = new AudioCtx();
+            if (!_alertAudioContext || _alertAudioContext.state === 'closed') {
+                _alertAudioContext = new AudioCtx();
+            }
+            const ctx = _alertAudioContext;
+            if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+                ctx.resume().catch(() => {});
+            }
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.type = 'sine';
@@ -1933,9 +1967,15 @@ function renderPortfolioCommandStrip(analytics) {
     }
 
     if (cashEl) {
-        const cashEurEl = document.getElementById('cash-val-eur');
+        const cashEurInput = document.getElementById('cash-input-eur');
+        const cashEurLegacy = document.getElementById('cash-val-eur');
         const cashUsdEl = document.getElementById('cash-val-usd');
-        const eurTxt = cashEurEl ? cashEurEl.textContent.trim() : '';
+        let eurTxt = '';
+        if (cashEurInput && cashEurInput.value !== '' && Number.isFinite(Number(cashEurInput.value))) {
+            eurTxt = `€${Number(cashEurInput.value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        } else if (cashEurLegacy) {
+            eurTxt = cashEurLegacy.textContent.trim();
+        }
         const usdTxt = cashUsdEl ? cashUsdEl.textContent.trim() : '';
         if (eurTxt && eurTxt !== '—') {
             cashEl.textContent = usdTxt && usdTxt !== '—' ? `${eurTxt} (${usdTxt})` : eurTxt;
@@ -2707,6 +2747,15 @@ function renderFibExtension(pA, pB, pC, candleSeries, bars, idxA = null, idxB = 
     };
 }
 
+let _activeChartResizeObserver = null;
+
+function _disconnectChartResizeObserver() {
+    if (_activeChartResizeObserver) {
+        try { _activeChartResizeObserver.disconnect(); } catch (_) {}
+        _activeChartResizeObserver = null;
+    }
+}
+
 /**
  * Open the chart modal for a given symbol.
  * Fetches 1m OHLCV bars, builds the Lightweight Charts instance,
@@ -3124,7 +3173,8 @@ async function openChartModal(symbol) {
             dCopyChartBtn.onclick = () => copyCurrentChartImage(symbol, dCopyChartBtn);
         }
 
-        // Handle resize
+        // Handle resize (disconnect any prior observer before attaching a new one)
+        _disconnectChartResizeObserver();
         const resizeObserver = new ResizeObserver(() => {
             if (chartInstances[symbol]) {
                 chart.applyOptions({
@@ -3134,6 +3184,10 @@ async function openChartModal(symbol) {
             }
         });
         resizeObserver.observe(dChartContainer);
+        _activeChartResizeObserver = resizeObserver;
+        if (chartInstances[symbol]) {
+            chartInstances[symbol].resizeObserver = resizeObserver;
+        }
 
         // Immediately capture and stream screenshot for this symbol
         setTimeout(() => captureChartScreenshot(symbol), 250);
@@ -3149,9 +3203,13 @@ async function openChartModal(symbol) {
  * Close the chart modal and clean up the active chart instance.
  */
 function closeChartModal() {
+    _disconnectChartResizeObserver();
     closeModal(dChartModalOverlay);
     const sym = dChartModalTicker ? dChartModalTicker.textContent : null;
     if (sym && chartInstances[sym]) {
+        if (chartInstances[sym].resizeObserver) {
+            try { chartInstances[sym].resizeObserver.disconnect(); } catch (_) {}
+        }
         try { chartInstances[sym].chart.remove(); } catch (_) {}
         delete chartInstances[sym];
     }

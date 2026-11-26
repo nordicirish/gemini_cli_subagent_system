@@ -23,9 +23,9 @@ from portfolio_proposals import PROPOSAL_STORE
 from improvement_proposals import IMPROVEMENT_STORE, is_agent_caller, lesson_items_from_payload
 
 try:
-    from persistence import get_persistence_service, PersistenceError, PersistenceValidationError
+    from persistence import get_persistence_service, PersistenceError, PersistenceValidationError, strip_ssot_history
 except ImportError:
-    from python.persistence import get_persistence_service, PersistenceError, PersistenceValidationError
+    from python.persistence import get_persistence_service, PersistenceError, PersistenceValidationError, strip_ssot_history
 
 # We import from the existing fetch_stocks to leverage its battle-tested logic
 from fetch_stocks import handle_paste, run_daemon
@@ -58,12 +58,23 @@ class ThreadAwareStdout:
         return getattr(self.original_stdout, name)
 
 
-sys.stdout = ThreadAwareStdout(sys.stdout)
+_daemon_start_lock = threading.Lock()
+daemon_thread = None
 
-# Start the background data daemon to keep GLOBAL_STATE updated
-daemon_thread = threading.Thread(target=run_daemon, daemon=True)
-daemon_thread.start()
-sys.stdout.daemon_thread_id = daemon_thread.ident
+
+def start_market_daemon(suppress_daemon_stdout: bool = False):
+    """Idempotently starts the background market data daemon thread once per process."""
+    global daemon_thread
+    with _daemon_start_lock:
+        if daemon_thread is not None and daemon_thread.is_alive():
+            return daemon_thread
+        if suppress_daemon_stdout and not isinstance(sys.stdout, ThreadAwareStdout):
+            sys.stdout = ThreadAwareStdout(sys.stdout)
+        daemon_thread = threading.Thread(target=run_daemon, daemon=True, name="MarketDataDaemon")
+        daemon_thread.start()
+        if isinstance(sys.stdout, ThreadAwareStdout):
+            sys.stdout.daemon_thread_id = daemon_thread.ident
+        return daemon_thread
 
 
 # A mock request to satisfy FastAPI's Request object in handle_paste
@@ -76,11 +87,11 @@ class MockRequest:
 
 
 def read_ssot() -> str:
-    """Reads the current Single Source of Truth (SSoT) state."""
+    """Reads the current Single Source of Truth (SSoT) state (excluding bulky decision_log/trade_lessons history)."""
     try:
         service = get_persistence_service()
-        data = service.get_ssot_data()
-        return json.dumps(data, indent=2)
+        data = strip_ssot_history(service.get_ssot_data())
+        return json.dumps(data, separators=(",", ":"), default=str)
     except Exception as e:
         return f"Error reading SSoT: {str(e)}"
 
@@ -182,12 +193,14 @@ def update_trade_lessons(lessons_json: str) -> str:
     return "Trade lessons updated successfully."
 
 
-def read_decision_log() -> str:
-    """Reads the continuous time-series ledger of all Council decisions (decision_log.json)."""
+def read_decision_log(limit: int = 10) -> str:
+    """Reads the recent ledger of Council decisions (defaults to the latest 10 entries; limit<=0 returns all)."""
     try:
         service = get_persistence_service()
         data = service.get_decision_log()
-        return json.dumps(data, indent=2)
+        if isinstance(data, list) and isinstance(limit, int) and limit > 0:
+            data = data[-limit:]
+        return json.dumps(data, separators=(",", ":"), default=str)
     except Exception as e:
         return f"Error reading decision log: {str(e)}"
 
@@ -382,7 +395,7 @@ def get_market_data() -> str:
     if state.get("persistence_error"):
         data_to_return["persistence_error"] = state.get("persistence_error")
     if state.get("local_storage_state") is not None:
-        data_to_return["ssot"] = state.get("local_storage_state")
+        data_to_return["ssot"] = strip_ssot_history(state.get("local_storage_state"))
 
     sanitizer = getattr(fetch_stocks, "sanitize_json_payload", None)
     if callable(sanitizer):
@@ -390,7 +403,7 @@ def get_market_data() -> str:
     else:
         payload = data_to_return
 
-    return json.dumps(payload, default=str)
+    return json.dumps(payload, separators=(",", ":"), default=str)
 
 
 def load_forensic_search_prompt(query: str) -> str:
@@ -483,12 +496,13 @@ GLOBAL_TOOL_REGISTRY.register(
 GLOBAL_TOOL_REGISTRY.register(
     name="read_decision_log",
     func=read_decision_log,
-    description="Reads the continuous time-series ledger of all Council decisions.",
+    description="Reads recent entries from the Council decision ledger (defaults to last 10).",
     classification="READ",
     required_permission="read_decision_log",
     requires_human_approval=False,
     allowed_roles=ALL_VALID_ROLES,
     affects_financial_state=False,
+    parameters={"limit": int},
     target_resource="context/decision_log.json",
 )
 

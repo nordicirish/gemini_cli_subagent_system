@@ -33,6 +33,7 @@ from .service import (
     get_persistence_service,
     configure_persistence,
     reset_persistence_service,
+    strip_ssot_history,
 )
 
 __all__ = [
@@ -50,4 +51,5 @@ __all__ = [
     "get_persistence_service",
     "configure_persistence",
     "reset_persistence_service",
+    "strip_ssot_history",
 ]

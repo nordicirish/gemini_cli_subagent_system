@@ -181,27 +181,47 @@ const ModernChat = {
         // Inject quick-prompt chip bar above the textarea
         this.renderQuickPromptBar();
 
-        // Setup real-time feedback stream
-        this.eventSource = new EventSource('/api/system_logs');
-        this.eventSource.onmessage = (event) => {
-            if (this.currentLogElement && event.data) {
-                if (event.data.includes('Attempting') || event.data.includes('Orchestrator')) {
-                    this.currentLogElement.textContent = event.data;
-                } else if (event.data.includes('Tool') || event.data.includes('Agent') || event.data.includes('Engine')) {
-                    this.currentLogElement.textContent = 'Firing Engine: ' + event.data;
-                } else if (event.data.includes('DATA_PACKET')) {
-                    this.currentLogElement.textContent = '📡 ' + event.data;
-                } else {
-                    this.currentLogElement.textContent = event.data;
-                }
-            }
-        };
+        // System log SSE stream is opened lazily when chat opens or sends a message
+        this.eventSource = null;
 
         this.loadHistory();
         this.fetchModels();
         // Always hide chat on page load — only shown when user clicks the launcher
         this.hide();
         console.log('Gemini CLI Chat UI Initialized');
+    },
+
+    _ensureLogStream() {
+        if (typeof window.EventSource !== 'function') return;
+        if (this.eventSource && this.eventSource.readyState !== 2) return;
+        try {
+            this.eventSource = new EventSource('/api/system_logs');
+            this.eventSource.onmessage = (event) => {
+                if (this.currentLogElement && event.data) {
+                    if (event.data.includes('Attempting') || event.data.includes('Orchestrator')) {
+                        this.currentLogElement.textContent = event.data;
+                    } else if (event.data.includes('Tool') || event.data.includes('Agent') || event.data.includes('Engine')) {
+                        this.currentLogElement.textContent = 'Firing Engine: ' + event.data;
+                    } else if (event.data.includes('DATA_PACKET')) {
+                        this.currentLogElement.textContent = '📡 ' + event.data;
+                    } else {
+                        this.currentLogElement.textContent = event.data;
+                    }
+                }
+            };
+            this.eventSource.onerror = () => {
+                this._closeLogStream();
+            };
+        } catch (_) {
+            this.eventSource = null;
+        }
+    },
+
+    _closeLogStream() {
+        if (this.eventSource) {
+            try { this.eventSource.close(); } catch (_) {}
+            this.eventSource = null;
+        }
     },
 
     // Update watchlist-only quick prompt visibility based on watchlist + active scout tickers
@@ -402,7 +422,10 @@ const ModernChat = {
                 // Insert it at the very top of the chat-messages container
                 this.messages.insertBefore(warningEl, this.messages.firstChild);
             }
-            warningEl.innerHTML = `⚠️ <span>${warningText}</span>`;
+            warningEl.replaceChildren();
+            const spanEl = document.createElement('span');
+            spanEl.textContent = String(warningText);
+            warningEl.append('⚠️ ', spanEl);
             warningEl.style.display = 'flex';
         } else {
             if (warningEl) {
@@ -862,6 +885,7 @@ const ModernChat = {
 
     show() {
         this.overlay.classList.add('active');
+        this._ensureLogStream();
         this.input.focus();
         // Update watchlist-gated quick prompt visibility each time chat opens
         this.updateWatchlistPromptVisibility();
@@ -869,6 +893,9 @@ const ModernChat = {
 
     hide() {
         this.overlay.classList.remove('active');
+        if (!this.activeAbortController) {
+            this._closeLogStream();
+        }
     },
 
     appendMessage(role, text, save = true, cost = 0.0, usage = null, model = null) {
@@ -1480,6 +1507,7 @@ const ModernChat = {
         logText.textContent = 'Awaiting DATA_PACKET injection...';
 
         const abortController = new AbortController();
+        this._ensureLogStream();
         this.activeTurnId = turnId;
         this.activeAbortController = abortController;
         this.currentThinkingId = thinkingId;

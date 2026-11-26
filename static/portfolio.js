@@ -199,9 +199,15 @@ const PortfolioPanel = {
             const draftAttr = isDraft ? ' data-draft="true"' : '';
             const wacInputVal = showEmptyWac ? '' : wacVal;
             const wacPlaceholderAttr = showEmptyWac ? ' placeholder="WAC > 0" style="border-color: var(--yellow, #d29922);"' : '';
+            const escTicker = String(item.ticker || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
             html += `
             <tr data-index="${index}"${draftAttr} class="portfolio-item-row">
-                <td style="color: var(--accent); font-weight: 700; font-size: 0.8rem;">${item.ticker}</td>
+                <td style="color: var(--accent); font-weight: 700; font-size: 0.8rem;">${escTicker}</td>
                 <td><input type="number" class="portfolio-input" data-key="shares" value="${sharesVal}" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
                 <td><input type="number" step="0.01" class="portfolio-input" data-key="wac" value="${wacInputVal}"${wacPlaceholderAttr} oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
                 <td><button class="delete-btn" onclick="deleteFromPortfolio(${index})">&times;</button></td>
@@ -292,10 +298,12 @@ async function addToPortfolio() {
     const hasLivePrice = Number.isFinite(livePriceRaw) && livePriceRaw > 0;
     dAddPortfolioTicker.value = '';
 
-    if (hasLivePrice) {
-        // WAC is stored in EUR; seed it from the USD quote at the live EUR/USD rate when known.
-        const rate = Number(currentEurUsdRate);
-        const seedWac = Number.isFinite(rate) && rate > 0 ? livePriceRaw / rate : livePriceRaw;
+    const rate = Number(currentEurUsdRate);
+    const hasLiveFx = Number.isFinite(rate) && rate > 0;
+
+    if (hasLivePrice && hasLiveFx) {
+        // WAC is stored in EUR; seed it from the USD quote only when live EUR/USD FX is known.
+        const seedWac = livePriceRaw / rate;
         portfolio.push({
             ticker,
             shares: 1,
@@ -323,7 +331,10 @@ async function addToPortfolio() {
         _hasDraft: true
     });
     updatePortfolioTotals();
-    setPortfolioHint(`Enter WAC (> 0) for ${ticker} and press Enter or SYNC to save.`, 'text-yellow');
+    const wacHint = hasLivePrice
+        ? `Live EUR/USD FX unavailable — enter EUR WAC (> 0) for ${ticker} and press Enter or SYNC to save.`
+        : `Enter WAC (> 0) for ${ticker} and press Enter or SYNC to save.`;
+    setPortfolioHint(wacHint, 'text-yellow');
     if (dPortfolioBody) {
         const draftRow = dPortfolioBody.querySelector('tr.portfolio-item-row[data-draft="true"]:last-of-type')
             || dPortfolioBody.querySelector('tr.portfolio-item-row[data-draft="true"]');
