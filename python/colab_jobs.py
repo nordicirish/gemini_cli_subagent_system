@@ -39,6 +39,7 @@ try:
         ColabMCPConfig,
         probe_transport,
         sanitize_job_inputs,
+        unwrap_exception_message,
     )
     from persistence import get_persistence_service
 except ImportError:
@@ -54,6 +55,7 @@ except ImportError:
         ColabMCPConfig,
         probe_transport,
         sanitize_job_inputs,
+        unwrap_exception_message,
     )
     from python.persistence import get_persistence_service
 
@@ -341,7 +343,7 @@ class ColabJobManager:
                     finished_at_utc=_utc_now_iso(),
                     progress="Failed (prior cached artifact preserved)",
                     progress_pct=100,
-                    error=redact_secrets(str(exc)),
+                    error=redact_secrets(unwrap_exception_message(exc)),
                 )
             finally:
                 with self._lock:
@@ -465,6 +467,7 @@ class ColabJobManager:
                 "failed_count": 0,
                 "percent": round((skipped_fresh / max(1, total_count)) * 100),
                 "step_label": f"Starting {JOB_SPEC[to_run[0]]['label']}...",
+                "error_summary": None,
                 "jobs": jobs_map,
             }
             snapshot = copy.deepcopy(self._pipeline)
@@ -482,77 +485,154 @@ class ColabJobManager:
         def _pipeline_worker() -> None:
             failed_cnt = 0
             completed_cnt = skipped_fresh
+            first_error: Optional[str] = None
             try:
-                for step_idx, jt in enumerate(targets, start=1):
-                    if jt not in to_run:
-                        continue
-                    label = JOB_SPEC[jt]["label"]
-                    with self._lock:
-                        self._pipeline["current_job"] = jt
-                        self._pipeline["step_label"] = f"Step {step_idx}/{len(targets)}: Running {label}..."
-                        self._pipeline["jobs"][jt]["status"] = "running"
-                        self._pipeline["jobs"][jt]["progress_pct"] = 5
-
-                    job_opts = dict(opts_lookup.get(jt) or {})
-                    job_id: Optional[str] = None
-                    try:
-                        sub = self.submit_job(
+                client = self._client_factory(cfg)
+                use_batch_session = hasattr(client, "execute_scripts_batch_sync")
+                if use_batch_session:
+                    batch_items: List[tuple] = []
+                    for jt in to_run:
+                        job_opts = dict(opts_lookup.get(jt) or {})
+                        clean_opts = _sanitize_options(job_opts)
+                        acc = "L4" if (jt == "sec_nlp" and clean_opts.get("use_llm")) else JOB_SPEC[jt]["default_accelerator"]
+                        batch_items.append((
                             jt,
-                            options=job_opts,
-                            service=service,
-                            daemon=daemon,
-                        )
-                        job_id = sub["job_id"]
-                    except ColabJobConflictError:
+                            self._worker_loader(jt),
+                            self._build_job_inputs(jt, clean_opts, service),
+                            acc,
+                        ))
+
+                    def _on_step(step_jt: str, phase: str, msg: str) -> None:
                         with self._lock:
-                            job_id = self._active_by_type.get(jt)
-                    except Exception as exc:
-                        failed_cnt += 1
-                        completed_cnt += 1
+                            step_idx = targets.index(step_jt) + 1 if step_jt in targets else 1
+                            lbl = JOB_SPEC.get(step_jt, {}).get("label", step_jt)
+                            self._pipeline["current_job"] = step_jt
+                            if phase == "handshake":
+                                self._pipeline["step_label"] = msg
+                                self._pipeline["jobs"][step_jt]["status"] = "running"
+                                self._pipeline["jobs"][step_jt]["progress_pct"] = 25
+                            elif phase == "running":
+                                self._pipeline["step_label"] = f"Step {step_idx}/{len(targets)}: Running {lbl}..."
+                                self._pipeline["jobs"][step_jt]["status"] = "running"
+                                self._pipeline["jobs"][step_jt]["progress_pct"] = 45
+                            elif phase == "succeeded":
+                                self._pipeline["jobs"][step_jt]["status"] = "succeeded"
+                                self._pipeline["jobs"][step_jt]["progress_pct"] = 100
+                            elif phase == "failed":
+                                self._pipeline["jobs"][step_jt]["status"] = "failed"
+                                self._pipeline["jobs"][step_jt]["progress_pct"] = 100
+                                self._pipeline["jobs"][step_jt]["error"] = redact_secrets(msg)
+                            self._pipeline["percent"] = _recompute_percent_locked()
+
+                    batch_out = client.execute_scripts_batch_sync(batch_items, progress_callback=_on_step)
+                    for jt in to_run:
+                        res_item = batch_out.get(jt) or {"ok": False, "error": "No result returned"}
+                        if res_item.get("ok"):
+                            try:
+                                import_colab_artifact(
+                                    JOB_SPEC[jt]["artifact_type"],
+                                    res_item["payload"],
+                                    cache_dir=self.cache_dir,
+                                )
+                                completed_cnt += 1
+                                with self._lock:
+                                    self._pipeline["jobs"][jt].update({"status": "succeeded", "progress_pct": 100, "error": None})
+                            except Exception as exc:
+                                err_txt = redact_secrets(unwrap_exception_message(exc))
+                                if first_error is None:
+                                    first_error = err_txt
+                                failed_cnt += 1
+                                completed_cnt += 1
+                                with self._lock:
+                                    self._pipeline["jobs"][jt].update({"status": "failed", "progress_pct": 100, "error": err_txt})
+                        else:
+                            err_txt = redact_secrets(str(res_item.get("error") or f"{jt} failed"))
+                            if first_error is None:
+                                first_error = err_txt
+                            failed_cnt += 1
+                            completed_cnt += 1
+                            with self._lock:
+                                self._pipeline["jobs"][jt].update({"status": "failed", "progress_pct": 100, "error": err_txt})
                         with self._lock:
-                            self._pipeline["jobs"][jt].update({
-                                "status": "failed",
-                                "progress_pct": 100,
-                                "error": redact_secrets(str(exc)),
-                            })
                             self._pipeline["failed_count"] = failed_cnt
                             self._pipeline["completed_count"] = completed_cnt
                             self._pipeline["percent"] = _recompute_percent_locked()
-                        continue
-
-                    if not job_id:
-                        continue
-                    with self._lock:
-                        self._pipeline["jobs"][jt]["job_id"] = job_id
-
-                    # Poll until single-flight job completes
-                    deadline = time.monotonic() + float(cfg.timeout_sec) + 30.0
-                    while time.monotonic() < deadline:
-                        rec = self.get_job(job_id)
-                        if not rec:
-                            break
-                        j_status = rec.get("status")
-                        j_pct = int(rec.get("progress_pct", 50 if j_status == "running" else 100))
+                else:
+                    for step_idx, jt in enumerate(targets, start=1):
+                        if jt not in to_run:
+                            continue
+                        label = JOB_SPEC[jt]["label"]
                         with self._lock:
-                            self._pipeline["jobs"][jt]["progress_pct"] = j_pct
-                            if rec.get("progress"):
-                                self._pipeline["step_label"] = f"Step {step_idx}/{len(targets)}: {rec['progress']}"
-                            self._pipeline["percent"] = _recompute_percent_locked()
-                        if j_status in {"succeeded", "failed"}:
+                            self._pipeline["current_job"] = jt
+                            self._pipeline["step_label"] = f"Step {step_idx}/{len(targets)}: Running {label}..."
+                            self._pipeline["jobs"][jt]["status"] = "running"
+                            self._pipeline["jobs"][jt]["progress_pct"] = 5
+
+                        job_opts = dict(opts_lookup.get(jt) or {})
+                        job_id: Optional[str] = None
+                        try:
+                            sub = self.submit_job(
+                                jt,
+                                options=job_opts,
+                                service=service,
+                                daemon=daemon,
+                            )
+                            job_id = sub["job_id"]
+                        except ColabJobConflictError:
+                            with self._lock:
+                                job_id = self._active_by_type.get(jt)
+                        except Exception as exc:
+                            err_txt = redact_secrets(unwrap_exception_message(exc))
+                            if first_error is None:
+                                first_error = err_txt
+                            failed_cnt += 1
                             completed_cnt += 1
-                            if j_status == "failed":
-                                failed_cnt += 1
                             with self._lock:
                                 self._pipeline["jobs"][jt].update({
-                                    "status": j_status,
+                                    "status": "failed",
                                     "progress_pct": 100,
-                                    "error": rec.get("error"),
+                                    "error": err_txt,
                                 })
                                 self._pipeline["failed_count"] = failed_cnt
                                 self._pipeline["completed_count"] = completed_cnt
                                 self._pipeline["percent"] = _recompute_percent_locked()
-                            break
-                        time.sleep(0.1)
+                            continue
+
+                        if not job_id:
+                            continue
+                        with self._lock:
+                            self._pipeline["jobs"][jt]["job_id"] = job_id
+
+                        # Poll until single-flight job completes
+                        deadline = time.monotonic() + float(cfg.timeout_sec) + 30.0
+                        while time.monotonic() < deadline:
+                            rec = self.get_job(job_id)
+                            if not rec:
+                                break
+                            j_status = rec.get("status")
+                            j_pct = int(rec.get("progress_pct", 50 if j_status == "running" else 100))
+                            with self._lock:
+                                self._pipeline["jobs"][jt]["progress_pct"] = j_pct
+                                if rec.get("progress"):
+                                    self._pipeline["step_label"] = f"Step {step_idx}/{len(targets)}: {rec['progress']}"
+                                self._pipeline["percent"] = _recompute_percent_locked()
+                            if j_status in {"succeeded", "failed"}:
+                                completed_cnt += 1
+                                if j_status == "failed":
+                                    failed_cnt += 1
+                                    if first_error is None and rec.get("error"):
+                                        first_error = str(rec.get("error"))
+                                with self._lock:
+                                    self._pipeline["jobs"][jt].update({
+                                        "status": j_status,
+                                        "progress_pct": 100,
+                                        "error": rec.get("error"),
+                                    })
+                                    self._pipeline["failed_count"] = failed_cnt
+                                    self._pipeline["completed_count"] = completed_cnt
+                                    self._pipeline["percent"] = _recompute_percent_locked()
+                                break
+                            time.sleep(0.1)
 
                 with self._lock:
                     if failed_cnt == 0:
@@ -572,6 +652,7 @@ class ColabJobManager:
                         "failed_count": failed_cnt,
                         "percent": 100,
                         "step_label": final_label,
+                        "error_summary": first_error,
                     })
             finally:
                 with self._lock:

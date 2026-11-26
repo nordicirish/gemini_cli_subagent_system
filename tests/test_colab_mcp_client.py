@@ -580,6 +580,155 @@ class TestColabJobManagerAndAPI(unittest.TestCase):
                 self.assertEqual(st.status_code, 200)
                 self.assertIn("pipeline", st.json())
 
+    def test_unwrap_exception_message_unpacks_nested_exception_groups(self) -> None:
+        nested = ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [ExceptionGroup("inner", [RuntimeError("Google Colab browser session did not connect")])],
+        )
+        msg = colab_mcp_client.unwrap_exception_message(nested)
+        self.assertEqual(msg, "Google Colab browser session did not connect")
+
+    def test_browser_handshake_unlocks_tools_and_supports_snake_case_input_schema(self) -> None:
+        from contextlib import asynccontextmanager
+        from types import SimpleNamespace
+
+        calls = []
+
+        class _SnakeTool:
+            def __init__(self, name, input_schema=None):
+                self.name = name
+                self.input_schema = input_schema or {}
+
+        class _HandshakeSession:
+            def __init__(self):
+                self.unlocked = False
+                self.init_count = 0
+
+            async def initialize(self):
+                self.init_count += 1
+
+            async def list_tools(self):
+                if not self.unlocked:
+                    return SimpleNamespace(tools=[_SnakeTool("open_colab_browser_connection")])
+                return SimpleNamespace(tools=[
+                    _SnakeTool("open_colab_browser_connection"),
+                    _SnakeTool("execute_code", {"properties": {"python_code": {"type": "string"}}}),
+                ])
+
+            async def call_tool(self, name, args):
+                calls.append((name, args))
+                if name == "open_colab_browser_connection":
+                    self.unlocked = True
+                    return SimpleNamespace(
+                        isError=False,
+                        content=[SimpleNamespace(text="true")],
+                        structured_content={"result": True},
+                    )
+                if name == "execute_code":
+                    return SimpleNamespace(
+                        isError=False,
+                        content=[SimpleNamespace(text=(
+                            f"{colab_mcp_client.JSON_START_MARKER}"
+                            '{"ok": true, "mode": "handshake"}'
+                            f"{colab_mcp_client.JSON_END_MARKER}"
+                        ))],
+                    )
+                raise AssertionError(f"Unexpected tool call: {name}")
+
+        sess = _HandshakeSession()
+
+        @asynccontextmanager
+        async def _factory(_cfg):
+            yield sess
+
+        client = colab_mcp_client.ColabMCPClient(
+            config=colab_mcp_client.ColabMCPConfig(mode="stdio"),
+            session_factory=_factory,
+        )
+        out = client.execute_python_script_sync("print('hi')", {"job_type": "vol_surface", "symbols": ["NVDA"]})
+        self.assertEqual(out, {"ok": True, "mode": "handshake"})
+        self.assertEqual(calls[0][0], "open_colab_browser_connection")
+        self.assertEqual(calls[1][0], "execute_code")
+        self.assertIn("python_code", calls[1][1])
+
+    def test_browser_handshake_false_raises_plain_english_guidance(self) -> None:
+        from contextlib import asynccontextmanager
+        from types import SimpleNamespace
+
+        class _TimeoutSession:
+            async def initialize(self):
+                pass
+
+            async def list_tools(self):
+                return SimpleNamespace(tools=[SimpleNamespace(name="open_colab_browser_connection", input_schema={})])
+
+            async def call_tool(self, name, args):
+                return SimpleNamespace(
+                    isError=False,
+                    content=[SimpleNamespace(text="false")],
+                    structured_content={"result": False},
+                )
+
+        @asynccontextmanager
+        async def _factory(_cfg):
+            yield _TimeoutSession()
+
+        client = colab_mcp_client.ColabMCPClient(
+            config=colab_mcp_client.ColabMCPConfig(mode="stdio"),
+            session_factory=_factory,
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            client.execute_python_script_sync("print('hi')", {"job_type": "vol_surface", "symbols": ["NVDA"]})
+        self.assertIn("Google Colab browser session did not connect", str(ctx.exception))
+
+    def test_execute_scripts_batch_sync_reuses_single_session(self) -> None:
+        from contextlib import asynccontextmanager
+        from types import SimpleNamespace
+
+        session_opens = 0
+        executed = []
+
+        class _BatchSession:
+            async def initialize(self):
+                pass
+
+            async def list_tools(self):
+                return SimpleNamespace(tools=[
+                    SimpleNamespace(name="execute_code", input_schema={"properties": {"code": {"type": "string"}}}),
+                ])
+
+            async def call_tool(self, name, args):
+                executed.append(args["code"])
+                idx = len(executed)
+                return SimpleNamespace(
+                    isError=False,
+                    content=[SimpleNamespace(text=(
+                        f"{colab_mcp_client.JSON_START_MARKER}"
+                        f'{{"step": {idx}}}'
+                        f"{colab_mcp_client.JSON_END_MARKER}"
+                    ))],
+                )
+
+        @asynccontextmanager
+        async def _factory(_cfg):
+            nonlocal session_opens
+            session_opens += 1
+            yield _BatchSession()
+
+        client = colab_mcp_client.ColabMCPClient(
+            config=colab_mcp_client.ColabMCPConfig(mode="stdio"),
+            session_factory=_factory,
+        )
+        res = client.execute_scripts_batch_sync([
+            ("vol_surface", "print(1)", {"job_type": "vol_surface", "symbols": ["NVDA"]}, "CPU"),
+            ("sec_nlp", "print(2)", {"job_type": "sec_nlp", "symbols": ["NVDA"]}, "T4"),
+        ])
+        self.assertEqual(session_opens, 1)
+        self.assertTrue(res["vol_surface"]["ok"])
+        self.assertTrue(res["sec_nlp"]["ok"])
+        self.assertEqual(res["vol_surface"]["payload"], {"step": 1})
+        self.assertEqual(res["sec_nlp"]["payload"], {"step": 2})
+
 
 if __name__ == "__main__":
     unittest.main()

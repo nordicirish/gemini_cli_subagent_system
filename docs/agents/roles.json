@@ -148,12 +148,12 @@
     },
     {
       "name": "documentation-subagent",
-      "title": "Documentation & Governance Parity Agent",
+      "title": "Documentation & User-Guide Parity Agent",
       "doc": "documentation-agent.md",
       "onDemand": false,
       "noAuthoring": false,
       "antigravity": {
-        "description": "Maintains synchronization across .agents/AGENTS.md, docs/agents/*.md, docs/governance/project-state.md, and README.md while enforcing the 23,500-byte directive ceiling and chat-only handover reporting.",
+        "description": "Maintains synchronization across README.md, CHANGELOG.md, docs/USER_GUIDE.md, .agents/AGENTS.md, docs/agents/*.md, and docs/governance/project-state.md while enforcing plain-English user docs, 23,500-byte directive ceilings, and chat-only handover reporting.",
         "tools": [
           "send_message",
           "view_file",
@@ -168,7 +168,7 @@
         "boundary": "Documentation and governance files only (never edit `docs/engineering/STAGE_*.md` without explicit approval, never hand-edit generated manifests, never touch Protocol 06 assets)."
       },
       "claude": {
-        "description": "Synchronizes governance docs, role registry, README.md, and project-state.md while enforcing <23,500 byte ceilings and chat-only stage reports.",
+        "description": "Synchronizes user docs (README.md, CHANGELOG.md, docs/USER_GUIDE.md) and governance docs (project-state.md, AGENTS.md) while enforcing <23,500 byte ceilings and chat-only stage reports.",
         "tools": [
           "Read",
           "Edit",
@@ -178,7 +178,8 @@
           "Bash"
         ],
         "notes": [
-          "Never hand-edit `.agents/agents/` or `.claude/agents/`; edit `docs/agents/roles.json` and run `python scripts/sync_agent_manifests.py`."
+          "Never hand-edit `.agents/agents/` or `.claude/agents/`; edit `docs/agents/roles.json` and run `python scripts/sync_agent_manifests.py`.",
+          "Whenever `static/index.html`, `static/app.js`, or `python/web_server.py` changes user features, sync plain-English copy in `docs/USER_GUIDE.md`, `README.md`, and `CHANGELOG.md`."
         ],
         "model": "sonnet"
       }

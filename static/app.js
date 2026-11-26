@@ -2886,6 +2886,7 @@ window.fetchCalibrationStatus = fetchCalibrationStatus;
 let _lastQuantScoutCandidates = [];
 let _lastColabStatus = null;
 let _colabPipelinePollTimer = null;
+let _colabBannerDismissedKey = null;
 
 function _briefActionClick(actionType, arg) {
     if (actionType === 'chat') {
@@ -3135,26 +3136,63 @@ function renderColabProgressAndSetup(data) {
     const pctEl = document.getElementById('colab-pipeline-percent');
     const fillEl = document.getElementById('colab-pipeline-bar-fill');
     const chipsEl = document.getElementById('colab-pipeline-chips');
+    const retryBtn = document.getElementById('colab-banner-retry-btn');
+    const errDetailEl = document.getElementById('colab-pipeline-error-detail');
     const pipeState = String(pipe.state || 'idle');
     const pct = Math.max(0, Math.min(100, Number(pipe.percent || 0)));
+    const jobs = pipe.jobs && typeof pipe.jobs === 'object' ? pipe.jobs : {};
+    const order = ['vol_surface', 'sec_nlp', 'quant_scout', 'walk_forward'];
+    const labels = {
+        vol_surface: 'Options Flow',
+        sec_nlp: 'Filing Risk',
+        quant_scout: 'Stock Finder',
+        walk_forward: 'Strategy Check',
+    };
+    const isErrState = pipeState === 'failed' || pipeState === 'partial';
+    const runKey = String(pipe.started_at_utc || pipeState);
+    if (pipeState === 'running' && _colabBannerDismissedKey && _colabBannerDismissedKey !== runKey) {
+        _colabBannerDismissedKey = null;
+    }
 
     if (banner) {
-        const showBanner = pipeState === 'running' || pipeState === 'partial' || pipeState === 'failed'
-            || (pipeState === 'succeeded' && pipe.trigger === 'manual');
+        const dismissed = _colabBannerDismissedKey && _colabBannerDismissedKey === runKey;
+        const showBanner = !dismissed && (
+            pipeState === 'running' || pipeState === 'partial' || pipeState === 'failed'
+            || (pipeState === 'succeeded' && pipe.trigger === 'manual')
+        );
         banner.classList.toggle('hidden', !showBanner);
+        banner.classList.toggle('is-failed', pipeState === 'failed');
+        banner.classList.toggle('is-partial', pipeState === 'partial');
     }
     if (stepEl) stepEl.textContent = pipe.step_label || 'Ready';
     if (pctEl) pctEl.textContent = `${pct}%`;
-    if (fillEl) fillEl.style.width = `${pct}%`;
+    if (fillEl) {
+        fillEl.style.width = `${pct}%`;
+        fillEl.classList.toggle('is-failed', pipeState === 'failed');
+        fillEl.classList.toggle('is-partial', pipeState === 'partial');
+    }
+    if (retryBtn) {
+        retryBtn.style.display = isErrState ? 'inline-block' : 'none';
+    }
+    if (errDetailEl) {
+        let firstErr = String(pipe.error_summary || '').trim();
+        if (!firstErr) {
+            for (const k of order) {
+                if (jobs[k] && jobs[k].error) {
+                    firstErr = String(jobs[k].error).trim();
+                    break;
+                }
+            }
+        }
+        if (isErrState && firstErr) {
+            errDetailEl.textContent = firstErr;
+            errDetailEl.style.display = 'block';
+        } else {
+            errDetailEl.textContent = '';
+            errDetailEl.style.display = 'none';
+        }
+    }
     if (chipsEl) {
-        const jobs = pipe.jobs && typeof pipe.jobs === 'object' ? pipe.jobs : {};
-        const order = ['vol_surface', 'sec_nlp', 'quant_scout', 'walk_forward'];
-        const labels = {
-            vol_surface: 'Options Flow',
-            sec_nlp: 'Filing Risk',
-            quant_scout: 'Stock Finder',
-            walk_forward: 'Strategy Check',
-        };
         chipsEl.innerHTML = order
             .filter((k) => jobs[k])
             .map((k) => {
@@ -3166,7 +3204,8 @@ function renderColabProgressAndSetup(data) {
                 else if (st === 'succeeded' || st === 'skipped_fresh') { cls = 'is-done'; icon = '✓'; }
                 else if (st === 'failed' || st === 'setup_required') { cls = 'is-failed'; icon = '!'; }
                 const lbl = _escAlertHtml(j.label || labels[k] || k);
-                return `<span class="colab-pipeline-chip ${cls}">${icon} ${lbl}</span>`;
+                const errTip = j.error ? ` title="${_escAlertHtml(String(j.error))}"` : '';
+                return `<span class="colab-pipeline-chip ${cls}"${errTip}>${icon} ${lbl}</span>`;
             }).join('');
     }
 }
@@ -3324,6 +3363,8 @@ async function launchColabJob(jobType, btnEl) {
 }
 
 const dColabRunAllBtn = document.getElementById('colab-run-all-btn');
+const dColabBannerRetryBtn = document.getElementById('colab-banner-retry-btn');
+const dColabBannerDismissBtn = document.getElementById('colab-banner-dismiss-btn');
 const dColabCopySetupBtn = document.getElementById('colab-copy-setup-btn');
 const dColabVolBtn = document.getElementById('colab-run-vol-surface-btn');
 const dColabScoutBtn = document.getElementById('colab-run-quant-scout-btn');
@@ -3332,7 +3373,20 @@ const dColabBtBtn = document.getElementById('colab-run-walk-forward-btn');
 const dColabScoutRefreshBtn = document.getElementById('colab-refresh-scout-btn');
 const dColabScoutList = document.getElementById('colab-quant-scout-list');
 
-if (dColabRunAllBtn) dColabRunAllBtn.addEventListener('click', () => launchAllColabJobs(dColabRunAllBtn));
+if (dColabRunAllBtn) dColabRunAllBtn.addEventListener('click', () => {
+    _colabBannerDismissedKey = null;
+    launchAllColabJobs(dColabRunAllBtn);
+});
+if (dColabBannerRetryBtn) dColabBannerRetryBtn.addEventListener('click', () => {
+    _colabBannerDismissedKey = null;
+    launchAllColabJobs(dColabBannerRetryBtn);
+});
+if (dColabBannerDismissBtn) dColabBannerDismissBtn.addEventListener('click', () => {
+    const p = _lastColabStatus && _lastColabStatus.pipeline ? _lastColabStatus.pipeline : {};
+    _colabBannerDismissedKey = String(p.started_at_utc || p.state || 'dismissed');
+    const b = document.getElementById('colab-progress-banner');
+    if (b) b.classList.add('hidden');
+});
 if (dColabCopySetupBtn) {
     dColabCopySetupBtn.addEventListener('click', async () => {
         const codeEl = document.getElementById('colab-setup-cmd-code');

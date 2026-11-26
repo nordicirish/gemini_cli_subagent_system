@@ -6,7 +6,32 @@ All notable engineering, architecture, UI, and governance changes to `gemini_cli
 
 ---
 
-## [Unreleased] — UI Streamlining & Documentation Parity
+## [Unreleased] — Colab MCP Handshake Fix & User Documentation Parity Agent
+
+### Fixed & Improved
+- **Google Colab MCP Handshake & Root-Cause Diagnostics (`python/colab_mcp_client.py`, `python/colab_jobs.py`):**
+  - Implemented `open_colab_browser_connection` handshake inside `ColabMCPClient._run_on_session()` so `googlecolab/colab-mcp` automatically opens the browser bridge tab and unlocks execution tools cleanly.
+  - Fixed `mcp==2.3.0` `Tool.input_schema` attribute compatibility via `_tool_input_schema()`.
+  - Added recursive `unwrap_exception_message()` so `ExceptionGroup` / `TaskGroup` errors surface concrete root-cause guidance instead of opaque TaskGroup strings.
+  - Added `execute_scripts_batch_sync()` so multi-job pipelines share one Colab browser connection session instead of spawning four tabs.
+- **Cloud Research Error & Retry Banner (`static/index.html`, `static/styles.css`, `static/app.js`):**
+  - Added red/amber `.is-failed` / `.is-partial` visual states, inline `#colab-pipeline-error-detail` messages, `↻ Retry` (`#colab-banner-retry-btn`), and `×` dismiss (`#colab-banner-dismiss-btn`).
+- **User Documentation Parity Agent & Gate (`docs/agents/documentation-agent.md`, `docs/agents/roles.json`, `docs/USER_GUIDE.md`, `scripts/stage_gate.py`):**
+  - Expanded `documentation-subagent` to own plain-English user docs (`README.md`, `CHANGELOG.md`, `docs/USER_GUIDE.md`).
+  - Added `docs/USER_GUIDE.md` trader handbook and automated `check_user_docs_parity()` in `scripts/stage_gate.py`.
+
+---
+
+## [v19.0] — Startup Colab Auto-Pipeline & Plain-English "Inform & Suggest" UX (`1e8d0a7`)
+
+### Added
+- **Startup Auto-Pipeline (`python/colab_jobs.py`, `python/web_server.py`):** Added `ColabJobManager.run_pipeline()`, `maybe_start_startup_pipeline()`, `COLAB_AUTO_RUN_ON_STARTUP`, `POST /api/colab/jobs/run_all`, and live `"pipeline"` progress in `/api/colab/status`.
+- **Today's Brief & Suggested Next Steps (`#action-brief-card`):** Added prioritized 1-click guidance card summarizing Risk Alerts, Macro Shields, SEC Filing Risks, Stretched Peaks, and Stock Finder ideas.
+- **Simple / Pro (14) Table Toggle & Plain-English Labels:** Added `.view-simple` toggle, `.signal-plain-pill` verdicts, inline `uv` setup box, and `.inline-feedback.active` visibility fix.
+
+---
+
+## [v18.9] — UI Streamlining & Standalone Changelog (`ef67235`)
 
 ### Added
 - **`CHANGELOG.md`:** Extracted project version history out of `README.md` into a standalone chronological changelog.

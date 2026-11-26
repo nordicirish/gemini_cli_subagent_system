@@ -3549,6 +3549,59 @@ td.num-col {
     display: none !important;
 }
 
+.colab-progress-banner.is-failed {
+    border-color: rgba(248, 81, 73, 0.45);
+    background: rgba(36, 17, 22, 0.85);
+}
+
+.colab-progress-banner.is-partial {
+    border-color: rgba(210, 153, 34, 0.45);
+}
+
+.colab-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.colab-banner-btn {
+    border: 1px solid rgba(88, 166, 255, 0.4);
+    background: rgba(88, 166, 255, 0.14);
+    color: var(--accent);
+    font-family: var(--font-sans);
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.colab-banner-btn.subtle {
+    border-color: var(--panel-border);
+    background: transparent;
+    color: var(--text-muted);
+    padding: 2px 6px;
+}
+
+.colab-progress-fill.is-failed {
+    background: linear-gradient(90deg, #f85149, #da3633);
+}
+
+.colab-progress-fill.is-partial {
+    background: linear-gradient(90deg, #d29922, #f0883e);
+}
+
+.colab-pipeline-error-detail {
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: rgba(248, 81, 73, 0.12);
+    border: 1px solid rgba(248, 81, 73, 0.35);
+    color: #ffa198;
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
 .colab-progress-top {
     display: flex;
     align-items: center;

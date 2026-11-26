@@ -122,9 +122,11 @@ Heavy cross-sectional and NLP computations can run on Colab GPUs via **Model Con
 | `COLAB_MCP_ARGS` | `["googlecolab/colab-mcp"]` | JSON array or whitespace-separated args for stdio command |
 | `COLAB_MCP_URL` | `https://colaboratory.googleapis.com/mcp` | Hosted Colab MCP endpoint (`http` mode) |
 | `COLAB_MCP_BEARER_TOKEN` | *(empty)* | OAuth bearer token required when `COLAB_MCP_MODE=http` |
-| `COLAB_MCP_TIMEOUT_SEC` | *(client default)* | Per-job timeout in seconds |
+| `COLAB_MCP_TIMEOUT_SEC` | `600` | Per-job timeout in seconds |
+| `COLAB_AUTO_RUN_ON_STARTUP` | `1` | Auto-runs missing/stale Colab jobs on server startup (`0` disables) |
 
-### Zero-Secret Egress & Protocol 06 Safety
+### Browser Handshake & Offline Fallback
+- When launching `stdio` jobs via `uvx`, `ColabMCPClient` shares a single session across pipeline jobs and invokes `open_colab_browser_connection` if execution tools aren't unlocked yet — opening one Google Colab browser tab for you to sign in/approve within 60s.
 - **Outbound Bundle (`export_colab_bundle`):** Strips all API keys, personal cash balances, share counts, and cost basis — only public ticker lists, market aggregates, and OHLCV/rule metadata leave localhost.
 - **Worker Suite (`python/colab_workers/`):**
   - `vol_surface_greeks.py` (Worker #4 — multi-expiry IV surface, Vanna/Charm tags)
@@ -175,7 +177,8 @@ Heavy cross-sectional and NLP computations can run on Colab GPUs via **Model Con
 | `/api/analytics` · `/backtest` · `/execution` · `/calendar` | `GET` | Deterministic regime, backtest, execution risk & macro calendar payloads |
 | `/api/analytics/sec/{ticker}` · `/peak/{ticker}` | `GET` | SEC 72h dilution radar & 60d intraday peak prediction for ticker |
 | `/api/calibration/export` · `/import` · `/status` | `GET` / `POST` | Export zero-secret bundle, import offline calibration JSON, or inspect status |
-| `/api/colab/status` | `GET` | Transport readiness and loaded artifact freshness metadata |
+| `/api/colab/status` | `GET` | Transport readiness, startup/manual pipeline progress & artifact freshness |
+| `/api/colab/jobs/run_all` | `POST` | Launch sequential 4-step Colab pipeline (`vol_surface`, `sec_nlp`, `quant_scout`, `walk_forward`) |
 | `/api/colab/jobs/{job_type}` · `/api/colab/jobs/{job_id}` | `POST` / `GET` | Launch or poll single-flight Colab MCP jobs (`vol_surface`, `quant_scout`, `sec_nlp`, `walk_forward`) |
 | `/api/colab/artifacts/{artifact_type}` · `/import` | `GET` / `POST` | Inspect or manually import validated Schema v2.0 Colab artifacts |
 
@@ -189,7 +192,7 @@ All tests use Python stdlib `unittest` (`pytest` is never used) and Node's built
 # Run JS dashboard & XSS sanitizer tests
 node --test tests/js/dashboard_load.test.js tests/js/sanitize_chat_html.test.js
 
-# Run scoped verification stage gate (auto-routes affected Python & JS suites + hygiene + Protocol 06 invariants)
+# Run scoped verification stage gate (auto-routes affected Python & JS suites + hygiene + Protocol 06 + user-doc parity)
 .\.venv\Scripts\python.exe scripts/stage_gate.py --scoped
 
 # Run static security & secret audit
@@ -199,5 +202,6 @@ node --test tests/js/dashboard_load.test.js tests/js/sanitize_chat_html.test.js
 .\.venv\Scripts\python.exe scripts/sync_agent_manifests.py --check
 ```
 
+- **Plain-English User Guide:** See [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) (maintained by the `documentation-subagent`).
 - **Governance Rules:** See [`.agents/AGENTS.md`](.agents/AGENTS.md), [`INSTRUCTIONS.md`](INSTRUCTIONS.md), and [`docs/governance/project-state.md`](docs/governance/project-state.md).
 - **Release History:** See [`CHANGELOG.md`](CHANGELOG.md).

@@ -118,6 +118,29 @@ class TestStageGateAndStopHook(unittest.TestCase):
         mods_gov, _ = stage_gate.select_test_targets([".agents/AGENTS.md", "scripts/stage_gate.py"], mode="scoped")
         self.assertIn("tests.test_agentic_governance", mods_gov)
 
+    def test_user_docs_parity_check_passes_clean_and_flags_stale_refs(self):
+        clean = stage_gate.check_user_docs_parity(ROOT, ["README.md"])
+        self.assertTrue(clean["ok"], f"Unexpected user doc parity issues: {clean}")
+        self.assertEqual(clean["reminders"], [])
+
+        advisory = stage_gate.check_user_docs_parity(ROOT, ["static/index.html"])
+        self.assertTrue(advisory["ok"])
+        self.assertEqual(len(advisory["reminders"]), 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            (tmp_root / "docs").mkdir()
+            (tmp_root / "README.md").write_text("Uses gemini-3.8 legacy model.\n", encoding="utf-8")
+            (tmp_root / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
+            (tmp_root / "docs" / "USER_GUIDE.md").write_text("# Guide\n", encoding="utf-8")
+            dirty = stage_gate.check_user_docs_parity(tmp_root, ["README.md"])
+            self.assertFalse(dirty["ok"])
+            self.assertEqual(dirty["stale_hits"], [{"file": "README.md", "pattern": "gemini-3.8"}])
+
+        doc_ag = (ROOT / ".agents" / "agents" / "documentation-subagent" / "agent.md").read_text(encoding="utf-8")
+        self.assertIn("USER_GUIDE.md", doc_ag)
+        self.assertIn("CHANGELOG.md", doc_ag)
+
     def test_hygiene_flags_unauthorized_stage_report_and_unignored_db(self):
         hygiene = stage_gate.check_artifact_hygiene(
             ROOT,

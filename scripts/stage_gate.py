@@ -35,6 +35,19 @@ from sync_agent_manifests import find_repo_root, sync_agent_manifests  # noqa: E
 DIRECTIVE_MAX_BYTES = 23_500
 PROJECT_STATE_MAX_LINES = 150
 
+REQUIRED_USER_DOCS = (
+    "README.md",
+    "CHANGELOG.md",
+    "docs/USER_GUIDE.md",
+)
+
+BANNED_USER_DOC_PATTERNS = (
+    "save_chart_screenshots",
+    "verify_stage_1.py",
+    "scratch/",
+    "gemini-3.8",
+)
+
 PROTECTED_FINANCIAL_ASSETS = (
     "engine_instructions/",
     "gem_trading_rules/rules.md",
@@ -196,6 +209,46 @@ def check_governance_and_ceilings(repo_root: Path) -> Dict[str, Any]:
     }
 
 
+def check_user_docs_parity(repo_root: Path, changed_files: Sequence[str]) -> Dict[str, Any]:
+    """Ensure required user documentation exists without stale patterns and flag doc-drift reminders."""
+    missing: List[str] = []
+    stale_hits: List[Dict[str, str]] = []
+    for rel in REQUIRED_USER_DOCS:
+        p = repo_root / rel
+        if not p.is_file():
+            missing.append(rel)
+            continue
+        if rel in ("README.md", "docs/USER_GUIDE.md"):
+            text = p.read_text(encoding="utf-8", errors="replace")
+            for pat in BANNED_USER_DOC_PATTERNS:
+                if pat in text:
+                    stale_hits.append({"file": rel, "pattern": pat})
+
+    normalized = [
+        (p.replace("\\", "/")[2:] if p.replace("\\", "/").startswith("./") else p.replace("\\", "/"))
+        for p in changed_files
+    ]
+    ui_or_api_touched = any(
+        p in ("static/index.html", "static/app.js", "python/web_server.py") for p in normalized
+    )
+    docs_touched = any(
+        p in ("README.md", "CHANGELOG.md", "docs/USER_GUIDE.md") for p in normalized
+    )
+    reminders: List[str] = []
+    if ui_or_api_touched and not docs_touched:
+        reminders.append(
+            "UI/API files changed without touching README.md, CHANGELOG.md, or docs/USER_GUIDE.md — "
+            "run documentation-subagent to keep user docs synchronized."
+        )
+
+    return {
+        "ok": not missing and not stale_hits,
+        "missing": missing,
+        "stale_hits": stale_hits,
+        "reminders": reminders,
+    }
+
+
 def select_test_targets(changed_files: Sequence[str], mode: str = "scoped") -> Tuple[List[str], List[str]]:
     """
     Map modified repository files to Protocol 05 unittest modules and JS test script paths.
@@ -327,6 +380,7 @@ def run_stage_gate(
     protected = check_protected_assets(root, changed_files)
     hygiene = check_artifact_hygiene(root, changed_files)
     governance = check_governance_and_ceilings(root)
+    user_docs = check_user_docs_parity(root, changed_files)
 
     modules, js_scripts = select_test_targets(changed_files, mode=mode)
     command_results: List[Dict[str, Any]] = []
@@ -402,6 +456,7 @@ def run_stage_gate(
         protected["ok"]
         and hygiene["ok"]
         and governance["ok"]
+        and user_docs["ok"]
         and tests_ok
         and compile_proc.returncode == 0
         and pip_ok
@@ -418,6 +473,7 @@ def run_stage_gate(
         "protected_assets": protected,
         "artifact_hygiene": hygiene,
         "governance": governance,
+        "user_docs": user_docs,
         "selected_tests": {"unittest": modules, "js": js_scripts},
         "commands": command_results,
     }
@@ -446,6 +502,12 @@ def _format_human_summary(report: Dict[str, Any]) -> str:
         lines.append(f"  [BLOCKER] Hygiene failure: {report['artifact_hygiene']}")
     if not report["governance"]["ok"]:
         lines.append(f"  [BLOCKER] Governance failure: {report['governance']}")
+    user_docs = report.get("user_docs") or {"ok": True, "reminders": []}
+    lines.append(f"User Documentation Parity: {'PASS' if user_docs.get('ok', True) else 'FAIL'}")
+    if not user_docs.get("ok", True):
+        lines.append(f"  [BLOCKER] User docs failure: {user_docs}")
+    for rem in user_docs.get("reminders") or ():
+        lines.append(f"  [REMINDER] {rem}")
     for cmd in report["commands"]:
         status = "PASS" if cmd["exit_code"] == 0 else f"FAIL (exit {cmd['exit_code']})"
         lines.append(f"  - {cmd['name']}: {status}")

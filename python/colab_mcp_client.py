@@ -275,6 +275,44 @@ def probe_transport(config: Optional[ColabMCPConfig] = None) -> Dict[str, Any]:
     }
 
 
+EXEC_TOOL_CANDIDATES: Tuple[str, ...] = (
+    "execute_code",
+    "run_code",
+    "execute_cell",
+    "run_cell",
+    "execute_python",
+)
+
+
+def unwrap_exception_message(exc: BaseException) -> str:
+    """Recursively unwrap ExceptionGroup / BaseExceptionGroup into a readable root-cause string."""
+    sub_excs = getattr(exc, "exceptions", None)
+    if sub_excs:
+        parts: List[str] = []
+        for sub in sub_excs:
+            msg = unwrap_exception_message(sub)
+            if msg and msg not in parts:
+                parts.append(msg)
+        if parts:
+            return "; ".join(parts)
+    text = str(exc).strip()
+    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    if (not text or "TaskGroup" in text) and cause is not None and cause is not exc:
+        inner = unwrap_exception_message(cause)
+        if inner:
+            return inner
+    return text or exc.__class__.__name__
+
+
+def _tool_input_schema(tool: Any) -> Dict[str, Any]:
+    """Read tool JSON schema across mcp==2.3.0 (`input_schema`) and camelCase (`inputSchema`) objects."""
+    raw = getattr(tool, "input_schema", None)
+    if isinstance(raw, dict):
+        return raw
+    raw_camel = getattr(tool, "inputSchema", None)
+    return raw_camel if isinstance(raw_camel, dict) else {}
+
+
 def _extract_tool_text(result: Any) -> str:
     if getattr(result, "isError", False):
         chunks = []
@@ -395,12 +433,35 @@ class ColabMCPClient:
         wrapped_code: str,
         *,
         accelerator: str = "CPU",
+        initialized: bool = False,
+        status_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
-        await session.initialize()
+        if not initialized:
+            await session.initialize()
         listed = await session.list_tools()
         tools = list(getattr(listed, "tools", None) or ())
         tool_by_name = {getattr(t, "name", ""): t for t in tools if getattr(t, "name", None)}
         discovered_names = sorted(tool_by_name.keys())
+
+        chosen_name = next((name for name in EXEC_TOOL_CANDIDATES if name in tool_by_name), None)
+        if chosen_name is None and "open_colab_browser_connection" in tool_by_name:
+            if status_callback:
+                status_callback("Opening Google Colab in your browser — sign in / approve the tab (up to 60s)...")
+            conn_res = await session.call_tool("open_colab_browser_connection", {})
+            conn_txt = _extract_tool_text(conn_res).strip().lower()
+            sc = getattr(conn_res, "structuredContent", None) or getattr(conn_res, "structured_content", None)
+            sc_result = sc.get("result") if isinstance(sc, dict) else None
+            connected = (sc_result is True) or (conn_txt in {"true", "connected", "ok"})
+            if sc_result is False or (not connected and "false" in conn_txt):
+                raise RuntimeError(
+                    "Google Colab browser session did not connect within 60s. "
+                    "Sign into Google Colab in the opened browser tab, approve the MCP connection, and click Retry."
+                )
+            listed = await session.list_tools()
+            tools = list(getattr(listed, "tools", None) or ())
+            tool_by_name = {getattr(t, "name", ""): t for t in tools if getattr(t, "name", None)}
+            discovered_names = sorted(tool_by_name.keys())
+            chosen_name = next((name for name in EXEC_TOOL_CANDIDATES if name in tool_by_name), None)
 
         runtime_id: Optional[str] = None
         session_id: Optional[str] = None
@@ -408,7 +469,7 @@ class ColabMCPClient:
         # Step 1 (optional hosted runtime/session provisioning if exposed)
         for rt_tool_name in ("create_runtime", "get_or_create_runtime"):
             if rt_tool_name in tool_by_name:
-                props = getattr(tool_by_name[rt_tool_name], "inputSchema", None) or {}
+                props = _tool_input_schema(tool_by_name[rt_tool_name])
                 prop_dict = props.get("properties", {}) if isinstance(props, dict) else {}
                 rt_args: Dict[str, Any] = {}
                 acc_key = _match_arg_name(prop_dict, ("accelerator", "accelerator_type", "runtime_type"))
@@ -420,7 +481,7 @@ class ColabMCPClient:
                 break
 
         if "create_session" in tool_by_name:
-            props = getattr(tool_by_name["create_session"], "inputSchema", None) or {}
+            props = _tool_input_schema(tool_by_name["create_session"])
             prop_dict = props.get("properties", {}) if isinstance(props, dict) else {}
             sess_args: Dict[str, Any] = {}
             rt_key = _match_arg_name(prop_dict, ("runtime_id", "runtimeId", "runtime_name"))
@@ -431,14 +492,15 @@ class ColabMCPClient:
             session_id = _extract_identifier(sess_txt, ("session_id", "sessionId", "id", "name"))
 
         # Step 2: Execute wrapped Python code via the first matching execution tool
-        exec_candidates = ("execute_code", "run_code", "execute_cell", "run_cell", "execute_python")
-        chosen_name = next((name for name in exec_candidates if name in tool_by_name), None)
+        if chosen_name is None:
+            chosen_name = next((name for name in EXEC_TOOL_CANDIDATES if name in tool_by_name), None)
         if chosen_name is None:
             raise RuntimeError(
-                f"Colab MCP server did not expose a supported code-execution tool; discovered tools: {discovered_names}"
+                f"Colab MCP server did not expose a supported code-execution tool; discovered tools: {discovered_names}. "
+                "Ensure Google Colab opened in your browser and the MCP notebook session is active."
             )
 
-        schema = getattr(tool_by_name[chosen_name], "inputSchema", None) or {}
+        schema = _tool_input_schema(tool_by_name[chosen_name])
         prop_dict = schema.get("properties", {}) if isinstance(schema, dict) else {}
         code_key = _match_arg_name(prop_dict, ("code", "source", "script", "python_code", "cell_source"), fallback="code")
         exec_args: Dict[str, Any] = {code_key: wrapped_code}
@@ -450,6 +512,8 @@ class ColabMCPClient:
         if sess_key and session_id:
             exec_args[sess_key] = session_id
 
+        if status_callback:
+            status_callback(f"Running code on Google Colab via `{chosen_name}`...")
         exec_res = await session.call_tool(chosen_name, exec_args)
         return _extract_tool_text(exec_res)
 
@@ -469,7 +533,12 @@ class ColabMCPClient:
                 stdout_text = await self._run_on_session(session, wrapped, accelerator=accelerator)
                 return extract_marked_json(stdout_text)
 
-        return await asyncio.wait_for(_inner(), timeout=float(self.config.timeout_sec))
+        try:
+            return await asyncio.wait_for(_inner(), timeout=float(self.config.timeout_sec))
+        except BaseException as exc:
+            if hasattr(exc, "exceptions"):
+                raise RuntimeError(unwrap_exception_message(exc)) from exc
+            raise
 
     def execute_python_script_sync(
         self,
@@ -479,6 +548,74 @@ class ColabMCPClient:
         accelerator: str = "CPU",
     ) -> Dict[str, Any]:
         """Blocking wrapper for daemon worker threads."""
-        return asyncio.run(
-            self.execute_python_script(script_source, job_inputs, accelerator=accelerator)
-        )
+        try:
+            return asyncio.run(
+                self.execute_python_script(script_source, job_inputs, accelerator=accelerator)
+            )
+        except BaseException as exc:
+            if hasattr(exc, "exceptions"):
+                raise RuntimeError(unwrap_exception_message(exc)) from exc
+            raise
+
+    async def execute_scripts_batch(
+        self,
+        items: List[Tuple[str, str, Dict[str, Any], str]],
+        *,
+        progress_callback: Optional[Callable[[str, str, str], None]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Execute multiple `(job_type, script_source, job_inputs, accelerator)` items over one shared MCP session."""
+        prepared: List[Tuple[str, str, str]] = []
+        for job_type, script_source, job_inputs, accelerator in items:
+            sanitized = sanitize_job_inputs(job_inputs)
+            prepared.append((job_type, self._wrap_script(script_source, sanitized), accelerator))
+
+        results: Dict[str, Dict[str, Any]] = {}
+
+        async def _inner() -> None:
+            async with self._open_session() as session:
+                await session.initialize()
+                abort_remaining_msg: Optional[str] = None
+                for job_type, wrapped, accelerator in prepared:
+                    if abort_remaining_msg is not None:
+                        results[job_type] = {"ok": False, "error": abort_remaining_msg}
+                        continue
+                    try:
+                        if progress_callback:
+                            progress_callback(job_type, "running", f"Running {job_type} on Google Colab...")
+                        stdout_text = await self._run_on_session(
+                            session,
+                            wrapped,
+                            accelerator=accelerator,
+                            initialized=True,
+                            status_callback=(lambda msg, _jt=job_type: progress_callback(_jt, "handshake", msg)) if progress_callback else None,
+                        )
+                        parsed = extract_marked_json(stdout_text)
+                        results[job_type] = {"ok": True, "payload": parsed}
+                        if progress_callback:
+                            progress_callback(job_type, "succeeded", f"Completed {job_type}")
+                    except BaseException as exc:
+                        err_msg = unwrap_exception_message(exc)
+                        results[job_type] = {"ok": False, "error": err_msg}
+                        if progress_callback:
+                            progress_callback(job_type, "failed", err_msg)
+                        if "browser session did not connect" in err_msg.lower():
+                            abort_remaining_msg = err_msg
+
+        try:
+            total_timeout = float(self.config.timeout_sec) * max(1, len(prepared))
+            await asyncio.wait_for(_inner(), timeout=total_timeout)
+        except BaseException as exc:
+            err_msg = unwrap_exception_message(exc)
+            for job_type, _, _ in prepared:
+                if job_type not in results:
+                    results[job_type] = {"ok": False, "error": err_msg}
+        return results
+
+    def execute_scripts_batch_sync(
+        self,
+        items: List[Tuple[str, str, Dict[str, Any], str]],
+        *,
+        progress_callback: Optional[Callable[[str, str, str], None]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Blocking single-session batch wrapper for `ColabJobManager.run_pipeline()`."""
+        return asyncio.run(self.execute_scripts_batch(items, progress_callback=progress_callback))

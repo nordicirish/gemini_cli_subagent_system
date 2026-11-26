@@ -1032,6 +1032,34 @@ async function main() {
         assert(verEl && verEl.textContent.trim() === 'v19.0', `Expected version v19.0, got ${verEl && verEl.textContent}`);
     });
 
+    mockColabPipeline = {
+        state: 'failed',
+        trigger: 'startup',
+        started_at_utc: '2026-11-26T20:00:00Z',
+        percent: 100,
+        step_label: 'Cloud research finished with 4 failure(s)',
+        error_summary: 'Google Colab browser session did not connect within 60s.',
+        jobs: {
+            vol_surface: { status: 'failed', label: 'Options Flow & Vol Surface', progress_pct: 100, error: 'Google Colab browser session did not connect within 60s.' },
+        },
+    };
+    await window.fetchColabMcpStatus();
+    const bannerEl = window.document.getElementById('colab-progress-banner');
+    const errDetailEl = window.document.getElementById('colab-pipeline-error-detail');
+    const retryBannerBtn = window.document.getElementById('colab-banner-retry-btn');
+    const dismissBannerBtn = window.document.getElementById('colab-banner-dismiss-btn');
+    const errBannerRendered = bannerEl.classList.contains('is-failed')
+        && !bannerEl.classList.contains('hidden')
+        && retryBannerBtn.style.display === 'inline-block'
+        && errDetailEl.style.display === 'block'
+        && errDetailEl.textContent.includes('Google Colab browser session did not connect');
+    dismissBannerBtn.click();
+    const dismissedBannerOk = bannerEl.classList.contains('hidden');
+    check('Colab Failure Banner: surfaces root-cause error, Retry button, and dismiss button', () => {
+        assert.strictEqual(errBannerRendered, true, 'Expected failed state banner, retry button, and error detail');
+        assert.strictEqual(dismissedBannerOk, true, 'Dismiss button should hide #colab-progress-banner');
+    });
+
     window.close();
     console.log(results.join('\n'));
     const failed = results.filter((r) => r.startsWith('FAIL')).length;

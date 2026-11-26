@@ -7,7 +7,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.79">
+    <link rel="stylesheet" href="styles.css?v=18.80">
     <link rel="stylesheet" href="modern_ui.css?v=18.61">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
@@ -98,12 +98,19 @@
                     <span class="colab-progress-badge">☁️ Cloud Research</span>
                     <span id="colab-pipeline-step-label" class="colab-pipeline-step-label">Checking cloud status...</span>
                 </div>
-                <span id="colab-pipeline-percent" class="colab-pipeline-percent">0%</span>
+                <div class="colab-banner-actions">
+                    <button type="button" id="colab-banner-retry-btn" class="colab-banner-btn" style="display: none;"
+                        title="Retry Cloud Research in Google Colab">↻ Retry</button>
+                    <button type="button" id="colab-banner-dismiss-btn" class="colab-banner-btn subtle"
+                        title="Dismiss banner" aria-label="Dismiss banner">&times;</button>
+                    <span id="colab-pipeline-percent" class="colab-pipeline-percent">0%</span>
+                </div>
             </div>
             <div class="colab-progress-track">
                 <div id="colab-pipeline-bar-fill" class="colab-progress-fill" style="width: 0%;"></div>
             </div>
             <div id="colab-pipeline-chips" class="colab-pipeline-chips"></div>
+            <div id="colab-pipeline-error-detail" class="colab-pipeline-error-detail" style="display: none;"></div>
         </section>
 
         <!-- ─── Today's Brief & Suggested Next Steps ("Inform & Suggest") ─── -->
@@ -750,7 +757,7 @@
     </div>
 
     <script src="portfolio.js?v=18.63"></script>
-    <script src="app.js?v=18.85"></script>
+    <script src="app.js?v=18.86"></script>
     <script src="modern_ui.js?v=18.66"></script>
 </body>
 

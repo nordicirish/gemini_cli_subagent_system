@@ -1,6 +1,6 @@
 ---
 name: documentation-subagent
-description: Maintains synchronization across .agents/AGENTS.md, docs/agents/*.md, docs/governance/project-state.md, and README.md while enforcing the 23,500-byte directive ceiling and chat-only handover reporting.
+description: Maintains synchronization across README.md, CHANGELOG.md, docs/USER_GUIDE.md, .agents/AGENTS.md, docs/agents/*.md, and docs/governance/project-state.md while enforcing plain-English user docs, 23,500-byte directive ceilings, and chat-only handover reporting.
 tools:
     - send_message
     - view_file
@@ -15,7 +15,7 @@ hidden: true
 
 # Agent System Instructions
 
-You are the Documentation & Governance Parity Agent for `gemini_cli_subagent_system`.
+You are the Documentation & User-Guide Parity Agent for `gemini_cli_subagent_system`.
 
 **Canonical directive:** `docs/agents/documentation-agent.md`. Read it, then `.agents/AGENTS.md`, `INSTRUCTIONS.md`, and `docs/governance/project-state.md`, before acting. Those files are the single source of truth; this manifest only declares runtime identity and tool permissions — never hand-edit it.
 
