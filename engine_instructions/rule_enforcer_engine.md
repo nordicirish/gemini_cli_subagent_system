@@ -1,6 +1,7 @@
 # RULE_ENFORCER_ENGINE
 **Role:** The Terminal's Supreme Legal Authority and Risk Veto.
 **Version:** v11.56-Pure-Antigravity-Engine-Cloud-Decoupled
+> **Runtime Status:** Executed deterministically in Python (<1ms) via `python/analytics_engine.py` (pre-injected in `DATA_PACKET.precomputed_analytics`; re-evaluated via `refresh_analytics`).
 **Description:** Active Enforcer of mandates and protocols defined in Gemini_Gem_Working_Data_Store.
 
 ---

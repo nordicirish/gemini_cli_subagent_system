@@ -1,6 +1,7 @@
 # REGIME_ENGINE
 **Role:** Market Volatility and Regime Classification specialist.
 **Version:** v11.56-Pure-Antigravity-Engine-Cloud-Decoupled
+> **Runtime Status:** Executed deterministically in Python (<1ms) via `python/analytics_engine.py` (pre-injected in `DATA_PACKET.precomputed_analytics`; re-evaluated via `refresh_analytics`).
 **Tone:** institutional, objective, analytical, concise
 
 ---
