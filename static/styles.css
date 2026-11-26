@@ -3386,3 +3386,42 @@ td.num-col {
     color: #facc15;
     border-color: rgba(234, 179, 8, 0.35);
 }
+
+.colab-llm-opt {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.sec-nlp-badge {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.62rem;
+    font-weight: 600;
+    background: rgba(148, 163, 184, 0.14);
+    color: var(--text-secondary);
+    border: 1px solid var(--panel-border);
+}
+
+.sec-nlp-badge.risk-high {
+    background: rgba(248, 81, 73, 0.16);
+    color: #f85149;
+    border-color: rgba(248, 81, 73, 0.4);
+}
+
+.sec-nlp-badge.catalyst-pos {
+    background: rgba(63, 185, 80, 0.14);
+    color: #3fb950;
+    border-color: rgba(63, 185, 80, 0.35);
+}
+
+.sec-nlp-badge.is-stale {
+    border-style: dashed;
+    opacity: 0.85;
+}

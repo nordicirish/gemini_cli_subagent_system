@@ -15,6 +15,11 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+try:
+    from colab_calibration import get_artifact_status, load_colab_artifact
+except ImportError:
+    from python.colab_calibration import get_artifact_status, load_colab_artifact
+
 SEC_USER_AGENT = os.environ.get(
     "SEC_EDGAR_USER_AGENT",
     "GEMMarketCouncilResearch/1.0 (research-desk@gemcouncil.org)",
@@ -75,12 +80,38 @@ def _is_within_72h(filing_date: str, now_ts: float) -> bool:
         return False
 
 
+def _attach_colab_sec_nlp(
+    sym: str,
+    result: Dict[str, Any],
+    *,
+    cache_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Attach read-only Colab `sec_nlp` GPU signals when cached for `sym` (never mutates SEC cache)."""
+    try:
+        nlp_data = load_colab_artifact("sec_nlp", cache_dir=cache_dir)
+        nlp_status = get_artifact_status("sec_nlp", cache_dir=cache_dir)
+        tickers = (nlp_data or {}).get("tickers", {}) if isinstance(nlp_data, dict) else {}
+        entry = tickers.get(sym) if isinstance(tickers, dict) else None
+        if isinstance(entry, dict):
+            freshness = (nlp_status or {}).get("freshness", {}) if isinstance(nlp_status, dict) else {}
+            result["sec_nlp"] = {
+                **entry,
+                "stale": bool(freshness.get("stale", True)),
+                "as_of_utc": nlp_data.get("generated_at_utc"),
+                "model_used": nlp_data.get("model_used"),
+            }
+    except Exception:
+        pass
+    return result
+
+
 def fetch_recent_sec_filings(
     ticker: str,
     limit: int = 8,
     cache_path: str = DEFAULT_SEC_CACHE_PATH,
     http_get: Optional[Callable[[str], Dict[str, Any]]] = None,
     now_ts: Optional[float] = None,
+    colab_cache_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Returns verified SEC EDGAR recent filings & 72h dilution warning for `ticker`."""
     sym = str(ticker or "").strip().upper()
@@ -97,7 +128,7 @@ def fetch_recent_sec_filings(
         if isinstance(cached_entry, dict) and (ts - float(cached_entry.get("cached_at", 0.0))) < FILINGS_TTL_SEC:
             out = dict(cached_entry["result"])
             out["cached"] = True
-            return out
+            return _attach_colab_sec_nlp(sym, out, cache_dir=colab_cache_dir)
 
     try:
         with _CACHE_LOCK:
@@ -179,7 +210,7 @@ def fetch_recent_sec_filings(
             c3 = _read_cache(cache_path)
             c3["tickers"][sym] = {"cached_at": ts, "result": result}
             _write_cache(cache_path, c3)
-        return result
+        return _attach_colab_sec_nlp(sym, dict(result), cache_dir=colab_cache_dir)
     except Exception as exc:
         return {
             "status": "unavailable",

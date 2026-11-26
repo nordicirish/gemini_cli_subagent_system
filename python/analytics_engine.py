@@ -839,15 +839,54 @@ class AnalyticsEngine:
         except Exception:
             pass
 
+        colab_sec_nlp = {
+            "loaded": False,
+            "fresh": False,
+            "stale": True,
+            "age_hours": None,
+            "generated_at_utc": None,
+            "model_used": None,
+            "tickers": {},
+        }
+        try:
+            nlp_data = load_colab_artifact("sec_nlp")
+            nlp_status = get_artifact_status("sec_nlp")
+            nlp_tickers = (nlp_data or {}).get("tickers", {}) if isinstance(nlp_data, dict) else {}
+            if isinstance(nlp_data, dict) and nlp_tickers:
+                freshness = (nlp_status or {}).get("freshness", {}) if isinstance(nlp_status, dict) else {}
+                gen_at = nlp_data.get("generated_at_utc")
+                model_used = nlp_data.get("model_used")
+                is_stale = bool(freshness.get("stale", True))
+                colab_sec_nlp = {
+                    "loaded": True,
+                    "fresh": bool(freshness.get("fresh", False)),
+                    "stale": is_stale,
+                    "age_hours": freshness.get("age_hours"),
+                    "generated_at_utc": gen_at,
+                    "model_used": model_used,
+                    "tickers": {
+                        sym: {**entry, "stale": is_stale, "as_of_utc": gen_at, "model_used": model_used}
+                        for sym, entry in nlp_tickers.items()
+                        if isinstance(entry, dict)
+                    },
+                }
+        except Exception:
+            pass
+
         vs_lookup = colab_vol_surface["tickers"]
+        nlp_lookup = colab_sec_nlp["tickers"]
         for pos_item in positions_out:
             sym = pos_item.get("ticker")
             if sym and sym in vs_lookup:
                 pos_item["vol_surface"] = dict(vs_lookup[sym])
+            if sym and sym in nlp_lookup:
+                pos_item["sec_nlp"] = dict(nlp_lookup[sym])
         for wl_item in watchlist_out:
             sym = wl_item.get("ticker")
             if sym and sym in vs_lookup:
                 wl_item["vol_surface"] = dict(vs_lookup[sym])
+            if sym and sym in nlp_lookup:
+                wl_item["sec_nlp"] = dict(nlp_lookup[sym])
 
         return {
             "as_of_ny": now_ny.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -861,6 +900,7 @@ class AnalyticsEngine:
             "positions": positions_out,
             "watchlist_signals": watchlist_out,
             "colab_vol_surface": colab_vol_surface,
+            "colab_sec_nlp": colab_sec_nlp,
         }
 
     def format_regime_engine_response(

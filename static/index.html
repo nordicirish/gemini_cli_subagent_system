@@ -7,7 +7,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.75">
+    <link rel="stylesheet" href="styles.css?v=18.76">
     <link rel="stylesheet" href="modern_ui.css?v=18.61">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
@@ -439,6 +439,9 @@
                                 <button id="colab-run-walk-forward-btn" type="button" class="glow-btn outline mini"
                                     title="Run Walk-Forward Rule Backtester on Colab MCP">📊 Backtest</button>
                             </div>
+                            <label class="colab-llm-opt" title="Opt-in 4-bit quantized 7B LLM refinement when running SEC NLP on an L4 GPU">
+                                <input type="checkbox" id="colab-sec-use-llm-toggle"> Use L4 7B LLM for SEC NLP
+                            </label>
                             <div id="colab-mcp-job-status" class="status-message inline-feedback"></div>
                             <div id="colab-quant-scout-panel" class="colab-scout-panel">
                                 <div class="colab-scout-header">
@@ -674,7 +677,7 @@
     </div>
 
     <script src="portfolio.js?v=18.63"></script>
-    <script src="app.js?v=18.81"></script>
+    <script src="app.js?v=18.82"></script>
     <script src="modern_ui.js?v=18.66"></script>
 </body>
 

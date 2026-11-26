@@ -131,6 +131,26 @@ const API = {
                 },
             },
         },
+        colab_sec_nlp: {
+            loaded: true,
+            fresh: true,
+            stale: false,
+            generated_at_utc: '2026-11-26T20:00:00Z',
+            model_used: 'ProsusAI/finbert',
+            tickers: {
+                PLTR: {
+                    dilution_risk_score: 72.0,
+                    catalyst_sentiment: -0.25,
+                    offering_overhang_flag: true,
+                    going_concern_flag: false,
+                    earnings_tone_delta: -0.1,
+                    filings_analyzed: 3,
+                    evidence_snippets: ['424B5 shelf <script>alert(1)</script>'],
+                    stale: false,
+                    model_used: 'ProsusAI/finbert',
+                },
+            },
+        },
     },
     '/api/analytics/execution': {
         source: 'python_deterministic',
@@ -262,11 +282,16 @@ async function main() {
 
     const calls = [];
     const watchlistPosts = [];
+    const colabJobPosts = [];
     let scoutCategories = [];
     window.fetch = async (url, opts = {}) => {
         const pathOnly = String(url).split('?')[0];
         const method = (opts.method || 'GET').toUpperCase();
         calls.push(`${method} ${pathOnly}`);
+        if (pathOnly.startsWith('/api/colab/jobs/') && method === 'POST') {
+            colabJobPosts.push({ path: pathOnly, body: JSON.parse(opts.body || '{}') });
+            return { ok: true, status: 202, json: async () => ({ job_id: 'colab-sec_nlp-test1', status: 'queued' }) };
+        }
         if (pathOnly === '/api/watchlist' && method === 'POST') {
             watchlistPosts.push(JSON.parse(opts.body || '[]'));
             return { ok: true, status: 200, json: async () => ({ status: 'success' }) };
@@ -810,6 +835,21 @@ async function main() {
         assert(calls.includes('POST /api/watchlist'), 'Expected POST /api/watchlist on + Watch click');
         const lastWlPost = watchlistPosts[watchlistPosts.length - 1];
         assert.deepStrictEqual(lastWlPost, ['AMD', 'SMCI']);
+    });
+
+    const useLlmToggle = window.document.getElementById('colab-sec-use-llm-toggle');
+    const secNlpBtn = window.document.getElementById('colab-run-sec-nlp-btn');
+    if (useLlmToggle && secNlpBtn) {
+        useLlmToggle.checked = true;
+        secNlpBtn.click();
+        await new Promise((r) => setTimeout(r, 40));
+    }
+    check('Stage M3: SEC NLP risk badge escapes snippets and L4 7B LLM toggle sends use_llm option', () => {
+        const nlpBadge = window.document.querySelector('.sec-nlp-badge.risk-high');
+        assert(nlpBadge && nlpBadge.textContent === 'NLP D:72', `Unexpected SEC NLP badge: ${nlpBadge && nlpBadge.textContent}`);
+        assert(nlpBadge.getAttribute('title').includes('424B5 shelf'), 'Expected escaped snippet in SEC NLP tooltip');
+        const secPost = colabJobPosts.find((p) => p.path === '/api/colab/jobs/sec_nlp');
+        assert(secPost && secPost.body && secPost.body.options && secPost.body.options.use_llm === true, 'Expected use_llm:true option on SEC NLP POST');
     });
 
     window.close();

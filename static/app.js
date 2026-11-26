@@ -909,6 +909,7 @@ function renderTable(tickers, state) {
 
         const scoutIndicator = row._isScout ? `<span class="scout-dot"></span>` : '';
         const secBadgeHtml = _buildSecBadgeHtml(sym);
+        const secNlpBadgeHtml = _buildSecNlpBadgeHtml(sym);
         const heldPlanHtml = row._isHeld
             ? `<button type="button" class="row-plan-btn" onclick="event.stopPropagation(); openExecutionPlanModal('${_escAlertHtml(sym)}')" title="Open Execution &amp; Risk Ticket for ${_escAlertHtml(sym)}">⚡</button>`
             : '';
@@ -948,7 +949,7 @@ function renderTable(tickers, state) {
             <tr class="chart-clickable" onclick="openChartModal('${safeSym}')" title="Click to view 1m TradingView chart">
                 <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}" data-sec-ticker="${safeSym}">
                     <span class="ticker-symbol ${dayColor}">${safeSym}</span>
-                    ${scoutIndicator}${heldPlanHtml}${secBadgeHtml}
+                    ${scoutIndicator}${heldPlanHtml}${secBadgeHtml}${secNlpBadgeHtml}
                 </td>
                 <td class="num-col ${pClass}">${p}</td>
                 <td class="num-col ${dayColor}">${fmtSigned(row.session_change_pct, 2)}</td>
@@ -2044,6 +2045,36 @@ function _buildSecBadgeHtml(sym) {
     return `<a class="sec-dilution-badge" href="${_escAlertHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="${title}">⚠️ SEC ${form}</a>`;
 }
 
+function _buildSecNlpBadgeHtml(sym) {
+    const key = String(sym || '').trim().toUpperCase();
+    const info = _lastQuantAnalytics && _lastQuantAnalytics.colab_sec_nlp && _lastQuantAnalytics.colab_sec_nlp.tickers
+        ? _lastQuantAnalytics.colab_sec_nlp.tickers[key]
+        : null;
+    if (!info || typeof info !== 'object') return '';
+    const dilution = Number(info.dilution_risk_score || 0);
+    const sentiment = Number(info.catalyst_sentiment || 0);
+    const overhang = Boolean(info.offering_overhang_flag);
+    const goingConcern = Boolean(info.going_concern_flag);
+    const staleTxt = info.stale ? ' [STALE]' : '';
+    const snippets = Array.isArray(info.evidence_snippets) ? info.evidence_snippets : [];
+    const snipPreview = snippets.length ? ` | ${String(snippets[0])}` : '';
+    const model = String(info.model_used || 'FinBERT');
+
+    let cls = 'sec-nlp-badge';
+    let label = `NLP ${dilution.toFixed(0)}`;
+    if (goingConcern || overhang || dilution >= 60) {
+        cls += ' risk-high';
+        label = `NLP D:${dilution.toFixed(0)}`;
+    } else if (sentiment >= 0.35) {
+        cls += ' catalyst-pos';
+        label = `NLP +${sentiment.toFixed(2)}`;
+    }
+    if (info.stale) cls += ' is-stale';
+
+    const tip = `SEC NLP (${model}${staleTxt}): Dilution ${dilution.toFixed(1)}/100 | Sentiment ${sentiment.toFixed(2)} | Overhang=${overhang} | GoingConcern=${goingConcern}${snipPreview}`;
+    return `<span class="${cls}" title="${_escAlertHtml(tip)}">${_escAlertHtml(label)}</span>`;
+}
+
 function _injectSecBadgeForSymbol(sym) {
     const key = String(sym || '').trim().toUpperCase();
     const badgeHtml = _buildSecBadgeHtml(key);
@@ -2826,12 +2857,16 @@ async function fetchColabMcpStatus() {
 
 async function launchColabJob(jobType, btnEl) {
     const jobStatusEl = document.getElementById('colab-mcp-job-status');
+    const useLlmEl = document.getElementById('colab-sec-use-llm-toggle');
+    const reqBody = (jobType === 'sec_nlp' && useLlmEl && useLlmEl.checked)
+        ? { options: { use_llm: true } }
+        : {};
     if (btnEl) btnEl.disabled = true;
     try {
         const res = await fetch(`${API_BASE}/colab/jobs/${encodeURIComponent(jobType)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}),
+            body: JSON.stringify(reqBody),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
