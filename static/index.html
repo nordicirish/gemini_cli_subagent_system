@@ -7,8 +7,8 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.84">
-    <link rel="stylesheet" href="modern_ui.css?v=18.62">
+    <link rel="stylesheet" href="styles.css?v=18.85">
+    <link rel="stylesheet" href="modern_ui.css?v=18.63">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
         rel="stylesheet">
@@ -49,7 +49,7 @@
                     <div class="status-item" id="macro-calendar-container">
                         <span class="label">Macro:</span>
                         <span id="macro-calendar-pill" class="macro-cal-pill macro-cal-clear"
-                            title="Upcoming Tier-1 Macro Economic Events (ENH_47 / ENH_259)">📅 —</span>
+                            title="Next major economic release (Fed decision, jobs report, CPI…). Stops tighten automatically just before it.">📅 —</span>
                     </div>
                     <div class="status-item" id="refresh-status-container" style="display: none;">
                         <span id="refresh-status" class="value text-yellow" style="font-weight: bold;">⚡ HEAVY
@@ -170,6 +170,9 @@
                                 <button type="button" class="table-filter-pill"
                                     data-table-filter="held" aria-pressed="false">Held</button>
                                 <button type="button" class="table-filter-pill"
+                                    data-table-filter="watchlist" aria-pressed="false"
+                                    title="Show only your watchlist tickers">Watchlist</button>
+                                <button type="button" class="table-filter-pill"
                                     data-table-filter="signals" aria-pressed="false"
                                     title="Show stocks with strong bullish or bearish signal scores (|Score| >= 3)">Strong Signals</button>
                             </div>
@@ -182,6 +185,36 @@
                                 <button type="button" id="table-view-pro-btn" class="table-view-btn"
                                     data-table-view="pro" aria-pressed="false"
                                     title="Show all 14 technical, options flow, and momentum columns">Pro (14)</button>
+                            </div>
+                            <div class="metric-guide-wrap">
+                                <button type="button" id="metric-guide-btn" class="table-density-btn"
+                                    aria-expanded="false" aria-controls="metric-guide-popover"
+                                    title="What do these columns mean?">? Metric guide</button>
+                                <div id="metric-guide-popover" class="metric-guide-popover" role="dialog"
+                                    aria-label="Metric guide" hidden>
+                                    <dl>
+                                        <dt>Price · Day % · Gap %</dt>
+                                        <dd>Latest USD price, today's change, and the overnight jump from yesterday's close to today's open.</dd>
+                                        <dt>Volume · rVol</dt>
+                                        <dd>Shares traded today. rVol compares that to a normal day at this time: above 1.5x is unusual interest, above 2x is strong.</dd>
+                                        <dt>ATR %</dt>
+                                        <dd>Typical daily price swing. Higher means wider moves, so stops need more room.</dd>
+                                        <dt>RSI</dt>
+                                        <dd>Momentum gauge from 0 to 100: above 70 is stretched (red), below 30 is oversold (green).</dd>
+                                        <dt>VWAP</dt>
+                                        <dd>Average price paid today, weighted by volume. Price above it (▲) means buyers are in control; below (▼) means sellers are.</dd>
+                                        <dt>MACD · Trend</dt>
+                                        <dd>Momentum direction (Bull / Bear) and the short-term price trend (Up / Down / Flat).</dd>
+                                        <dt>Target</dt>
+                                        <dd>The next Fibonacci price level and how far away it is. "Cap" is the most the stock is expected to stretch today.</dd>
+                                        <dt>Dealer (GEX)</dt>
+                                        <dd>Options dealers' gamma exposure. Positive: their hedging tends to calm swings. Negative: it tends to amplify them. V+ / V− is vanna flow from the options volatility surface.</dd>
+                                        <dt>Signal (−6 to +6)</dt>
+                                        <dd>GEM's combined setup score with a plain-English label. "Overheated" means a strong trend that is stretched (RSI 75+) — avoid chasing.</dd>
+                                        <dt>—</dt>
+                                        <dd>Data not available yet (still scanning, or no source). GEM never fills gaps with made-up numbers.</dd>
+                                    </dl>
+                                </div>
                             </div>
                             <span class="kbd-hint"
                                 title="Shortcuts: / filter, T toggle tools sidebar, C toggle AI Council, Esc close">/ Filter · T Tools · C Council</span>
@@ -201,10 +234,10 @@
                                 <th class="num-col sortable-th pro-col" data-sort-key="atr_percent" title="Average Daily Swing % — measures normal daily volatility">ATR %<span class="sort-indicator" aria-hidden="true"></span></th>
                                 <th class="num-col sortable-th pro-col" data-sort-key="rsi" title="Momentum gauge (0–100): above 70 is stretched/overheated, below 30 is oversold">RSI<span class="sort-indicator" aria-hidden="true"></span></th>
                                 <th class="num-col sortable-th pro-col" data-sort-key="vwap" title="Volume-Weighted Average Price — institutional fair-value anchor">VWAP<span class="sort-indicator" aria-hidden="true"></span></th>
-                                <th class="pro-col" title="MACD momentum trend &amp; acceleration">MACD</th>
+                                <th class="pro-col sortable-th" data-sort-key="macd_hist" title="MACD momentum: Bull / Bear / Neutral (sorts by histogram strength)">MACD<span class="sort-indicator" aria-hidden="true"></span></th>
                                 <th title="Overall short-term price trend direction">Trend</th>
-                                <th title="Estimated next resistance or profit-taking target level">Target</th>
-                                <th class="pro-col" title="Options dealer hedging flow (GEX &amp; Colab Vanna Vol Surface)">Dealer</th>
+                                <th class="sortable-th" data-sort-key="target_distance" title="Next Fibonacci price level and how far away it is (sorts by distance %)">Target<span class="sort-indicator" aria-hidden="true"></span></th>
+                                <th class="pro-col sortable-th" data-sort-key="dealer_gex" title="Options dealer gamma exposure (GEX): positive = dealers dampen swings, negative = dealers amplify moves">Dealer (GEX)<span class="sort-indicator" aria-hidden="true"></span></th>
                                 <th class="score-col sortable-th" data-sort-key="score" title="Plain-English setup verdict plus composite score (-6 to +6)">Signal<span class="sort-indicator" aria-hidden="true"></span></th>
                             </tr>
                         </thead>
@@ -402,18 +435,13 @@
 
                         <div class="sentinel-control-box">
                             <div class="sentinel-header-row">
-                                <span class="sentinel-title">⚡ Low-Power Sentinel</span>
+                                <span class="sentinel-title"
+                                    title="Sentinel: periodically re-tunes your alert triggers to current price levels">⚡ Auto-tune alerts</span>
                                 <button id="sentinel-toggle-btn" type="button" class="sentinel-toggle-btn"
                                     aria-pressed="false">OFF</button>
                             </div>
                             <div class="sentinel-config-row">
-                                <select id="sentinel-provider-select" title="Model Provider"
-                                    style="flex: 1; min-width: 0;">
-                                    <option value="deterministic" selected>Deterministic (Local · 0 LLM)</option>
-                                    <option value="gemini_free">Gemini Free Tier</option>
-                                    <option value="auto">Auto (Free → Local)</option>
-                                    <option value="antigravity">Local Antigravity</option>
-                                </select>
+                                <label for="sentinel-interval-select" class="sentinel-check-label">Check every</label>
                                 <select id="sentinel-interval-select" title="Check Cadence"
                                     style="width: 64px; flex: 0 0 auto;">
                                     <option value="60">1m</option>
@@ -423,6 +451,16 @@
                                     <option value="900">15m</option>
                                 </select>
                             </div>
+                            <details class="tech-settings">
+                                <summary>Engine settings</summary>
+                                <select id="sentinel-provider-select" title="Model Provider"
+                                    style="width: 100%; min-width: 0;">
+                                    <option value="deterministic" selected>Local rules, no AI (recommended)</option>
+                                    <option value="gemini_free">Gemini free tier (AI)</option>
+                                    <option value="auto">Auto: Gemini, then local rules</option>
+                                    <option value="antigravity">Local Antigravity agent</option>
+                                </select>
+                            </details>
                             <div class="sentinel-peak-row">
                                 <label class="sentinel-check-label"
                                     title="Use 60-day intraday Peak Window &amp; Exhaustion zones to arm morning sell triggers">
@@ -466,17 +504,20 @@
                             <div class="colab-mcp-panel">
                                 <div class="colab-mcp-header">
                                     <span class="subtitle">Google Colab Cloud Research</span>
-                                    <span id="colab-mcp-transport-status" class="colab-mcp-transport-pill">MCP: Checking...</span>
+                                    <span id="colab-mcp-transport-status" class="colab-mcp-transport-pill">Cloud: Checking…</span>
                                 </div>
                                 <div id="colab-setup-guidance" class="colab-setup-guidance" style="display: none;">
-                                    <div id="colab-setup-guidance-text" class="colab-setup-guidance-text">
-                                        One-time setup needed to run automatic Cloud GPU scans: install <code>uv</code> or import an offline JSON pack below.
-                                    </div>
-                                    <div class="colab-setup-cmd-row">
-                                        <code id="colab-setup-cmd-code">winget install --id=astral-sh.uv -e</code>
-                                        <button id="colab-copy-setup-btn" type="button" class="glow-btn outline mini"
-                                            title="Copy install command to clipboard">📋 Copy Cmd</button>
-                                    </div>
+                                    <details class="tech-settings">
+                                        <summary>One-time setup needed for automatic cloud scans — show steps</summary>
+                                        <div id="colab-setup-guidance-text" class="colab-setup-guidance-text">
+                                            One-time setup needed to run automatic Cloud GPU scans: install <code>uv</code> or import an offline JSON pack below.
+                                        </div>
+                                        <div class="colab-setup-cmd-row">
+                                            <code id="colab-setup-cmd-code">winget install --id=astral-sh.uv -e</code>
+                                            <button id="colab-copy-setup-btn" type="button" class="glow-btn outline mini"
+                                                title="Copy install command to clipboard">📋 Copy Cmd</button>
+                                        </div>
+                                    </details>
                                 </div>
                                 <button id="colab-run-all-btn" type="button" class="glow-btn outline mini colab-run-all-btn"
                                     title="Run all 4 Google Colab cloud research tasks sequentially with live progress">▶ Refresh All Cloud Insights</button>
@@ -489,7 +530,7 @@
                                         title="Run Walk-Forward Historical Strategy Backtester on Colab MCP">📊 Strategy Check</button>
                                 </div>
                                 <label class="colab-llm-opt" title="Opt-in 4-bit quantized 7B LLM refinement when running Filing Risk NLP on an L4 GPU">
-                                    <input type="checkbox" id="colab-sec-use-llm-toggle"> Use deeper L4 7B AI for Filing Risk
+                                    <input type="checkbox" id="colab-sec-use-llm-toggle"> Deeper AI review of filings (slower; needs a cloud GPU)
                                 </label>
                                 <div id="colab-mcp-job-status" class="status-message inline-feedback"></div>
                                 <div id="colab-evidence-panel" class="colab-evidence-panel">
@@ -834,8 +875,8 @@
     </div>
 
     <script src="portfolio.js?v=18.64"></script>
-    <script src="app.js?v=18.95"></script>
-    <script src="modern_ui.js?v=18.67"></script>
+    <script src="app.js?v=18.98"></script>
+    <script src="modern_ui.js?v=18.69"></script>
 </body>
 
 </html>

@@ -1359,8 +1359,24 @@ const ModernChat = {
                 : verdict === 'REJECT' ? 'verdict-reject'
                 : 'verdict-neutral';
             pill.className = `verdict-pill ${vClass}`;
-            pill.textContent = verdict ? `VERDICT: ${verdict}` : 'COUNCIL RESPONSE';
+            // Always label the verdict as advisory: "EXECUTE" must never read as "GEM executed a trade".
+            const friendlyVerdict = {
+                EXECUTE: 'Actionable setup',
+                HOLD: 'Hold',
+                REJECT: 'Avoid',
+            }[verdict] || (verdict ? verdict.charAt(0) + verdict.slice(1).toLowerCase().replace(/_/g, ' ') : '');
+            pill.textContent = verdict ? `AI Advisory: ${friendlyVerdict}` : 'Council response';
+            if (verdict) {
+                pill.setAttribute('data-verdict', verdict);
+                pill.title = `Council verdict: ${verdict}. Advisory only — GEM does not place broker orders.`;
+            }
             bar.appendChild(pill);
+            if (verdict) {
+                const note = document.createElement('span');
+                note.className = 'verdict-advisory-note';
+                note.textContent = 'Advisory only — no order placed';
+                bar.appendChild(note);
+            }
             if (model) {
                 const mSpan = document.createElement('span');
                 mSpan.className = 'verdict-model';
@@ -1927,7 +1943,7 @@ const ModernChat = {
         const title = document.createElement('div');
         title.className = 'proposal-title';
         title.textContent = isRule
-            ? `🧠 Proposed rule ${p.action === 'MODIFY' ? 'change' : 'addition'} (${p.rule_id || 'NEW_RULE'}): not applied yet`
+            ? `🧠 Proposed rule ${p.action === 'MODIFY' ? 'change' : 'addition'}: not applied yet`
             : `🧠 Proposed trade lesson${p.ticker && p.ticker !== 'PORTFOLIO' ? ` (${p.ticker})` : ''}: not saved yet`;
         card.appendChild(title);
 

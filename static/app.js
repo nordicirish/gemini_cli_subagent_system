@@ -70,8 +70,9 @@ function updateVolatilityRegimePill(state) {
         cls = 'regime-normal';
     }
 
-    pill.textContent = upper || '—';
+    pill.textContent = _friendlyRegimeLabel(upper);
     pill.className = `regime-pill ${cls}`;
+    pill.setAttribute('data-regime', upper || '');
     const vixVal = regimeSample && Number.isFinite(Number(regimeSample.vix_price))
         ? `VIX: ${Number(regimeSample.vix_price).toFixed(2)}`
         : '';
@@ -91,10 +92,44 @@ function updateVolatilityRegimePill(state) {
         } else if (/BULL_QUIET|NORMAL|LOW|CALM|STABLE/.test(upper)) {
             friendlyMood = 'Calm Uptrend — Normal Risk';
         } else if (upper) {
-            friendlyMood = `Market Tone: ${upper}`;
+            friendlyMood = `Market Tone: ${_friendlyRegimeLabel(upper)}`;
         }
         moodEl.textContent = friendlyMood;
     }
+}
+
+// Plain-English label for a volatility-regime enum (raw value stays in the pill's title/data-regime).
+function _friendlyRegimeLabel(upper) {
+    const raw = String(upper || '').trim().toUpperCase();
+    if (!raw) return '—';
+    const known = {
+        BEAR_VOLATILE: 'Bearish · Volatile',
+        BEAR_QUIET: 'Bearish · Quiet',
+        BULL_VOLATILE: 'Bullish · Volatile',
+        BULL_QUIET: 'Bullish · Calm',
+        ELEVATED_VOLATILITY: 'Elevated volatility',
+    };
+    if (known[raw]) return known[raw];
+    const words = raw.replace(/_/g, ' ').toLowerCase();
+    return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+// Rule IDs (ENH_72, MANDATE_36, ENH_16_E …) are for the LLM/rule engine, never the trader UI.
+// Strips them from backend-supplied prose, e.g. "(ENH_57 exempts biotechs)" -> "(exempts biotechs)".
+function _stripRuleIds(text) {
+    return String(text == null ? '' : text)
+        .replace(/\b(?:ENH|MANDATE|PROTOCOL)_\d+(?:_[A-Z0-9]+)*\b\s*(?:[:/·-]\s*)?/g, '')
+        .replace(/\(\s*\)/g, '')
+        .replace(/\(\s+/g, '(')
+        .replace(/\s+\)/g, ')')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+
+// "MANDATORY_50PCT_TRIM" -> "Mandatory 50% trim"
+function _friendlyEnum(value) {
+    const s = String(value || '').replace(/(\d+)PCT/gi, '$1%').replace(/_/g, ' ').trim().toLowerCase();
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
 }
 
 function setSidebarCollapsed(collapsed) {
@@ -419,6 +454,31 @@ function _initTableToolbarAndShortcuts() {
     if (proBtn && !proBtn._gemViewBound) {
         proBtn.addEventListener('click', () => _applyTableView('pro'));
         proBtn._gemViewBound = true;
+    }
+
+    // Metric guide popover: plain-English meaning of every table column.
+    const guideBtn = document.getElementById('metric-guide-btn');
+    const guidePop = document.getElementById('metric-guide-popover');
+    if (guideBtn && guidePop && !guideBtn._gemGuideBound) {
+        const setGuideOpen = (open) => {
+            guidePop.hidden = !open;
+            guideBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            guideBtn.classList.toggle('active', open);
+        };
+        guideBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setGuideOpen(guidePop.hidden);
+        });
+        document.addEventListener('mousedown', (e) => {
+            if (!guidePop.hidden && !guidePop.contains(e.target) && !guideBtn.contains(e.target)) setGuideOpen(false);
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !guidePop.hidden) {
+                setGuideOpen(false);
+                guideBtn.focus();
+            }
+        });
+        guideBtn._gemGuideBound = true;
     }
 
     if (filterInput && !filterInput._gemBound) {
@@ -792,6 +852,19 @@ function _displayGexFor(row) {
     return { value: liveKnown ? live : null, fromColab: false, vs };
 }
 
+// Sort value for a table column key. Derived columns sort by exactly what the cell shows:
+// Target by distance to the next level, Dealer by the displayed GEX (incl. Colab fallback).
+function _sortValueFor(row, key) {
+    if (!row) return null;
+    if (key === 'rvol') return Number(row.volume) > 0 ? row.rvol : null;
+    if (key === 'target_distance') {
+        const fib = row.fib_forecast;
+        return fib && Number(fib.next_resistance) > 0 ? fib.distance_to_next_pct : null;
+    }
+    if (key === 'dealer_gex') return _displayGexFor(row).value;
+    return row[key];
+}
+
 // Render the data table with bifurcated sections
 function renderTable(tickers, state) {
     if (!tickers || !tickers.length) return;
@@ -904,6 +977,11 @@ function renderTable(tickers, state) {
     const isNum = (v) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
     const fmt = (v, digits) => (isNum(v) ? Number(v).toFixed(digits) : '—');
     const fmtSigned = (v, digits) => (isNum(v) ? `${Number(v) > 0 ? '+' : ''}${Number(v).toFixed(digits)}%` : '—');
+    // Small ▲/▼ cue next to signed moves so direction never relies on red/green alone.
+    const _dirGlyph = (v) => {
+        if (!isNum(v) || Number(v) === 0) return '';
+        return `<span class="dir-glyph" aria-hidden="true">${Number(v) > 0 ? '▲' : '▼'}</span>`;
+    };
 
     const renderRowUnsafe = (row) => {
         const sym = row.ticker;
@@ -995,7 +1073,7 @@ function renderTable(tickers, state) {
                 || fib.daily_peak_status === 'BELOW_VWAP';
 
             let tagClass = 't1';
-            let tagPrefix = '🎯 T1';
+            let tagPrefix = 'T1';
             if (isRetracement) {
                 tagClass = 'retracement';
                 if (label.includes('HOD')) {
@@ -1015,36 +1093,36 @@ function renderTable(tickers, state) {
                 }
             } else if (label.includes('HOD') || label.includes('Peak')) {
                 tagClass = 'peak';
-                tagPrefix = '🎯 HOD';
+                tagPrefix = 'HOD';
             } else if (label.includes('T3') || label.includes('2.618')) {
                 tagClass = 't3';
-                tagPrefix = '🎯 T3';
+                tagPrefix = 'T3';
             } else if (label.includes('T2') || label.includes('1.618')) {
                 tagClass = 't2';
-                tagPrefix = '🎯 T2';
+                tagPrefix = 'T2';
             } else if (label.includes('T1') || label.includes('1.000')) {
                 tagClass = 't1';
-                tagPrefix = '🎯 T1';
+                tagPrefix = 'T1';
             } else if (label.includes('0.236') || label.includes('Early')) {
                 tagClass = 'early';
-                tagPrefix = '🎯 0.236';
+                tagPrefix = '0.236';
             } else if (label.includes('0.382') || label.includes('Conservative')) {
                 tagClass = 'conservative';
-                tagPrefix = '🎯 0.382';
+                tagPrefix = '0.382';
             } else if (label.includes('0.500') || label.includes('Mid')) {
                 tagClass = 'mid';
-                tagPrefix = '🎯 0.500';
+                tagPrefix = '0.500';
             } else if (label.includes('0.618') || label.includes('Golden')) {
                 tagClass = 'golden';
-                tagPrefix = '🎯 0.618';
+                tagPrefix = '0.618';
             } else {
                 tagClass = 't1';
-                tagPrefix = '🎯 Fib';
+                tagPrefix = 'Fib';
             }
 
             const atrCapStr = fib.daily_peak_atr ? `$${Number(fib.daily_peak_atr).toFixed(2)}` : '—';
             const peakCapStr = fib.daily_peak_target ? `$${Number(fib.daily_peak_target).toFixed(2)}` : '—';
-            const tooltip = `Mode: ${fib.mode || 'EXTENSION'} | Anchors: A=$${fib.pA || '—'}, B=$${fib.pB || '—'}, C=$${fib.pC || '—'} | Next: ${label} $${nextPrice} (${distStr}) | Cap=${peakCapStr} | ATR Cap=${atrCapStr} | Status=${fib.daily_peak_status || '—'}`;
+            const tooltip = `Next Fibonacci price level the move is heading toward (${isRetracement ? 'pullback/retracement level' : 'extension target'}). Mode: ${fib.mode || 'EXTENSION'} | Anchors: A=$${fib.pA || '—'}, B=$${fib.pB || '—'}, C=$${fib.pC || '—'} | Next: ${label} $${nextPrice} (${distStr}) | Cap=${peakCapStr} | ATR Cap=${atrCapStr} | Status=${fib.daily_peak_status || '—'}`;
             const safeFibTip = _escAlertHtml(tooltip);
             if (fib.daily_peak_target && Number(fib.daily_peak_target) > 0) {
                 const peakTarget = `$${Number(fib.daily_peak_target).toFixed(2)}`;
@@ -1055,7 +1133,7 @@ function renderTable(tickers, state) {
                         : (fib.daily_peak_status === 'PULLBACK' ? 'Pullback' : 'At HOD');
                     fibTargetHtml = `
                         <div class="fib-target-cell-wrapper">
-                            <span class="fib-target-tag ${tagClass}" title="${safeFibTip}">${tagPrefix} $${nextPrice} (${distStr})</span>
+                            <span class="fib-target-tag ${tagClass}" title="${safeFibTip}"><span class="fib-lvl">${tagPrefix}</span> <strong>$${nextPrice}</strong> <span class="fib-dist">(${distStr})</span></span>
                             <div class="fib-peak-indicator" title="Session HOD / ATR Cap: ${peakTarget}">HOD Cap: <strong>${peakTarget}</strong> <span class="fib-status-pill pullback">${statusLabel}</span> ${atrConfBadge}</div>
                         </div>
                     `;
@@ -1065,13 +1143,13 @@ function renderTable(tickers, state) {
                         : '';
                     fibTargetHtml = `
                         <div class="fib-target-cell-wrapper">
-                            <span class="fib-target-tag ${tagClass}" title="${safeFibTip}">${tagPrefix} $${nextPrice} (${distStr})</span>
+                            <span class="fib-target-tag ${tagClass}" title="${safeFibTip}"><span class="fib-lvl">${tagPrefix}</span> <strong>$${nextPrice}</strong> <span class="fib-dist">(${distStr})</span></span>
                             <div class="fib-peak-indicator" title="ATR-Capped Intraday Target: ${peakTarget}">Target Cap: <strong>${peakTarget}</strong>${exhaustedPill} ${atrConfBadge}</div>
                         </div>
                     `;
                 }
             } else {
-                fibTargetHtml = `<span class="fib-target-tag ${tagClass}" title="${safeFibTip}">${tagPrefix} $${nextPrice} (${distStr})</span>`;
+                fibTargetHtml = `<span class="fib-target-tag ${tagClass}" title="${safeFibTip}"><span class="fib-lvl">${tagPrefix}</span> <strong>$${nextPrice}</strong> <span class="fib-dist">(${distStr})</span></span>`;
             }
         }
 
@@ -1085,12 +1163,15 @@ function renderTable(tickers, state) {
         const hasVwap = isNum(row.vwap) && vwapNum > 0;
         let vwapClass = 'num-col text-muted';
         let vwapTitle = '';
+        let vwapGlyph = '';
         if (hasVwap) {
             if (isNum(row.price)) {
                 const px = Number(row.price);
                 const vwapDist = ((px - vwapNum) / vwapNum) * 100;
                 vwapClass = px >= vwapNum ? 'num-col text-green' : 'num-col text-red';
-                vwapTitle = ` title="${vwapDist >= 0 ? '+' : ''}${vwapDist.toFixed(2)}% vs VWAP"`;
+                // Glyph = where price sits vs VWAP (colour alone is not enough for colour-blind users).
+                vwapGlyph = `<span class="dir-glyph" aria-hidden="true">${px >= vwapNum ? '▲' : '▼'}</span>`;
+                vwapTitle = ` title="Price is ${vwapDist >= 0 ? '+' : ''}${vwapDist.toFixed(2)}% ${px >= vwapNum ? 'above' : 'below'} VWAP (${px >= vwapNum ? 'buyers' : 'sellers'} in control)"`;
             } else {
                 vwapClass = 'num-col text-white';
             }
@@ -1131,14 +1212,14 @@ function renderTable(tickers, state) {
                     <span class="ticker-symbol ${dayColor}">${safeSym}</span>
                     ${scoutIndicator}${heldPlanHtml}${secBadgeHtml}${secNlpBadgeHtml}
                 </td>
-                <td class="num-col ${pClass}">${p}</td>
-                <td class="num-col ${dayColor}">${fmtSigned(row.session_change_pct, 2)}</td>
+                <td class="num-col ${pClass}">${isNum(row.price) ? `$${p}` : p}</td>
+                <td class="num-col ${dayColor}">${_dirGlyph(row.session_change_pct)}${fmtSigned(row.session_change_pct, 2)}</td>
                 <td class="num-col pro-col ${gapColor}">${fmtSigned(row.gap_percent, 2)}</td>
                 <td class="num-col pro-col">${formatVol(row.volume)}</td>
                 <td class="num-col pro-col ${rvolClass}"${rvolStyle} title="Relative Volume vs 20d avg (time-paced)">${rvolDisplay}</td>
                 <td class="num-col pro-col">${isNum(row.atr_percent) ? `${fmt(row.atr_percent, 2)}%` : '—'}</td>
                 <td class="num-col pro-col ${rsiColor}">${fmt(row.rsi, 1)}</td>
-                <td class="pro-col ${vwapClass}"${vwapTitle}>${hasVwap ? fmt(row.vwap, 2) : '—'}</td>
+                <td class="pro-col ${vwapClass}"${vwapTitle}>${hasVwap ? `${vwapGlyph}$${fmt(row.vwap, 2)}` : '—'}</td>
                 <td class="pro-col">${macdHtml}</td>
                 <td>${trendHtml}</td>
                 <td>${fibTargetHtml}</td>
@@ -1160,15 +1241,22 @@ function renderTable(tickers, state) {
                     if (displayGex > 0.0005) dpClass = 'dealer-long';
                     else if (displayGex < -0.0005) dpClass = 'dealer-short';
 
-                    let vsTitleAttr = '';
+                    const gexMeaning = displayGex > 0
+                        ? 'Positive GEX: dealer hedging tends to calm price swings.'
+                        : (displayGex < 0 ? 'Negative GEX: dealer hedging tends to amplify moves.' : 'Neutral dealer positioning.');
+                    let vsTitleAttr = ` title="${gexMeaning}"`;
                     let vsTagHtml = '';
                     if (vs) {
                         const staleTxt = vs.stale ? ' [STALE]' : '';
                         const srcNote = fromColab ? ' · using Colab multi-expiry GEX pre-market' : '';
-                        const tip = `Vol Surface (${vs.dealer_flow_regime || 'NEUTRAL'}${staleTxt}): Flip $${Number(vs.gamma_flip_multi_expiry || 0).toFixed(2)} | Vanna ${Number(vs.vanna_exposure || 0).toFixed(2)} | Charm ${Number(vs.charm_decay_bias || 0).toFixed(2)} | 25d Skew ${Number(vs.svi_skew_25d || 0).toFixed(2)}%${srcNote}`;
+                        const tip = `${gexMeaning} Vol Surface (${vs.dealer_flow_regime || 'NEUTRAL'}${staleTxt}): Flip $${Number(vs.gamma_flip_multi_expiry || 0).toFixed(2)} | Vanna ${Number(vs.vanna_exposure || 0).toFixed(2)} | Charm ${Number(vs.charm_decay_bias || 0).toFixed(2)} | 25d Skew ${Number(vs.svi_skew_25d || 0).toFixed(2)}%${srcNote}`;
                         vsTitleAttr = ` title="${_escAlertHtml(tip)}"`;
-                        const tagLabel = vs.stale ? 'STALE' : (Number(vs.vanna_exposure || 0) >= 0 ? 'V+' : 'V-');
-                        vsTagHtml = `<span class="vol-surface-tag${vs.stale ? ' is-stale' : ''}">${tagLabel}</span>`;
+                        const vannaUp = Number(vs.vanna_exposure || 0) >= 0;
+                        const tagLabel = vs.stale ? 'STALE' : (vannaUp ? 'V+' : 'V-');
+                        const tagTip = vs.stale
+                            ? 'Options volatility-surface data is out of date'
+                            : `Vanna flow ${vannaUp ? 'positive' : 'negative'}: how dealer hedging shifts as options volatility changes (from the Colab volatility surface)`;
+                        vsTagHtml = `<span class="vol-surface-tag${vs.stale ? ' is-stale' : ''}" title="${tagTip}">${tagLabel}</span>`;
                     }
 
                     const gexText = (Math.abs(displayGex) > 0 && Math.abs(displayGex) < 0.001)
@@ -1214,8 +1302,8 @@ function renderTable(tickers, state) {
             if (key === 'ticker') {
                 return String(a.ticker || '').localeCompare(String(b.ticker || '')) * mult;
             }
-            const rawA = key === 'rvol' && !(Number(a.volume) > 0) ? null : a[key];
-            const rawB = key === 'rvol' && !(Number(b.volume) > 0) ? null : b[key];
+            const rawA = _sortValueFor(a, key);
+            const rawB = _sortValueFor(b, key);
             const numA = rawA !== null && rawA !== undefined && rawA !== '' ? Number(rawA) : NaN;
             const numB = rawB !== null && rawB !== undefined && rawB !== '' ? Number(rawB) : NaN;
             const validA = Number.isFinite(numA);
@@ -1227,9 +1315,10 @@ function renderTable(tickers, state) {
         });
     };
 
-    const heldRows = sortGroupRows(groups.held.filter(matchesFilter));
+    const heldRows = _tableFilterMode === 'watchlist' ? [] : sortGroupRows(groups.held.filter(matchesFilter));
     const watchRows = _tableFilterMode === 'held' ? [] : sortGroupRows(groups.watchlist.filter(matchesFilter));
-    const scoutRows = _tableFilterMode === 'held' ? [] : sortGroupRows(groups.scouts.filter(matchesFilter));
+    const scoutRows = (_tableFilterMode === 'held' || _tableFilterMode === 'watchlist')
+        ? [] : sortGroupRows(groups.scouts.filter(matchesFilter));
 
     const fullSpan = _visibleTableColCount();
     const renderHeader = (label, cls = '') => `
@@ -1591,7 +1680,7 @@ async function pollData() {
                     const icon = sev === 'critical' ? '🚨' : (sev === 'warning' ? '⚠️' : '🔔');
                     const evId = _escAlertHtml(ev.event_id || '');
                     const evTicker = _escAlertHtml(String(ev.ticker || '').trim().toUpperCase());
-                    const evMsg = _escAlertHtml(ev.message || `${ev.ticker || ''} triggered`);
+                    const evMsg = _escAlertHtml(_stripRuleIds(ev.message || `${ev.ticker || ''} triggered`));
                     alertsHtml += `<div class="alert-item ${sev}" data-event-id="${evId}" data-ticker="${evTicker}"><span>${icon} ${evMsg}</span><button type="button" class="alert-dismiss-btn" onclick="ackAlertEvent('${evId}')" title="Acknowledge alert">&times;</button></div>`;
                     alertKeys.push(`ev:${ev.event_id || evTicker}:${sev}:${evMsg}`);
                     _notifyNewAlertEvent(ev);
@@ -1943,7 +2032,7 @@ function renderAlertRules(rules) {
     container.innerHTML = list.map((r) => {
         const id = _escAlertHtml(r.rule_id || '');
         const ticker = _escAlertHtml(r.ticker || '');
-        const label = _escAlertHtml(r.label || '');
+        const label = _escAlertHtml(_stripRuleIds(r.label || ''));
         const src = (r.source === 'council' || r.source === 'sentinel') ? r.source : 'manual';
         const metric = _escAlertHtml(r.metric || 'price');
         const op = _escAlertHtml(r.op || '>=');
@@ -2279,17 +2368,19 @@ function _buildSecNlpBadgeHtml(sym) {
     const model = String(info.model_used || 'FinBERT');
 
     let cls = 'sec-nlp-badge';
-    let label = `NLP ${dilution.toFixed(0)}`;
+    let label = `Filing risk ${dilution.toFixed(0)}`;
     if (goingConcern || overhang || dilution >= 60) {
         cls += ' risk-high';
-        label = `NLP D:${dilution.toFixed(0)}`;
     } else if (sentiment >= 0.35) {
         cls += ' catalyst-pos';
-        label = `NLP +${sentiment.toFixed(2)}`;
+        label = `Filings positive +${sentiment.toFixed(2)}`;
     }
     if (info.stale) cls += ' is-stale';
 
-    const tip = `SEC NLP (${model}${staleTxt}): Dilution ${dilution.toFixed(1)}/100 | Sentiment ${sentiment.toFixed(2)} | Overhang=${overhang} | GoingConcern=${goingConcern}${snipPreview}`;
+    const flags = [overhang ? 'share-offering overhang' : '', goingConcern ? 'going-concern warning' : ''].filter(Boolean).join(', ');
+    const tip = `SEC filing analysis: dilution risk ${dilution.toFixed(1)}/100 (higher = more likely to issue new shares)`
+        + ` · catalyst tone ${sentiment.toFixed(2)}${flags ? ` · flags: ${flags}` : ''}`
+        + ` · model ${model}${staleTxt}${snipPreview}`;
     return `<span class="${cls}" title="${_escAlertHtml(tip)}">${_escAlertHtml(label)}</span>`;
 }
 
@@ -2355,7 +2446,7 @@ function updateMacroCalendarPill(macroCal) {
     }
     if (macroCal.shield_active) {
         pill.className = 'macro-cal-pill macro-cal-shield';
-        pill.textContent = `🛡️ ${shortName} ${timeTag} (-50% stops)`.trim();
+        pill.textContent = `🛡️ ${shortName} ${timeTag} · stops tightened`.trim();
     } else {
         pill.className = 'macro-cal-pill macro-cal-clear';
         pill.textContent = `📅 ${shortName} ${timeTag}`.trim();
@@ -2363,7 +2454,7 @@ function updateMacroCalendarPill(macroCal) {
     const upcomingLines = (Array.isArray(macroCal.upcoming_events) ? macroCal.upcoming_events : [])
         .map((e) => `${e.name}: ${e.date} ${e.time_et} ET (${e.hours_away}h)`)
         .join(' | ');
-    pill.title = `${macroCal.shield_active ? 'ENH_259 Shield ACTIVE (-50% stops) · ' : ''}${upcomingLines}`;
+    pill.title = `${macroCal.shield_active ? 'Macro shield active: trailing-stop distance cut by 50% ahead of this event · ' : ''}${upcomingLines}`;
 }
 
 function renderPortfolioCommandStrip(analytics) {
@@ -2457,7 +2548,7 @@ function renderPortfolioCommandStrip(analytics) {
     if (vetoEl) {
         vetoEl.textContent = String(vetoes.length);
         vetoEl.className = vetoes.length > 0 ? 'cmd-veto-badge active' : 'cmd-veto-badge clear';
-        vetoEl.title = vetoes.length > 0 ? vetoes.map(v => `${v.rule_id}: ${v.reason || ''}`).join(' | ') : 'No global risk vetoes active';
+        vetoEl.title = vetoes.length > 0 ? vetoes.map(v => _stripRuleIds(v.reason || v.action || 'Risk guard active')).join(' | ') : 'No global risk vetoes active';
     }
 
     if (actionsEl) {
@@ -2507,9 +2598,8 @@ function renderQuantAnalyticsPanel(analytics, backtest) {
 
     const vetoesHtml = vetoes.length
         ? vetoes.map((v) => {
-            const rid = _escAlertHtml(v.rule_id || 'VETO');
-            const msg = _escAlertHtml(v.reason || v.action || '');
-            return `<div class="quant-veto-item"><strong>${rid}</strong> ${msg}</div>`;
+            const msg = _escAlertHtml(_stripRuleIds(v.reason || _friendlyEnum(v.action) || 'Risk guard active'));
+            return `<div class="quant-veto-item">⚠️ ${msg}</div>`;
         }).join('')
         : '<div class="quant-ok-line">✓ No active global vetoes</div>';
 
@@ -2521,7 +2611,7 @@ function renderQuantAnalyticsPanel(analytics, backtest) {
             const t50 = tr['50pct'];
             const mand = Array.isArray(p.triggered_mandates) ? p.triggered_mandates : [];
             const mandBadge = mand.length
-                ? ` <span class="quant-mandate-pill">${mand.map(m => _escAlertHtml(m.rule_id || '')).join(', ')}</span>`
+                ? ` <span class="quant-mandate-pill" title="${_escAlertHtml(mand.map(m => _stripRuleIds(m.detail || '')).filter(Boolean).join(' | '))}">${_escAlertHtml([...new Set(mand.map(m => _friendlyEnum(m.action) || 'Risk rule triggered'))].join(', '))}</span>`
                 : '';
             const planBtn = `<button type="button" class="quant-plan-btn" onclick="openExecutionPlanModal('${sym}')" title="Open Execution &amp; Risk Ticket">📋 Plan</button>`;
             if (!t25 && !t50) {
@@ -2675,7 +2765,7 @@ async function openExecutionPlanModal(ticker, _retryAttempt = 0) {
         const stopPriceStr = stop.effective_stop_price != null ? `$${Number(stop.effective_stop_price).toFixed(2)}` : '—';
         const anchorStr = stop.anchor_price != null ? `$${Number(stop.anchor_price).toFixed(2)}` : '—';
         const armStopBtn = stop.effective_stop_price != null
-            ? `<button type="button" class="exec-mini-btn arm" onclick="armQuickTriggerFromPlan('${pSym}', '<=', ${Number(stop.effective_stop_price)}, 'MANDATE_36 Trailing Stop')">🔔 Arm Stop (${stopPriceStr})</button>`
+            ? `<button type="button" class="exec-mini-btn arm" onclick="armQuickTriggerFromPlan('${pSym}', '<=', ${Number(stop.effective_stop_price)}, 'Trailing Stop')">🔔 Arm Stop (${stopPriceStr})</button>`
             : '';
 
         let peakHtml = '';
@@ -2702,17 +2792,17 @@ async function openExecutionPlanModal(ticker, _retryAttempt = 0) {
 
             peakHtml = `
                 <div class="exec-ticket-section">
-                    <div class="quant-section-title">🎯 Daily Peak Window &amp; Exhaustion Predictor (${Number(prof.sessions_analyzed || 0)}d 5m RTH)</div>
+                    <div class="quant-section-title">When does ${pSym} usually top out today? <span class="rule-ref-tag" title="Daily peak window &amp; exhaustion predictor, from ${Number(prof.sessions_analyzed || 0)} days of 5-minute regular-hours bars">${Number(prof.sessions_analyzed || 0)}d history</span></div>
                     <div class="peak-stat-grid">
-                        <div><span>Median HOD</span><strong>${_escAlertHtml(prof.median_peak_time_et || '—')} ET</strong></div>
+                        <div><span>Typical high of day</span><strong>${_escAlertHtml(prof.median_peak_time_et || '—')} ET</strong></div>
                         <div><span>Peak Window</span><strong>${_escAlertHtml(prof.peak_window_start_et || '—')}–${_escAlertHtml(prof.peak_window_end_et || '—')}</strong></div>
-                        <div><span>Before 10:30</span><strong>${prof.pct_peaking_before_1030 != null ? `${prof.pct_peaking_before_1030}%` : '—'}</strong></div>
-                        <div><span>Avg HOD Fade</span><strong>${prof.avg_fade_from_peak_pct != null ? `${prof.avg_fade_from_peak_pct}%` : '—'}</strong></div>
+                        <div><span>Days peaking before 10:30</span><strong>${prof.pct_peaking_before_1030 != null ? `${prof.pct_peaking_before_1030}%` : '—'}</strong></div>
+                        <div><span>Avg drop after the high</span><strong>${prof.avg_fade_from_peak_pct != null ? `${prof.avg_fade_from_peak_pct}%` : '—'}</strong></div>
                     </div>
                     <div class="exec-kv-row" style="margin-top:6px;">
                         <span>Peak Zone: <strong>${zoneTxt}</strong></span>
-                        <span>Front-Run Limit: <strong>${frLim ? `$${frLim}` : '—'}</strong></span>
-                        <span>Exhaustion: <strong>${exScore}/100 (${_escAlertHtml(exState)})</strong></span>
+                        <span title="Sell limit set 0.25% below the predicted peak so it fills before the top">Early sell limit: <strong>${frLim ? `$${frLim}` : '—'}</strong></span>
+                        <span title="0–100: how close today's move is to running out of steam">Exhaustion: <strong>${exScore}/100 (${_escAlertHtml(exState)})</strong></span>
                     </div>
                     <div class="peak-meter-track"><div class="peak-meter-fill ${exCls}" style="width:${Math.max(4, Math.min(100, exScore))}%"></div></div>
                     ${sigChips ? `<div class="peak-signal-chips">${sigChips}</div>` : ''}
@@ -2757,7 +2847,7 @@ async function openExecutionPlanModal(ticker, _retryAttempt = 0) {
                     const ordTxt = `SELL ${t.sell_shares} ${pSym} LMT $${sweepLim}`;
                     return `
                         <div class="exec-sweep-row">
-                            <span><strong>${lbl}:</strong> ${t.sell_shares} sh @ $${sweepLim} (Sweep -0.50%)</span>
+                            <span><strong>${lbl}:</strong> ${t.sell_shares} sh @ $${sweepLim} <span class="text-muted" title="Limit set 0.50% below the current price so the trim fills quickly">(0.50% below price)</span></span>
                             <button type="button" class="exec-mini-btn" onclick="copyExecutionOrderText('${_escAlertHtml(ordTxt)}', this)">📋 Copy Order</button>
                         </div>`;
                 }).join('')
@@ -2765,37 +2855,52 @@ async function openExecutionPlanModal(ticker, _retryAttempt = 0) {
 
         const directivesBanner = directives.length
             ? `<div class="exec-ticket-section alert">
-                    <div class="quant-section-title">🚨 Triggered Risk Directives</div>
-                    ${directives.map(d => `<div class="quant-veto-item"><strong>${_escAlertHtml(d.rule_id)}</strong>: ${_escAlertHtml(d.order_text)}</div>`).join('')}
+                    <div class="quant-section-title">🚨 Risk rules triggered right now</div>
+                    ${directives.map(d => `<div class="quant-veto-item">${_escAlertHtml(_stripRuleIds(d.order_text))}</div>`).join('')}
                </div>`
             : '';
 
+        const firstTargets = ladder.slice(0, 2)
+            .map((lvl) => Number(lvl.limit_usd))
+            .filter((v) => Number.isFinite(v) && v > 0)
+            .map((v) => `$${v.toFixed(2)}`);
+        const summaryParts = [];
+        if (stop.effective_stop_price != null) summaryParts.push(`Protective stop at <strong>${stopPriceStr}</strong>.`);
+        if (firstTargets.length) summaryParts.push(`Scale-out sell limits at <strong>${firstTargets.join(' / ')}</strong>.`);
+        if (macroCal.shield_active) summaryParts.push('Stop is tightened ahead of a major macro event.');
+        const summaryHtml = `
+            <div class="exec-plan-summary">
+                ${summaryParts.length ? `<div>${summaryParts.join(' ')}</div>` : ''}
+                <div class="exec-advisory-note">Advisory plan only — GEM never places broker orders. Arm an alert or copy an order to act on it yourself.</div>
+            </div>`;
+
         bodyEl.innerHTML = `
+            ${summaryHtml}
             ${directivesBanner}
             ${peakHtml}
             <div class="exec-ticket-section">
-                <div class="quant-section-title">🛡️ MANDATE_36 Trailing Stop Audit${macroCal.shield_active ? ' (ENH_259 -50% Active)' : ''}</div>
+                <div class="quant-section-title">🛡️ Trailing stop protection${macroCal.shield_active ? ' <span class="rule-ref-tag" title="Macro shield: stop distance cut by 50% before a major economic release">stop tightened 50%</span>' : ''}</div>
                 <div class="exec-kv-row">
-                    <span>Anchor: <strong>${anchorStr}</strong></span>
-                    <span>Dist: <strong>${stop.pct_distance_from_anchor != null ? `${Number(stop.pct_distance_from_anchor).toFixed(2)}%` : '—'}</strong></span>
+                    <span title="Price the trailing stop is measured from">Anchor: <strong>${anchorStr}</strong></span>
+                    <span>Distance from anchor: <strong>${stop.pct_distance_from_anchor != null ? `${Number(stop.pct_distance_from_anchor).toFixed(2)}%` : '—'}</strong></span>
                     <span>Stop (${stop.effective_stop_pct || 2.0}%): <strong>${stopPriceStr}</strong></span>
                     ${armStopBtn}
                 </div>
             </div>
             <div class="exec-ticket-section">
-                <div class="quant-section-title">🎯 ENH_96 Fibonacci Front-Run Limit Ladder (-0.25%)</div>
+                <div class="quant-section-title">🎯 Scale-out profit targets <span class="text-muted">(limits 0.25% below each Fibonacci level)</span></div>
                 <table class="exec-ticket-table">
                     <thead><tr><th>Tier</th><th>Shares</th><th>Limit</th><th>Est. Proceeds</th><th>Actions</th></tr></thead>
                     <tbody>${ladderRows}</tbody>
                 </table>
             </div>
             <div class="exec-ticket-section">
-                <div class="quant-section-title">⚡ Defensive Sweep Trim Tickets</div>
+                <div class="quant-section-title">⚡ Defensive trim orders</div>
                 ${sweepRows}
             </div>
             <div class="exec-ticket-section">
-                <div class="quant-section-title">💶 MANDATE_06 Cash Reconciliation</div>
-                <div class="quant-tranche-row">${_escAlertHtml(cash.proof || 'Cash proof unavailable')}</div>
+                <div class="quant-section-title">💶 Cash balance check</div>
+                <div class="quant-tranche-row">${_escAlertHtml(_stripRuleIds(cash.proof || 'Cash proof unavailable'))}</div>
             </div>
         `;
         if (needsLivePrice && _retryAttempt < 8 && overlay.classList.contains('active') && _execModalActiveSym === sym) {
@@ -3133,12 +3238,11 @@ function renderActionBrief(state, analytics) {
     // 1. Global Risk Vetoes
     const vetoes = Array.isArray(data.global_vetoes) ? data.global_vetoes : [];
     vetoes.slice(0, 2).forEach((v) => {
-        const rid = _escAlertHtml(v.rule_id || 'Risk Guard');
-        const msg = _escAlertHtml(v.reason || v.action || 'Market risk guard is active — review stops before adding risk.');
+        const msg = _escAlertHtml(_stripRuleIds(v.reason || _friendlyEnum(v.action) || 'Market risk guard is active — review stops before adding risk.'));
         items.push({
             rank: 1,
             severity: 'severity-critical',
-            title: `⚠️ Risk Alert Active (${rid})`,
+            title: '⚠️ Risk guard active',
             desc: msg,
             btnLabel: 'Ask AI Council',
             action: 'chat',
@@ -3614,17 +3718,20 @@ async function fetchColabMcpStatus() {
         const ready = Boolean(tr.ready);
         const mode = String(tr.mode || 'cli');
         const linked = Boolean(data && data.session && data.session.browser_linked);
-        if (mode === 'cli') {
-            pillEl.textContent = ready ? 'Colab: Ready (cli)' : 'Colab: Setup (cli)';
-        } else {
-            pillEl.textContent = ready
-                ? `MCP: Ready (${mode})${linked ? ' · Colab linked ✓' : ''}`
-                : `MCP: Setup (${mode})`;
-        }
+        // Trader-facing label stays plain; the transport mode (cli / stdio / …) lives in the tooltip.
+        pillEl.textContent = ready
+            ? `Cloud: Ready${linked && mode !== 'cli' ? ' · Colab linked ✓' : ''}`
+            : 'Cloud: Setup needed';
+        pillEl.setAttribute('data-transport-mode', mode);
         pillEl.className = `colab-mcp-transport-pill${ready ? ' is-ready' : ''}`;
-        if (tr.setup_hint) pillEl.title = (linked && mode !== 'cli')
-            ? `${tr.setup_hint} Google Colab tab is linked for this server session — keep it open to avoid reconnecting.`
-            : tr.setup_hint;
+        const modeNote = `Connection mode: ${mode}.`;
+        if (tr.setup_hint) {
+            pillEl.title = (linked && mode !== 'cli')
+                ? `${modeNote} ${tr.setup_hint} Google Colab tab is linked for this server session — keep it open to avoid reconnecting.`
+                : `${modeNote} ${tr.setup_hint}`;
+        } else {
+            pillEl.title = modeNote;
+        }
         renderColabProgressAndSetup(data);
         renderActionBrief(_lastRenderState, _lastQuantAnalytics);
 
@@ -3906,12 +4013,12 @@ async function fetchBacktestEvidence() {
         const metricsLine = `Sharpe ${Number(b.sharpe_ratio || 0).toFixed(2)} -> ${Number(c.sharpe_ratio || 0).toFixed(2)} | DD ${Number(b.max_drawdown_pct || 0).toFixed(1)}% -> ${Number(c.max_drawdown_pct || 0).toFixed(1)}% | Hit ${Number(c.hit_rate_pct || 0).toFixed(1)}% | Stab ${Number(data.stability_score || 0).toFixed(2)}${staleTxt}`;
         const deltasHtml = deltas.length
             ? deltas.map((d) => {
-                const rid = _escAlertHtml(String(d.rule_id || ''));
-                const param = _escAlertHtml(String(d.parameter || ''));
+                // Rule IDs stay out of the UI (they remain in the copied LLM proposal text below).
+                const param = _escAlertHtml(_friendlyEnum(String(d.parameter || '')));
                 const curV = _escAlertHtml(String(d.current_value ?? ''));
                 const propV = _escAlertHtml(String(d.proposed_value ?? ''));
-                const rat = _escAlertHtml(String(d.rationale || ''));
-                return `<div class="colab-evidence-delta" title="${rat}"><strong>${rid}</strong> · <code>${param}</code>: ${curV} → <strong>${propV}</strong></div>`;
+                const rat = _escAlertHtml(_stripRuleIds(String(d.rationale || '')));
+                return `<div class="colab-evidence-delta" title="${rat}"><code>${param}</code>: ${curV} → <strong>${propV}</strong></div>`;
             }).join('')
             : '<div class="colab-scout-empty">Baseline parameters remain optimal across OOS folds.</div>';
 

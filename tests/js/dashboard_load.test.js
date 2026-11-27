@@ -486,7 +486,8 @@ async function main() {
     check('Package A: regime pill, ticker-first macro HUD, and collapsible tools sidebar', () => {
         const pill = window.document.getElementById('volatility-regime-pill');
         assert(pill, 'volatility-regime-pill missing');
-        assert.strictEqual(pill.textContent.trim(), 'ELEVATED');
+        assert.strictEqual(pill.textContent.trim(), 'Elevated');
+        assert.strictEqual(pill.getAttribute('data-regime'), 'ELEVATED');
         assert(pill.classList.contains('regime-elevated'), 'expected regime-elevated class');
 
         const macroTicker = window.document.querySelector('#macro-card-SPY .macro-ticker');
@@ -526,7 +527,9 @@ async function main() {
         const aiMsgs = [...window.document.querySelectorAll('.modern-message.ai')];
         const msg = aiMsgs[aiMsgs.length - 1];
         assert(msg.firstElementChild && msg.firstElementChild.classList.contains('chat-top-brief'), '.chat-top-brief should be prepended first');
-        assert.strictEqual(msg.querySelector('.verdict-pill').textContent.trim(), 'VERDICT: HOLD');
+        assert.strictEqual(msg.querySelector('.verdict-pill').textContent.trim(), 'AI Advisory: Hold');
+        assert.strictEqual(msg.querySelector('.verdict-pill').getAttribute('data-verdict'), 'HOLD');
+        assert(msg.querySelector('.verdict-advisory-note'), 'verdict must carry an advisory-only note');
         assert(msg.querySelector('.chat-callout-alert').textContent.includes('VIX elevated'));
         const pills = [...msg.querySelectorAll('.chat-callout-reco .action-pill')].map((p) => p.textContent.trim());
         assert.deepStrictEqual(pills, ['TRIM', 'HOLD']);
@@ -576,7 +579,7 @@ async function main() {
         const quantPanel = window.document.getElementById('analytics-quant-panel');
         assert(quantPanel, 'analytics-quant-panel missing');
         assert(quantPanel.textContent.includes('ELEVATED_VOLATILITY'), 'regime missing from quant panel');
-        assert(quantPanel.textContent.includes('ENH_72'), 'global veto missing from quant panel');
+        assert(quantPanel.textContent.includes('VIX >= 20 new-risk long veto') && !quantPanel.textContent.includes('ENH_72'), 'global veto should show its reason without the rule ID');
         assert(quantPanel.textContent.includes('NVDA') && quantPanel.textContent.includes('2sh'), 'NVDA trim sizing missing from quant panel');
         assert(quantPanel.textContent.includes('60.0%'), 'backtest hit rate missing from quant panel');
 
@@ -626,7 +629,8 @@ async function main() {
             precomputed_analytics: { regime: { volatility_state: 'BEAR_VOLATILE' } },
         });
         const pill = window.document.getElementById('volatility-regime-pill');
-        assert.strictEqual(pill.textContent.trim(), 'BEAR_VOLATILE');
+        assert.strictEqual(pill.textContent.trim(), 'Bearish · Volatile');
+        assert.strictEqual(pill.getAttribute('data-regime'), 'BEAR_VOLATILE');
         assert(pill.classList.contains('regime-crisis'), 'BEAR_VOLATILE should map to regime-crisis');
         assert(window.document.getElementById('chart-exec-plan-btn'), 'chart-exec-plan-btn missing from chart modal');
     });
@@ -731,7 +735,7 @@ async function main() {
     window.fetch = origFetch;
     check('Improvement proposals: review rule proposal renders an approval card and Apply sends the edited text', () => {
         assert(impCard, 'improvement card for imp-1 not rendered');
-        assert(impTitleBefore.includes('ENH_1') && impTitleBefore.includes('not applied'), `pending title was: ${impTitleBefore}`);
+        assert(!impTitleBefore.includes('ENH_1') && impTitleBefore.includes('not applied'), `pending title was: ${impTitleBefore}`);
         assert(applyBody && JSON.parse(applyBody).text === 'Halve size before PCE (edited).', `apply body was ${applyBody}`);
         assert.strictEqual(impCard.dataset.state, 'applied');
         assert(impCard.textContent.includes('A-1'), 'applied card should show the amendment id');
@@ -901,7 +905,9 @@ async function main() {
         const pill = window.document.getElementById('colab-mcp-transport-status');
         const btnIds = ['colab-run-vol-surface-btn', 'colab-run-quant-scout-btn', 'colab-run-sec-nlp-btn', 'colab-run-walk-forward-btn'];
         btnIds.forEach((id) => assert(window.document.getElementById(id), `Missing ${id}`));
-        assert(pill && pill.textContent.includes('MCP: Setup (stdio)'), `Unexpected pill: ${pill && pill.textContent}`);
+        assert(pill && pill.textContent.includes('Cloud: Setup needed'), `Unexpected pill: ${pill && pill.textContent}`);
+        assert.strictEqual(pill.getAttribute('data-transport-mode'), 'stdio');
+        assert((pill.getAttribute('title') || '').includes('Connection mode: stdio'), 'transport mode should move into the tooltip');
 
         const vsTag = window.document.querySelector('.vol-surface-tag');
         assert(vsTag && vsTag.textContent === 'V+', `Expected V+ vol-surface tag, got ${vsTag && vsTag.textContent}`);
@@ -927,7 +933,7 @@ async function main() {
     }
     check('Stage M3: SEC NLP risk badge escapes snippets and L4 7B LLM toggle sends use_llm option', () => {
         const nlpBadge = window.document.querySelector('.sec-nlp-badge.risk-high');
-        assert(nlpBadge && nlpBadge.textContent === 'NLP D:72', `Unexpected SEC NLP badge: ${nlpBadge && nlpBadge.textContent}`);
+        assert(nlpBadge && nlpBadge.textContent === 'Filing risk 72', `Unexpected SEC NLP badge: ${nlpBadge && nlpBadge.textContent}`);
         assert(nlpBadge.getAttribute('title').includes('424B5 shelf'), 'Expected escaped snippet in SEC NLP tooltip');
         const secPost = colabJobPosts.find((p) => p.path === '/api/colab/jobs/sec_nlp');
         assert(secPost && secPost.body && secPost.body.options && secPost.body.options.use_llm === true, 'Expected use_llm:true option on SEC NLP POST');
@@ -939,7 +945,7 @@ async function main() {
         assert(panel && sum && copyBtn, 'Missing Stage M4 Evidence Pack elements');
         assert(panel.textContent.includes('Read-Only'), 'Missing Protocol 06 Read-Only notice');
         assert(sum.textContent.includes('1.18 -> 1.44'), `Expected Sharpe comparison, got: ${sum.textContent}`);
-        assert(sum.textContent.includes('ENH_104'), 'Expected ENH_104 delta row');
+        assert(sum.textContent.includes('Trailing stop vwap ext pct') && !sum.textContent.includes('ENH_104'), 'Expected delta row by parameter, without rule ID');
         assert.strictEqual(sum.querySelectorAll('img, script').length, 0, 'XSS elements must never render in Evidence Pack');
     });
 
@@ -1356,6 +1362,91 @@ async function main() {
         assert.strictEqual(s1Exec.getAttribute('role'), 'dialog');
         assert.strictEqual(execClosed, true, 'Esc should close the Execution Ticket');
         assert.strictEqual(chartStillOpen, true, 'Esc on the ticket must not also close the chart');
+    });
+
+    // ── UX Stage 2: table comprehension & plain-English labels ──
+    const s2State = JSON.parse(JSON.stringify(API['/api/data']));
+    window.renderTable(s2State.tickers, s2State);
+    const s2Ths = [...window.document.querySelectorAll('#data-table thead th')];
+    const s2RowOf = (sym) => [...window.document.querySelectorAll('#data-table tbody tr')]
+        .find((r) => !r.matches('tr[data-section-row]') && (r.querySelector('.ticker-symbol') || r.cells[0]).textContent.trim() === sym);
+    const s2Nvda = s2RowOf('NVDA');
+    check('Stage 2: 14 columns preserved, Dealer (GEX) label, $ prices and ▲/▼ direction cues', () => {
+        assert.strictEqual(s2Ths.length, 14, 'must keep all 14 columns');
+        assert.strictEqual(window.document.querySelectorAll('#data-table thead th.num-col').length, 8);
+        assert(s2Ths[12].textContent.includes('Dealer (GEX)'), `col 13 header: ${s2Ths[12].textContent}`);
+        ['macd_hist', 'target_distance', 'dealer_gex'].forEach((k) => {
+            assert(window.document.querySelector(`#data-table thead th[data-sort-key="${k}"]`), `${k} should be sortable`);
+        });
+        assert(s2Nvda, 'NVDA row missing');
+        assert.strictEqual(s2Nvda.cells[1].textContent.trim(), '$120.50');
+        assert(s2Nvda.cells[2].textContent.includes('▲') && s2Nvda.cells[2].textContent.includes('+1.20%'), `Day %: ${s2Nvda.cells[2].textContent}`);
+        assert(s2Nvda.cells[8].textContent.includes('▲') && s2Nvda.cells[8].textContent.includes('$119.00'), `VWAP: ${s2Nvda.cells[8].textContent}`);
+        assert(!s2Nvda.cells[11].textContent.includes('🎯'), 'Target cell should drop decorative emoji');
+    });
+
+    check('Stage 2: derived sort keys match what the cells display', () => {
+        const sv = window._sortValueFor;
+        assert.strictEqual(sv({ fib_forecast: { next_resistance: 10, distance_to_next_pct: 1.5 } }, 'target_distance'), 1.5);
+        assert.strictEqual(sv({ fib_forecast: { next_resistance: 0, distance_to_next_pct: 1.5 } }, 'target_distance'), null);
+        assert.strictEqual(sv({ ticker: 'X1', net_gex_total: 0.32 }, 'dealer_gex'), 0.32);
+        assert.strictEqual(sv({ ticker: 'X1', net_gex_total: 0.0 }, 'dealer_gex'), null);
+        assert.strictEqual(sv({ volume: 0, rvol: 1.0 }, 'rvol'), null);
+        assert.strictEqual(sv({ macd_hist: -0.4 }, 'macd_hist'), -0.4);
+    });
+
+    const s2WatchPill = window.document.querySelector('.table-filter-pill[data-table-filter="watchlist"]');
+    if (s2WatchPill) s2WatchPill.click();
+    const s2WatchSections = [...window.document.querySelectorAll('#data-table tbody tr[data-section-row]')].map((r) => r.textContent.trim());
+    const s2WatchHasHeld = Boolean(s2RowOf('NVDA'));
+    const s2AllPill = window.document.querySelector('.table-filter-pill[data-table-filter="all"]');
+    if (s2AllPill) s2AllPill.click();
+    check('Stage 2: Watchlist filter pill shows only watchlist tickers', () => {
+        assert(s2WatchPill, 'Watchlist pill missing');
+        assert.deepStrictEqual(s2WatchSections, ['Strategic Watchlist']);
+        assert.strictEqual(s2WatchHasHeld, false, 'held NVDA must be hidden in Watchlist filter');
+    });
+
+    const s2GuideBtn = window.document.getElementById('metric-guide-btn');
+    const s2GuidePop = window.document.getElementById('metric-guide-popover');
+    s2GuideBtn.click();
+    const s2GuideOpened = !s2GuidePop.hidden && s2GuideBtn.getAttribute('aria-expanded') === 'true';
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    check('Stage 2: Metric guide explains GEX / rVol / VWAP / ATR % / RSI and closes on Esc', () => {
+        assert.strictEqual(s2GuideOpened, true, 'guide should open on click');
+        assert.strictEqual(s2GuidePop.hidden, true, 'guide should close on Esc');
+        const txt = s2GuidePop.textContent;
+        ['Dealer (GEX)', 'rVol', 'VWAP', 'ATR %', 'RSI', 'Signal'].forEach((k) => assert(txt.includes(k), `guide missing ${k}`));
+    });
+
+    const s2ExecBody = window.document.getElementById('exec-modal-body');
+    const s2SentinelSel = window.document.getElementById('sentinel-provider-select');
+    check('Stage 2: plain-English Execution Ticket, advisory note, and tucked-away engine settings', () => {
+        const t = s2ExecBody.textContent;
+        assert(t.includes('Protective stop at'), 'plain-English summary missing');
+        assert(t.includes('Advisory plan only'), 'advisory-only note missing');
+        assert(t.includes('Trailing stop protection') && t.includes('Cash balance check'), 'plain-English headings missing');
+        assert(!/\b(?:ENH|MANDATE)_\d+/.test(t), 'rule IDs must not appear in the Execution Ticket');
+        assert(!t.includes('Trailing Stop Audit'), 'old compliance-style heading still present');
+        assert(s2SentinelSel && s2SentinelSel.closest('details.tech-settings'), 'Sentinel provider should sit inside Engine settings');
+    });
+
+    // Rule IDs are internal (LLM / rule engine). Nothing outside the AI chat transcript
+    // (which is model prose) may show them — neither visible text nor tooltips.
+    const ruleIdRe = /\b(?:ENH|MANDATE)_\d+/;
+    const leakedText = [];
+    const walker = window.document.createTreeWalker(window.document.body, 4 /* SHOW_TEXT */);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const el = n.parentElement;
+        if (!el || el.closest('#chat-messages, script, style')) continue;
+        if (ruleIdRe.test(n.nodeValue)) leakedText.push(`${el.tagName}#${el.id || ''}.${el.className || ''}: ${n.nodeValue.trim().slice(0, 80)}`);
+    }
+    const leakedTitles = [...window.document.querySelectorAll('[title]')]
+        .filter((el) => !el.closest('#chat-messages') && ruleIdRe.test(el.getAttribute('title')))
+        .map((el) => `${el.tagName}#${el.id || ''}: ${el.getAttribute('title').slice(0, 80)}`);
+    check('Stage 2: no internal rule IDs (ENH_* / MANDATE_*) anywhere in the dashboard UI', () => {
+        assert.deepStrictEqual(leakedText, [], `rule IDs in text: ${leakedText.join(' || ')}`);
+        assert.deepStrictEqual(leakedTitles, [], `rule IDs in tooltips: ${leakedTitles.join(' || ')}`);
     });
 
     window.close();

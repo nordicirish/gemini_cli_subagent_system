@@ -4051,3 +4051,139 @@ td.num-col {
     color: var(--text-secondary);
     border-color: var(--panel-border);
 }
+
+/* ─── UX Stage 2: table comprehension ─── */
+
+/* Column groups (CSS only, no extra header row): Price & Session | Activity & Volatility |
+   Technicals & Levels | Options Flow & Signal. Pro dividers at cols 2/5/8/13; Simple at 2/11. */
+#data-table thead th:nth-child(2),
+#data-table tbody td:nth-child(2):not([data-fullwidth]),
+#data-table thead th:nth-child(5),
+#data-table tbody td:nth-child(5),
+#data-table thead th:nth-child(8),
+#data-table tbody td:nth-child(8),
+#data-table thead th:nth-child(13),
+#data-table tbody td:nth-child(13) {
+    border-left: 1px solid rgba(255, 255, 255, 0.10);
+}
+.view-simple #data-table thead th:nth-child(11),
+.view-simple #data-table tbody td:nth-child(11) {
+    border-left: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+/* Direction cue beside signed values / VWAP (colour is never the only signal) */
+.dir-glyph {
+    font-size: 0.7em;
+    margin-right: 3px;
+    vertical-align: 1px;
+}
+
+/* Target cell: level label muted, price prominent */
+.fib-target-tag .fib-lvl {
+    opacity: 0.75;
+    font-weight: 600;
+}
+.fib-target-tag .fib-dist {
+    opacity: 0.85;
+}
+
+/* Signal column: holding / pending note on its own line keeps the sticky column compact */
+.table-container td.score-col .note-tag {
+    display: block;
+    width: fit-content;
+    margin: 3px auto 0;
+}
+
+/* Metric guide popover */
+.metric-guide-wrap {
+    position: relative;
+}
+.metric-guide-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 60;
+    width: min(420px, calc(100vw - 32px));
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 14px 16px;
+    background: var(--panel-bg-solid);
+    border: 1px solid var(--panel-border-hover);
+    border-radius: 10px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+    text-align: left;
+}
+.metric-guide-popover[hidden] {
+    display: none;
+}
+.metric-guide-popover dl {
+    margin: 0;
+}
+.metric-guide-popover dt {
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: var(--text-main);
+    margin-top: 10px;
+}
+.metric-guide-popover dt:first-child {
+    margin-top: 0;
+}
+.metric-guide-popover dd {
+    margin: 2px 0 0;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+
+/* Rule IDs demoted to small reference tags behind plain-English headings */
+.rule-ref-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 5px;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text-muted);
+    border: 1px solid var(--panel-border-hover);
+    border-radius: 4px;
+    vertical-align: 1px;
+}
+
+/* Execution Ticket plain-English summary + advisory note */
+.exec-plan-summary {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--text-main);
+    background: rgba(88, 166, 255, 0.06);
+    border: 1px solid rgba(88, 166, 255, 0.18);
+    border-radius: 8px;
+}
+.exec-advisory-note {
+    margin-top: 4px;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+}
+
+/* Collapsed technical / engine settings (progressive disclosure) */
+.tech-settings {
+    margin: 4px 0;
+    font-size: 0.8125rem;
+}
+.tech-settings > summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-weight: 600;
+    padding: 2px 0;
+}
+.tech-settings[open] > summary {
+    margin-bottom: 6px;
+}
+.colab-setup-guidance .tech-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
