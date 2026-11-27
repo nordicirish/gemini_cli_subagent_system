@@ -45,6 +45,7 @@ const MACRO_SUBTITLES = {
     'GDX': 'Gold Miners'
 };
 let latestTickersMap = {};
+let _chartInspectorSym = ''; // ticker shown in the chart modal's Stock Inspector strip
 
 function updateVolatilityRegimePill(state) {
     const pill = document.getElementById('volatility-regime-pill');
@@ -323,12 +324,6 @@ function _initAppSettingsPopover() {
     });
 }
 
-const dCopyBtn = document.getElementById('copy-json-btn');
-const dCopySessionBtn = document.getElementById('copy-session-btn');
-const dNewsScanBtn = document.getElementById('btn-news-scan');
-const dPasteBtn = document.getElementById('paste-payload-btn');
-const dMobileStatus = document.getElementById('mobile-data-status');
-
 // Manager Elements
 const dWatchlistContainer = document.getElementById('watchlist-manager-container');
 const dAddWatchlistTicker = document.getElementById('add-watchlist-ticker');
@@ -336,9 +331,6 @@ const dAddToWatchlistBtn = document.getElementById('add-to-watchlist-btn');
 
 // Scout Elements
 const dScoutContainer = document.getElementById('scout-categories-container');
-const dAddScoutCategory = document.getElementById('add-scout-category');
-const dAddScoutCategoryBtn = document.getElementById('add-scout-category-btn');
-const dSaveScoutCategoriesBtn = document.getElementById('save-scout-categories-btn');
 const dRunAiScoutBtn = document.getElementById('run-ai-scout-btn');
 const dAiScoutLimitSelect = document.getElementById('scout-limit-select');
 const dAiScoutMaxRsiSelect = document.getElementById('scout-max-rsi-select');
@@ -854,109 +846,6 @@ dUpdateIndicesBtn.addEventListener('click', async () => {
     }
 });
 
-// --- Action Handlers ---
-
-async function copyMarketSnapshot(triggerBtn, statusEl) {
-    try {
-        let snapshotPrompt = "";
-        try {
-            const promptRes = await fetch(`${API_BASE}/prompts/snapshot`);
-            const promptData = await promptRes.json();
-            snapshotPrompt = promptData.prompt || "";
-        } catch (pe) {
-            console.warn("Failed to fetch dynamic snapshot prompt.");
-        }
-        if (!snapshotPrompt) {
-            snapshotPrompt = [
-                "SYSTEM DIRECTIVE: ROUTINE TURN EXECUTION",
-                "",
-                "1. Read the linked `local_ssot_shadow` document via your Gem_Store source to synchronize your local context.",
-                "2. Evaluate current 'risk_regime' and 'dealer_posture' shifts.",
-                "3. Route the data through the Consensus Pipeline (Data Analyst -> Council Debate -> Synthesis) for any required rebalancing, entries, or defensive trims.",
-                "4. Conclude your turn by outputting the final EXECUTION_PAYLOAD."
-            ].join("\n");
-        }
-        
-        await navigator.clipboard.writeText(snapshotPrompt);
-        showFeedback(triggerBtn, "✅ Copied!", "Market snapshot prompt ready! (Gem_Store holds SSoT context)", false, statusEl);
-    } catch (e) {
-        console.error(e);
-        showFeedback(triggerBtn, "❌ Error", "Failed to copy snapshot.", true, statusEl);
-    }
-}
-
-async function copySessionBoot(triggerBtn, statusEl) {
-    try {
-        let bootPrompt = "";
-        try {
-            const promptRes = await fetch(`${API_BASE}/prompts/boot`);
-            const promptData = await promptRes.json();
-            bootPrompt = promptData.prompt || "";
-        } catch (pe) {
-            console.warn("Failed to fetch dynamic boot prompt.");
-        }
-        if (!bootPrompt) bootPrompt = "SYSTEM BOOT: COUNCIL SESSION INITIALIZATION";
-        
-        await navigator.clipboard.writeText(bootPrompt);
-        showFeedback(triggerBtn, "✅ Copied!", "Session boot prompt ready! (Gem_Store holds SSoT context)", false, statusEl);
-    } catch (e) {
-        console.error(e);
-        showFeedback(triggerBtn, "❌ Error", "Failed to copy prompt", true, statusEl);
-    }
-}
-
-async function copyNewsScan(triggerBtn, statusEl) {
-    try {
-        let newsScanPrompt = "";
-        try {
-            const promptRes = await fetch(`${API_BASE}/prompts/news_scan`);
-            const promptData = await promptRes.json();
-            newsScanPrompt = promptData.prompt || "";
-        } catch (pe) {
-            console.warn("Failed to fetch news scan prompt.");
-        }
-        if (!newsScanPrompt) newsScanPrompt = "SYSTEM DIRECTIVE: MACRO & STOCK NEWS SCAN";
-        
-        await navigator.clipboard.writeText(newsScanPrompt);
-        showFeedback(triggerBtn, "✅ Copied!", "News scan prompt ready!", false, statusEl);
-    } catch (e) {
-        console.error(e);
-        showFeedback(triggerBtn, "❌ Error", "Failed to copy news scan payload.", true, statusEl);
-    }
-}
-
-async function ingestExecutionPayload(triggerBtn, statusEl) {
-    triggerBtn.disabled = true;
-    try {
-        const text = await navigator.clipboard.readText();
-        if (!text) throw new Error("Clipboard empty");
-        
-        const res = await fetch(`${API_BASE}/paste`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ payload: text })
-        });
-        
-        const data = await res.json();
-        if (data.status === 'success') {
-            showFeedback(triggerBtn, "✅ Ingested!", "Payload ingested!", false, statusEl);
-            pollData();
-        } else {
-            throw new Error(data.message);
-        }
-    } catch (e) {
-        console.error("Paste Error: ", e);
-        showFeedback(triggerBtn, "❌ Error", e.message || "Failed to ingest.", true, statusEl);
-    } finally {
-        triggerBtn.disabled = false;
-    }
-}
-
-// --- Listeners ---
-if (dCopyBtn) dCopyBtn.addEventListener('click', () => copyMarketSnapshot(dCopyBtn, document.getElementById('outbound-turn-status')));
-if (dCopySessionBtn) dCopySessionBtn.addEventListener('click', () => copySessionBoot(dCopySessionBtn, document.getElementById('outbound-session-status')));
-if (dNewsScanBtn) dNewsScanBtn.addEventListener('click', () => copyNewsScan(dNewsScanBtn, document.getElementById('outbound-newsscan-status')));
-if (dPasteBtn) dPasteBtn.addEventListener('click', () => ingestExecutionPayload(dPasteBtn, document.getElementById('inbound-paste-status')));
 
 
 
@@ -992,6 +881,21 @@ function _displayGexFor(row) {
         return { value: colab, fromColab: true, vs };
     }
     return { value: liveKnown ? live : null, fromColab: false, vs };
+}
+
+// Plain-English setup label for a row's composite score (shared by the table and the Stock
+// Inspector so both always agree). RSI >= 75 wins: a strong trend that is stretched.
+function _plainSignalFor(row) {
+    const num = (v) => (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+    const score = num(row && row.score);
+    if (score === null) return { cls: 'signal-neutral', text: 'Pending' };
+    const rsi = num(row && row.rsi);
+    if (rsi !== null && rsi >= 75) return { cls: 'signal-warn', text: '🔥 Overheated' };
+    if (score >= 5) return { cls: 'signal-bull', text: '▲ Strong Setup' };
+    if (score >= 2) return { cls: 'signal-bull-soft', text: '↗ Favorable' };
+    if (score <= -5) return { cls: 'signal-bear', text: '▼ High Risk' };
+    if (score <= -2) return { cls: 'signal-bear-soft', text: '↘ Weakening' };
+    return { cls: 'signal-neutral', text: '— Steady' };
 }
 
 // Sort value for a table column key. Derived columns sort by exactly what the cell shows:
@@ -1336,20 +1240,9 @@ function renderTable(tickers, state) {
         }
         const rvolDisplay = hasRvol ? `${rvolNum.toFixed(2)}x` : '—';
         const safeSym = _escAlertHtml(sym);
-        const _plainSignalForRow = () => {
-            if (!hasScore) return { cls: 'signal-neutral', text: 'Pending' };
-            const rsiN = isNum(row.rsi) ? Number(row.rsi) : null;
-            const scN = Number(row.score || 0);
-            if (rsiN !== null && rsiN >= 75) return { cls: 'signal-warn', text: '🔥 Overheated' };
-            if (scN >= 5) return { cls: 'signal-bull', text: '▲ Strong Setup' };
-            if (scN >= 2) return { cls: 'signal-bull-soft', text: '↗ Favorable' };
-            if (scN <= -5) return { cls: 'signal-bear', text: '▼ High Risk' };
-            if (scN <= -2) return { cls: 'signal-bear-soft', text: '↘ Weakening' };
-            return { cls: 'signal-neutral', text: '— Steady' };
-        };
-        const plainSig = _plainSignalForRow();
+        const plainSig = _plainSignalFor(row);
         return `
-            <tr class="chart-clickable" onclick="openChartModal('${safeSym}')" title="Click to view 1m TradingView chart">
+            <tr class="chart-clickable" data-ticker="${safeSym}" tabindex="0" onclick="openChartModal('${safeSym}')" title="Open ${safeSym} chart &amp; inspector (click or Enter)">
                 <td class="ticker-cell ${row._isScout ? 'is-scout' : ''}" data-sec-ticker="${safeSym}">
                     <span class="ticker-symbol ${dayColor}">${safeSym}</span>
                     ${scoutIndicator}${heldPlanHtml}${secBadgeHtml}${secNlpBadgeHtml}
@@ -1502,8 +1395,57 @@ function renderTable(tickers, state) {
         html = `<tr class="table-empty-filter-row" data-section-row="true"><td colspan="${fullSpan}" data-fullwidth="true">No matching tickers for current filter.</td></tr>`;
     }
 
-    dTableBody.innerHTML = html;
+    _writeTableBody(html);
     prefetchSecDilutionBadges([...heldRows, ...watchRows, ...scoutRows].map(r => r && r.ticker));
+    // Keep the chart's Stock Inspector strip live while the chart is open.
+    const chartOverlay = document.getElementById('chart-modal-overlay');
+    if (_chartInspectorSym && chartOverlay && chartOverlay.classList.contains('active')) {
+        _renderChartInspector(_chartInspectorSym);
+    }
+}
+
+// The table is re-rendered on every 3s poll. Writing identical markup is skipped entirely, and
+// when it does change, keyboard focus (a row, its ⚡ plan button or SEC link) is put back on
+// the same ticker so polling never throws the user out of the table.
+let _lastTableBodyHtml = null;
+
+function _focusKeyFor(el, row) {
+    if (el === row) return null;
+    if (el.classList && el.classList.length) return `.${el.classList[0]}`;
+    return el.tagName ? el.tagName.toLowerCase() : null;
+}
+
+function _writeTableBody(html) {
+    if (!dTableBody) return;
+    if (html === _lastTableBodyHtml && dTableBody.childElementCount > 0) return;
+    const active = document.activeElement;
+    let restore = null;
+    if (active && dTableBody.contains(active)) {
+        const row = active.closest('tr[data-ticker]');
+        if (row) restore = { ticker: row.getAttribute('data-ticker'), sel: _focusKeyFor(active, row) };
+    }
+    dTableBody.innerHTML = html;
+    _lastTableBodyHtml = html;
+    if (restore) {
+        const row = [...dTableBody.querySelectorAll('tr[data-ticker]')]
+            .find((tr) => tr.getAttribute('data-ticker') === restore.ticker);
+        const target = row && (restore.sel ? row.querySelector(restore.sel) : row);
+        if (target && typeof target.focus === 'function') {
+            try { target.focus({ preventScroll: true }); } catch (_) { target.focus(); }
+        }
+    }
+}
+
+// Enter / Space on a focused row opens that ticker's chart & inspector.
+if (dTableBody && !dTableBody._gemRowKeysBound) {
+    dTableBody._gemRowKeysBound = true;
+    dTableBody.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const row = e.target && e.target.matches && e.target.matches('tr[data-ticker]') ? e.target : null;
+        if (!row) return;
+        e.preventDefault();
+        openChartModal(row.getAttribute('data-ticker'));
+    });
 }
 
 async function pollData() {
@@ -2109,7 +2051,6 @@ window.deleteFromWatchlist = deleteFromWatchlist;
 window.toggleScoutCategory = toggleScoutCategory;
 window.toggleSection = toggleSection;
 window.setWorkspaceView = setWorkspaceView;
-window.copySessionReviewPayload = copySessionReviewPayload;
 window.runScout = runScout;
 
 // ─── Key-Level Triggers & Low-Power Sentinel Controllers ───
@@ -3256,21 +3197,6 @@ if (dScanWatchlistBtn) {
 }
 
 
-async function copySessionReviewPayload(triggerBtn, statusEl) {
-    const btn = triggerBtn || document.getElementById('btn-session-review');
-    const targetStatus = statusEl || document.getElementById('outbound-review-status');
-    try {
-        const response = await fetch('/api/session_review_payload');
-        const data = await response.json();
-        
-        await navigator.clipboard.writeText(data.payload);
-        showFeedback(btn, "✅ Copied!", "Audit & Rule Review prompt ready! (Gem_Store holds SSoT context)", false, targetStatus);
-    } catch (error) {
-        console.error("Failed to copy Review payload:", error);
-        showFeedback(btn, "❌ Error", "Failed to copy review prompt", true, targetStatus);
-    }
-}
-
 // Clear Decision Log Handler
 const dClearLogBtn = document.getElementById('clear-log-btn');
 if (dClearLogBtn) {
@@ -4233,16 +4159,6 @@ window.copyProtocol06Proposal = copyProtocol06Proposal;
 
 
 
-// ─── Mobile Quick Action Bridge ───
-const dMobileCopyBtn = document.getElementById('mobile-copy-json-btn');
-const dMobilePasteBtn = document.getElementById('mobile-paste-payload-btn');
-const dMobileCopySessionBtn = document.getElementById('mobile-copy-session-btn');
-const dMobileReviewBtn = document.getElementById('mobile-btn-session-review');
-
-if (dMobileCopyBtn) dMobileCopyBtn.addEventListener('click', () => copyMarketSnapshot(dMobileCopyBtn, dMobileStatus));
-if (dMobilePasteBtn) dMobilePasteBtn.addEventListener('click', () => ingestExecutionPayload(dMobilePasteBtn, dMobileStatus));
-if (dMobileCopySessionBtn) dMobileCopySessionBtn.addEventListener('click', () => copySessionBoot(dMobileCopySessionBtn, dMobileStatus));
-if (dMobileReviewBtn) dMobileReviewBtn.addEventListener('click', () => copySessionReviewPayload(dMobileReviewBtn, dMobileStatus));
 
 // ─── Chart Modal: TradingView Lightweight Charts Integration ───
 
@@ -4531,11 +4447,102 @@ function _disconnectChartResizeObserver() {
  * Fetches 1m OHLCV bars, builds the Lightweight Charts instance,
  * and overlays EMA 9, EMA 30, EMA 200, VWAP, VWAP Session Bands, and Volume (with 20 SMA).
  */
+// ─── Stock Inspector (chart modal header strip) ───
+// Shows every live metric for the clicked ticker with plain-English hints, so Simple-mode users
+// get the full 14-column picture in one click. Values come from latestTickersMap (same data as
+// the table); missing values show "—".
+function _renderChartInspector(symbol) {
+    const el = document.getElementById('chart-inspector-strip');
+    if (!el) return;
+    const sym = String(symbol || '').trim().toUpperCase();
+    _chartInspectorSym = sym;
+    const row = (latestTickersMap && latestTickersMap[sym]) || null;
+    const num = (v) => (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+    const price = num(row && row.price);
+    const day = num(row && row.session_change_pct);
+    const vwapRaw = num(row && row.vwap);
+    const vwap = vwapRaw !== null && vwapRaw > 0 ? vwapRaw : null;
+    const volume = num(row && row.volume);
+    const rvol = volume !== null && volume > 0 ? num(row && row.rvol) : null;
+    const rsi = num(row && row.rsi);
+    const atr = num(row && row.atr_percent);
+    const score = num(row && row.score);
+    const gex = row ? _displayGexFor(row).value : null;
+    const sig = _plainSignalFor(row || {});
+    const signed = (v, d = 2) => (v === null ? '—' : `${v > 0 ? '▲ +' : v < 0 ? '▼ ' : ''}${v.toFixed(d)}%`);
+    const metric = (label, value, hint, cls = '') =>
+        `<div class="inspector-metric" title="${_escAlertHtml(hint)}"><dt>${label}</dt><dd class="${cls}">${value}</dd></div>`;
+
+    const vwapSide = price !== null && vwap !== null ? (price >= vwap ? 'above' : 'below') : null;
+    const metrics = [
+        metric('Price', price === null ? '—' : `$${price.toFixed(2)}`, 'Latest share price in USD'),
+        metric('Day %', signed(day), 'Change during today\'s session', day === null ? '' : (day >= 0 ? 'text-green' : 'text-red')),
+        metric('VWAP', vwap === null ? '—' : `$${vwap.toFixed(2)}${vwapSide ? ` <span class="inspector-sub">${vwapSide}</span>` : ''}`,
+            'Volume-weighted average price today: above = buyers in control, below = sellers in control',
+            vwapSide === 'above' ? 'text-green' : (vwapSide === 'below' ? 'text-red' : '')),
+        metric('rVol', rvol === null ? '—' : `${rvol.toFixed(2)}x`, 'Volume vs a normal day at this time: above 1.5x is unusual interest'),
+        metric('RSI', rsi === null ? '—' : `${rsi.toFixed(1)}${rsi >= 70 ? ' <span class="inspector-sub">stretched</span>' : (rsi <= 30 ? ' <span class="inspector-sub">oversold</span>' : '')}`,
+            'Momentum 0–100: above 70 stretched, below 30 oversold'),
+        metric('ATR %', atr === null ? '—' : `${atr.toFixed(2)}%`, 'Typical daily swing — higher means wider stops'),
+        metric('Dealer (GEX)', gex === null ? '—' : `${gex > 0 ? '+' : ''}${Math.abs(gex) < 0.001 && gex !== 0 ? gex.toFixed(4) : gex.toFixed(3)}`,
+            'Options dealer gamma: positive tends to calm swings, negative tends to amplify them'),
+        metric('Signal', `${_escAlertHtml(sig.text)}${score === null ? '' : ` <span class="inspector-sub">${score > 0 ? '+' : ''}${score}</span>`}`,
+            'GEM combined setup score (−6 to +6)'),
+    ].join('');
+
+    const safeSym = _escAlertHtml(sym);
+    el.innerHTML = `
+        <dl class="inspector-metrics">${metrics}</dl>
+        <div class="inspector-actions">
+            <button type="button" class="chart-copy-btn" data-inspector-action="alert" data-ticker="${safeSym}"
+                title="Set a price alert for ${safeSym} (opens the Alerts view pre-filled)">🔔 Set alert</button>
+            <button type="button" class="chart-copy-btn" data-inspector-action="council" data-ticker="${safeSym}"
+                title="Ask the AI Council about ${safeSym}">💬 Ask Council</button>
+        </div>`;
+}
+
+function _chartInspectorAction(action, sym) {
+    const ticker = String(sym || '').toUpperCase();
+    if (!ticker) return;
+    const row = latestTickersMap && latestTickersMap[ticker];
+    closeChartModal();
+    if (action === 'alert') {
+        setWorkspaceView('alerts');
+        const tickerInput = document.getElementById('alert-ticker-input');
+        const targetInput = document.getElementById('alert-target-input');
+        const metricSel = document.getElementById('alert-metric-select');
+        if (tickerInput) tickerInput.value = ticker;
+        if (metricSel) metricSel.value = 'price';
+        const px = row && Number(row.price);
+        if (targetInput) {
+            if (Number.isFinite(px) && px > 0) targetInput.value = px.toFixed(2);
+            targetInput.focus();
+        }
+    } else if (action === 'council' && window.chatUI) {
+        window.chatUI.show();
+        const input = document.getElementById('chat-input');
+        if (input) {
+            input.value = `Give me a plain-English read on ${ticker}: trend, key levels to watch, and the main risk right now.`;
+            input.focus();
+        }
+    }
+}
+
+if (!window._gemInspectorBound) {
+    window._gemInspectorBound = true;
+    document.addEventListener('click', (e) => {
+        const btn = e.target && e.target.closest ? e.target.closest('[data-inspector-action]') : null;
+        if (!btn) return;
+        _chartInspectorAction(btn.getAttribute('data-inspector-action'), btn.getAttribute('data-ticker'));
+    });
+}
+
 async function openChartModal(symbol) {
     if (!dChartModalOverlay || !dChartContainer || typeof LightweightCharts === 'undefined') {
         console.warn('[Chart] Lightweight Charts library not loaded yet.');
         return;
     }
+    _renderChartInspector(symbol);
 
     // Destroy any existing chart for this symbol before re-rendering
     if (chartInstances[symbol]) {
@@ -4971,6 +4978,7 @@ async function openChartModal(symbol) {
  * Close the chart modal and clean up the active chart instance.
  */
 function closeChartModal() {
+    _chartInspectorSym = '';
     _disconnectChartResizeObserver();
     closeModal(dChartModalOverlay);
     const sym = dChartModalTicker ? dChartModalTicker.textContent : null;

@@ -1567,6 +1567,57 @@ async function main() {
         assert.strictEqual(s4SortedByKey, true, 'Enter on a sortable header should sort');
     });
 
+    // ── UX Stage 5: Stock Inspector, focus-preserving refresh, dead-code removal ──
+    window.eval("latestTickersMap['NVDA'] = Object.assign({}, latestTickersMap['NVDA'] || {}, { ticker: 'NVDA', price: 120.5, session_change_pct: 1.2, vwap: 119, volume: 1000000, rvol: 1.85, rsi: 55, atr_percent: 2.5, score: 3, net_gex_total: 0.32 });");
+    window._renderChartInspector('NVDA');
+    const s5Strip = window.document.getElementById('chart-inspector-strip');
+    const s5StripText = s5Strip.textContent.replace(/\s+/g, ' ');
+    window.document.querySelector('[data-inspector-action="alert"][data-ticker="NVDA"]').click();
+    const s5AlertView = !window.document.getElementById('view-alerts').hidden;
+    const s5AlertTicker = window.document.getElementById('alert-ticker-input').value;
+    const s5AlertTarget = window.document.getElementById('alert-target-input').value;
+    window.setWorkspaceView('today');
+    check('Stage 5: Stock Inspector shows all key metrics in plain English and pre-fills a price alert', () => {
+        ['Price', '$120.50', 'Day %', '+1.20%', 'VWAP', '$119.00', 'above', 'rVol', '1.85x', 'RSI', '55.0', 'ATR %', '2.50%', 'Dealer (GEX)', '+0.320', 'Signal', 'Favorable']
+            .forEach((t) => assert(s5StripText.includes(t), `inspector missing "${t}": ${s5StripText}`));
+        assert(s5Strip.querySelector('[data-inspector-action="council"]'), 'Ask Council action missing');
+        assert.strictEqual(s5AlertView, true, 'Set alert should open the Alerts view');
+        assert.strictEqual(s5AlertTicker, 'NVDA');
+        assert.strictEqual(s5AlertTarget, '120.50', 'alert target should pre-fill with the live price');
+    });
+
+    const s5State = JSON.parse(JSON.stringify(API['/api/data']));
+    window.renderTable(s5State.tickers, s5State);
+    const s5RowOf = () => window.document.querySelector('#data-table tbody tr[data-ticker="NVDA"]');
+    const s5FirstRow = s5RowOf();
+    window.renderTable(s5State.tickers, s5State); // identical data
+    const s5SkippedIdentical = s5RowOf() === s5FirstRow;
+    s5RowOf().focus();
+    s5State.tickers.find((t) => t.ticker === 'NVDA').price = 121.75; // a live tick changes the markup
+    window.renderTable(s5State.tickers, s5State);
+    const s5Rebuilt = s5RowOf() !== s5FirstRow;
+    const s5FocusKept = window.document.activeElement === s5RowOf();
+    const s5OrigOpen = window.openChartModal;
+    let s5Opened = null;
+    window.openChartModal = (sym) => { s5Opened = sym; };
+    s5RowOf().dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    window.openChartModal = s5OrigOpen;
+    check('Stage 5: 3s refresh keeps keyboard focus, skips identical re-renders, Enter opens the chart', () => {
+        assert.strictEqual(s5SkippedIdentical, true, 'identical data must not rebuild the table');
+        assert.strictEqual(s5Rebuilt, true, 'changed data should rebuild the rows');
+        assert.strictEqual(s5FocusKept, true, 'focus should return to the same ticker row after a refresh');
+        assert.strictEqual(s5Opened, 'NVDA', 'Enter on a focused row should open its chart');
+    });
+
+    const s5AppJs = read(path.join(staticDir, 'app.js'));
+    check('Stage 5: dead legacy clipboard / mobile-bridge code and CSS removed', () => {
+        ['copyMarketSnapshot', 'copySessionBoot', 'copyNewsScan', 'ingestExecutionPayload', 'copySessionReviewPayload', 'dMobileCopyBtn']
+            .forEach((id) => assert(!s5AppJs.includes(id), `${id} should be removed`));
+        assert.strictEqual(typeof window.copySessionReviewPayload, 'undefined');
+        const cssAll = read(path.join(staticDir, 'styles.css'));
+        ['gdrive-select', 'quick-action-bar', 'full-width-field'].forEach((c) => assert(!cssAll.includes(c), `dead CSS ${c} remains`));
+    });
+
     window.close();
     console.log(results.join('\n'));
     const failed = results.filter((r) => r.startsWith('FAIL')).length;

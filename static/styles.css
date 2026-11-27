@@ -124,8 +124,6 @@ body::before {
     border-color: var(--panel-border-hover);
 }
 
-
-
 header.glass-panel {
     padding: 10px 18px;
     border-radius: var(--radius-md);
@@ -1114,21 +1112,11 @@ textarea:focus {
 
     .desktop-only { display: none !important; }
     .mobile-only { display: block !important; }
-    
-    .quick-action-bar.mobile-only { 
-        display: flex !important; 
-        gap: 8px;
-        padding: 8px;
-        border-radius: var(--radius-sm);
-        margin-bottom: 4px;
-    }
-    
+
     #mobile-data-status.mobile-only {
         display: block !important;
     }
 }
-
-.quick-action-bar { display: none; }
 
 /* ─── Scrollbar ─── */
 ::-webkit-scrollbar {
@@ -1191,31 +1179,6 @@ textarea:focus {
 
 .mini-input:focus {
     border-color: var(--accent);
-}
-
-.gdrive-select, .full-width-field {
-    width: 100%;
-    box-sizing: border-box;
-    background: rgba(0, 0, 0, 0.45);
-    border: 1px solid var(--panel-border);
-    color: var(--text-main);
-    border-radius: var(--radius-sm);
-    font-size: var(--text-sm);
-    padding: 8px 12px;
-    height: 38px;
-    outline: none;
-    font-family: var(--font-sans);
-    transition: border-color var(--transition), box-shadow var(--transition);
-}
-
-.gdrive-select:focus, .full-width-field:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-dim);
-}
-
-.gdrive-select option {
-    background-color: #0d1117;
-    color: var(--text-main);
 }
 
 .admin-stacked-row {
@@ -1560,49 +1523,6 @@ textarea:focus {
     flex-direction: column;
     gap: 8px;
     width: 100%;
-}
-
-.full-width-field {
-    width: 100%;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--panel-border);
-    border-radius: var(--radius-sm);
-    padding: 10px 12px;
-    color: var(--text-secondary);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    outline: none;
-    transition: border-color var(--transition), box-shadow var(--transition);
-}
-
-.full-width-field:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-dim);
-}
-
-.gdrive-select {
-    width: 100%;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--panel-border);
-    border-radius: var(--radius-sm);
-    padding: 10px 12px;
-    color: var(--text-secondary);
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
-    outline: none;
-    cursor: pointer;
-    transition: border-color var(--transition), box-shadow var(--transition);
-    appearance: none;
-}
-
-.gdrive-select:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-dim);
-}
-
-.gdrive-select option {
-    background: var(--bg-secondary);
-    color: var(--text-main);
 }
 
 .admin-btn-row {
@@ -2877,7 +2797,6 @@ td.num-col {
     text-align: right;
     font-variant-numeric: tabular-nums;
 }
-
 
 /* ─── Sentinel Peak Toggle & Daily Peak Predictor Modal Block ─── */
 .sentinel-peak-row {
@@ -4379,6 +4298,58 @@ header.glass-panel {
 #data-table thead th.sortable-th:focus-visible,
 .settings-switch[role="switch"]:focus-visible,
 .gem-dialog-actions .glow-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+/* ─── UX Stage 5: Stock Inspector strip inside the chart modal ─── */
+.chart-inspector-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 8px 4px 10px;
+    border-bottom: 1px solid var(--panel-border);
+    margin-bottom: 8px;
+}
+.chart-inspector-strip:empty {
+    display: none;
+}
+.inspector-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    margin: 0;
+}
+.inspector-metric {
+    display: flex;
+    flex-direction: column;
+    min-width: 64px;
+    cursor: help;
+}
+.inspector-metric dt {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-muted);
+}
+.inspector-metric dd {
+    margin: 0;
+    font: 700 var(--text-sm) var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-main);
+}
+.inspector-sub {
+    font: 500 var(--text-xs) var(--font-sans);
+    color: var(--text-muted);
+}
+.inspector-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* Focusable table rows (Enter opens chart & inspector) */
+#data-table tbody tr[data-ticker]:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
 }
