@@ -32,9 +32,11 @@ except ImportError:
 try:
     from colab_workers.quant_scout_worker import infer_sector_for_ticker, is_excluded_non_stock_ticker
     from colab_workers.walk_forward_worker import rule_deltas_improve_baseline
+    from colab_workers.sec_nlp_worker import LLM_REVIEW_FLAGS, LLM_SUMMARY_MAX_CHARS
 except ImportError:
     from python.colab_workers.quant_scout_worker import infer_sector_for_ticker, is_excluded_non_stock_ticker
     from python.colab_workers.walk_forward_worker import rule_deltas_improve_baseline
+    from python.colab_workers.sec_nlp_worker import LLM_REVIEW_FLAGS, LLM_SUMMARY_MAX_CHARS
 
 
 CALIBRATION_SCHEMA_VERSION = "1.0"
@@ -643,7 +645,9 @@ def validate_sec_nlp_artifact(payload: Any) -> Dict[str, Any]:
         "warrant_overhang_pct": (0.0, 500.0),
     }
     bool_fields = ("offering_overhang_flag", "going_concern_flag")
-    allowed_fields = set(float_bounds.keys()) | set(bool_fields) | {"filings_analyzed", "evidence_snippets"}
+    # Advisory LLM review fields (optional; never alter the deterministic dilution_risk_score).
+    llm_fields = {"llm_summary", "llm_flags", "llm_severity"}
+    allowed_fields = set(float_bounds.keys()) | set(bool_fields) | {"filings_analyzed", "evidence_snippets"} | llm_fields
     required_fields = {"dilution_risk_score", "catalyst_sentiment", "offering_overhang_flag", "going_concern_flag", "filings_analyzed"}
     cleaned_tickers: Dict[str, Dict[str, Any]] = {}
     for raw_sym, entry in raw_tickers.items():
@@ -681,6 +685,25 @@ def validate_sec_nlp_artifact(payload: Any) -> Dict[str, Any]:
                     raise ValueError(f"sec_nlp.tickers[{sym}].evidence_snippets[{s_idx}] must be a string.")
                 clean_snips.append(snip.strip()[:240])
             clean_entry["evidence_snippets"] = clean_snips
+        present_llm = {k for k in llm_fields if entry.get(k) is not None}
+        if present_llm and present_llm != llm_fields:
+            raise ValueError(f"sec_nlp.tickers[{sym}] LLM review must include all of {sorted(llm_fields)}.")
+        if present_llm:
+            summary = entry["llm_summary"]
+            if not isinstance(summary, str) or not summary.strip():
+                raise ValueError(f"sec_nlp.tickers[{sym}].llm_summary must be a non-empty string.")
+            severity = entry["llm_severity"]
+            if not _is_valid_int(severity, 0, 100):
+                raise ValueError(f"sec_nlp.tickers[{sym}].llm_severity must be an integer in [0, 100].")
+            flags = entry["llm_flags"]
+            if not isinstance(flags, list) or len(flags) > len(LLM_REVIEW_FLAGS):
+                raise ValueError(f"sec_nlp.tickers[{sym}].llm_flags must be a list.")
+            unknown_flags = {f for f in flags if f not in LLM_REVIEW_FLAGS}
+            if unknown_flags:
+                raise ValueError(f"Unknown llm_flags in sec_nlp.tickers[{sym}]: {sorted(map(str, unknown_flags))}")
+            clean_entry["llm_summary"] = " ".join(summary.split())[:LLM_SUMMARY_MAX_CHARS]
+            clean_entry["llm_severity"] = int(severity)
+            clean_entry["llm_flags"] = [f for f in LLM_REVIEW_FLAGS if f in set(flags)]
         cleaned_tickers[sym] = clean_entry
     out["tickers"] = cleaned_tickers
     return out

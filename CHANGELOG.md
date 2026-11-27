@@ -6,6 +6,18 @@ All notable engineering, architecture, UI, and governance changes to `gemini_cli
 
 ---
 
+## [Unreleased] — Real open-weight LLM filing review (Phase 1)
+
+### Fixed & Added (`python/colab_workers/sec_nlp_worker.py`, `python/colab_calibration.py`, `static/app.js`, `static/index.html`, `static/styles.css`)
+- **Honesty fix:** `use_llm=True` previously only forced an L4 GPU and relabelled `model_used` as "+Qwen2.5-7B" without ever loading or calling the model. `model_used` now names an LLM only when it actually reviewed at least one ticker (and names the lexicon fallback when FinBERT failed to load).
+- **Advisory LLM review in the Colab job (no tunnel, CLI path):** `Qwen/Qwen2.5-7B-Instruct` (bf16, L4) reviews each ticker's public evidence snippets (max 12 tickers, 240 s budget inside the 600 s job timeout) and adds `llm_summary`, `llm_flags` (fixed allowlist), and `llm_severity`. The deterministic `dilution_risk_score` is never altered.
+- Shared contract `build_filing_review_messages()` / `parse_filing_review()`: excerpts are delimited untrusted data (angle brackets stripped), replies are strictly parsed (unknown flags dropped, severity clamped, malformed → ignored).
+- `validate_sec_nlp_artifact` accepts the three fields only together and only within contract.
+- UI: "AI read (advisory)" in the Filing risk tooltip and Stock Inspector (escaped), ⚠ when AI and rule scores differ by > 30; tooltip now shows the artifact's real `model_used`.
+- Tests: 9 new unit tests (`tests/test_colab_sec_nlp.py`) + 1 dashboard check.
+
+---
+
 ## [Unreleased] — Trader UX Overhaul, UX Stages 1–5 (`29e1820` → `99969dc`)
 
 Front-end only (`static/*`, `tests/js/dashboard_load.test.js`); zero backend, financial-engine, or Protocol 06 changes. All 14 `#data-table` columns and element IDs preserved. Screenshots: `docs/images/` (demo data).

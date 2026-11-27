@@ -4353,3 +4353,20 @@ header.glass-panel {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
 }
+
+/* Advisory open-weight LLM filing read (sec_nlp llm_* fields) */
+.inspector-ai-note {
+    flex-basis: 100%;
+    order: 3;
+    margin: 2px 0 0;
+    font-size: var(--text-sm);
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+.inspector-ai-note.disagree {
+    color: var(--yellow);
+}
+.sec-nlp-badge.ai-disagrees {
+    outline: 1px dashed var(--yellow);
+    outline-offset: 1px;
+}

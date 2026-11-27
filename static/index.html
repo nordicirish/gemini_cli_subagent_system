@@ -7,7 +7,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.89">
+    <link rel="stylesheet" href="styles.css?v=18.90">
     <link rel="stylesheet" href="modern_ui.css?v=18.65">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
@@ -607,7 +607,7 @@
                                     <button id="colab-run-walk-forward-btn" type="button" class="glow-btn outline mini"
                                         title="Run Walk-Forward Historical Strategy Backtester on Colab MCP">📊 Strategy Check</button>
                                 </div>
-                                <label class="colab-llm-opt" title="Opt-in 4-bit quantized 7B LLM refinement when running Filing Risk NLP on an L4 GPU">
+                                <label class="colab-llm-opt" title="Adds an advisory plain-English read of each stock's filings from an open-weight model (Qwen2.5-7B) on a cloud L4 GPU. It never changes the filing risk score; big disagreements are flagged.">
                                     <input type="checkbox" id="colab-sec-use-llm-toggle"> Deeper AI review of filings (slower; needs a cloud GPU)
                                 </label>
                                 <div id="colab-mcp-job-status" class="status-message inline-feedback"></div>
@@ -931,7 +931,7 @@
     </div>
 
     <script src="portfolio.js?v=18.65"></script>
-    <script src="app.js?v=19.02"></script>
+    <script src="app.js?v=19.03"></script>
     <script src="modern_ui.js?v=18.70"></script>
 </body>
 

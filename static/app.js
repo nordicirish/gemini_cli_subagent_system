@@ -2429,7 +2429,9 @@ function _buildSecNlpBadgeHtml(sym) {
     const staleTxt = info.stale ? ' [STALE]' : '';
     const snippets = Array.isArray(info.evidence_snippets) ? info.evidence_snippets : [];
     const snipPreview = snippets.length ? ` | ${String(snippets[0])}` : '';
-    const model = String(info.model_used || 'FinBERT');
+    // model_used lives on the artifact, not on each ticker entry.
+    const model = String((_lastQuantAnalytics.colab_sec_nlp && _lastQuantAnalytics.colab_sec_nlp.model_used) || info.model_used || 'FinBERT');
+    const aiRead = _aiFilingRead(info);
 
     let cls = 'sec-nlp-badge';
     let label = `Filing risk ${dilution.toFixed(0)}`;
@@ -2444,8 +2446,35 @@ function _buildSecNlpBadgeHtml(sym) {
     const flags = [overhang ? 'share-offering overhang' : '', goingConcern ? 'going-concern warning' : ''].filter(Boolean).join(', ');
     const tip = `SEC filing analysis: dilution risk ${dilution.toFixed(1)}/100 (higher = more likely to issue new shares)`
         + ` · catalyst tone ${sentiment.toFixed(2)}${flags ? ` · flags: ${flags}` : ''}`
-        + ` · model ${model}${staleTxt}${snipPreview}`;
-    return `<span class="${cls}" title="${_escAlertHtml(tip)}">${_escAlertHtml(label)}</span>`;
+        + ` · model ${model}${staleTxt}${snipPreview}`
+        + (aiRead ? ` || ${aiRead.text}` : '');
+    if (aiRead && aiRead.disagree) cls += ' ai-disagrees';
+    return `<span class="${cls}" title="${_escAlertHtml(tip)}">${_escAlertHtml(label)}${aiRead && aiRead.disagree ? ' ⚠' : ''}</span>`;
+}
+
+// Advisory open-weight LLM read of a ticker's filings (sec_nlp llm_* fields), or null.
+// It never replaces the rule-based dilution score; a large gap between the two is surfaced.
+const _AI_FILING_FLAG_LABELS = {
+    atm_program: 'at-the-market share sales',
+    shelf_registration: 'shelf registration',
+    warrants: 'warrants',
+    convertible_notes: 'convertible notes',
+    reverse_split: 'reverse split',
+    going_concern: 'going-concern warning',
+};
+
+function _aiFilingRead(info) {
+    if (!info || typeof info.llm_summary !== 'string' || !info.llm_summary.trim()) return null;
+    const severity = Number(info.llm_severity);
+    const ruleScore = Number(info.dilution_risk_score);
+    const flags = (Array.isArray(info.llm_flags) ? info.llm_flags : [])
+        .map((f) => _AI_FILING_FLAG_LABELS[f]).filter(Boolean);
+    const disagree = Number.isFinite(severity) && Number.isFinite(ruleScore) && Math.abs(severity - ruleScore) > 30;
+    const text = `AI read (advisory): ${info.llm_summary.trim()}`
+        + (flags.length ? ` · ${flags.join(', ')}` : '')
+        + (Number.isFinite(severity) ? ` · AI severity ${Math.round(severity)}/100` : '')
+        + (disagree ? ' · Models disagree — read the filing' : '');
+    return { text, summary: info.llm_summary.trim(), severity: Number.isFinite(severity) ? Math.round(severity) : null, disagree };
 }
 
 function _injectSecBadgeForSymbol(sym) {
@@ -4491,8 +4520,17 @@ function _renderChartInspector(symbol) {
     ].join('');
 
     const safeSym = _escAlertHtml(sym);
+    const secInfo = _lastQuantAnalytics && _lastQuantAnalytics.colab_sec_nlp && _lastQuantAnalytics.colab_sec_nlp.tickers
+        ? _lastQuantAnalytics.colab_sec_nlp.tickers[sym] : null;
+    const aiRead = _aiFilingRead(secInfo);
+    const aiNote = aiRead
+        ? `<p class="inspector-ai-note${aiRead.disagree ? ' disagree' : ''}" title="${_escAlertHtml(aiRead.text)}">`
+            + `<strong>AI filing read (advisory):</strong> ${_escAlertHtml(aiRead.summary)}`
+            + (aiRead.disagree ? ' <span class="inspector-sub">· models disagree — read the filing</span>' : '')
+            + '</p>'
+        : '';
     el.innerHTML = `
-        <dl class="inspector-metrics">${metrics}</dl>
+        <dl class="inspector-metrics">${metrics}</dl>${aiNote}
         <div class="inspector-actions">
             <button type="button" class="chart-copy-btn" data-inspector-action="alert" data-ticker="${safeSym}"
                 title="Set a price alert for ${safeSym} (opens the Alerts view pre-filled)">🔔 Set alert</button>

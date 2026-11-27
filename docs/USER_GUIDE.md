@@ -97,6 +97,7 @@ The **Alerts** view lists every active alert in a readable, stationary list — 
 
 - Click **▶ Refresh All Cloud Insights** to run four Google Colab steps with live progress: **⚡ Options Flow**, **📑 Filing Risk**, **🔭 Stock Finder**, and **📊 Strategy Check**. (It no longer starts automatically — set `COLAB_AUTO_RUN_ON_STARTUP=1` if you want that.)
 - The status pill shows **Cloud: Ready** or **Cloud: Setup needed**; one-time setup steps are under a collapsed *show steps* section.
+- **Deeper AI review of filings** (checkbox) adds an *advisory* plain-English read of each stock's SEC filings from an open-weight model (Qwen2.5-7B) running on a Colab L4 GPU. It appears in the **Filing risk** badge tooltip and the Stock Inspector as *"AI filing read (advisory)"*. It never changes the filing risk score; when the AI and the rule-based score differ by more than 30 points you'll see **⚠ Models disagree — read the filing**. If no suitable GPU is available, the scan runs without it and says so.
 - **Suggested Rule Tweaks** are read-only until you approve them. **Offline Colab Calibration (JSON)** lets you export/import results without a live connection.
 
 ---

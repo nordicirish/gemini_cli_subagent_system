@@ -1609,6 +1609,24 @@ async function main() {
         assert.strictEqual(s5Opened, 'NVDA', 'Enter on a focused row should open its chart');
     });
 
+    // Advisory open-weight LLM filing read (sec_nlp llm_* fields): escaped, labelled, disagreement flagged
+    window.eval(`_lastQuantAnalytics = Object.assign({}, _lastQuantAnalytics || {}, { colab_sec_nlp: {
+        model_used: 'ProsusAI/finbert+Qwen/Qwen2.5-7B-Instruct',
+        tickers: { NVDA: { dilution_risk_score: 20, catalyst_sentiment: 0.1, offering_overhang_flag: false, going_concern_flag: false,
+            filings_analyzed: 2, llm_summary: 'New $2B shelf <img src=x onerror=alert(1)> filed; no active ATM.',
+            llm_flags: ['shelf_registration'], llm_severity: 61 } } } });`);
+    const s6Badge = window._buildSecNlpBadgeHtml('NVDA');
+    window._renderChartInspector('NVDA');
+    const s6Note = window.document.querySelector('#chart-inspector-strip .inspector-ai-note');
+    check('LLM filing read: advisory label, escaped text, model shown, disagreement flagged', () => {
+        assert(s6Badge.includes('AI read (advisory)') && s6Badge.includes('shelf registration'), `badge tooltip: ${s6Badge}`);
+        assert(s6Badge.includes('Qwen/Qwen2.5-7B-Instruct'), 'tooltip should name the model that actually ran');
+        assert(s6Badge.includes('ai-disagrees') && s6Badge.includes('Models disagree'), 'a 41-point gap should be flagged');
+        assert(!s6Badge.includes('<img'), 'model text must be escaped in the badge');
+        assert(s6Note && s6Note.textContent.includes('AI filing read (advisory)') && s6Note.classList.contains('disagree'));
+        assert(!s6Note.querySelector('img'), 'model text must be escaped in the inspector');
+    });
+
     const s5AppJs = read(path.join(staticDir, 'app.js'));
     check('Stage 5: dead legacy clipboard / mobile-bridge code and CSS removed', () => {
         ['copyMarketSnapshot', 'copySessionBoot', 'copyNewsScan', 'ingestExecutionPayload', 'copySessionReviewPayload', 'dMobileCopyBtn']
