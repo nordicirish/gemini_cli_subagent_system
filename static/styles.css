@@ -3369,6 +3369,170 @@ td.num-col {
     background: rgba(56, 189, 248, 0.25);
 }
 
+/* ─── Top Stock Recommendations Modal (Colab Quant) ─── */
+.modal-scout-rankings {
+    width: 1140px;
+    max-width: 96vw;
+    display: flex;
+    flex-direction: column;
+    max-height: 90vh;
+}
+
+.scout-modal-meta {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.scout-modal-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    margin: 6px 0 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+}
+
+.scout-modal-ctrl {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.scout-modal-ctrl select,
+.scout-modal-search {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: var(--text-primary, #e6edf3);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 0.74rem;
+}
+
+.scout-modal-search {
+    flex: 1 1 170px;
+    min-width: 140px;
+}
+
+.scout-modal-table-wrap {
+    overflow: auto;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    flex: 1 1 auto;
+}
+
+.scout-rankings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.76rem;
+}
+
+.scout-rankings-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #131922;
+    color: var(--text-muted);
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.66rem;
+    letter-spacing: 0.4px;
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    white-space: nowrap;
+}
+
+.scout-rankings-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    vertical-align: middle;
+}
+
+.scout-rankings-table tbody tr:hover {
+    background: rgba(56, 189, 248, 0.06);
+}
+
+.scout-rank-badge {
+    display: inline-block;
+    min-width: 24px;
+    text-align: center;
+    padding: 2px 5px;
+    border-radius: 5px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 0.72rem;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary, #e6edf3);
+}
+
+.scout-rank-badge.top3 {
+    background: rgba(0, 255, 148, 0.16);
+    color: var(--green, #4ade80);
+    border: 1px solid rgba(0, 255, 148, 0.35);
+}
+
+.scout-sector-pill {
+    display: inline-block;
+    margin-top: 2px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 0.64rem;
+    background: rgba(56, 189, 248, 0.12);
+    color: #7dd3fc;
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    white-space: nowrap;
+}
+
+.scout-score-pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    color: var(--green, #4ade80);
+}
+
+.scout-cluster-pill {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.64rem;
+    font-weight: 700;
+    background: rgba(168, 85, 247, 0.14);
+    color: #d8b4fe;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    margin-bottom: 2px;
+}
+
+.scout-notes-cell {
+    min-width: 220px;
+    max-width: 340px;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+.scout-action-cell {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.scout-modal-footer {
+    margin-top: 8px;
+    font-size: 0.71rem;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
 .vol-surface-tag {
     display: inline-block;
     margin-left: 4px;

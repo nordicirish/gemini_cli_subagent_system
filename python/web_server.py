@@ -1791,7 +1791,7 @@ async def run_ai_scout(request: Request, background_tasks: BackgroundTasks):
                 "message": f"Watchlist rescan triggered for {len(watchlist)} tickers."
             })
 
-        # ── Mode: Sector discovery ───────────────────────────────────────────
+        # ── Mode: Sector discovery (unified through Colab Stock Finder when ready) ──
         else:
             categories = []
             try:
@@ -1803,14 +1803,46 @@ async def run_ai_scout(request: Request, background_tasks: BackgroundTasks):
             if not categories:
                 return JSONResponse({"status": "error", "message": "No Scout Sectors enabled. Toggle at least one sector to scan."})
 
-            # Trigger the dynamic scout ticker discovery in background
+            try:
+                mgr = get_colab_job_manager()
+                tr = mgr.get_status().get("transport", {})
+                if tr.get("mode") != "offline" and tr.get("ready"):
+                    try:
+                        rec = mgr.submit_job(
+                            "quant_scout",
+                            options={
+                                "sectors": categories,
+                                "max_rsi": max_rsi,
+                                "top_n": max(20, min(50, limit * 10)),
+                            },
+                        )
+                    except ColabJobConflictError:
+                        return JSONResponse({
+                            "status": "error",
+                            "message": "A Colab Stock Finder scan is already running. Wait for it to finish cleanly.",
+                        }, status_code=409)
+                    framework.log(f"[Colab Scout] Queued sector job {rec['job_id']} for {categories} (max_rsi={max_rsi}).")
+                    return JSONResponse({
+                        "status": "success",
+                        "engine": "colab",
+                        "colab_job_id": rec["job_id"],
+                        "sectors": categories,
+                        "requested_limit": limit,
+                        "scouts": [],
+                        "message": f"Colab sector scan started for {', '.join(categories)} (max RSI {max_rsi})...",
+                    }, status_code=202)
+            except Exception as colab_err:
+                framework.log(f"[Warning] Colab sector scout unavailable, falling back to local: {redact_secrets(str(colab_err))}")
+
+            # Fallback local dynamic scout ticker discovery when Colab is offline
             _trigger_force_refresh(fetch_stocks)
             background_tasks.add_task(reload_scout_tickers_task)
 
             return JSONResponse({
                 "status": "success",
+                "engine": "local",
                 "scouts": [],
-                "message": f"Sector scout triggered for {len(categories)} sector(s): {', '.join(categories)}. New tickers will appear in the table shortly."
+                "message": f"Local sector scout triggered for {len(categories)} sector(s): {', '.join(categories)}. New tickers will appear in the table shortly."
             })
 
     except Exception as e:

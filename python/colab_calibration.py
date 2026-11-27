@@ -29,6 +29,11 @@ try:
 except ImportError:
     from python.persistence import get_persistence_service
 
+try:
+    from colab_workers.quant_scout_worker import infer_sector_for_ticker, is_excluded_non_stock_ticker
+except ImportError:
+    from python.colab_workers.quant_scout_worker import infer_sector_for_ticker, is_excluded_non_stock_ticker
+
 
 CALIBRATION_SCHEMA_VERSION = "1.0"
 ARTIFACT_SCHEMA_VERSION = "2.0"
@@ -566,11 +571,12 @@ def validate_quant_scout_artifact(payload: Any) -> Dict[str, Any]:
         "rs_1m_pct": (-100.0, 1000.0),
         "rs_3m_pct": (-100.0, 2000.0),
         "rs_6m_pct": (-100.0, 5000.0),
+        "rsi_14": (0.0, 100.0),
         "corr_to_portfolio": (-1.0, 1.0),
         "pead_score": (-100.0, 100.0),
         "adv_usd_m": (0.0, 1_000_000.0),
     }
-    allowed_fields = set(float_bounds.keys()) | {"ticker", "vol_regime", "cluster_label", "rationale"}
+    allowed_fields = set(float_bounds.keys()) | {"ticker", "sector", "vol_regime", "cluster_label", "rationale"}
     required_fields = {"ticker", "composite_score", "rs_3m_pct", "corr_to_portfolio", "vol_regime", "cluster_label"}
     cleaned_cands: List[Dict[str, Any]] = []
     seen_syms = set()
@@ -587,7 +593,15 @@ def validate_quant_scout_artifact(payload: Any) -> Dict[str, Any]:
         if not _TICKER_RE.match(sym) or sym in seen_syms:
             raise ValueError(f"Invalid or duplicate ticker in quant_scout.candidates[{idx}]: {sym!r}")
         seen_syms.add(sym)
+        if is_excluded_non_stock_ticker(sym):
+            continue
         clean_item: Dict[str, Any] = {"ticker": sym}
+        if "sector" in item and item["sector"] is not None:
+            if not isinstance(item["sector"], str):
+                raise ValueError(f"quant_scout.candidates[{idx}].sector must be a string.")
+            clean_item["sector"] = item["sector"].strip()[:48] or infer_sector_for_ticker(sym)
+        else:
+            clean_item["sector"] = infer_sector_for_ticker(sym)
         for k, (lo, hi) in float_bounds.items():
             if k in item and item[k] is not None:
                 if not _is_valid_number(item[k], lo, hi):

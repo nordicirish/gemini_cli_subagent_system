@@ -7,7 +7,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.81">
+    <link rel="stylesheet" href="styles.css?v=18.82">
     <link rel="stylesheet" href="modern_ui.css?v=18.61">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
@@ -296,9 +296,11 @@
                         </div>
 
                         <div class="sidebar-tab-pane" data-tab-pane="scout-quant" role="tabpanel">
-                            <div class="btn-row" style="gap: 6px; margin-bottom: 8px;">
+                            <div class="btn-row" style="gap: 6px; margin-bottom: 8px; display: flex; flex-wrap: wrap;">
                                 <button id="colab-run-quant-scout-btn" type="button" class="glow-btn outline mini"
-                                    title="Run Broad 500+ Ticker Quantitative Stock Finder on Colab MCP">🔭 Scan 500+ Stocks</button>
+                                    title="Run Broad 500+ Ticker Quantitative Stock Finder on Colab">🔭 Scan 500+ Stocks</button>
+                                <button id="colab-open-scout-modal-btn" type="button" class="glow-btn outline mini"
+                                    title="Open full ranked Stock Recommendations table with sector filter">📊 Top 20+ Table</button>
                             </div>
                             <div id="colab-scout-job-status" class="status-message inline-feedback" style="margin-bottom: 6px;"></div>
                             <div id="colab-quant-scout-panel" class="colab-scout-panel">
@@ -315,7 +317,7 @@
 
                         <div class="sidebar-tab-pane hidden" data-tab-pane="scout-sector" role="tabpanel">
                             <p style="font-size: 0.62rem; color: var(--text-muted); margin-bottom: 8px; line-height: 1.4;">
-                                Enable sectors below, then scan to discover new candidate tickers from those industries.</p>
+                                Enable sectors below, then scan via Google Colab to discover ranked stock ideas from those industries (falls back to local scout when offline).</p>
                             <div id="scout-categories-container" class="scout-grid-container"
                                 style="margin-top: 0; min-height: 40px; border: 1px dashed var(--panel-border); padding: 8px; border-radius: 4px; margin-bottom: 10px;">
                                 <!-- Grid injected by JS -->
@@ -759,8 +761,80 @@
         </div>
     </div>
 
+    <!-- ─── Top Stock Recommendations Modal (Colab Quant) ─── -->
+    <div class="modal-overlay" id="scout-rankings-modal-overlay" role="dialog" aria-modal="true"
+        aria-labelledby="scout-modal-title">
+        <div class="modal modal-scout-rankings">
+            <div class="modal-header">
+                <div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;">
+                    <h3 id="scout-modal-title">🔭 Top Stock Recommendations (Colab Quant)</h3>
+                    <span id="scout-modal-meta" class="scout-modal-meta">—</span>
+                </div>
+                <button class="modal-close" id="close-scout-rankings-modal" type="button" aria-label="Close">&times;</button>
+            </div>
+            <div class="scout-modal-controls">
+                <label class="scout-modal-ctrl">
+                    <span>Sector:</span>
+                    <select id="scout-modal-sector-filter">
+                        <option value="ALL">All Sectors</option>
+                    </select>
+                </label>
+                <label class="scout-modal-ctrl">
+                    <span>Show:</span>
+                    <select id="scout-modal-limit-select">
+                        <option value="10">Top 10</option>
+                        <option value="20" selected>Top 20</option>
+                        <option value="30">Top 30</option>
+                        <option value="50">Top 50</option>
+                        <option value="all">All</option>
+                    </select>
+                </label>
+                <label class="scout-modal-ctrl">
+                    <span>Sort by:</span>
+                    <select id="scout-modal-sort-select">
+                        <option value="score" selected>Colab Rank (Score)</option>
+                        <option value="rs_3m_pct">3M Momentum</option>
+                        <option value="rs_1m_pct">1M Momentum</option>
+                        <option value="corr_asc">Lowest Correlation</option>
+                        <option value="adv_usd_m">Highest Liquidity (ADV)</option>
+                    </select>
+                </label>
+                <input id="scout-modal-search" type="search" class="scout-modal-search"
+                    placeholder="Filter ticker or notes..." aria-label="Filter ticker or notes">
+                <button id="scout-modal-rescan-btn" type="button" class="glow-btn outline mini"
+                    title="Run a fresh 500+ stock screen on Google Colab">🔭 Re-Scan 500+</button>
+            </div>
+            <div id="scout-modal-status" class="status-message inline-feedback" style="margin-bottom: 8px;"></div>
+            <div class="scout-modal-table-wrap">
+                <table id="scout-rankings-table" class="scout-rankings-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Ticker / Sector</th>
+                            <th>Colab Score</th>
+                            <th>1M / 3M / 6M RS</th>
+                            <th>RSI</th>
+                            <th>Port. Corr</th>
+                            <th>PEAD</th>
+                            <th>Vol Regime</th>
+                            <th>ADV ($M)</th>
+                            <th>Colab Cluster &amp; Notes</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scout-rankings-tbody">
+                        <tr>
+                            <td colspan="11" style="text-align:center; padding: 24px; color: var(--text-muted);">No Colab Stock Finder ideas loaded yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="scout-modal-footer" class="scout-modal-footer"></div>
+        </div>
+    </div>
+
     <script src="portfolio.js?v=18.63"></script>
-    <script src="app.js?v=18.89"></script>
+    <script src="app.js?v=18.90"></script>
     <script src="modern_ui.js?v=18.66"></script>
 </body>
 

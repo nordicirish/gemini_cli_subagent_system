@@ -133,7 +133,7 @@ def _sanitize_options(raw_options: Any) -> Dict[str, Any]:
         return {}
     if not isinstance(raw_options, dict):
         raise ValueError("options must be a JSON object.")
-    allowed = {"use_llm", "top_n", "lookback_years", "tickers"}
+    allowed = {"use_llm", "top_n", "lookback_years", "tickers", "sectors", "max_rsi"}
     unknown = set(raw_options.keys()) - allowed
     if unknown:
         raise ValueError(f"Unknown Colab job option(s): {sorted(unknown)}")
@@ -156,6 +156,18 @@ def _sanitize_options(raw_options: Any) -> Dict[str, Any]:
         if not isinstance(raw_options["tickers"], list):
             raise ValueError("options.tickers must be a list of ticker symbols.")
         clean["tickers"] = [str(t or "").strip().upper() for t in raw_options["tickers"] if str(t or "").strip()]
+    if "sectors" in raw_options and raw_options["sectors"] is not None:
+        if not isinstance(raw_options["sectors"], list):
+            raise ValueError("options.sectors must be a list of sector names.")
+        sectors_clean = [str(s or "").strip()[:48] for s in raw_options["sectors"] if str(s or "").strip()]
+        if len(sectors_clean) > 20:
+            raise ValueError("options.sectors cannot exceed 20 entries.")
+        clean["sectors"] = sectors_clean
+    if "max_rsi" in raw_options and raw_options["max_rsi"] is not None:
+        mr = raw_options["max_rsi"]
+        if isinstance(mr, bool) or not isinstance(mr, (int, float)) or mr < 20 or mr > 100:
+            raise ValueError("options.max_rsi must be a number in [20, 100].")
+        clean["max_rsi"] = float(mr)
     return clean
 
 

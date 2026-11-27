@@ -244,15 +244,37 @@ const API = {
         data: {
             schema_version: '2.0',
             universe_size: 520,
+            notes: 'Screened 520 universe ticker(s); ADV >= $20M.',
             candidates: [
                 {
                     ticker: 'SMCI',
+                    sector: 'AI & Data',
                     composite_score: 77.5,
+                    rs_1m_pct: 12.1,
                     rs_3m_pct: 29.4,
+                    rs_6m_pct: 48.0,
+                    rsi_14: 61.5,
                     corr_to_portfolio: 0.18,
+                    pead_score: 14.2,
+                    adv_usd_m: 920.0,
                     vol_regime: 'NORMAL',
                     cluster_label: 'LOW_CORR<img src=x onerror=alert(1)>',
                     rationale: 'Orthogonal alpha <script>evil()</script>',
+                },
+                {
+                    ticker: 'REGN',
+                    sector: 'Biotech',
+                    composite_score: 64.0,
+                    rs_1m_pct: 8.2,
+                    rs_3m_pct: 19.5,
+                    rs_6m_pct: 22.0,
+                    rsi_14: 58.0,
+                    corr_to_portfolio: 0.05,
+                    pead_score: 0.0,
+                    adv_usd_m: 410.0,
+                    vol_regime: 'NORMAL',
+                    cluster_label: 'LOW_CORR_ALPHA',
+                    rationale: '[Biotech] 3m RS +19.5%, RSI 58, corr +0.05',
                 },
             ],
         },
@@ -1088,6 +1110,41 @@ async function main() {
     check('Colab Connect Link: surfaces safe colab.research.google.com URL and blocks unsafe URLs', () => {
         assert.strictEqual(safeLinkShown, true, 'Expected #colab-connect-link visible with safe Colab URL');
         assert.strictEqual(badLinkBlocked, true, 'Unsafe javascript: URL must remain hidden and reset to #');
+    });
+
+    const openScoutModalBtn = window.document.getElementById('colab-open-scout-modal-btn');
+    const scoutModalOverlay = window.document.getElementById('scout-rankings-modal-overlay');
+    const scoutModalTbody = window.document.getElementById('scout-rankings-tbody');
+    const scoutModalSectorSel = window.document.getElementById('scout-modal-sector-filter');
+    const scoutModalLimitSel = window.document.getElementById('scout-modal-limit-select');
+    const scoutModalCloseBtn = window.document.getElementById('close-scout-rankings-modal');
+
+    openScoutModalBtn.click();
+    const modalOpenedAll = scoutModalOverlay.classList.contains('active')
+        && scoutModalTbody.querySelectorAll('tr[data-scout-rank-row]').length === 2
+        && scoutModalTbody.innerHTML.includes('SMCI')
+        && scoutModalTbody.innerHTML.includes('REGN')
+        && scoutModalTbody.innerHTML.includes('#1')
+        && !scoutModalTbody.innerHTML.includes('<script>evil()</script>');
+
+    scoutModalSectorSel.value = 'Biotech';
+    scoutModalSectorSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+    const filteredToBiotech = scoutModalTbody.querySelectorAll('tr[data-scout-rank-row]').length === 1
+        && scoutModalTbody.innerHTML.includes('REGN')
+        && !scoutModalTbody.innerHTML.includes('SMCI');
+
+    scoutModalSectorSel.value = 'ALL';
+    scoutModalLimitSel.value = '10';
+    scoutModalSectorSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+    const resetSectorOk = scoutModalTbody.querySelectorAll('tr[data-scout-rank-row]').length === 2;
+
+    scoutModalCloseBtn.click();
+    const modalClosedOk = !scoutModalOverlay.classList.contains('active');
+    check('Scout Recommendations Modal: ranks candidates with Colab notes, sector filter, limit control, and clean close', () => {
+        assert.strictEqual(modalOpenedAll, true, 'Expected Top Recommendations modal to open and render escaped ranked rows');
+        assert.strictEqual(filteredToBiotech, true, 'Expected Biotech sector filter to isolate REGN');
+        assert.strictEqual(resetSectorOk, true, 'Expected ALL sector filter to restore both candidates');
+        assert.strictEqual(modalClosedOk, true, 'Close button should dismiss #scout-rankings-modal-overlay');
     });
 
     window.close();

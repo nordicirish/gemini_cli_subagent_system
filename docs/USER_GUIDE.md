@@ -28,13 +28,14 @@ Welcome! This guide explains how to use the dashboard without needing options-de
 
 ## 3. Finding New Stocks (**🔭 Discovery**)
 
-Inside **🧰 TOOLS → 🔭 Discovery**, there are two ways to look for ideas:
+Inside **🧰 TOOLS → 🔭 Discovery**, both tabs are powered by the same **Google Colab Stock Finder** engine:
 
-1. **Stock Finder (500+) *(runs via Google Colab Cloud Research)*:**
-   - Screens 500+ tickers for strong momentum and low correlation to what you already hold.
-   - Click **+ Watch** next to any idea to add it straight to your Watchlist.
-2. **Sector Themes *(runs locally)*:**
+1. **Stock Finder (500+):**
+   - Screens 500+ individual stocks (indices, VIX products, and macro ETFs are filtered out) for strong momentum and low correlation to what you already hold.
+   - Click **📊 Top 20+ Table** to open the full ranked modal: inspect Top 10 / 20 / 30 / 50 / All picks from top to bottom with 1M/3M/6M returns, RSI, portfolio correlation, PEAD, liquidity, Colab cluster tags, and notes — filter by sector or search, and click **+ Watch** on any row.
+2. **Sector Themes:**
    - Pick market sectors (e.g., Semiconductors, AI & Data, Biotech), set max RSI and max picks, and click **🔭 Scout New Sectors**.
+   - Runs a targeted Google Colab scan for those sectors and automatically opens the ranked recommendations modal (falling back to local scanning only when Colab is offline).
 
 ---
 

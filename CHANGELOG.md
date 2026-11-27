@@ -9,6 +9,12 @@ All notable engineering, architecture, UI, and governance changes to `gemini_cli
 ## [Unreleased] — Colab MCP Handshake Fix & User Documentation Parity Agent
 
 ### Fixed & Improved
+- **Unified Colab Sector Themes & Top Recommendations Modal (`python/colab_workers/quant_scout_worker.py`, `python/colab_calibration.py`, `python/colab_jobs.py`, `python/web_server.py`, `static/index.html`, `static/styles.css`, `static/app.js`):**
+  - Routed **Discovery → Sector Themes** (`POST /api/ai_scout`) through Colab Stock Finder (`quant_scout` with `options.sectors` and `options.max_rsi`), with automatic local fallback when offline.
+  - Added canonical sector tagging (`infer_sector_for_ticker`, S&P 500 GICS parsing + parent sector matching), `rsi_14` scoring, and Top-50 default candidate depth; auto-enriches existing cached artifacts on load.
+  - Added **📊 Top 20+ Table** (`#scout-rankings-modal-overlay`) showing top-to-bottom Colab rankings, detailed performance/liquidity/RSI/PEAD columns, Colab cluster & notes, sector filter, show-count selector (`10`/`20`/`30`/`50`/`All`), sorting, search, `+ Watch`, and quick chart buttons (`styles.css?v=18.82`, `app.js?v=18.90`).
+- **Stock Finder Equity-Only Filter (`python/colab_workers/quant_scout_worker.py`, `python/colab_calibration.py`):**
+  - Excluded volatility products (`VIXY`, `^VIX`, `UVXY`, etc.), market indices (`^GSPC`, etc.), macro/bond/currency/commodity ETFs (`UUP`, `IEF`, `TLT`, `GLD`), and broad/sector ETFs (`SPY`, `QQQ`, `XLV`) from Colab Stock Finder (`quant_scout`) screening and persisted artifact loading.
 - **Headless Google Colab CLI Mode (`mode="cli"`, `python/colab_mcp_client.py`, `python/colab_jobs.py`, `static/app.js`):**
   - Added `mode="cli"` powered by `google-colab-cli` (`colab run --config <temp> --timeout <sec> [--gpu T4|L4]`), auto-selected as the default when `colab` is installed (`COLAB_CLI_PATH`, `COLAB_CLI_AUTH`). Eliminates browser-tab handshakes and self-terminates each ephemeral VM cleanly; strictly allowlists `CPU`/`T4`/`L4` to prevent silent A100 fallback.
   - Updated `ColabMCPClient._wrap_script()` via `ast.parse` so `GEM_JOB_INPUTS` is injected *after* module docstrings and `from __future__ import annotations` lines.

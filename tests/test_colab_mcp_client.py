@@ -1039,6 +1039,63 @@ class TestColabJobManagerAndAPI(unittest.TestCase):
         finally:
             ps.close()
 
+    def test_ai_scout_sectors_routes_via_colab_when_ready_and_falls_back_when_offline(self) -> None:
+        from fastapi.testclient import TestClient
+        import web_server
+
+        with tempfile.TemporaryDirectory() as td:
+            mock_svc = MagicMock()
+            mock_svc.get_scout_categories.return_value = ["Biotech", "Semiconductors"]
+            mock_svc.get_portfolio_basket.return_value = {"portfolio": [], "unallocated_cash_eur": 0.0}
+            mock_svc.get_watchlist.return_value = []
+            mock_svc.get_decision_log.return_value = []
+
+            captured = []
+
+            class _CliFake:
+                def execute_python_script_sync(self, _src, job_inputs, accelerator="CPU"):
+                    captured.append(job_inputs)
+                    return _sample_quant_scout()
+
+            mgr_ready = colab_jobs.ColabJobManager(
+                cache_dir=td,
+                config_loader=lambda: colab_mcp_client.ColabMCPConfig(mode="cli"),
+                client_factory=lambda _cfg: _CliFake(),
+                worker_loader=lambda _jt: "print('sector')",
+                service_provider=lambda: mock_svc,
+                transport_prober=lambda _cfg: {"mode": "cli", "ready": True},
+            )
+            client = TestClient(web_server.app)
+            with patch.object(web_server, "get_persistence_service", return_value=mock_svc), \
+                 patch.object(web_server, "get_colab_job_manager", return_value=mgr_ready):
+                resp = client.post("/api/ai_scout", json={"mode": "sectors", "limit": 3, "max_rsi": 70})
+                self.assertEqual(resp.status_code, 202)
+                body = resp.json()
+                self.assertEqual(body["engine"], "colab")
+                self.assertEqual(body["sectors"], ["Biotech", "Semiconductors"])
+                job_id = body["colab_job_id"]
+                for _ in range(50):
+                    j = mgr_ready.get_job(job_id)
+                    if j and j["status"] in {"succeeded", "failed"}:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(mgr_ready.get_job(job_id)["status"], "succeeded")
+                self.assertEqual(captured[0]["options"]["sectors"], ["Biotech", "Semiconductors"])
+                self.assertEqual(captured[0]["options"]["max_rsi"], 70)
+
+            mgr_offline = colab_jobs.ColabJobManager(
+                cache_dir=td,
+                config_loader=lambda: colab_mcp_client.ColabMCPConfig(mode="offline"),
+                transport_prober=lambda _cfg: {"mode": "offline", "ready": True},
+            )
+            with patch.object(web_server, "get_persistence_service", return_value=mock_svc), \
+                 patch.object(web_server, "get_colab_job_manager", return_value=mgr_offline), \
+                 patch.object(web_server, "_trigger_force_refresh"), \
+                 patch.object(web_server, "reload_scout_tickers_task"):
+                resp_off = client.post("/api/ai_scout", json={"mode": "sectors", "limit": 2, "max_rsi": 75})
+                self.assertEqual(resp_off.status_code, 200)
+                self.assertEqual(resp_off.json()["engine"], "local")
+
 
 if __name__ == "__main__":
     unittest.main()

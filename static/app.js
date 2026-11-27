@@ -252,6 +252,7 @@ dIndicesModalOverlay.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         closeModal(dIndicesModalOverlay);
+        if (typeof closeScoutRankingsModal === 'function') closeScoutRankingsModal();
     }
 });
 
@@ -2731,6 +2732,22 @@ if (dAddWatchlistTicker) {
 if (dAddToWatchlistBtn) dAddToWatchlistBtn.addEventListener('click', addToWatchlist);
 
 // Shared scout runner — mode: 'sectors' | 'watchlist'
+async function _pollColabJobUntilDone(jobId, statusEl) {
+    for (let i = 0; i < 120; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const res = await fetch(`${API_BASE}/colab/jobs/${encodeURIComponent(jobId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status} polling Colab scan`);
+        const pData = await res.json();
+        if (statusEl && pData.progress) {
+            statusEl.textContent = pData.progress;
+            statusEl.className = 'status-message inline-feedback active text-yellow';
+        }
+        if (pData.status === 'succeeded') return pData;
+        if (pData.status === 'failed') throw new Error(pData.error || 'Colab sector scan failed.');
+    }
+    throw new Error('Colab sector scan timed out waiting for result.');
+}
+
 async function runScout(mode) {
     const isWatchlist = mode === 'watchlist';
     const btn = isWatchlist ? document.getElementById('scan-watchlist-btn') : dRunAiScoutBtn;
@@ -2739,9 +2756,9 @@ async function runScout(mode) {
     if (!btn) return;
     btn.disabled = true;
     const originalHtml = btn.innerHTML;
-    btn.innerHTML = isWatchlist ? '🎯 Scanning...' : '🔭 Scouting Sectors...';
+    btn.innerHTML = isWatchlist ? '🎯 Scanning...' : '🔭 Scouting Colab...';
     if (statusEl) {
-        statusEl.textContent = isWatchlist ? 'Triggering watchlist refresh...' : 'Querying sector discovery...';
+        statusEl.textContent = isWatchlist ? 'Triggering watchlist refresh...' : 'Dispatching Colab sector discovery...';
         statusEl.className = 'status-message inline-feedback active text-yellow';
     }
 
@@ -2755,11 +2772,26 @@ async function runScout(mode) {
         });
         const data = await res.json();
         if (data.status === 'success') {
-            const msg = data.message || (data.scouts && data.scouts.length > 0
-                ? `Found: ${data.scouts.join(', ')}`
-                : 'Scan triggered — table will update shortly.');
-            showFeedback(btn, isWatchlist ? '🎯 Done! ✅' : '🔭 Triggered! ✅', msg, false, statusEl);
-            pollData();
+            if (data.engine === 'colab' && data.colab_job_id) {
+                if (statusEl) {
+                    statusEl.textContent = data.message || 'Running Colab sector scan...';
+                    statusEl.className = 'status-message inline-feedback active text-yellow';
+                }
+                const done = await _pollColabJobUntilDone(data.colab_job_id, statusEl);
+                await fetchQuantScoutCandidates();
+                const count = done && done.artifact_summary ? done.artifact_summary.item_count : _lastQuantScoutCandidates.length;
+                showFeedback(btn, '🔭 Done! ✅', `Colab found ${count} ranked pick(s).`, false, statusEl);
+                const sectors = Array.isArray(data.sectors) ? data.sectors : [];
+                if (typeof openScoutRankingsModal === 'function') {
+                    openScoutRankingsModal({ sector: sectors.length === 1 ? sectors[0] : 'ALL', limit: '20' });
+                }
+            } else {
+                const msg = data.message || (data.scouts && data.scouts.length > 0
+                    ? `Found: ${data.scouts.join(', ')}`
+                    : 'Scan triggered — table will update shortly.');
+                showFeedback(btn, isWatchlist ? '🎯 Done! ✅' : '🔭 Triggered! ✅', msg, false, statusEl);
+                pollData();
+            }
         } else {
             throw new Error(data.message);
         }
@@ -2884,6 +2916,7 @@ window.fetchCalibrationStatus = fetchCalibrationStatus;
 
 // Google Colab MCP Quant Jobs, Auto-Pipeline Progress & Action Brief
 let _lastQuantScoutCandidates = [];
+let _lastQuantScoutMeta = { universe_size: 0, generated_at_utc: null, notes: '', stale: false };
 let _lastColabStatus = null;
 let _colabPipelinePollTimer = null;
 let _colabBannerDismissedKey = null;
@@ -2904,7 +2937,11 @@ function _briefActionClick(actionType, arg) {
     } else if (actionType === 'chart' && arg) {
         openChartModal(arg);
     } else if (actionType === 'discovery') {
-        _openSidebarCardAndTab('scout-content', 'scout-quant');
+        if (Array.isArray(_lastQuantScoutCandidates) && _lastQuantScoutCandidates.length > 0 && typeof openScoutRankingsModal === 'function') {
+            openScoutRankingsModal();
+        } else {
+            _openSidebarCardAndTab('scout-content', 'scout-quant');
+        }
     } else if (actionType === 'colab') {
         _openSidebarCardAndTab('analytics-quant-content', 'quant-colab');
     }
@@ -3062,16 +3099,24 @@ async function fetchQuantScoutCandidates() {
         const data = payload && payload.data;
         const cands = data && Array.isArray(data.candidates) ? data.candidates : [];
         _lastQuantScoutCandidates = cands;
+        _lastQuantScoutMeta = {
+            universe_size: Number((data && data.universe_size) || 0),
+            generated_at_utc: (data && data.generated_at_utc) || null,
+            notes: String((data && data.notes) || ''),
+            stale: Boolean(payload.freshness && payload.freshness.stale),
+        };
         renderActionBrief(_lastRenderState, _lastQuantAnalytics);
         if (!payload.loaded || !cands.length) {
             listEl.innerHTML = '<div class="colab-scout-empty">No Stock Finder ideas loaded yet.</div>';
+            renderScoutRankingsModal();
             return;
         }
-        const staleBadge = payload.freshness && payload.freshness.stale
+        const staleBadge = _lastQuantScoutMeta.stale
             ? '<div class="colab-scout-empty">Cached ideas are stale (past 48h refresh window).</div>'
             : '';
         listEl.innerHTML = staleBadge + cands.slice(0, 10).map((c) => {
             const sym = _escAlertHtml(String(c.ticker || '').toUpperCase());
+            const sector = _escAlertHtml(String(c.sector || 'Equity'));
             const score = Number.isFinite(Number(c.composite_score)) ? Number(c.composite_score).toFixed(1) : '—';
             const rs3m = Number.isFinite(Number(c.rs_3m_pct)) ? Number(c.rs_3m_pct).toFixed(1) : '—';
             const corr = Number.isFinite(Number(c.corr_to_portfolio)) ? Number(c.corr_to_portfolio).toFixed(2) : '—';
@@ -3081,13 +3126,164 @@ async function fetchQuantScoutCandidates() {
                 <div class="colab-scout-row" title="${rationale}">
                     <div class="colab-scout-meta">
                         <strong>${sym} · ${score}</strong>
-                        <span>3m ${rs3m}% | corr ${corr} | ${cluster}</span>
+                        <span>${sector} | 3m ${rs3m}% | corr ${corr} | ${cluster}</span>
                     </div>
                     <button type="button" class="colab-scout-promote-btn" data-scout-ticker="${sym}">+ Watch</button>
                 </div>
             `;
         }).join('');
+        renderScoutRankingsModal();
     } catch (_) {}
+}
+
+const _SCOUT_SECTOR_CHILDREN = {
+    Technology: ['Technology', 'Semiconductors', 'AI & Data'],
+    Healthcare: ['Healthcare', 'Biotech'],
+    Industrials: ['Industrials', 'Aerospace & Defense'],
+};
+
+function _scoutSectorMatches(candidateSector, filterVal) {
+    if (!filterVal || filterVal === 'ALL') return true;
+    const cand = String(candidateSector || 'Other').trim();
+    if (cand.toLowerCase() === String(filterVal).trim().toLowerCase()) return true;
+    const children = _SCOUT_SECTOR_CHILDREN[filterVal];
+    return Array.isArray(children) && children.some((c) => c.toLowerCase() === cand.toLowerCase());
+}
+
+function renderScoutRankingsModal() {
+    const overlay = document.getElementById('scout-rankings-modal-overlay');
+    const tbody = document.getElementById('scout-rankings-tbody');
+    const sectorSel = document.getElementById('scout-modal-sector-filter');
+    const limitSel = document.getElementById('scout-modal-limit-select');
+    const sortSel = document.getElementById('scout-modal-sort-select');
+    const searchEl = document.getElementById('scout-modal-search');
+    const metaEl = document.getElementById('scout-modal-meta');
+    const footerEl = document.getElementById('scout-modal-footer');
+    if (!overlay || !tbody) return;
+
+    const baseList = Array.isArray(_lastQuantScoutCandidates) ? _lastQuantScoutCandidates : [];
+    const rankedAll = baseList.map((item, idx) => ({ ...item, _colabRank: idx + 1 }));
+
+    if (sectorSel) {
+        const prevVal = sectorSel.value || 'ALL';
+        const counts = {};
+        rankedAll.forEach((c) => {
+            const sec = String(c.sector || 'Other').trim() || 'Other';
+            counts[sec] = (counts[sec] || 0) + 1;
+        });
+        const sortedSectors = Object.keys(counts).sort();
+        const optsHtml = [`<option value="ALL">All Sectors (${rankedAll.length})</option>`]
+            .concat(sortedSectors.map((s) => `<option value="${_escAlertHtml(s)}">${_escAlertHtml(s)} (${counts[s]})</option>`));
+        if (prevVal !== 'ALL' && !sortedSectors.includes(prevVal)) {
+            optsHtml.push(`<option value="${_escAlertHtml(prevVal)}">${_escAlertHtml(prevVal)} (0)</option>`);
+        }
+        sectorSel.innerHTML = optsHtml.join('');
+        sectorSel.value = prevVal;
+    }
+
+    const activeSector = sectorSel ? sectorSel.value : 'ALL';
+    const rawLimit = limitSel ? limitSel.value : '20';
+    const sortKey = sortSel ? sortSel.value : 'score';
+    const q = searchEl ? String(searchEl.value || '').trim().toLowerCase() : '';
+
+    let filtered = rankedAll.filter((c) => _scoutSectorMatches(c.sector || 'Other', activeSector));
+    if (q) {
+        filtered = filtered.filter((c) =>
+            String(c.ticker || '').toLowerCase().includes(q)
+            || String(c.sector || '').toLowerCase().includes(q)
+            || String(c.cluster_label || '').toLowerCase().includes(q)
+            || String(c.rationale || '').toLowerCase().includes(q)
+        );
+    }
+
+    filtered.sort((a, b) => {
+        if (sortKey === 'rs_3m_pct') return Number(b.rs_3m_pct || -999) - Number(a.rs_3m_pct || -999);
+        if (sortKey === 'rs_1m_pct') return Number(b.rs_1m_pct || -999) - Number(a.rs_1m_pct || -999);
+        if (sortKey === 'corr_asc') return Number(a.corr_to_portfolio ?? 99) - Number(b.corr_to_portfolio ?? 99);
+        if (sortKey === 'adv_usd_m') return Number(b.adv_usd_m || 0) - Number(a.adv_usd_m || 0);
+        return Number(a._colabRank) - Number(b._colabRank);
+    });
+
+    const totalMatching = filtered.length;
+    const cap = rawLimit === 'all' ? totalMatching : Math.max(1, parseInt(rawLimit, 10) || 20);
+    const shown = filtered.slice(0, cap);
+
+    if (metaEl) {
+        const uSize = _lastQuantScoutMeta.universe_size ? `${_lastQuantScoutMeta.universe_size} screened` : '';
+        const gen = _lastQuantScoutMeta.generated_at_utc ? ` · ${_lastQuantScoutMeta.generated_at_utc.replace('T', ' ').replace('Z', ' UTC')}` : '';
+        metaEl.textContent = `Showing ${shown.length} of ${totalMatching}${uSize ? ' · ' + uSize : ''}${gen}`;
+    }
+    if (footerEl) {
+        footerEl.textContent = _lastQuantScoutMeta.notes || 'Ranked by Google Colab Stock Finder composite alpha & diversification score.';
+    }
+
+    if (!shown.length) {
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; padding: 24px; color: var(--text-muted);">No candidates match the current sector or search filter.</td></tr>';
+        return;
+    }
+
+    const fmtPct = (val) => Number.isFinite(Number(val)) ? `${Number(val) >= 0 ? '+' : ''}${Number(val).toFixed(1)}%` : '—';
+    tbody.innerHTML = shown.map((c) => {
+        const rank = c._colabRank;
+        const sym = _escAlertHtml(String(c.ticker || '').toUpperCase());
+        const sec = _escAlertHtml(String(c.sector || 'Other'));
+        const score = Number.isFinite(Number(c.composite_score)) ? Number(c.composite_score).toFixed(1) : '—';
+        const rs1m = fmtPct(c.rs_1m_pct);
+        const rs3m = fmtPct(c.rs_3m_pct);
+        const rs6m = fmtPct(c.rs_6m_pct);
+        const rsi = Number.isFinite(Number(c.rsi_14)) ? Number(c.rsi_14).toFixed(0) : '—';
+        const corr = Number.isFinite(Number(c.corr_to_portfolio)) ? Number(c.corr_to_portfolio).toFixed(2) : '—';
+        const pead = Number.isFinite(Number(c.pead_score)) ? Number(c.pead_score).toFixed(1) : '—';
+        const regime = _escAlertHtml(String(c.vol_regime || '—'));
+        const adv = Number.isFinite(Number(c.adv_usd_m)) ? `$${Number(c.adv_usd_m).toFixed(0)}M` : '—';
+        const cluster = _escAlertHtml(String(c.cluster_label || '—'));
+        const rationale = _escAlertHtml(String(c.rationale || 'No Colab notes recorded.'));
+        return `
+            <tr data-scout-rank-row="${rank}" data-scout-sector="${sec}">
+                <td><span class="scout-rank-badge${rank <= 3 ? ' top3' : ''}">#${rank}</span></td>
+                <td>
+                    <div><strong>${sym}</strong></div>
+                    <span class="scout-sector-pill">${sec}</span>
+                </td>
+                <td><span class="scout-score-pill">${score}</span></td>
+                <td style="font-family:'JetBrains Mono',monospace; white-space:nowrap;">${rs1m} / ${rs3m} / ${rs6m}</td>
+                <td style="font-family:'JetBrains Mono',monospace;">${rsi}</td>
+                <td style="font-family:'JetBrains Mono',monospace;">${corr}</td>
+                <td style="font-family:'JetBrains Mono',monospace;">${pead}</td>
+                <td>${regime}</td>
+                <td style="font-family:'JetBrains Mono',monospace;">${adv}</td>
+                <td class="scout-notes-cell">
+                    <div><span class="scout-cluster-pill">${cluster}</span></div>
+                    <div>${rationale}</div>
+                </td>
+                <td>
+                    <div class="scout-action-cell">
+                        <button type="button" class="colab-scout-promote-btn" data-scout-ticker="${sym}">+ Watch</button>
+                        <button type="button" class="glow-btn outline mini scout-modal-chart-btn" data-chart-ticker="${sym}" title="Open 1m Chart">📈</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function openScoutRankingsModal(opts = {}) {
+    const overlay = document.getElementById('scout-rankings-modal-overlay');
+    if (!overlay) return;
+    const sectorSel = document.getElementById('scout-modal-sector-filter');
+    const limitSel = document.getElementById('scout-modal-limit-select');
+    if (limitSel && opts && opts.limit) limitSel.value = String(opts.limit);
+    renderScoutRankingsModal();
+    if (sectorSel && opts && opts.sector) {
+        sectorSel.value = String(opts.sector);
+        renderScoutRankingsModal();
+    }
+    openModal(overlay);
+}
+
+function closeScoutRankingsModal() {
+    const overlay = document.getElementById('scout-rankings-modal-overlay');
+    if (overlay) closeModal(overlay);
 }
 
 async function promoteQuantScoutTicker(ticker, btnEl) {
@@ -3095,6 +3291,7 @@ async function promoteQuantScoutTicker(ticker, btnEl) {
     const statusEls = [
         document.getElementById('colab-scout-job-status'),
         document.getElementById('colab-mcp-job-status'),
+        document.getElementById('scout-modal-status'),
     ].filter(Boolean);
     if (!sym) return;
     if (btnEl) btnEl.disabled = true;
@@ -3332,7 +3529,8 @@ async function launchAllColabJobs(btnEl) {
 async function launchColabJob(jobType, btnEl) {
     const jobStatusEl = document.getElementById('colab-mcp-job-status');
     const scoutStatusEl = jobType === 'quant_scout' ? document.getElementById('colab-scout-job-status') : null;
-    const statusEls = [jobStatusEl, scoutStatusEl].filter(Boolean);
+    const modalStatusEl = jobType === 'quant_scout' ? document.getElementById('scout-modal-status') : null;
+    const statusEls = [jobStatusEl, scoutStatusEl, modalStatusEl].filter(Boolean);
     const useLlmEl = document.getElementById('colab-sec-use-llm-toggle');
     const reqBody = (jobType === 'sec_nlp' && useLlmEl && useLlmEl.checked)
         ? { options: { use_llm: true } }
@@ -3452,9 +3650,52 @@ if (dColabScoutList) {
         if (btn) promoteQuantScoutTicker(btn.getAttribute('data-scout-ticker'), btn);
     });
 }
+const dOpenScoutModalBtn = document.getElementById('colab-open-scout-modal-btn');
+const dCloseScoutModalBtn = document.getElementById('close-scout-rankings-modal');
+const dScoutModalOverlay = document.getElementById('scout-rankings-modal-overlay');
+const dScoutModalSectorSel = document.getElementById('scout-modal-sector-filter');
+const dScoutModalLimitSel = document.getElementById('scout-modal-limit-select');
+const dScoutModalSortSel = document.getElementById('scout-modal-sort-select');
+const dScoutModalSearch = document.getElementById('scout-modal-search');
+const dScoutModalRescanBtn = document.getElementById('scout-modal-rescan-btn');
+const dScoutModalTbody = document.getElementById('scout-rankings-tbody');
+
+if (dOpenScoutModalBtn) dOpenScoutModalBtn.addEventListener('click', () => openScoutRankingsModal());
+if (dCloseScoutModalBtn) dCloseScoutModalBtn.addEventListener('click', closeScoutRankingsModal);
+if (dScoutModalOverlay) {
+    dScoutModalOverlay.addEventListener('click', (ev) => {
+        if (ev.target === dScoutModalOverlay) closeScoutRankingsModal();
+    });
+}
+[dScoutModalSectorSel, dScoutModalLimitSel, dScoutModalSortSel].forEach((el) => {
+    if (el) el.addEventListener('change', renderScoutRankingsModal);
+});
+if (dScoutModalSearch) dScoutModalSearch.addEventListener('input', renderScoutRankingsModal);
+if (dScoutModalRescanBtn) {
+    dScoutModalRescanBtn.addEventListener('click', () => {
+        launchColabJob('quant_scout', dScoutModalRescanBtn);
+    });
+}
+if (dScoutModalTbody) {
+    dScoutModalTbody.addEventListener('click', (ev) => {
+        const addBtn = ev.target && ev.target.closest ? ev.target.closest('.colab-scout-promote-btn') : null;
+        if (addBtn) {
+            promoteQuantScoutTicker(addBtn.getAttribute('data-scout-ticker'), addBtn);
+            return;
+        }
+        const chartBtn = ev.target && ev.target.closest ? ev.target.closest('.scout-modal-chart-btn') : null;
+        if (chartBtn && typeof openChartModal === 'function') {
+            closeScoutRankingsModal();
+            openChartModal(chartBtn.getAttribute('data-chart-ticker'));
+        }
+    });
+}
 
 window.fetchColabMcpStatus = fetchColabMcpStatus;
 window.fetchQuantScoutCandidates = fetchQuantScoutCandidates;
+window.openScoutRankingsModal = openScoutRankingsModal;
+window.closeScoutRankingsModal = closeScoutRankingsModal;
+window.renderScoutRankingsModal = renderScoutRankingsModal;
 window.launchColabJob = launchColabJob;
 window.launchAllColabJobs = launchAllColabJobs;
 window.promoteQuantScoutTicker = promoteQuantScoutTicker;
