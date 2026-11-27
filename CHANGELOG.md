@@ -6,6 +6,38 @@ All notable engineering, architecture, UI, and governance changes to `gemini_cli
 
 ---
 
+## [Unreleased] — Trader UX Overhaul, UX Stages 1–5 (`29e1820` → `99969dc`)
+
+Front-end only (`static/*`, `tests/js/dashboard_load.test.js`); zero backend, financial-engine, or Protocol 06 changes. All 14 `#data-table` columns and element IDs preserved. Screenshots: `docs/images/` (demo data).
+
+### Stage 1 — Data honesty & CSS fixes (`29e1820`)
+- Unscanned held/watchlist rows render `—` instead of fabricated `0` / RSI `50.0` / EUR WAC as USD price & VWAP; Dealer, volume, score, trend and MACD cells are null-safe; backend `0.0` "no GEX" placeholder renders `—` (shared `_displayGexFor`).
+- Portfolio USD totals exclude unpriced holdings (`*` + tooltip) instead of adding EUR WAC; Command Strip cash shows `—` until loaded.
+- Fixed sticky-header z-index inversion, bounded desktop table container, dynamic Simple (6) / Pro (14) `colspan`; removed dead `.alert-item` / duplicate `.modal-*` CSS; overlay z-index tokens.
+- Escape closes the Execution Ticket only; same-tab reload restores the chat, a new session archives it; fixed archived-session load being wiped.
+
+### Stage 2 — Table comprehension & plain English (`af1c227`)
+- `Dealer (GEX)` header; MACD / Target / Dealer sortable; `$` prices; ▲/▼ cues; column-group dividers; `? Metric guide`; Watchlist filter.
+- Execution Ticket plain-English summary + "advisory only, GEM never places broker orders"; AI verdicts read **AI Advisory: …**; plain Market Mood, filing-risk, macro and cloud labels; setup/engine controls collapsed.
+- Internal rule IDs (`ENH_*`, `MANDATE_*`) removed from all trader UI via `_stripRuleIds` (kept in LLM-bound text); page-wide test guard.
+
+### Stage 3 — Workspace navigation (`c8a2b8f`)
+- TOOLS drawer replaced by **Today · Portfolio · Opportunities · Alerts · Research** views (badges, `1`–`5`, `#hash` deep links); `.desktop-only` mobile lockout removed; ⚙ Settings popover.
+- New read-only **Positions** table; stationary alert bar (top 2 + "+N more") with full list in the Alerts view (marquee retired).
+
+### Stage 4 — Visual system & accessibility (`ba41488`)
+- Type-scale tokens with a 12px floor (~200 micro-text declarations lifted); explicit transitions; global `prefers-reduced-motion`; chart/chat on the app palette.
+- AI Council as a docked, non-modal co-pilot panel with **Expand**; retired Context Caching switch removed; `role="switch"` toggles; `role="dialog"` on every modal; keyboard-sortable headers; `gemConfirm` / `gemNotice` replace native `alert()` / `confirm()`.
+
+### Stage 5 — Stock Inspector & polish (`99969dc`)
+- Chart modal **Stock Inspector** strip with **Set alert** / **Ask Council**; focusable rows (Enter opens chart); 3s refresh skips identical markup and restores focus.
+- Removed dead clipboard / mobile-bridge JS and unused `.gdrive-select` / `.quick-action-bar` CSS.
+
+### Verification
+- `npm run test:dashboard` 66/66, `npm run test:sanitizer`, `tests.test_dashboard_scripts`, `tests.test_chat_sanitizer`, `scripts/audit_security.py`, and `scripts/stage_gate.py --scoped` pass at each stage; `scripts/verify_dashboard_ui.js` passes at 1280 / 1440 / 390 px.
+
+---
+
 ## [Unreleased] — Colab MCP Handshake Fix & User Documentation Parity Agent
 
 ### Fixed & Improved

@@ -9,9 +9,15 @@ Repository: [`nordicirish/gemini_cli_subagent_system`](https://github.com/nordic
 ## Showcase
 
 <p align="center">
-  <img src="static/dashboard_mockup.png" alt="GEM Live Web Dashboard" width="48%">
-  <img src="static/chat_overlay_mockup.png" alt="GEM AI Council Chat Overlay" width="48%">
+  <img src="docs/images/ui-today.png" alt="GEM dashboard — Today view" width="48%">
+  <img src="docs/images/ui-ai-council-docked.png" alt="AI Council docked beside the live table" width="48%">
 </p>
+<p align="center">
+  <img src="docs/images/ui-portfolio.png" alt="Portfolio view with positions and health" width="48%">
+  <img src="docs/images/ui-chart-inspector.png" alt="1m chart with Stock Inspector" width="48%">
+</p>
+
+<sub>Screenshots use demo data. See the <a href="docs/USER_GUIDE.md">User Guide</a> for a walkthrough.</sub>
 
 ---
 
@@ -87,25 +93,28 @@ Open **`http://127.0.0.1:8000`** in your browser.
 
 ## Dashboard UI Guide
 
-1. **Macro HUD & Portfolio Command Strip:** Live macro cards (`^VIX`, `VIXY`, `^VVIX`, `IEF`, `UUP`, `SPY`, `GDX`), volatility regime pill, Tier-1 macro calendar shield pill, live Equity/P&L/Cash strip, active veto counter, and one-click execution tickets.
-2. **14-Column Market Telemetry Table (`#data-table`):** Real-time prices, session change %, VWAP distance, RSI-9/14, MACD status/slope, Bollinger %B, Relative Volume (`rVol` gated on `volume > 0`), Fibonacci/ATR Peak targets, Options GEX & Vol Surface badges, SEC 72h Dilution & NLP badges, live filter (`/`), per-section sorting, and compact density toggle. Clicking a row opens the 1-minute TradingView Lightweight Chart modal (extended 24h hours + EMA 9/30/200 warmup + Execution Plan modal).
-3. **Tools Sidebar (Toggle with `t` or button):**
-   - **💼 Portfolio Basket & 👀 Watchlist:** Inline holding/cash editor with draft-row protection plus integrated **🎯 Scan Watchlist** rescan trigger.
-   - **🔭 Discovery (`#scout-content`):** Tabbed switcher combining:
-     - **Quant Screen (500+)** (default): Colab MCP broad-universe screener with ranked breakout candidates and one-click `+ Watch` promotion.
-     - **Sector AI:** Local Antigravity sector selector (`SCOUT_TICKER_MAP`), RSI ceiling, and max ticker count controls.
-   - **🔔 Key Triggers & Sentinel:** Price/RSI/rVol/Chg% conditional triggers plus configurable Low-Power Sentinel cadence (1m–15m) with 60-day intraday Daily Peak prediction.
-   - **📊 Quant Lab (`#analytics-quant-content`):** Tabbed switcher combining:
-     - **Live Quant** (default): Real-time strategy permissibility matrix, global vetoes, tranche status, and historical decision backtest accuracy.
-     - **Colab MCP Lab:** Transport status pill, single-flight GPU job buttons (**⚡ Vol Surface**, **📑 SEC NLP** with opt-in L4 7B toggle, **📊 Backtest**), read-only **Protocol 06 Evidence Pack** (Sharpe/drawdown deltas + `📋 Copy Proposal`), and collapsible **Offline Colab Calibration (JSON)** export/import.
-   - **⚙️ Admin (`#admin-content`):** Destructive Decision Log maintenance (`🗑️ Clear Decision Log`).
-4. **AI Council Chat Drawer (Toggle with `c`):** Streaming SSE Council deliberation (`DOMPurify` + `marked` sanitized), boot/quick-prompt chips, Read-Only `/api/review` log auditing, owner-approved portfolio & rule improvement proposal cards, and 1-click `[LESSON]` / `[TRIGGER]` actions.
+Five client-side workspace views (vanilla JS view switching; every panel keeps its element IDs and keeps polling while hidden). Deep-linkable via `#portfolio`, `#opportunities`, `#alerts`, `#research`.
+
+1. **Today (default):** stationary alert bar (top 2 by severity + `+N more → Alerts`, hidden when empty), macro cards, Portfolio Command Strip (Equity / P&L / Cash / risk guards / per-holding plans), plain-English **Today's Brief** with deep-link actions, and the **14-column market table** (`#data-table`):
+   - **Simple** (6 columns) / **Pro (14)** toggle with CSS column-group dividers, `? Metric guide` popover, All / Held / Watchlist / Strong Signals filters, live search (`/`), per-section sorting (incl. MACD, Target distance, Dealer (GEX)), compact density.
+   - Honest data states: unscanned rows render `—` (never synthetic 0 / 50.0 / EUR cost as USD); `rVol` gated on `volume > 0`; backend `0.0` "no GEX" placeholder renders `—`.
+   - Rows are keyboard-focusable; the 3s refresh skips identical markup and restores focus.
+   - Clicking a row opens the 1-minute Lightweight Chart modal with the **Stock Inspector** strip (Price, Day %, VWAP side, rVol, RSI, ATR %, Dealer (GEX), Signal + **Set alert** / **Ask Council**), auto/3-point Fib HUD, and Execution Ticket link.
+2. **Portfolio:** read-only **Positions** table from `/api/analytics` (shares, EUR avg cost, USD price/value, unrealized P&L, weight, Trade plan), holdings & cash editor with draft-row protection, watchlist with **🎯 Scan Watchlist**, and **Portfolio health & trim plan** (strategy permissibility, risk guards, tranches, decision backtest).
+3. **Opportunities:** Colab **Stock Finder (500+)** with `📊 Top 20+ Table` rankings modal and `+ Watch`, plus **Sector Themes** scouting.
+4. **Alerts:** full active-alert list with acknowledge, price/indicator trigger quick-add, and **Auto-tune alerts** (AlertSentinel; engine selector under *Engine settings*).
+5. **Research:** Google Colab cloud research (**▶ Refresh All Cloud Insights**, Options Flow / Filing Risk / Strategy Check), read-only **Suggested Rule Tweaks** evidence pack with `📋 Copy Proposal`, and **Offline Colab Calibration (JSON)**.
+- **⚙ Settings popover:** Manage tracked indices; Clear decision log (in-page confirmation).
+- **AI Council (`c`):** docked, non-modal 560px co-pilot panel with **⤢ Expand** full-screen toggle; streaming SSE deliberation (`DOMPurify` + `marked` sanitized), quick-prompt chips, read-only `/api/review`, owner-approved proposal cards, 1-click `[LESSON]` / `[TRIGGER]` actions, and verdicts labelled **AI Advisory** (never an executed order).
+
+Trader-facing UI never shows internal rule IDs (`ENH_*`, `MANDATE_*`); they remain in LLM-bound text only. Type scale has a 12px floor, motion honours `prefers-reduced-motion`, and native `alert()`/`confirm()` are replaced by accessible in-page dialogs.
 
 ### Keyboard Shortcuts
+- `1`–`5` — Switch view (Today, Portfolio, Opportunities, Alerts, Research)
 - `/` — Focus market table ticker filter
-- `t` — Toggle Tools sidebar drawer
-- `c` — Toggle AI Council chat overlay
-- `Esc` — Close active modal, chat overlay, or overlay drawer
+- `c` — Toggle the AI Council panel
+- `Tab` / `Enter` — Focus rows & sortable headers; Enter opens a chart or sorts
+- `Esc` — Close the active chart, ticket, popover, or dialog
 - `Enter` / `Shift + Enter` (in chat input) — Send message / insert newline
 
 ---
