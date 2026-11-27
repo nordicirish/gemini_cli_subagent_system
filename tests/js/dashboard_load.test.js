@@ -495,15 +495,21 @@ async function main() {
         assert(macroTicker && macroTicker.textContent.trim() === 'SPY', 'macro card ticker header missing');
         assert(macroSubtitle && macroSubtitle.textContent.trim() === 'S&P 500', 'macro card subtitle missing');
 
-        const main = window.document.getElementById('main-content');
-        const btn = window.document.getElementById('toggle-sidebar-btn');
-        assert(main && main.classList.contains('sidebar-collapsed'), 'sidebar should default to collapsed');
-        assert(btn && btn.getAttribute('aria-expanded') === 'false', 'aria-expanded should start false');
-        btn.click();
-        assert(!main.classList.contains('sidebar-collapsed'), 'clicking TOOLS should expand sidebar');
-        assert.strictEqual(btn.getAttribute('aria-expanded'), 'true');
-        btn.click();
-        assert(main.classList.contains('sidebar-collapsed'), 'clicking TOOLS again should collapse sidebar');
+        // UX Stage 3: top-level workspace views replace the hidden TOOLS drawer.
+        const doc = window.document;
+        assert(!doc.getElementById('dashboard-sidebar') && !doc.getElementById('toggle-sidebar-btn'), 'TOOLS drawer should be gone');
+        assert(!doc.getElementById('view-today').hidden, 'Today should be the default view');
+        ['portfolio', 'opportunities', 'alerts', 'research'].forEach((v) => {
+            assert(doc.getElementById(`view-${v}`).hidden, `${v} view should start hidden`);
+        });
+        assert.strictEqual(doc.getElementById('nav-today').getAttribute('aria-selected'), 'true');
+        doc.getElementById('nav-portfolio').click();
+        assert(!doc.getElementById('view-portfolio').hidden && doc.getElementById('view-today').hidden, 'Portfolio tab should switch views');
+        assert.strictEqual(doc.getElementById('nav-portfolio').getAttribute('aria-selected'), 'true');
+        assert.strictEqual(window.location.hash, '#portfolio', 'view should be deep-linkable');
+        doc.getElementById('nav-today').click();
+        assert(!doc.getElementById('view-today').hidden, 'Today tab should switch back');
+        assert.strictEqual(doc.querySelectorAll('.desktop-only').length, 0, 'no panels may be hidden on mobile');
     });
     check('Chat Structure: hoists verdict, Alerts & Recommendations above prose and collapses Source Index', () => {
         const sampleReply = [
@@ -560,12 +566,17 @@ async function main() {
         assert.strictEqual(postScoutCalls, 2, `expected 2 POST /api/scout_categories calls, got ${postScoutCalls}`);
     });
     check('Key-Level Triggers & Sentinel: renders fired alert banner, armed rule row, and fallback status', () => {
+        // Bar shows the 2 most severe alerts; the full set (incl. this warning) lives in the Alerts view.
         const alertBanner = window.document.getElementById('alerts-content');
-        assert(alertBanner && alertBanner.textContent.includes('NVDA: HOD Break'), 'triggered alert missing from top alert bar');
+        const alertsList = window.document.getElementById('alerts-view-list');
+        assert(alertsList && alertsList.textContent.includes('NVDA: HOD Break'), 'triggered alert missing from Alerts view');
+        assert(alertBanner && alertBanner.querySelectorAll('.alert-item.critical').length === 2, 'bar should lead with the critical alerts');
+        assert(alertBanner.querySelector('.alert-more-link'), 'bar should link to the remaining alerts');
         assert(alertBanner.textContent.includes('33.42 (+26.75%)'), `expected live VIX price & session % in alert bar, got: ${alertBanner.textContent}`);
         assert(!alertBanner.textContent.includes('+6.83%'), 'VIX alert should show live session_change_pct, not static opening gap_percent');
-        const nvdaItems = alertBanner.querySelectorAll('.ticker-group:not([aria-hidden="true"]) .alert-item[data-ticker="NVDA"]');
-        const pltrItems = alertBanner.querySelectorAll('.ticker-group:not([aria-hidden="true"]) .alert-item[data-ticker="PLTR"]');
+        // De-duplication is checked on the full set (Alerts view), not just the 2-slot bar.
+        const nvdaItems = alertsList.querySelectorAll('.alert-item[data-ticker="NVDA"]');
+        const pltrItems = alertsList.querySelectorAll('.alert-item[data-ticker="PLTR"]');
         assert.strictEqual(nvdaItems.length, 1, `expected 1 NVDA alert, got ${nvdaItems.length}`);
         assert(!nvdaItems[0].textContent.includes('Stale Support Trigger'), 'stale lower-severity NVDA alert should be collapsed');
         assert.strictEqual(pltrItems.length, 1, `expected 1 PLTR alert, got ${pltrItems.length}`);
@@ -578,7 +589,7 @@ async function main() {
     check('Phase 3 UI: Quant & Backtest panel and SEC 72h dilution badge render cleanly', () => {
         const quantPanel = window.document.getElementById('analytics-quant-panel');
         assert(quantPanel, 'analytics-quant-panel missing');
-        assert(quantPanel.textContent.includes('ELEVATED_VOLATILITY'), 'regime missing from quant panel');
+        assert(quantPanel.textContent.includes('Elevated volatility') && !quantPanel.textContent.includes('ELEVATED_VOLATILITY'), 'plain-English regime missing from quant panel');
         assert(quantPanel.textContent.includes('VIX >= 20 new-risk long veto') && !quantPanel.textContent.includes('ENH_72'), 'global veto should show its reason without the rule ID');
         assert(quantPanel.textContent.includes('NVDA') && quantPanel.textContent.includes('2sh'), 'NVDA trim sizing missing from quant panel');
         assert(quantPanel.textContent.includes('60.0%'), 'backtest hit rate missing from quant panel');
@@ -635,52 +646,47 @@ async function main() {
         assert(window.document.getElementById('chart-exec-plan-btn'), 'chart-exec-plan-btn missing from chart modal');
     });
 
-    // Top alert bar marquee: scrolls only when alerts overflow, loops via an aria-hidden clone
+    // Top alert bar (UX Stage 3): stationary, highest severity first, "+N more" → Alerts view
     {
         const content = window.document.getElementById('alerts-content');
-        const proto = window.HTMLElement.prototype;
-        const origSW = Object.getOwnPropertyDescriptor(proto, 'scrollWidth');
-        const origCW = Object.getOwnPropertyDescriptor(proto, 'clientWidth');
-        let groupWidth = 2000;
-        Object.defineProperty(proto, 'scrollWidth', { configurable: true, get() { return this.classList && this.classList.contains('ticker-group') ? groupWidth : 0; } });
-        Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return this.id === 'alerts-content' ? 800 : 0; } });
-        const many = '<div class="alert-item critical" data-ticker="^VIX">⚠️ FEAR ALERT: (<span class="vix-spike-pct">+6.83%</span>)</div>'
+        const bar = window.document.getElementById('top-alert-bar');
+        const listEl = window.document.getElementById('alerts-view-list');
+        const many = '<div class="alert-item info" data-event-id="e0"><span>INFO first</span></div>'
+            + '<div class="alert-item critical" data-ticker="^VIX">⚠️ FEAR ALERT: (<span class="vix-spike-pct">+6.83%</span>)</div>'
             + '<div class="alert-item critical" data-event-id="e1"><span>A</span><button type="button" class="alert-dismiss-btn">&times;</button></div>'
             + '<div class="alert-item warning">B</div>';
         window.renderAlertTicker(content, many, 'vix|e1', { '.vix-spike-pct': '+6.83%' });
-        const firstTrack = content.querySelector('.ticker-track');
+        const firstStrip = content.querySelector('.alert-strip');
         window.renderAlertTicker(content, many, 'vix|e1', { '.vix-spike-pct': '+7.12%' }); // live VIX % jitter
-        const scrolling = content.classList.contains('is-scrolling');
-        const clone = content.querySelector('.ticker-group[aria-hidden="true"]');
-        const sameTrack = content.querySelector('.ticker-track') === firstTrack;
-        const vixPcts = [...content.querySelectorAll('.vix-spike-pct')].map((el) => el.textContent);
-        const duration = content.style.getPropertyValue('--marquee-duration');
-        groupWidth = 300; // fits: single-pass scroll without cloning
-        window.renderAlertTicker(content, '<div class="alert-item info">C</div>');
-        const fitsSinglePass = content.classList.contains('is-scrolling')
-            && content.classList.contains('is-single-pass')
-            && !content.querySelector('.ticker-group[aria-hidden="true"]');
+        const sameStrip = content.querySelector('.alert-strip') === firstStrip;
+        const barItems = [...content.querySelectorAll('.alert-item')];
+        const barSeverities = barItems.map((el) => (el.classList.contains('critical') ? 'critical' : el.classList.contains('warning') ? 'warning' : 'info'));
+        const moreLink = content.querySelector('.alert-more-link');
+        const listCount = listEl ? listEl.querySelectorAll('.alert-item').length : 0;
+        const vixPcts = [...window.document.querySelectorAll('.vix-spike-pct')].map((el) => el.textContent);
+        const navBadge = window.document.getElementById('nav-badge-alerts');
+        const badgeTxt = navBadge && !navBadge.hidden ? navBadge.textContent : '';
+        const barShown = bar.classList.contains('has-alerts');
+        const noMotion = !content.querySelector('.ticker-track') && !content.classList.contains('is-scrolling');
+        if (moreLink) moreLink.click();
+        const wentToAlerts = !window.document.getElementById('view-alerts').hidden;
+        window.setWorkspaceView('today');
         window.renderAlertTicker(content, '');
-        const emptyCleared = !content.classList.contains('is-scrolling')
-            && !content.classList.contains('is-single-pass')
-            && content.textContent.includes('NO ACTIVE ALERTS');
-        if (origSW) Object.defineProperty(proto, 'scrollWidth', origSW); else delete proto.scrollWidth;
-        if (origCW) Object.defineProperty(proto, 'clientWidth', origCW); else delete proto.clientWidth;
+        const emptyHidesBar = !bar.classList.contains('has-alerts') && navBadge.hidden
+            && listEl.textContent.includes('No active alerts');
         const cssText = read(path.join(staticDir, 'styles.css'));
-        check('Alert bar marquee: clones on overflow, single-pass scrolls when fitting, survives VIX % jitter', () => {
-            assert(scrolling, 'overflowing alerts should scroll');
-            assert(clone, 'aria-hidden clone missing for overflow seamless loop');
-            assert.strictEqual(clone.querySelector('button').tabIndex, -1, 'clone buttons must not take focus');
-            assert(sameTrack, 'live numeric update must not re-render .ticker-track (would restart animation)');
-            assert.deepStrictEqual(vixPcts, ['+7.12%', '+7.12%'], `VIX % should update in-place on primary and clone, got ${JSON.stringify(vixPcts)}`);
-            assert(/^\d+(\.\d)?s$/.test(duration) && parseFloat(duration) >= 12, `bad duration ${duration}`);
-            assert(fitsSinglePass, 'fitting alerts should scroll via single-pass mode without creating a duplicate clone');
-            assert(emptyCleared, 'empty state should clear marquee classes and render placeholder');
-            assert(
-                cssText.includes('.top-alert-bar:hover .ticker-content.is-scrolling.is-single-pass .ticker-track')
-                && cssText.includes('animation-play-state: paused'),
-                'hover pause selector must match/exceed .is-scrolling.is-single-pass specificity',
-            );
+        check('Alert bar: stationary, top-2 by severity, "+N more" opens Alerts view, live % updates in place', () => {
+            assert(noMotion, 'alert bar must not scroll (no marquee track / is-scrolling)');
+            assert.deepStrictEqual(barSeverities, ['critical', 'critical'], `bar should show the 2 most severe, got ${barSeverities}`);
+            assert(moreLink && moreLink.textContent.includes('+2 more'), `missing +N more link: ${moreLink && moreLink.textContent}`);
+            assert.strictEqual(listCount, 4, 'Alerts view must list every active alert');
+            assert(sameStrip, 'live numeric update must not rebuild the strip');
+            assert(vixPcts.length >= 1 && vixPcts.every((t) => t === '+7.12%'), `VIX % should update in place, got ${JSON.stringify(vixPcts)}`);
+            assert.strictEqual(badgeTxt, '4', `Alerts nav badge should show 4, got "${badgeTxt}"`);
+            assert(barShown, 'bar should be visible while alerts are active');
+            assert(wentToAlerts, '"+N more" should switch to the Alerts view');
+            assert(emptyHidesBar, 'no alerts: bar hidden, badge hidden, Alerts view shows empty state');
+            assert(cssText.includes('.top-alert-bar:not(.has-alerts)') && !cssText.includes('@keyframes marquee'), 'marquee CSS should be retired');
         });
     }
 
@@ -871,21 +877,23 @@ async function main() {
     const slashFocusedFilter = window.document.activeElement === filterInput;
     const chatInputEl = window.document.getElementById('chat-input');
     chatInputEl.focus();
-    chatInputEl.dispatchEvent(new window.KeyboardEvent('keydown', { key: 't', bubbles: true }));
-    const sidebarIgnoredInsideInput = window.document.getElementById('main-content').classList.contains('sidebar-collapsed');
+    chatInputEl.dispatchEvent(new window.KeyboardEvent('keydown', { key: '2', bubbles: true }));
+    const viewKeyIgnoredInsideInput = !window.document.getElementById('view-today').hidden;
     chatInputEl.blur();
     window.document.body.focus();
-    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 't', bubbles: true }));
-    const sidebarToggledOpen = !window.document.getElementById('main-content').classList.contains('sidebar-collapsed');
-    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 't', bubbles: true }));
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: '2', bubbles: true }));
+    const viewKeySwitched = !window.document.getElementById('view-portfolio').hidden;
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: '1', bubbles: true }));
+    const viewKeyBackToToday = !window.document.getElementById('view-today').hidden;
     window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'c', bubbles: true }));
     const chatOpenedViaShortcut = window.document.getElementById('chat-window').classList.contains('active');
     window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     const chatClosedViaEsc = !window.document.getElementById('chat-window').classList.contains('active');
-    check('Stage C: keyboard shortcuts (/, t, c, Esc) work and ignore editable inputs', () => {
+    check('Stage C: keyboard shortcuts (/, 1–5 views, c, Esc) work and ignore editable inputs', () => {
         assert.strictEqual(slashFocusedFilter, true);
-        assert.strictEqual(sidebarIgnoredInsideInput, true);
-        assert.strictEqual(sidebarToggledOpen, true);
+        assert.strictEqual(viewKeyIgnoredInsideInput, true, 'view keys must be ignored while typing');
+        assert.strictEqual(viewKeySwitched, true, '"2" should open the Portfolio view');
+        assert.strictEqual(viewKeyBackToToday, true, '"1" should return to Today');
         assert.strictEqual(chatOpenedViaShortcut, true);
         assert.strictEqual(chatClosedViaEsc, true);
     });
@@ -958,10 +966,12 @@ async function main() {
     const scoutSectorTab = scoutContent.querySelector('.sidebar-tab-btn[data-panel-tab="scout-sector"]');
     const scoutQuantPane = scoutContent.querySelector('.sidebar-tab-pane[data-tab-pane="scout-quant"]');
     const scoutSectorPane = scoutContent.querySelector('.sidebar-tab-pane[data-tab-pane="scout-sector"]');
-    const quantLiveTab = quantContent.querySelector('.sidebar-tab-btn[data-panel-tab="quant-live"]');
-    const quantColabTab = quantContent.querySelector('.sidebar-tab-btn[data-panel-tab="quant-colab"]');
-    const quantLivePane = quantContent.querySelector('.sidebar-tab-pane[data-tab-pane="quant-live"]');
-    const quantColabPane = quantContent.querySelector('.sidebar-tab-pane[data-tab-pane="quant-colab"]');
+    const researchContent = window.document.getElementById('research-content');
+    const viewOf = (id) => {
+        const el = window.document.getElementById(id);
+        const v = el && el.closest('.workspace-view');
+        return v ? v.getAttribute('data-view') : null;
+    };
 
     const discoveryDefaultOk = scoutQuantTab.classList.contains('active')
         && scoutQuantTab.getAttribute('aria-selected') === 'true'
@@ -978,18 +988,7 @@ async function main() {
         && !scoutQuantPane.classList.contains('hidden')
         && scoutSectorPane.classList.contains('hidden');
 
-    const quantDefaultOk = quantLiveTab.classList.contains('active')
-        && quantLiveTab.getAttribute('aria-selected') === 'true'
-        && !quantLivePane.classList.contains('hidden')
-        && quantColabPane.classList.contains('hidden');
-    quantColabTab.click();
-    const quantSwitchedOk = !quantLiveTab.classList.contains('active')
-        && quantColabTab.classList.contains('active')
-        && quantColabTab.getAttribute('aria-selected') === 'true'
-        && quantLivePane.classList.contains('hidden')
-        && !quantColabPane.classList.contains('hidden');
-
-    check('UI Streamlining: Watchlist Rescan, unified Discovery/Quant Lab tabs, and slim Admin work cleanly', () => {
+    check('UI Streamlining: Watchlist Rescan, Discovery tabs, workspace homes for health/research, Admin in Settings', () => {
         assert(wlContent.contains(window.document.getElementById('scan-watchlist-btn')), '#scan-watchlist-btn should live inside #watchlist-content');
         assert(!scoutContent.contains(window.document.getElementById('scan-watchlist-btn')), '#scan-watchlist-btn should not live inside #scout-content');
         assert(scoutContent.contains(window.document.getElementById('colab-run-quant-scout-btn')), '#colab-run-quant-scout-btn should live inside #scout-content');
@@ -1000,11 +999,18 @@ async function main() {
         assert.strictEqual(discoveryRestoredOk, true, 'Discovery tab switch back to scout-quant failed');
 
         assert(quantContent.contains(window.document.getElementById('analytics-quant-panel')), '#analytics-quant-panel should live inside #analytics-quant-content');
-        assert(quantContent.contains(window.document.getElementById('colab-evidence-panel')), '#colab-evidence-panel should live inside #analytics-quant-content');
-        assert(quantContent.contains(window.document.getElementById('colab-export-btn')), '#colab-export-btn should live inside #analytics-quant-content');
-        assert.strictEqual(quantDefaultOk, true, 'Quant Lab default tab should be quant-live');
-        assert.strictEqual(quantSwitchedOk, true, 'Quant Lab tab switch to quant-colab failed');
+        assert(researchContent.contains(window.document.getElementById('colab-evidence-panel')), '#colab-evidence-panel should live inside #research-content');
+        assert(researchContent.contains(window.document.getElementById('colab-export-btn')), '#colab-export-btn should live inside #research-content');
+        assert.strictEqual(viewOf('analytics-quant-panel'), 'portfolio', 'portfolio health belongs in the Portfolio view');
+        assert.strictEqual(viewOf('portfolio-manager-body'), 'portfolio');
+        assert.strictEqual(viewOf('watchlist-content'), 'portfolio');
+        assert.strictEqual(viewOf('scout-content'), 'opportunities');
+        assert.strictEqual(viewOf('alerts-rules-container'), 'alerts');
+        assert.strictEqual(viewOf('colab-run-all-btn'), 'research');
+        assert.strictEqual(viewOf('data-table'), 'today');
 
+        assert(window.document.getElementById('app-settings-popover').contains(adminContent), '#admin-content should live in the Settings popover');
+        assert(window.document.getElementById('app-settings-popover').contains(window.document.getElementById('open-indices-modal-btn')), 'Manage indices should live in Settings');
         assert(adminContent.contains(window.document.getElementById('clear-log-btn')), '#clear-log-btn should remain inside #admin-content');
         assert(!adminContent.contains(window.document.getElementById('colab-quant-scout-panel')), '#colab-quant-scout-panel should be removed from #admin-content');
         assert(!adminContent.contains(window.document.getElementById('colab-evidence-panel')), '#colab-evidence-panel should be removed from #admin-content');
@@ -1447,6 +1453,44 @@ async function main() {
     check('Stage 2: no internal rule IDs (ENH_* / MANDATE_*) anywhere in the dashboard UI', () => {
         assert.deepStrictEqual(leakedText, [], `rule IDs in text: ${leakedText.join(' || ')}`);
         assert.deepStrictEqual(leakedTitles, [], `rule IDs in tooltips: ${leakedTitles.join(' || ')}`);
+    });
+
+    // ── UX Stage 3: workspace views, positions table, settings popover ──
+    window.renderPositionsTable([
+        { ticker: 'NVDA', shares: 10, wac: 100.0, price: 120.5, market_value_usd: 1205.0, unrealized_pnl_usd: 107.2, unrealized_pnl_pct: 9.76 },
+        { ticker: 'ZZZ', shares: 5, wac: 42.0, price: null, market_value_usd: null, unrealized_pnl_usd: null, unrealized_pnl_pct: null },
+    ]);
+    const s3Rows = [...window.document.querySelectorAll('#portfolio-positions-body tr')];
+    const s3Cells = (i) => [...s3Rows[i].cells].map((c) => c.textContent.trim());
+    const s3PortfolioBadge = window.document.getElementById('nav-badge-portfolio');
+    check('Stage 3: Positions table shows shares, € cost, $ price/value, P&L and weight; unpriced rows show —', () => {
+        assert.strictEqual(s3Rows.length, 2);
+        const nvda = s3Cells(0);
+        assert.deepStrictEqual(nvda.slice(0, 5), ['NVDA', '10', '€100.00', '$120.50', '$1,205.00']);
+        assert(nvda[5].includes('▲ +$107.20') && nvda[5].includes('(+9.8%)'), `P&L cell: ${nvda[5]}`);
+        assert.strictEqual(nvda[6], '100.0%', 'weight uses priced holdings only');
+        const zzz = s3Cells(1);
+        assert.deepStrictEqual(zzz.slice(3, 7), ['—', '—', '—', '—'], `unpriced row: ${zzz}`);
+        assert.strictEqual(zzz[2], '€42.00', 'EUR cost stays labelled as EUR');
+        assert(s3PortfolioBadge && !s3PortfolioBadge.hidden && s3PortfolioBadge.textContent === '2', 'Portfolio nav badge should count holdings');
+    });
+
+    const s3SettingsBtn = window.document.getElementById('app-settings-btn');
+    const s3SettingsPop = window.document.getElementById('app-settings-popover');
+    s3SettingsBtn.click();
+    const s3SettingsOpened = !s3SettingsPop.hidden && s3SettingsBtn.getAttribute('aria-expanded') === 'true';
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const s3SettingsClosed = s3SettingsPop.hidden;
+    window._briefActionClick('view', 'portfolio');
+    const s3BriefToPortfolio = !window.document.getElementById('view-portfolio').hidden;
+    window._briefActionClick('colab', '');
+    const s3BriefToResearch = !window.document.getElementById('view-research').hidden;
+    window.setWorkspaceView('today');
+    check('Stage 3: Settings popover opens/closes (Esc) and Today\'s Brief actions jump to the right view', () => {
+        assert.strictEqual(s3SettingsOpened, true, 'settings should open on click');
+        assert.strictEqual(s3SettingsClosed, true, 'settings should close on Esc');
+        assert.strictEqual(s3BriefToPortfolio, true, '"Review risk" should open the Portfolio view');
+        assert.strictEqual(s3BriefToResearch, true, 'cloud-research actions should open the Research view');
     });
 
     window.close();

@@ -7,7 +7,7 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.85">
+    <link rel="stylesheet" href="styles.css?v=18.87">
     <link rel="stylesheet" href="modern_ui.css?v=18.63">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
@@ -23,7 +23,7 @@
         <!-- ─── Top Alert Bar ─── -->
         <div id="top-alert-bar" class="top-alert-bar">
             <div id="alerts-container" class="alerts-ticker">
-                <span class="ticker-label">SYSTEM ALERTS:</span>
+                <span class="ticker-label">ALERTS</span>
                 <div id="alerts-content" class="ticker-content">
                     <span class="empty-state">NO ACTIVE ALERTS</span>
                 </div>
@@ -59,37 +59,42 @@
                         <span class="label">Updated:</span>
                         <span id="last-updated" class="value">—</span>
                     </div>
-                    <button id="toggle-sidebar-btn" class="glow-btn outline header-action-btn" type="button"
-                        aria-expanded="false" aria-controls="dashboard-sidebar"
-                        title="Toggle Portfolio, Watchlist &amp; Cloud Research tools panel">🧰 TOOLS</button>
-                    <button id="open-indices-modal-btn" class="glow-btn outline header-action-btn" type="button"
-                        title="Manage tracked macro indices">⚙️ INDICES</button>
                     <button id="launch-chat-btn" class="glow-btn chat-launcher header-action-btn" type="button"
-                        title="Consult Gemini AI Council">💬 AI COUNCIL</button>
+                        title="Ask the AI Council (shortcut: C)">💬 Ask AI Council</button>
+                    <div class="app-settings-wrap">
+                        <button id="app-settings-btn" class="glow-btn outline header-action-btn" type="button"
+                            aria-expanded="false" aria-controls="app-settings-popover" title="Settings">⚙ Settings</button>
+                        <div id="app-settings-popover" class="app-settings-popover" role="dialog" aria-label="Settings" hidden>
+                            <div class="app-settings-section">
+                                <div class="app-settings-title">Market overview</div>
+                                <button id="open-indices-modal-btn" class="glow-btn outline mini" type="button"
+                                    title="Choose which indices appear in the market overview cards">Manage tracked indices</button>
+                            </div>
+                            <div class="app-settings-section" id="admin-content">
+                                <div class="app-settings-title">Maintenance</div>
+                                <button id="clear-log-btn" class="glow-btn outline danger mini" type="button">🗑️ Clear decision log</button>
+                                <div id="clear-log-status" class="status-message inline-feedback"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
+            <nav class="workspace-nav" id="workspace-nav" role="tablist" aria-label="Workspace">
+                <button type="button" class="workspace-tab active" id="nav-today" role="tab" aria-selected="true"
+                    aria-controls="view-today" data-view="today" title="Market overview, brief &amp; live table (1)">Today</button>
+                <button type="button" class="workspace-tab" id="nav-portfolio" role="tab" aria-selected="false"
+                    aria-controls="view-portfolio" data-view="portfolio" title="Positions, holdings, watchlist &amp; health (2)">Portfolio
+                    <span class="nav-badge" id="nav-badge-portfolio" hidden></span></button>
+                <button type="button" class="workspace-tab" id="nav-opportunities" role="tab" aria-selected="false"
+                    aria-controls="view-opportunities" data-view="opportunities" title="Stock finder &amp; sector themes (3)">Opportunities
+                    <span class="nav-badge" id="nav-badge-opportunities" hidden></span></button>
+                <button type="button" class="workspace-tab" id="nav-alerts" role="tab" aria-selected="false"
+                    aria-controls="view-alerts" data-view="alerts" title="Active alerts, triggers &amp; auto-tuning (4)">Alerts
+                    <span class="nav-badge nav-badge-alert" id="nav-badge-alerts" hidden></span></button>
+                <button type="button" class="workspace-tab" id="nav-research" role="tab" aria-selected="false"
+                    aria-controls="view-research" data-view="research" title="Cloud research &amp; strategy evidence (5)">Research</button>
+            </nav>
         </header>
-
-        <!-- ─── Macro HUD ─── -->
-        <section class="macro-hud" id="macro-hud">
-            <div id="dynamic-macro-cards" style="display: contents;">
-                <!-- Cards injected by JS -->
-            </div>
-        </section>
-
-        <!-- ─── Portfolio & Risk Command Strip ─── -->
-        <section class="portfolio-command-strip glass-panel" id="portfolio-command-strip">
-            <div class="cmd-strip-metrics" id="cmd-strip-metrics">
-                <span class="cmd-metric"><span class="cmd-label">Equity</span><strong
-                        id="cmd-equity-val">—</strong></span>
-                <span class="cmd-metric"><span class="cmd-label">Unrealized P&amp;L</span><strong
-                        id="cmd-pnl-val">—</strong></span>
-                <span class="cmd-metric"><span class="cmd-label">Cash</span><strong id="cmd-cash-val">—</strong></span>
-                <span class="cmd-metric"><span class="cmd-label" title="Active global risk circuit breakers">Risk Alerts</span><strong
-                        id="cmd-vetoes-val">0</strong></span>
-            </div>
-            <div class="cmd-strip-actions" id="cmd-strip-actions"></div>
-        </section>
 
         <!-- ─── Cloud Research Progress Banner (Auto-Shown on Pipeline Activity or Setup) ─── -->
         <section id="colab-progress-banner" class="colab-progress-banner glass-panel hidden" aria-live="polite">
@@ -116,6 +121,30 @@
             <div id="colab-pipeline-error-detail" class="colab-pipeline-error-detail" style="display: none;"></div>
         </section>
 
+        <div id="view-today" class="workspace-view" data-view="today" role="tabpanel"
+            aria-labelledby="nav-today" aria-label="Today">
+
+        <!-- ─── Macro HUD ─── -->
+        <section class="macro-hud" id="macro-hud">
+            <div id="dynamic-macro-cards" style="display: contents;">
+                <!-- Cards injected by JS -->
+            </div>
+        </section>
+
+        <!-- ─── Portfolio & Risk Command Strip ─── -->
+        <section class="portfolio-command-strip glass-panel" id="portfolio-command-strip">
+            <div class="cmd-strip-metrics" id="cmd-strip-metrics">
+                <span class="cmd-metric"><span class="cmd-label">Equity</span><strong
+                        id="cmd-equity-val">—</strong></span>
+                <span class="cmd-metric"><span class="cmd-label">Unrealized P&amp;L</span><strong
+                        id="cmd-pnl-val">—</strong></span>
+                <span class="cmd-metric"><span class="cmd-label">Cash</span><strong id="cmd-cash-val">—</strong></span>
+                <span class="cmd-metric"><span class="cmd-label" title="Active global risk circuit breakers">Risk Alerts</span><strong
+                        id="cmd-vetoes-val">0</strong></span>
+            </div>
+            <div class="cmd-strip-actions" id="cmd-strip-actions"></div>
+        </section>
+
         <!-- ─── Today's Brief & Suggested Next Steps ("Inform & Suggest") ─── -->
         <section id="action-brief-card" class="action-brief-card glass-panel" aria-label="Today's Brief and Suggested Next Steps">
             <div class="action-brief-header">
@@ -132,7 +161,7 @@
         </section>
 
         <!-- ─── Main Content ─── -->
-        <main class="main-content sidebar-collapsed" id="main-content">
+        <main class="main-content" id="main-content">
             <div class="left-content-wrapper"
                 style="display: grid; grid-template-columns: 1fr; align-items: start; gap: 16px;">
                 <!-- Initial Fetch Progress Container -->
@@ -217,7 +246,7 @@
                                 </div>
                             </div>
                             <span class="kbd-hint"
-                                title="Shortcuts: / filter, T toggle tools sidebar, C toggle AI Council, Esc close">/ Filter · T Tools · C Council</span>
+                                title="Shortcuts: / filter, 1–5 switch views, C toggle AI Council, Esc close">/ Filter · 1–5 Views · C Council</span>
                             <button type="button" id="table-density-btn" class="table-density-btn"
                                 aria-pressed="false" title="Toggle compact table rows">Compact</button>
                         </div>
@@ -249,19 +278,46 @@
             </div>
 
             <!-- Sidebar -->
-            <aside class="sidebar" id="dashboard-sidebar">
+        </main>
+        </div>
 
-
-
-                <!-- Portfolio Manager -->
-                <div class="sidebar-card glass-panel manager-card minimized">
+        <section id="view-portfolio" class="workspace-view" data-view="portfolio" role="tabpanel"
+            aria-labelledby="nav-portfolio" aria-label="Portfolio" hidden>
+            <div class="workspace-grid">
+                <!-- Positions overview (read-only; values from /api/analytics) -->
+                <div class="sidebar-card glass-panel manager-card workspace-wide" id="positions-card">
                     <div class="header-row">
-                        <h3 onclick="toggleSection('portfolio-content', this)">
-                            <span class="icon">💼</span> Portfolio <span class="chevron"
-                                style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                        <h3><span class="icon">📈</span> Positions</h3>
+                        <span class="card-hint">Value &amp; P&amp;L in USD · average cost in EUR</span>
+                    </div>
+                    <div class="positions-table-wrap">
+                        <table class="positions-table" id="positions-table">
+                            <thead>
+                                <tr>
+                                    <th>Ticker</th>
+                                    <th class="num">Shares</th>
+                                    <th class="num" title="Your weighted average cost per share, in EUR">Avg cost (€)</th>
+                                    <th class="num">Price ($)</th>
+                                    <th class="num">Value ($)</th>
+                                    <th class="num">Unrealized P&amp;L</th>
+                                    <th class="num" title="Share of the value of your priced holdings">Weight</th>
+                                    <th><span class="sr-only">Actions</span></th>
+                                </tr>
+                            </thead>
+                            <tbody id="portfolio-positions-body">
+                                <tr><td colspan="8" class="empty-msg">Loading positions…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <!-- Portfolio Manager -->
+                <div class="sidebar-card glass-panel manager-card">
+                    <div class="header-row">
+                        <h3>
+                            <span class="icon">💼</span> Edit holdings &amp; cash
                         </h3>
                     </div>
-                    <div id="portfolio-content" style="display: none;">
+                    <div id="portfolio-content">
                         <div class="input-group" style="margin-bottom: 12px; justify-content: center;">
                             <input type="text" id="add-portfolio-ticker" placeholder="SYM" class="mini-input">
                             <button id="add-to-portfolio-btn" class="add-btn">+</button>
@@ -288,14 +344,13 @@
                 </div>
 
                 <!-- Watchlist Manager -->
-                <div class="sidebar-card glass-panel manager-card minimized">
+                <div class="sidebar-card glass-panel manager-card">
                     <div class="header-row">
-                        <h3 onclick="toggleSection('watchlist-content', this)">
-                            <span class="icon">👀</span> Watchlist <span class="chevron"
-                                style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                        <h3>
+                            <span class="icon">👀</span> Watchlist
                         </h3>
                     </div>
-                    <div id="watchlist-content" style="display: none;">
+                    <div id="watchlist-content">
                         <div class="input-group" style="margin-bottom: 12px; justify-content: center;">
                             <input type="text" id="add-watchlist-ticker" placeholder="SYM" class="mini-input">
                             <button id="add-to-watchlist-btn" class="add-btn">+</button>
@@ -312,15 +367,35 @@
                     </div>
                 </div>
 
-                <!-- Unified Discovery Manager (Quant Screen + Sector AI) -->
-                <div class="sidebar-card glass-panel manager-card minimized">
+                <!-- Portfolio Health (live quant checks) -->
+                <div class="sidebar-card glass-panel manager-card" id="portfolio-health-card">
                     <div class="header-row">
-                        <h3 onclick="toggleSection('scout-content', this)">
-                            <span class="icon">🔭</span> Discovery <span class="chevron"
-                                style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
+                        <h3><span class="icon">📊</span> Portfolio health &amp; trim plan</h3>
+                    </div>
+                    <div id="analytics-quant-content">
+                        <div class="workspace-pane" data-tab-pane="quant-live" role="tabpanel">
+                            <div id="analytics-quant-panel" class="quant-panel">
+                                <span class="empty-msg">Loading portfolio health &amp; signals...</span>
+                            </div>
+                            <button id="refresh-analytics-btn" type="button" class="alert-action-btn full"
+                                title="Refresh Portfolio Health &amp; Backtest">↻ Refresh Health &amp; Backtest</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="view-opportunities" class="workspace-view" data-view="opportunities" role="tabpanel"
+            aria-labelledby="nav-opportunities" aria-label="Opportunities" hidden>
+            <div class="workspace-grid">
+                <!-- Unified Discovery Manager (Quant Screen + Sector AI) -->
+                <div class="sidebar-card glass-panel manager-card workspace-wide">
+                    <div class="header-row">
+                        <h3>
+                            <span class="icon">🔭</span> Find new stocks
                         </h3>
                     </div>
-                    <div id="scout-content" style="display: none;">
+                    <div id="scout-content">
                         <div class="sidebar-tabs" role="tablist" aria-label="Discovery Modes">
                             <button type="button" class="sidebar-tab-btn active" role="tab" aria-selected="true"
                                 data-panel-tab="scout-quant">Stock Finder (500+)</button>
@@ -395,13 +470,28 @@
                     </div>
                 </div>
 
-                <!-- Key-Level Triggers & Free-Tier Sentinel Panel -->
-                <div class="sidebar-card glass-panel manager-card desktop-only">
+            </div>
+        </section>
+
+        <section id="view-alerts" class="workspace-view" data-view="alerts" role="tabpanel"
+            aria-labelledby="nav-alerts" aria-label="Alerts" hidden>
+            <div class="workspace-grid">
+                <!-- Active (fired) alerts: full, stationary list -->
+                <div class="sidebar-card glass-panel manager-card workspace-wide" id="active-alerts-card">
                     <div class="header-row">
-                        <h3 onclick="toggleSection('alerts-manager-content', this)" style="white-space: nowrap;">
-                            <span class="icon">🔔</span> Key Triggers <span id="alerts-active-count"
-                                class="alerts-count-pill">0</span> <span class="chevron"
-                                style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block;">▼</span>
+                        <h3><span class="icon">🚨</span> Active alerts</h3>
+                        <span class="card-hint">Acknowledge (×) once you have reviewed an alert</span>
+                    </div>
+                    <div id="alerts-view-list" class="alerts-view-list">
+                        <span class="empty-msg">No active alerts.</span>
+                    </div>
+                </div>
+                <!-- Key-Level Triggers & Free-Tier Sentinel Panel -->
+                <div class="sidebar-card glass-panel manager-card workspace-wide">
+                    <div class="header-row">
+                        <h3>
+                            <span class="icon">🔔</span> Price &amp; indicator triggers <span id="alerts-active-count"
+                                class="alerts-count-pill">0</span>
                         </h3>
                     </div>
                     <div id="alerts-manager-content">
@@ -476,31 +566,19 @@
                     </div>
                 </div>
 
-                <!-- Unified Quant Lab (Live Quant + Colab MCP Lab) -->
-                <div class="sidebar-card glass-panel manager-card desktop-only">
+            </div>
+        </section>
+
+        <section id="view-research" class="workspace-view" data-view="research" role="tabpanel"
+            aria-labelledby="nav-research" aria-label="Research" hidden>
+            <div class="workspace-grid">
+                <!-- Cloud Research (Google Colab) -->
+                <div class="sidebar-card glass-panel manager-card workspace-wide" id="research-card">
                     <div class="header-row">
-                        <h3 onclick="toggleSection('analytics-quant-content', this)" style="white-space: nowrap;">
-                            <span class="icon">📊</span> Quant Lab <span class="chevron"
-                                style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block;">▼</span>
-                        </h3>
+                        <h3><span class="icon">☁️</span> Cloud research</h3>
                     </div>
-                    <div id="analytics-quant-content">
-                        <div class="sidebar-tabs" role="tablist" aria-label="Quant Lab Views">
-                            <button type="button" class="sidebar-tab-btn active" role="tab" aria-selected="true"
-                                data-panel-tab="quant-live">Live Health</button>
-                            <button type="button" class="sidebar-tab-btn" role="tab" aria-selected="false"
-                                data-panel-tab="quant-colab">Cloud Research</button>
-                        </div>
-
-                        <div class="sidebar-tab-pane" data-tab-pane="quant-live" role="tabpanel">
-                            <div id="analytics-quant-panel" class="quant-panel">
-                                <span class="empty-msg">Loading portfolio health &amp; signals...</span>
-                            </div>
-                            <button id="refresh-analytics-btn" type="button" class="alert-action-btn full"
-                                title="Refresh Portfolio Health &amp; Backtest">↻ Refresh Health &amp; Backtest</button>
-                        </div>
-
-                        <div class="sidebar-tab-pane hidden" data-tab-pane="quant-colab" role="tabpanel">
+                    <div id="research-content">
+                        <div class="workspace-pane" data-tab-pane="quant-colab" role="tabpanel">
                             <div class="colab-mcp-panel">
                                 <div class="colab-mcp-header">
                                     <span class="subtitle">Google Colab Cloud Research</span>
@@ -564,26 +642,9 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </section>
 
-                <!-- System Admin Panel -->
-                <div class="sidebar-card glass-panel manager-card minimized desktop-only">
-                    <div class="header-row">
-                        <h3 onclick="toggleSection('admin-content', this)">
-                            <span class="icon">⚙️</span> Admin <span class="chevron"
-                                style="font-size: 0.7rem; margin-left: 5px; transition: transform 0.2s; display: inline-block; transform: rotate(-90deg);">▼</span>
-                        </h3>
-                    </div>
-                    <div id="admin-content" style="display: none;">
-                        <p class="subtitle" style="margin-bottom: 8px;">Decision Log Maintenance</p>
-                        <div class="btn-row">
-                            <button id="clear-log-btn" class="glow-btn outline danger mini">🗑️ Clear Decision
-                                Log</button>
-                            <div id="clear-log-status" class="status-message inline-feedback"></div>
-                        </div>
-                    </div>
-                </div>
-            </aside>
-        </main>
 
     </div>
 
@@ -875,7 +936,7 @@
     </div>
 
     <script src="portfolio.js?v=18.64"></script>
-    <script src="app.js?v=18.98"></script>
+    <script src="app.js?v=19.00"></script>
     <script src="modern_ui.js?v=18.69"></script>
 </body>
 

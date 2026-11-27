@@ -132,59 +132,115 @@ function _friendlyEnum(value) {
     return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
 }
 
-function setSidebarCollapsed(collapsed) {
-    const main = document.getElementById('main-content');
-    const btn = document.getElementById('toggle-sidebar-btn');
-    if (main) {
-        main.classList.toggle('sidebar-collapsed', Boolean(collapsed));
-    }
-    if (btn) {
-        btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-        btn.classList.toggle('active', !collapsed);
-    }
-    try {
-        localStorage.setItem('gem_sidebar_open', collapsed ? 'false' : 'true');
-    } catch (_) {}
-}
+// ─── Workspace navigation (Today · Portfolio · Opportunities · Alerts · Research) ───
+// Plain client-side view switching: every panel stays in the DOM (polling keeps rendering
+// into it); only the active view is shown. Deep-linkable via #portfolio etc.
+const WORKSPACE_VIEWS = ['today', 'portfolio', 'opportunities', 'alerts', 'research'];
+let _activeWorkspaceView = 'today';
 
-function toggleSidebarPanel() {
-    const main = document.getElementById('main-content');
-    const isCollapsed = main ? main.classList.contains('sidebar-collapsed') : true;
-    setSidebarCollapsed(!isCollapsed);
-}
-
-function initSidebarToggle() {
-    const btn = document.getElementById('toggle-sidebar-btn');
-    let savedOpen = false;
-    try {
-        savedOpen = localStorage.getItem('gem_sidebar_open') === 'true';
-    } catch (_) {}
-    setSidebarCollapsed(!savedOpen);
-    if (btn && !btn._gemSidebarBound) {
-        btn.addEventListener('click', toggleSidebarPanel);
-        btn._gemSidebarBound = true;
-
-        // Overlay-drawer mode (below the docking breakpoint): Escape or a click outside closes it.
-        const isOverlayOpen = () => {
-            const main = document.getElementById('main-content');
-            const sidebar = document.getElementById('dashboard-sidebar');
-            return Boolean(main && sidebar && !main.classList.contains('sidebar-collapsed')
-                && getComputedStyle(sidebar).position === 'fixed');
-        };
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && isOverlayOpen() && !document.querySelector('.modal-overlay.active, .chart-modal-overlay.active')) {
-                setSidebarCollapsed(true);
-                btn.focus();
+function setWorkspaceView(view, opts = {}) {
+    const target = WORKSPACE_VIEWS.includes(view) ? view : 'today';
+    _activeWorkspaceView = target;
+    WORKSPACE_VIEWS.forEach((v) => {
+        const panel = document.getElementById(`view-${v}`);
+        const tab = document.getElementById(`nav-${v}`);
+        const on = v === target;
+        if (panel) panel.hidden = !on;
+        if (tab) {
+            tab.classList.toggle('active', on);
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+            tab.tabIndex = on ? 0 : -1;
+        }
+    });
+    if (opts.updateHash !== false) {
+        const hash = target === 'today' ? '' : `#${target}`;
+        try {
+            if ((window.location.hash || '') !== hash) {
+                window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
             }
+        } catch (_) {}
+    }
+    if (opts.focusTab) {
+        const tab = document.getElementById(`nav-${target}`);
+        if (tab) tab.focus();
+    }
+}
+
+function _setNavBadge(view, count, title) {
+    const badge = document.getElementById(`nav-badge-${view}`);
+    if (!badge) return;
+    const n = Number(count) || 0;
+    badge.hidden = n <= 0;
+    badge.textContent = n > 0 ? String(n) : '';
+    if (title) badge.title = title;
+}
+
+function initWorkspaceNav() {
+    const nav = document.getElementById('workspace-nav');
+    if (nav && !nav._gemNavBound) {
+        nav._gemNavBound = true;
+        nav.addEventListener('click', (e) => {
+            const tab = e.target && e.target.closest ? e.target.closest('.workspace-tab[data-view]') : null;
+            if (tab) setWorkspaceView(tab.getAttribute('data-view'));
         });
-        document.addEventListener('mousedown', (e) => {
-            const sidebar = document.getElementById('dashboard-sidebar');
-            if (!isOverlayOpen() || !sidebar || sidebar.contains(e.target) || btn.contains(e.target)) return;
-            // Clicks inside dialogs opened from the drawer must not close it.
-            if (e.target.closest && e.target.closest('[role="dialog"], .modal-overlay, .chart-modal-overlay')) return;
-            setSidebarCollapsed(true);
+        // Arrow keys move between tabs (WAI-ARIA tabs pattern).
+        nav.addEventListener('keydown', (e) => {
+            if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+            const idx = WORKSPACE_VIEWS.indexOf(_activeWorkspaceView);
+            const next = WORKSPACE_VIEWS[(idx + (e.key === 'ArrowRight' ? 1 : WORKSPACE_VIEWS.length - 1)) % WORKSPACE_VIEWS.length];
+            e.preventDefault();
+            setWorkspaceView(next, { focusTab: true });
         });
     }
+    const fromHash = String(window.location.hash || '').replace('#', '').toLowerCase();
+    setWorkspaceView(WORKSPACE_VIEWS.includes(fromHash) ? fromHash : 'today', { updateHash: false });
+    if (!window._gemHashBound) {
+        window._gemHashBound = true;
+        window.addEventListener('hashchange', () => {
+            const v = String(window.location.hash || '').replace('#', '').toLowerCase();
+            setWorkspaceView(WORKSPACE_VIEWS.includes(v) ? v : 'today', { updateHash: false });
+        });
+    }
+    // Any element with data-goto-view="alerts" (e.g. the alert bar's "+N more") switches views.
+    if (!window._gemGotoViewBound) {
+        window._gemGotoViewBound = true;
+        document.addEventListener('click', (e) => {
+            const link = e.target && e.target.closest ? e.target.closest('[data-goto-view]') : null;
+            if (!link) return;
+            e.preventDefault();
+            setWorkspaceView(link.getAttribute('data-goto-view'));
+        });
+    }
+    _initAppSettingsPopover();
+}
+
+function _initAppSettingsPopover() {
+    const btn = document.getElementById('app-settings-btn');
+    const pop = document.getElementById('app-settings-popover');
+    if (!btn || !pop || btn._gemSettingsBound) return;
+    btn._gemSettingsBound = true;
+    const setOpen = (open) => {
+        pop.hidden = !open;
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        btn.classList.toggle('active', open);
+    };
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setOpen(pop.hidden);
+    });
+    // Opening the Indices editor (or any modal) from the popover closes the popover.
+    pop.addEventListener('click', (e) => {
+        if (e.target && e.target.closest && e.target.closest('#open-indices-modal-btn')) setOpen(false);
+    });
+    document.addEventListener('mousedown', (e) => {
+        if (!pop.hidden && !pop.contains(e.target) && !btn.contains(e.target)) setOpen(false);
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !pop.hidden) {
+            setOpen(false);
+            btn.focus();
+        }
+    });
 }
 
 const dCopyBtn = document.getElementById('copy-json-btn');
@@ -569,9 +625,11 @@ function _initTableToolbarAndShortcuts() {
                     filterInput.focus();
                     if (typeof filterInput.select === 'function') filterInput.select();
                 }
-            } else if (e.key === 't' || e.key === 'T') {
+            } else if (/^[1-5]$/.test(e.key)) {
+                // 1–5 switch workspace views (Today, Portfolio, Opportunities, Alerts, Research)
+                if (document.querySelector('.modal-overlay.active, .chart-modal-overlay.active, #chat-window.active')) return;
                 e.preventDefault();
-                toggleSidebarPanel();
+                setWorkspaceView(WORKSPACE_VIEWS[Number(e.key) - 1]);
             } else if (e.key === 'c' || e.key === 'C') {
                 const otherModal = document.querySelector('.modal-overlay.active, .chart-modal-overlay.active');
                 if (!otherModal && window.chatUI && typeof window.chatUI.toggle === 'function') {
@@ -600,18 +658,13 @@ function _activateSidebarTab(container, target) {
     });
 }
 
-function _openSidebarCardAndTab(contentId, tabKey) {
-    setSidebarCollapsed(false);
-    const content = document.getElementById(contentId);
-    if (content) {
-        if (content.style.display === 'none') {
-            const card = content.closest('.sidebar-card');
-            const header = card && card.querySelector('.header-row h3');
-            if (header) toggleSection(contentId, header);
-            else content.style.display = 'block';
-        }
-        if (tabKey) _activateSidebarTab(content, tabKey);
-    }
+// Switch to a workspace view and (optionally) a tab inside one of its cards.
+function _openWorkspace(view, contentId, tabKey) {
+    setWorkspaceView(view);
+    const content = contentId ? document.getElementById(contentId) : null;
+    if (content && tabKey) _activateSidebarTab(content, tabKey);
+    const card = content && content.closest ? content.closest('.sidebar-card') : null;
+    if (card && typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 function _initSidebarTabs() {
@@ -1966,7 +2019,7 @@ if (dAiScoutMaxRsiSelect) {
 window.deleteFromWatchlist = deleteFromWatchlist;
 window.toggleScoutCategory = toggleScoutCategory;
 window.toggleSection = toggleSection;
-window.toggleSidebarPanel = toggleSidebarPanel;
+window.setWorkspaceView = setWorkspaceView;
 window.copySessionReviewPayload = copySessionReviewPayload;
 window.runScout = runScout;
 
@@ -2170,35 +2223,36 @@ async function ackAlertEvent(eventId) {
     try {
         const res = await fetch(`${API_BASE}/alerts/events/${encodeURIComponent(eventId)}/ack`, { method: 'POST' });
         if (!res.ok) return;
-        // Remove the item and its marquee clone, then re-measure whether the bar still overflows.
+        // Remove it from the alert bar and the Alerts view; the next poll re-renders both.
         document.querySelectorAll(`.alert-item[data-event-id="${CSS.escape(eventId)}"]`).forEach(el => el.remove());
         const alertsEl = document.getElementById('alerts-content');
         if (alertsEl) {
             delete alertsEl.dataset.renderedKey;
             delete alertsEl.dataset.renderedHtml;
         }
-        updateAlertMarquee();
         pollData();
     } catch (e) { console.error('Ack alert failed:', e); }
 }
 
-// --- Top alert bar ticker -------------------------------------------------------------
-// Alerts scroll as a seamless marquee only when they overflow the bar; hovering or focusing
-// the bar pauses it so the acknowledge (×) buttons stay clickable. Reduced-motion users get a
-// static, manually scrollable bar instead.
-const MARQUEE_PX_PER_SEC = 45;
+// --- Top alert bar ----------------------------------------------------------------------
+// Stationary (no marquee): the bar shows the highest-severity alerts and a "+N more" link to
+// the Alerts view, which lists every active alert. The bar hides itself when nothing is active.
+const ALERT_BAR_MAX_ITEMS = 2;
 
 function renderAlertTicker(container, alertsHtml, structureKey, dynamicUpdates) {
     if (!container) return;
-    const html = alertsHtml || '<span class="empty-state">NO ACTIVE ALERTS</span>';
+    const html = alertsHtml || '';
     const key = (typeof structureKey === 'string' && structureKey.length > 0) ? structureKey : html;
-    // Compare against the structural key so live numeric jitter (e.g. VIX %) updates in place
-    // without tearing down .ticker-track or restarting the scroll animation.
+    const listEl = document.getElementById('alerts-view-list');
+    // Same structure: only patch live numbers (e.g. VIX %) in place, in both places.
     if (container.dataset.renderedKey === key) {
         if (dynamicUpdates && typeof dynamicUpdates === 'object') {
             Object.entries(dynamicUpdates).forEach(([selector, text]) => {
-                container.querySelectorAll(selector).forEach((el) => {
-                    if (el.textContent !== text) el.textContent = text;
+                [container, listEl].forEach((root) => {
+                    if (!root) return;
+                    root.querySelectorAll(selector).forEach((el) => {
+                        if (el.textContent !== text) el.textContent = text;
+                    });
                 });
             });
         }
@@ -2206,60 +2260,40 @@ function renderAlertTicker(container, alertsHtml, structureKey, dynamicUpdates) 
     }
     container.dataset.renderedKey = key;
     container.dataset.renderedHtml = html;
-    container.innerHTML = `<div class="ticker-track"><div class="ticker-group">${html}</div></div>`;
-    updateAlertMarquee();
-}
 
-function updateAlertMarquee() {
-    const container = document.getElementById('alerts-content');
-    const track = container && container.querySelector('.ticker-track');
-    const group = track && track.querySelector('.ticker-group:not([aria-hidden])');
-    if (!container || !track || !group) return;
+    if (listEl) listEl.innerHTML = html || '<span class="empty-msg">No active alerts.</span>';
 
-    track.querySelectorAll('.ticker-group[aria-hidden="true"]').forEach(el => el.remove());
-    container.classList.remove('is-scrolling', 'is-single-pass');
-    container.style.removeProperty('--marquee-start');
-    container.style.removeProperty('--marquee-delay');
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    const items = [...tpl.content.querySelectorAll('.alert-item')];
+    const sevRank = (el) => (el.classList.contains('critical') ? 3 : (el.classList.contains('warning') ? 2 : 1));
+    const ranked = items
+        .map((el, idx) => ({ el, idx, rank: sevRank(el) }))
+        .sort((a, b) => (b.rank - a.rank) || (a.idx - b.idx));
 
-    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const hasAlerts = Boolean(group.querySelector('.alert-item'));
-    if (!hasAlerts || reduceMotion) return;
-
-    let padX = 0;
-    try {
-        const cs = window.getComputedStyle ? window.getComputedStyle(container) : null;
-        if (cs) padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
-    } catch (_) {}
-    const availWidth = Math.max(0, container.clientWidth - padX);
-    const groupWidth = group.scrollWidth;
-
-    if (groupWidth > availWidth) {
-        container.classList.add('is-scrolling'); // adds trailing spacing, so measure after this
-        const clone = group.cloneNode(true);
-        clone.setAttribute('aria-hidden', 'true');
-        clone.querySelectorAll('button').forEach(btn => { btn.tabIndex = -1; });
-        track.appendChild(clone);
-        const seconds = Math.max(12, group.scrollWidth / MARQUEE_PX_PER_SEC);
-        container.style.setProperty('--marquee-duration', `${seconds.toFixed(1)}s`);
+    container.innerHTML = '';
+    if (!items.length) {
+        container.innerHTML = '<span class="empty-state">No active alerts</span>';
     } else {
-        // Single-pass marquee: smoothly scroll alerts without cloning (never duplicates a ticker).
-        container.classList.add('is-scrolling', 'is-single-pass');
-        const startPx = Math.max(availWidth, 320);
-        const travelPx = startPx + Math.max(groupWidth, 1);
-        const seconds = Math.max(12, travelPx / MARQUEE_PX_PER_SEC);
-        const initOffsetPx = Math.max(0, startPx - Math.min(startPx * 0.12, 120));
-        const delaySec = initOffsetPx / MARQUEE_PX_PER_SEC;
-        container.style.setProperty('--marquee-start', `${startPx}px`);
-        container.style.setProperty('--marquee-duration', `${seconds.toFixed(1)}s`);
-        container.style.setProperty('--marquee-delay', `-${delaySec.toFixed(1)}s`);
+        const strip = document.createElement('div');
+        strip.className = 'alert-strip';
+        ranked.slice(0, ALERT_BAR_MAX_ITEMS).forEach(({ el }) => strip.appendChild(el));
+        const extra = items.length - ALERT_BAR_MAX_ITEMS;
+        if (extra > 0) {
+            const more = document.createElement('button');
+            more.type = 'button';
+            more.className = 'alert-more-link';
+            more.setAttribute('data-goto-view', 'alerts');
+            more.textContent = `+${extra} more → Alerts`;
+            strip.appendChild(more);
+        }
+        container.appendChild(strip);
     }
+    const bar = document.getElementById('top-alert-bar');
+    if (bar) bar.classList.toggle('has-alerts', items.length > 0);
+    _setNavBadge('alerts', items.length, `${items.length} active alert${items.length === 1 ? '' : 's'}`);
 }
 
-let _alertMarqueeResizeTimer = null;
-window.addEventListener('resize', () => {
-    clearTimeout(_alertMarqueeResizeTimer);
-    _alertMarqueeResizeTimer = setTimeout(updateAlertMarquee, 150);
-});
 
 async function saveSentinelConfig(overrides = {}) {
     const providerSel = document.getElementById('sentinel-provider-select');
@@ -2558,6 +2592,48 @@ function renderPortfolioCommandStrip(analytics) {
         }).join('');
         actionsEl.innerHTML = planBtns;
     }
+
+    renderPositionsTable(positions);
+}
+
+// Portfolio view: one row per holding with live value, P&L and weight. Values come straight
+// from /api/analytics (server-side Decimal math); nothing is estimated client-side except the
+// weight share. Unpriced holdings show "—" and are left out of the weight denominator.
+function renderPositionsTable(positions) {
+    const body = document.getElementById('portfolio-positions-body');
+    const list = Array.isArray(positions) ? positions : [];
+    _setNavBadge('portfolio', list.length, `${list.length} holding${list.length === 1 ? '' : 's'}`);
+    if (!body) return;
+    if (!list.length) {
+        body.innerHTML = '<tr><td colspan="8" class="empty-msg">No holdings yet — add them under “Edit holdings &amp; cash”.</td></tr>';
+        return;
+    }
+    const num = (v) => (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+    const money = (v, sym, digits = 2) => (v === null ? '—' : `${sym}${v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`);
+    const totalMv = list.reduce((acc, p) => acc + (num(p.market_value_usd) || 0), 0);
+    body.innerHTML = list.map((p) => {
+        const sym = _escAlertHtml(p.ticker || '');
+        const shares = num(p.shares);
+        const mv = num(p.market_value_usd);
+        const pnl = num(p.unrealized_pnl_usd);
+        const pnlPct = num(p.unrealized_pnl_pct);
+        const weight = mv !== null && totalMv > 0 ? (mv / totalMv) * 100 : null;
+        const pnlCls = pnl === null ? 'text-muted' : (pnl >= 0 ? 'text-green' : 'text-red');
+        const pnlTxt = pnl === null
+            ? '—'
+            : `${pnl >= 0 ? '▲ +' : '▼ −'}$${Math.abs(pnl).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${pnlPct !== null ? ` (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)` : ''}`;
+        return `
+            <tr>
+                <td><button type="button" class="positions-ticker-btn" onclick="openChartModal('${sym}')" title="Open ${sym} chart">${sym}</button></td>
+                <td class="num">${shares === null ? '—' : shares.toLocaleString('en-US')}</td>
+                <td class="num">${money(num(p.wac), '€')}</td>
+                <td class="num">${money(num(p.price), '$')}</td>
+                <td class="num">${money(mv, '$')}</td>
+                <td class="num ${pnlCls}">${pnlTxt}</td>
+                <td class="num">${weight === null ? '—' : `${weight.toFixed(1)}%`}</td>
+                <td><button type="button" class="cmd-plan-btn" onclick="openExecutionPlanModal('${sym}')" title="Open trade plan for ${sym}">Trade plan</button></td>
+            </tr>`;
+    }).join('');
 }
 
 function renderQuantAnalyticsPanel(analytics, backtest) {
@@ -2580,7 +2656,7 @@ function renderQuantAnalyticsPanel(analytics, backtest) {
     const watchlistSignals = Array.isArray(data.watchlist_signals) ? data.watchlist_signals : [];
     const macroCal = data.macro_calendar && typeof data.macro_calendar === 'object' ? data.macro_calendar : null;
 
-    const volState = _escAlertHtml(regime.volatility_state || 'UNKNOWN');
+    const volState = _escAlertHtml(_friendlyRegimeLabel(regime.volatility_state || 'UNKNOWN'));
     const permTags = [
         ['Breakout', Boolean(perm.Momentum_Breakouts)],
         ['EP', Boolean(perm.Episodic_Pivots)],
@@ -2998,7 +3074,7 @@ window.ackAlertEvent = ackAlertEvent;
 window.deleteAlertRule = deleteAlertRule;
 window.toggleAlertRule = toggleAlertRule;
 
-initSidebarToggle();
+initWorkspaceNav();
 
 if (dAddWatchlistTicker) {
     dAddWatchlistTicker.addEventListener('keydown', (e) => {
@@ -3217,10 +3293,12 @@ function _briefActionClick(actionType, arg) {
         if (Array.isArray(_lastQuantScoutCandidates) && _lastQuantScoutCandidates.length > 0 && typeof openScoutRankingsModal === 'function') {
             openScoutRankingsModal();
         } else {
-            _openSidebarCardAndTab('scout-content', 'scout-quant');
+            _openWorkspace('opportunities', 'scout-content', 'scout-quant');
         }
     } else if (actionType === 'colab') {
-        _openSidebarCardAndTab('analytics-quant-content', 'quant-colab');
+        _openWorkspace('research', 'research-content');
+    } else if (actionType === 'view' && arg) {
+        _openWorkspace(String(arg));
     }
 }
 window._briefActionClick = _briefActionClick;
@@ -3244,9 +3322,9 @@ function renderActionBrief(state, analytics) {
             severity: 'severity-critical',
             title: '⚠️ Risk guard active',
             desc: msg,
-            btnLabel: 'Ask AI Council',
-            action: 'chat',
-            arg: '',
+            btnLabel: 'Review risk',
+            action: 'view',
+            arg: 'portfolio',
         });
     });
 
@@ -3375,6 +3453,7 @@ async function fetchQuantScoutCandidates() {
         const data = payload && payload.data;
         const cands = data && Array.isArray(data.candidates) ? data.candidates : [];
         _lastQuantScoutCandidates = cands;
+        _setNavBadge('opportunities', cands.length, `${cands.length} stock idea${cands.length === 1 ? '' : 's'} ready`);
         _lastQuantScoutMeta = {
             universe_size: Number((data && data.universe_size) || 0),
             generated_at_utc: (data && data.generated_at_utc) || null,
@@ -3396,13 +3475,13 @@ async function fetchQuantScoutCandidates() {
             const score = Number.isFinite(Number(c.composite_score)) ? Number(c.composite_score).toFixed(1) : '—';
             const rs3m = Number.isFinite(Number(c.rs_3m_pct)) ? Number(c.rs_3m_pct).toFixed(1) : '—';
             const corr = Number.isFinite(Number(c.corr_to_portfolio)) ? Number(c.corr_to_portfolio).toFixed(2) : '—';
-            const cluster = _escAlertHtml(String(c.cluster_label || ''));
+            const cluster = _escAlertHtml(_friendlyEnum(String(c.cluster_label || '')));
             const rationale = _escAlertHtml(String(c.rationale || ''));
             return `
                 <div class="colab-scout-row" title="${rationale}">
                     <div class="colab-scout-meta">
-                        <strong>${sym} · ${score}</strong>
-                        <span>${sector} | 3m ${rs3m}% | corr ${corr} | ${cluster}</span>
+                        <strong>${sym} · score ${score}</strong>
+                        <span title="3-month relative strength · correlation to your portfolio (lower = better diversification)">${sector} | 3m ${rs3m}% | corr ${corr}${cluster ? ` | ${cluster}` : ''}</span>
                     </div>
                     <button type="button" class="colab-scout-promote-btn" data-scout-ticker="${sym}">+ Watch</button>
                 </div>
