@@ -777,7 +777,8 @@ const ModernChat = {
 
     archiveCurrentSession() {
         const history = JSON.parse(localStorage.getItem('gem_chat_history') || '[]');
-        if (history.length === 0) return;
+        // A transcript with no user turn is just the standby greeting — nothing to archive.
+        if (!Array.isArray(history) || !history.some(m => m && m.role === 'user')) return;
         const sessions = JSON.parse(localStorage.getItem('gemini_chat_sessions') || '[]');
         const firstUserMsg = history.find(m => m.role === 'user')?.text || 'Empty Session';
         const sessionPreview = firstUserMsg.substring(0, 40) + (firstUserMsg.length > 40 ? '...' : '');
@@ -857,7 +858,7 @@ const ModernChat = {
                 localStorage.setItem('gem_chat_history', JSON.stringify(session.messages));
                 this.restoreNodes = null;
                 try { fetch('/api/reset_chat', { method: 'POST' }); } catch(e) {} // Force backend LLM hydration next message
-                this.loadHistory();
+                this.loadHistory({ restore: true });
             }
         }
     },
@@ -879,13 +880,49 @@ const ModernChat = {
         );
     },
 
-    loadHistory() {
-        // Always start clean — wipe any stale session from localStorage.
-        // Old sessions are accessible via the SESSIONS archive button.
-        localStorage.removeItem('gem_chat_history');
-        this.saveHistory();
+    _readStoredHistory() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem('gem_chat_history') || '[]');
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (_) {
+            return [];
+        }
+    },
+
+    _renderHistory(history) {
+        this.messages.innerHTML = '';
+        this._renderedProposalIds = new Set();
+        history.forEach((m) => {
+            if (!m || (m.role !== 'ai' && m.role !== 'user')) return;
+            this.appendMessage(m.role, String(m.text || ''), false, Number(m.cost) || 0, m.usage || null, m.model || null);
+        });
+    },
+
+    // Same browser tab (a reload): restore the conversation in progress.
+    // New tab / new browser session: archive the previous conversation (if it had any user
+    // turns) into SESSIONS, then start clean. `restore: true` forces a restore (loadSession).
+    loadHistory({ restore = false } = {}) {
+        const TAB_FLAG = 'gem_chat_tab_active';
+        let sameTabReload = false;
+        try {
+            sameTabReload = sessionStorage.getItem(TAB_FLAG) === '1';
+            sessionStorage.setItem(TAB_FLAG, '1');
+        } catch (_) { /* storage blocked: treat as a new session */ }
+
+        const history = this._readStoredHistory();
+        const hasConversation = history.some((m) => m && m.role === 'user');
+
+        if ((restore || sameTabReload) && hasConversation) {
+            this._renderHistory(history);
+        } else {
+            if (hasConversation) {
+                try { this.archiveCurrentSession(); } catch (e) { console.error('Archive failed', e); }
+            }
+            localStorage.removeItem('gem_chat_history');
+            this._renderStandbyMessage();
+            this.saveHistory();
+        }
         this.updateTotalSessionCost();
-        this._renderStandbyMessage();
         // Pending proposals live server-side and survive a page reload.
         this.loadPendingProposals();
         this.loadPendingImprovements();

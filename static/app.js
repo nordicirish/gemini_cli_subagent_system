@@ -251,6 +251,14 @@ dIndicesModalOverlay.addEventListener('click', (e) => {
 // Escape to close any open modal
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+        // Execution Ticket stacks above other modals (it opens from the chart), so close it
+        // alone first and leave whatever it was opened from in place.
+        const execOverlay = document.getElementById('execution-plan-modal-overlay');
+        if (execOverlay && execOverlay.classList.contains('active')) {
+            closeExecutionPlanModal();
+            e.stopImmediatePropagation();
+            return;
+        }
         closeModal(dIndicesModalOverlay);
         if (typeof closeScoutRankingsModal === 'function') closeScoutRankingsModal();
     }
@@ -313,11 +321,33 @@ let _tableSortDir = null;
 let _lastRenderTickers = null;
 let _lastRenderState = null;
 
+// Number of columns actually visible: all 14 in Pro, the non-.pro-col subset in Simple.
+// Full-width rows (section headers, empty-filter row) span exactly this many so the
+// table layout stays valid in both views.
+function _visibleTableColCount() {
+    const ths = document.querySelectorAll('#data-table thead th');
+    const total = ths.length || 14;
+    const isSimple = Boolean(dTableContainer && dTableContainer.classList.contains('view-simple'));
+    if (!isSimple) return total;
+    const proCount = document.querySelectorAll('#data-table thead th.pro-col').length;
+    return Math.max(1, total - proCount);
+}
+
+function _syncFullWidthColspans() {
+    const span = String(_visibleTableColCount());
+    document.querySelectorAll('#data-table tbody td[data-fullwidth]').forEach((td) => {
+        // "rest" cells sit beside the ticker cell, so they span one fewer column.
+        const n = td.getAttribute('data-fullwidth') === 'rest' ? Math.max(1, Number(span) - 1) : Number(span);
+        td.setAttribute('colspan', String(n));
+    });
+}
+
 function _applyTableView(viewMode) {
     const mode = viewMode === 'pro' ? 'pro' : 'simple';
     if (dTableContainer) {
         dTableContainer.classList.toggle('view-simple', mode === 'simple');
     }
+    _syncFullWidthColspans();
     const simpleBtn = document.getElementById('table-view-simple-btn');
     const proBtn = document.getElementById('table-view-pro-btn');
     if (simpleBtn) {
@@ -732,10 +762,34 @@ if (dPasteBtn) dPasteBtn.addEventListener('click', () => ingestExecutionPayload(
 
 // Format large numbers (Volume)
 function formatVol(vol) {
-    if (vol === null || vol === undefined || !Number.isFinite(Number(vol))) return '—';
+    // Zero/negative volume means no session prints yet (warm-up / pre-market), not "0 shares".
+    if (vol === null || vol === undefined || !Number.isFinite(Number(vol)) || Number(vol) <= 0) return '—';
     if (vol >= 1000000) return (vol / 1000000).toFixed(2) + 'M';
     if (vol >= 1000) return (vol / 1000).toFixed(1) + 'K';
     return vol.toString();
+}
+
+// Dealer (GEX) value shown in the table: live net GEX, falling back to Colab multi-expiry GEX
+// when the live value is absent or zero (pre-market). Returns value=null when neither exists,
+// so callers render "—" instead of a fabricated 0.000. Shared by rendering and sorting.
+function _displayGexFor(row) {
+    const sym = row && row.ticker;
+    const rawLive = row ? row.net_gex_total : null;
+    const live = rawLive !== null && rawLive !== undefined && rawLive !== '' && Number.isFinite(Number(rawLive))
+        ? Number(rawLive) : null;
+    const vsMap = _lastQuantAnalytics && _lastQuantAnalytics.colab_vol_surface && _lastQuantAnalytics.colab_vol_surface.tickers;
+    const vs = vsMap && sym && vsMap[sym] ? vsMap[sym] : null;
+    const rawColab = vs ? vs.net_gex_multi_expiry : null;
+    const colab = rawColab !== null && rawColab !== undefined && Number.isFinite(Number(rawColab))
+        ? Number(rawColab) : null;
+    // fetch_stocks.py coerces "no GEX data" to exactly 0.0, so an exact zero is treated as
+    // missing (same convention as the macro HUD's "GEX: —"), never shown as a real 0.000.
+    const liveKnown = live !== null && live !== 0;
+    const colabKnown = colab !== null && colab !== 0;
+    if (!liveKnown && colabKnown) {
+        return { value: colab, fromColab: true, vs };
+    }
+    return { value: liveKnown ? live : null, fromColab: false, vs };
 }
 
 // Render the data table with bifurcated sections
@@ -794,26 +848,28 @@ function renderTable(tickers, state) {
     portfolio.forEach(p => {
         const sym = (p.ticker || '').toUpperCase();
         if (sym && !processedSyms.has(sym) && !MACRO_TICKERS.includes(sym)) {
-            const livePrice = (latestTickersMap[sym] && latestTickersMap[sym].price) || p.wac || 0;
+            // Never substitute p.wac (EUR cost basis) for a USD quote, and never invent
+            // neutral-looking metrics: every unknown value stays null and renders as "—".
+            const quote = latestTickersMap[sym] && Number(latestTickersMap[sym].price);
             groups.held.push({
                 ticker: sym,
-                price: livePrice,
-                session_change_pct: 0,
-                gap_percent: 0,
-                volume: 0,
-                rvol: 0,
-                atr_percent: 0,
-                rsi: 50.0,
-                macd: 0.0,
-                macd_signal: 0.0,
-                macd_hist: 0.0,
-                macd_slope: 'EXPANDING_POSITIVE',
-                macd_status: 'NEUTRAL',
-                vwap: p.wac || 0,
-                trend: 'FLAT',
-                net_gex_total: 0,
-                score: 0,
-                note: 'Holding'
+                price: Number.isFinite(quote) && quote > 0 ? quote : null,
+                session_change_pct: null,
+                gap_percent: null,
+                volume: null,
+                rvol: null,
+                atr_percent: null,
+                rsi: null,
+                macd: null,
+                macd_signal: null,
+                macd_hist: null,
+                macd_slope: null,
+                macd_status: null,
+                vwap: null,
+                trend: null,
+                net_gex_total: null,
+                score: null,
+                note: 'Holding · Pending live quote'
             });
             processedSyms.add(sym);
         }
@@ -827,13 +883,14 @@ function renderTable(tickers, state) {
                 price: (latestTickersMap[sym] && latestTickersMap[sym].price) || null,
                 session_change_pct: null,
                 gap_percent: null,
-                volume: 0,
+                volume: null,
                 rvol: null,
                 atr_percent: null,
                 rsi: null,
-                vwap: 0,
-                trend: 'FLAT',
-                score: 0,
+                vwap: null,
+                trend: null,
+                net_gex_total: null,
+                score: null,
                 note: 'Pending scan'
             });
             processedSyms.add(sym);
@@ -867,7 +924,8 @@ function renderTable(tickers, state) {
         if (row.rsi >= 70) rsiColor = 'text-red';
         else if (row.rsi <= 30) rsiColor = 'text-green';
 
-        let scoreStr = row.score > 0 ? `+${row.score}` : `${row.score}`;
+        const hasScore = isNum(row.score);
+        let scoreStr = !hasScore ? '—' : (row.score > 0 ? `+${row.score}` : `${row.score}`);
         let scoreBadge = 'neutral';
         if (row.score >= 5) scoreBadge = 'positive';
         else if (row.score <= -5) scoreBadge = 'negative';
@@ -882,6 +940,8 @@ function renderTable(tickers, state) {
         } else if(row.trend === 'DOWN') {
             const cls = isMacroInv ? 'down-inv' : 'down';
             trendHtml = `<span class="trend-tag ${cls}">▼ Down</span>`;
+        } else if (row.trend === null || row.trend === undefined) {
+            trendHtml = `<span class="trend-tag flat" title="Trend pending scan">—</span>`;
         } else {
             trendHtml = `<span class="trend-tag flat">— Flat</span>`;
         }
@@ -907,6 +967,10 @@ function renderTable(tickers, state) {
         } else if (macdStat === 'BEARISH' || (!macdStat && macdHist !== null && macdHist < -0.001)) {
             macdClass = 'bearish';
             macdLabel = '▼ Bear';
+        } else if (!macdStat && macdHist === null) {
+            // No MACD data at all (pending scan): don't present it as a real "Neutral" reading.
+            macdClass = 'neutral';
+            macdLabel = '—';
         } else {
             macdClass = 'neutral';
             macdLabel = '— Neutral';
@@ -1050,6 +1114,7 @@ function renderTable(tickers, state) {
         const rvolDisplay = hasRvol ? `${rvolNum.toFixed(2)}x` : '—';
         const safeSym = _escAlertHtml(sym);
         const _plainSignalForRow = () => {
+            if (!hasScore) return { cls: 'signal-neutral', text: 'Pending' };
             const rsiN = isNum(row.rsi) ? Number(row.rsi) : null;
             const scN = Number(row.score || 0);
             if (rsiN !== null && rsiN >= 75) return { cls: 'signal-warn', text: '🔥 Overheated' };
@@ -1078,7 +1143,6 @@ function renderTable(tickers, state) {
                 <td>${trendHtml}</td>
                 <td>${fibTargetHtml}</td>
                 <td class="pro-col">${(() => {
-                    const liveGex = Number(row.net_gex_total || 0);
                     const diff = Number(row.gex_diff || 0);
                     let chevron = '';
                     if (diff > 0.005) {
@@ -1087,10 +1151,10 @@ function renderTable(tickers, state) {
                         chevron = `<span class="text-red" style="margin-left: 4px; font-weight: bold;">▼</span>`;
                     }
 
-                    const vsMap = _lastQuantAnalytics && _lastQuantAnalytics.colab_vol_surface && _lastQuantAnalytics.colab_vol_surface.tickers;
-                    const vs = vsMap && vsMap[sym] ? vsMap[sym] : null;
-                    const colabGex = vs && Number.isFinite(Number(vs.net_gex_multi_expiry)) ? Number(vs.net_gex_multi_expiry) : 0;
-                    const displayGex = (liveGex === 0 && colabGex !== 0) ? colabGex : liveGex;
+                    const { value: displayGex, fromColab, vs } = _displayGexFor(row);
+                    if (displayGex === null) {
+                        return `<span class="dealer-badge dealer-neutral" title="Dealer GEX not available yet">—</span>`;
+                    }
 
                     let dpClass = 'dealer-neutral';
                     if (displayGex > 0.0005) dpClass = 'dealer-long';
@@ -1100,7 +1164,7 @@ function renderTable(tickers, state) {
                     let vsTagHtml = '';
                     if (vs) {
                         const staleTxt = vs.stale ? ' [STALE]' : '';
-                        const srcNote = liveGex === 0 && colabGex !== 0 ? ' · using Colab multi-expiry GEX pre-market' : '';
+                        const srcNote = fromColab ? ' · using Colab multi-expiry GEX pre-market' : '';
                         const tip = `Vol Surface (${vs.dealer_flow_regime || 'NEUTRAL'}${staleTxt}): Flip $${Number(vs.gamma_flip_multi_expiry || 0).toFixed(2)} | Vanna ${Number(vs.vanna_exposure || 0).toFixed(2)} | Charm ${Number(vs.charm_decay_bias || 0).toFixed(2)} | 25d Skew ${Number(vs.svi_skew_25d || 0).toFixed(2)}%${srcNote}`;
                         vsTitleAttr = ` title="${_escAlertHtml(tip)}"`;
                         const tagLabel = vs.stale ? 'STALE' : (Number(vs.vanna_exposure || 0) >= 0 ? 'V+' : 'V-');
@@ -1126,8 +1190,7 @@ function renderTable(tickers, state) {
         } catch (e) {
             console.error(`Row render failed for ${row && row.ticker}`, e);
             const sym = String((row && row.ticker) || '?').replace(/[<>&"']/g, '');
-            const TABLE_COLUMNS = 14;  // ticker cell + the rest of the 14-column table
-            return `<tr class="row-render-error"><td><span class="ticker-symbol">${sym}</span></td><td colspan="${TABLE_COLUMNS - 1}">— data unavailable —</td></tr>`;
+            return `<tr class="row-render-error"><td><span class="ticker-symbol">${sym}</span></td><td colspan="${Math.max(1, _visibleTableColCount() - 1)}" data-fullwidth="rest">— data unavailable —</td></tr>`;
         }
     };
 
@@ -1168,9 +1231,10 @@ function renderTable(tickers, state) {
     const watchRows = _tableFilterMode === 'held' ? [] : sortGroupRows(groups.watchlist.filter(matchesFilter));
     const scoutRows = _tableFilterMode === 'held' ? [] : sortGroupRows(groups.scouts.filter(matchesFilter));
 
+    const fullSpan = _visibleTableColCount();
     const renderHeader = (label, cls = '') => `
-        <tr class="table-section-header ${cls}">
-            <td colspan="14">${label}</td>
+        <tr class="table-section-header ${cls}" data-section-row="true">
+            <td colspan="${fullSpan}" data-fullwidth="true">${label}</td>
         </tr>
     `;
 
@@ -1191,8 +1255,8 @@ function renderTable(tickers, state) {
 
         if (scoutRows.length > 0) {
             html += `
-                <tr class="table-sub-header scout-header">
-                    <td colspan="14">Scout Intelligence Suggestions</td>
+                <tr class="table-sub-header scout-header" data-section-row="true">
+                    <td colspan="${fullSpan}" data-fullwidth="true">Scout Intelligence Suggestions</td>
                 </tr>
             `;
             scoutRows.forEach(t => {
@@ -1204,7 +1268,7 @@ function renderTable(tickers, state) {
     }
 
     if (!html && (_tableFilterQuery || _tableFilterMode !== 'all')) {
-        html = '<tr class="table-empty-filter-row"><td colspan="14">No matching tickers for current filter.</td></tr>';
+        html = `<tr class="table-empty-filter-row" data-section-row="true"><td colspan="${fullSpan}" data-fullwidth="true">No matching tickers for current filter.</td></tr>`;
     }
 
     dTableBody.innerHTML = html;
@@ -2385,7 +2449,8 @@ function renderPortfolioCommandStrip(analytics) {
         } else if (usdTxt && usdTxt !== '—') {
             cashEl.textContent = usdTxt;
         } else {
-            cashEl.textContent = '€0.00';
+            // Cash not hydrated yet (or portfolio degraded): never show a fabricated €0.00.
+            cashEl.textContent = '—';
         }
     }
 

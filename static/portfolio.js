@@ -35,13 +35,28 @@ function formatUsdCash(cashEur, rate) {
 }
 
 // positionsUsd: market value of holdings (USD). Cash is EUR; totals need the live rate.
-function formatPortfolioTotals(cashEur, positionsUsd, rate) {
+function formatPortfolioTotals(cashEur, positionsUsd, rate, unpricedCount = 0) {
     if (!rate) return { eur: FX_UNAVAILABLE_TEXT, usd: FX_UNAVAILABLE_TEXT };
     const totalUsd = cashEur * rate + positionsUsd;
+    // Holdings without a live USD quote are excluded (never valued at EUR WAC); flag the gap.
+    const mark = unpricedCount > 0 ? ' *' : '';
     return {
-        eur: `€${Math.round(totalUsd / rate).toLocaleString()}`,
-        usd: `$${Math.round(totalUsd).toLocaleString()}`,
+        eur: `€${Math.round(totalUsd / rate).toLocaleString()}${mark}`,
+        usd: `$${Math.round(totalUsd).toLocaleString()}${mark}`,
     };
+}
+
+// Live USD quote for a ticker, or null. Never falls back to WAC (EUR cost basis).
+function liveUsdPrice(ticker, tickerMap) {
+    const map = tickerMap || ((typeof latestTickersMap !== 'undefined' && latestTickersMap) ? latestTickersMap : {});
+    const px = map[ticker] && Number(map[ticker].price);
+    return Number.isFinite(px) && px > 0 ? px : null;
+}
+
+function unpricedTitle(unpricedCount) {
+    return unpricedCount > 0
+        ? `Excludes ${unpricedCount} holding${unpricedCount === 1 ? '' : 's'} with no live USD quote yet`
+        : '';
 }
 
 // Degraded / stale state and the authoritative fetch + render (formerly ModernChat methods)
@@ -187,6 +202,7 @@ const PortfolioPanel = {
         const tickerMap = (typeof latestTickersMap !== 'undefined' && latestTickersMap) ? latestTickersMap : {};
 
         let totalUsd = 0; // positions only; cash is added below via the live rate
+        let unpricedCount = 0;
         let html = '';
         portfolio.forEach((item, index) => {
             const sharesVal = item.shares !== undefined && item.shares !== null ? item.shares : 0;
@@ -194,8 +210,10 @@ const PortfolioPanel = {
             const isDraft = Boolean(item._draft);
             const wacNum = Number(wacVal);
             const showEmptyWac = isDraft && !(wacNum > 0);
-            const livePrice = (tickerMap[item.ticker] && tickerMap[item.ticker].price) || (wacNum > 0 ? wacNum : 0);
-            totalUsd += (Number(sharesVal) || 0) * livePrice;
+            const livePrice = liveUsdPrice(item.ticker, tickerMap);
+            const sharesNum = Number(sharesVal) || 0;
+            if (livePrice !== null) totalUsd += sharesNum * livePrice;
+            else if (sharesNum > 0) unpricedCount += 1;
             const draftAttr = isDraft ? ' data-draft="true"' : '';
             const wacInputVal = showEmptyWac ? '' : wacVal;
             const wacPlaceholderAttr = showEmptyWac ? ' placeholder="WAC > 0" style="border-color: var(--yellow, #d29922);"' : '';
@@ -215,9 +233,11 @@ const PortfolioPanel = {
         `;
         });
 
-        const totals = formatPortfolioTotals(cashNum, totalUsd, rate);
+        const totals = formatPortfolioTotals(cashNum, totalUsd, rate, unpricedCount);
         const totalEurText = totals.eur;
         const totalUsdText = totals.usd;
+        const totalTitleText = rate ? unpricedTitle(unpricedCount) : '';
+        const totalTitle = totalTitleText ? ` title="${totalTitleText}"` : fxTitle;
         html += `
         <tr class="cash-row" style="background: rgba(0, 255, 148, 0.05);">
             <td style="color: var(--green); font-weight: 700; font-size: 0.75rem;">CASH (€)</td>
@@ -226,8 +246,8 @@ const PortfolioPanel = {
         </tr>
         <tr class="total-row" style="background: rgba(88, 166, 255, 0.08);">
             <td style="color: var(--accent); font-weight: 700; font-size: 0.75rem;">TOTAL</td>
-            <td id="total-val-eur"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; font-family: var(--font-mono);">${totalEurText}</td>
-            <td colspan="2" id="total-val-usd"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${totalUsdText}</td>
+            <td id="total-val-eur"${totalTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; font-family: var(--font-mono);">${totalEurText}</td>
+            <td colspan="2" id="total-val-usd"${totalTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${totalUsdText}</td>
         </tr>
     `;
 
@@ -272,17 +292,25 @@ function updatePortfolioTotals() {
     }
 
     let positionsUsd = 0;
+    let unpricedCount = 0;
     portfolio.forEach(item => {
-        const livePrice = (latestTickersMap[item.ticker] && latestTickersMap[item.ticker].price) || item.wac || 0;
-        positionsUsd += (item.shares || 0) * livePrice;
+        const livePrice = liveUsdPrice(item.ticker);
+        const shares = Number(item.shares) || 0;
+        if (livePrice !== null) positionsUsd += shares * livePrice;
+        else if (shares > 0) unpricedCount += 1;
     });
-    const totals = formatPortfolioTotals(cashEur, positionsUsd, rate);
+    const totals = formatPortfolioTotals(cashEur, positionsUsd, rate, unpricedCount);
 
     const totalEurEl = document.getElementById('total-val-eur');
     const totalUsdEl = document.getElementById('total-val-usd');
+    const titleText = rate ? unpricedTitle(unpricedCount) : 'Live EUR/USD rate unavailable';
 
-    if (totalEurEl) totalEurEl.textContent = totals.eur;
-    if (totalUsdEl) totalUsdEl.textContent = totals.usd;
+    [totalEurEl, totalUsdEl].forEach((el, i) => {
+        if (!el) return;
+        el.textContent = i === 0 ? totals.eur : totals.usd;
+        if (titleText) el.setAttribute('title', titleText);
+        else el.removeAttribute('title');
+    });
 }
 
 async function addToPortfolio() {

@@ -7,8 +7,8 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.83">
-    <link rel="stylesheet" href="modern_ui.css?v=18.61">
+    <link rel="stylesheet" href="styles.css?v=18.84">
+    <link rel="stylesheet" href="modern_ui.css?v=18.62">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
         rel="stylesheet">
@@ -566,11 +566,11 @@
     </div>
 
     <!-- ─── Execution & Risk Ticket Modal (Phase 4) ─── -->
-    <div class="modal-overlay" id="execution-plan-modal-overlay">
+    <div class="modal-overlay" id="execution-plan-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="exec-modal-title">
         <div class="modal modal-wide">
             <div class="modal-header">
-                <h3>⚡ Execution &amp; Risk Ticket — <span id="exec-modal-ticker">—</span></h3>
-                <button class="modal-close" id="close-exec-modal">&times;</button>
+                <h3 id="exec-modal-title">⚡ Execution &amp; Risk Ticket — <span id="exec-modal-ticker">—</span></h3>
+                <button class="modal-close" id="close-exec-modal" aria-label="Close Execution Ticket">&times;</button>
             </div>
             <div id="exec-modal-body" class="exec-modal-body">
                 <div class="empty-msg">Loading deterministic execution ticket...</div>
@@ -833,9 +833,9 @@
         </div>
     </div>
 
-    <script src="portfolio.js?v=18.63"></script>
-    <script src="app.js?v=18.94"></script>
-    <script src="modern_ui.js?v=18.66"></script>
+    <script src="portfolio.js?v=18.64"></script>
+    <script src="app.js?v=18.95"></script>
+    <script src="modern_ui.js?v=18.67"></script>
 </body>
 
 </html>

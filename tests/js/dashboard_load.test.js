@@ -447,10 +447,10 @@ async function main() {
     });
     check('market table shows portfolio and watchlist sections, tolerating missing numbers', () => {
         const rows = [...window.document.querySelectorAll('#data-table tbody tr')];
-        const sections = rows.filter((r) => r.querySelector('td[colspan="14"]')).map((r) => r.textContent.trim());
+        const sections = rows.filter((r) => r.matches('tr[data-section-row]')).map((r) => r.textContent.trim());
         assert.deepStrictEqual(sections, ['Your Portfolio', 'Strategic Watchlist']);
         const symOf = (r) => (r.querySelector('.ticker-symbol') || r.cells[0]).textContent.trim();
-        const symbols = rows.filter((r) => !r.querySelector('td[colspan="14"]')).map(symOf);
+        const symbols = rows.filter((r) => !r.matches('tr[data-section-row]')).map(symOf);
         assert.deepStrictEqual(symbols, ['NVDA', 'AMD', 'PLTR', 'TSLA']);
         const amd = rows.find((r) => symOf(r) === 'AMD');
         assert.strictEqual(amd.cells[1].textContent.trim(), '—', 'null price should render as —');
@@ -807,7 +807,7 @@ async function main() {
     const filterInput = window.document.getElementById('table-filter-input');
     const filterClearBtn = window.document.getElementById('table-filter-clear');
     const getRenderedSymbols = () => [...window.document.querySelectorAll('#data-table tbody tr')]
-        .filter((r) => !r.querySelector('td[colspan="14"]'))
+        .filter((r) => !r.matches('tr[data-section-row]'))
         .map((r) => (r.querySelector('.ticker-symbol') || r.cells[0]).textContent.trim());
     filterInput.value = 'PLTR';
     filterInput.dispatchEvent(new window.Event('input', { bubbles: true }));
@@ -1243,6 +1243,119 @@ async function main() {
         assert.strictEqual(hasDeterministicOpt, true, 'Expected #sentinel-provider-select to include deterministic option');
         assert.strictEqual(sentMetaTxt.includes('Local Deterministic') && sentMetaTxt.includes('5 armed'), true, `Unexpected status text: ${sentMetaTxt}`);
         assert.strictEqual(sentMetaTxt.includes('GEMINI_API_KEY'), false, 'Deterministic mode must never show missing API key error');
+    });
+
+    // ── UX Stage 1: data honesty, colspan, chat persistence, Esc on Execution Ticket ──
+    const s1State = JSON.parse(JSON.stringify(API['/api/data']));
+    // Backend emits net_gex_total: 0.0 when it has no GEX data for a ticker.
+    s1State.tickers.find((t) => t.ticker === 'PLTR').net_gex_total = 0.0;
+    s1State.local_storage_state.mutable_state.portfolio_snapshot = [
+        { ticker: 'NVDA', shares: 10, wac: 100 },
+        { ticker: 'ZZZ', shares: 5, wac: 42 }, // held but never scanned, no quote
+    ];
+    window.renderTable(s1State.tickers, s1State);
+    const s1Rows = [...window.document.querySelectorAll('#data-table tbody tr')];
+    const s1SymOf = (r) => (r.querySelector('.ticker-symbol') || r.cells[0]).textContent.trim();
+    const zzz = s1Rows.find((r) => !r.matches('tr[data-section-row]') && s1SymOf(r) === 'ZZZ');
+    const amdRow = s1Rows.find((r) => !r.matches('tr[data-section-row]') && s1SymOf(r) === 'AMD');
+    check('Stage 1: unscanned held row shows — instead of fabricated 0 / 50.0 / EUR WAC as USD', () => {
+        assert(zzz, 'held-but-unscanned ZZZ row missing');
+        const cellTxt = (i) => zzz.cells[i].textContent.trim();
+        assert.strictEqual(cellTxt(1), '—', `Price should be —, got ${cellTxt(1)}`);
+        assert.strictEqual(cellTxt(2), '—', `Day % should be —, got ${cellTxt(2)}`);
+        assert.strictEqual(cellTxt(4), '—', `Volume should be —, got ${cellTxt(4)}`);
+        assert.strictEqual(cellTxt(7), '—', `RSI should be —, got ${cellTxt(7)}`);
+        assert.strictEqual(cellTxt(8), '—', `VWAP should be —, got ${cellTxt(8)}`);
+        assert.strictEqual(cellTxt(12), '—', `Dealer GEX should be —, got ${cellTxt(12)}`);
+        assert(!zzz.textContent.includes('42.00'), 'EUR WAC leaked into a USD column');
+        assert(!zzz.textContent.includes('50.0'), 'fabricated neutral RSI 50.0 rendered');
+        assert(zzz.textContent.includes('Pending live quote'), 'missing pending-quote note');
+        assert.strictEqual(zzz.querySelector('.score-badge').textContent.trim(), '—', 'score should be — when unscored');
+        assert(amdRow && amdRow.cells[12].textContent.trim() === '—', 'scanned row without GEX must not show 0.000');
+        const pltrRow = s1Rows.find((r) => !r.matches('tr[data-section-row]') && s1SymOf(r) === 'PLTR');
+        assert(pltrRow && pltrRow.cells[12].textContent.trim() === '—', `backend 0.0 GEX placeholder must render —, got ${pltrRow && pltrRow.cells[12].textContent.trim()}`);
+    });
+
+    const s1SimpleBtn = window.document.getElementById('table-view-simple-btn');
+    const s1ProBtn = window.document.getElementById('table-view-pro-btn');
+    const spanOf = () => [...window.document.querySelectorAll('#data-table tbody tr[data-section-row] td')].map((td) => td.getAttribute('colspan'));
+    if (s1SimpleBtn) s1SimpleBtn.click();
+    const simpleSpans = spanOf();
+    if (s1ProBtn) s1ProBtn.click();
+    const proSpans = spanOf();
+    if (s1SimpleBtn) s1SimpleBtn.click();
+    check('Stage 1: section-row colspan matches visible columns (6 Simple / 14 Pro)', () => {
+        assert(simpleSpans.length > 0, 'no section rows rendered');
+        assert(simpleSpans.every((s) => s === '6'), `Simple spans: ${simpleSpans}`);
+        assert(proSpans.every((s) => s === '14'), `Pro spans: ${proSpans}`);
+    });
+
+    window.renderPortfolio({
+        portfolio: [{ ticker: 'NVDA', shares: 10, wac: 100.0 }, { ticker: 'ZZZ', shares: 5, wac: 42.0 }],
+        unallocated_cash_eur: 1000.0, eurusd_rate: 1.0977,
+    });
+    const s1TotalUsd = window.document.getElementById('total-val-usd');
+    check('Stage 1: portfolio USD total excludes unpriced holdings instead of adding EUR WAC', () => {
+        // 1000 EUR * 1.0977 + 10 * 120.50 = 2302.70 -> $2,303 (adding 5 * 42 EUR WAC would give $2,513)
+        assert(s1TotalUsd && s1TotalUsd.textContent.includes('$2,303'), `unexpected total: ${s1TotalUsd && s1TotalUsd.textContent}`);
+        assert(s1TotalUsd.textContent.includes('*'), 'unpriced marker missing');
+        assert((s1TotalUsd.getAttribute('title') || '').includes('Excludes 1 holding'), 'unpriced tooltip missing');
+    });
+    window.renderPortfolio(API['/api/basket']);
+
+    const s1CashInput = window.document.getElementById('cash-input-eur');
+    const s1CashUsd = window.document.getElementById('cash-val-usd');
+    const savedCash = s1CashInput ? s1CashInput.value : '';
+    const savedCashUsd = s1CashUsd ? s1CashUsd.textContent : '';
+    if (s1CashInput) s1CashInput.value = '';
+    if (s1CashUsd) s1CashUsd.textContent = '—';
+    window.renderPortfolioCommandStrip({ positions: [], global_vetoes: [] });
+    const s1CmdCash = (window.document.getElementById('cmd-cash-val') || {}).textContent || '';
+    if (s1CashInput) s1CashInput.value = savedCash;
+    if (s1CashUsd) s1CashUsd.textContent = savedCashUsd;
+    check('Stage 1: Command Strip cash shows — (not €0.00) before cash hydrates', () => {
+        assert.strictEqual(s1CmdCash.trim(), '—', `got ${s1CmdCash}`);
+    });
+
+    const chat = window.chatUI;
+    const ls = window.localStorage;
+    const ss = window.sessionStorage;
+    const convo = [{ role: 'user', text: 'Review NVDA' }, { role: 'ai', text: 'NVDA briefing body text' }];
+    ls.setItem('gemini_chat_sessions', '[]');
+    ls.setItem('gem_chat_history', JSON.stringify(convo));
+    ss.removeItem('gem_chat_tab_active');
+    chat.loadHistory(); // new browser session
+    const archivedAfterNew = JSON.parse(ls.getItem('gemini_chat_sessions') || '[]');
+    const domAfterNew = chat.messages.textContent;
+    ls.setItem('gem_chat_history', JSON.stringify(convo));
+    chat.loadHistory(); // same-tab reload (flag now set)
+    const domAfterReload = chat.messages.textContent;
+    const archivedAfterReload = JSON.parse(ls.getItem('gemini_chat_sessions') || '[]');
+    ss.removeItem('gem_chat_tab_active');
+    ls.setItem('gem_chat_history', JSON.stringify([{ role: 'ai', text: 'Council standing by.' }]));
+    chat.loadHistory(); // new session with only the standby greeting
+    const archivedAfterStandby = JSON.parse(ls.getItem('gemini_chat_sessions') || '[]');
+    check('Stage 1: chat restores on same-tab reload, archives + starts clean on a new session', () => {
+        assert.strictEqual(archivedAfterNew.length, 1, 'new session should archive the previous conversation');
+        assert.strictEqual(archivedAfterNew[0].preview, 'Review NVDA');
+        assert(!domAfterNew.includes('NVDA briefing body text'), 'new session should start clean');
+        assert(domAfterReload.includes('NVDA briefing body text'), 'same-tab reload should restore the conversation');
+        assert.strictEqual(archivedAfterReload.length, 1, 'reload must not archive a duplicate');
+        assert.strictEqual(archivedAfterStandby.length, 1, 'standby-only transcript must not be archived');
+    });
+
+    const s1Exec = window.document.getElementById('execution-plan-modal-overlay');
+    const s1Chart = window.document.getElementById('chart-modal-overlay');
+    s1Chart.classList.add('active');
+    s1Exec.classList.add('active');
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const execClosed = !s1Exec.classList.contains('active');
+    const chartStillOpen = s1Chart.classList.contains('active');
+    s1Chart.classList.remove('active');
+    check('Stage 1: Escape closes the Execution Ticket only, leaving the chart it was opened from', () => {
+        assert.strictEqual(s1Exec.getAttribute('role'), 'dialog');
+        assert.strictEqual(execClosed, true, 'Esc should close the Execution Ticket');
+        assert.strictEqual(chartStillOpen, true, 'Esc on the ticket must not also close the chart');
     });
 
     window.close();
