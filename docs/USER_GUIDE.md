@@ -44,12 +44,12 @@ Inside **🧰 TOOLS → 📊 Quant Lab**:
 
 - **Live Health:** Shows which trading strategies currently fit the market mood, any active risk alerts, watchlist setup readiness, and historical decision backtest hit rate.
 - **Cloud Research (Google Colab MCP):**
-  - On startup (when `uv` is installed), missing or expired cloud scans run automatically with a live progress bar across **4 steps**:
+  - Click **▶ Refresh All Cloud Insights** to run cloud research with a live progress bar across **4 steps** (it no longer starts by itself when the server starts — set `COLAB_AUTO_RUN_ON_STARTUP=1` if you want that back):
     1. **⚡ Options Flow** (Multi-expiry volatility surface & dealer hedging)
     2. **📑 Filing Risk** (SEC filing & dilution language scan)
     3. **🔭 Stock Finder (500+)** (Broad quantitative stock screen)
     4. **📊 Strategy Check** (Out-of-sample walk-forward rule validation — **Suggested Rule Tweaks** are strictly read-only until you explicitly approve them)
-  - **First-Time Google Colab Browser Connection:** When live scans run via `uvx`, Google Colab opens a browser tab (`colab.research.google.com`) asking to connect the MCP bridge (one tab shared across all 4 steps). Sign in / approve the tab within 60 seconds; if it times out, the banner explains why and offers a **↻ Retry** button.
+  - **Headless Colab CLI Connection (no browser tab needed):** When the Google Colab CLI is installed and signed in once in your terminal (`colab sessions`), cloud research runs directly from the dashboard with **no browser pop-up or 60-second timer**, and each cloud machine turns itself off automatically when its step finishes (look for **Colab: Ready (cli)** in the Cloud Research header). If you run in browser-bridge mode (`stdio`) instead, click the green **🔗 Open Google Colab to Connect** button in the banner when prompted.
   - **Offline Fallback:** Open **Offline Colab Calibration (JSON)** inside Cloud Research to export a zero-secret bundle and import results manually without live MCP.
 
 ---

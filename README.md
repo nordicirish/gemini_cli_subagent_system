@@ -117,16 +117,20 @@ Heavy cross-sectional and NLP computations can run on Colab GPUs via **Model Con
 ### Transport Modes (`python/colab_mcp_client.py`)
 | Environment Variable | Default | Purpose |
 |---|---|---|
-| `COLAB_MCP_MODE` | `stdio` | `stdio` (spawns `uvx googlecolab/colab-mcp`) or `http` (hosted endpoint) |
+| `COLAB_MCP_MODE` | `cli` *(when `colab` installed, else `stdio`)* | `cli` (headless `google-colab-cli`), `stdio` (`uvx googlecolab/colab-mcp`), `http` (hosted endpoint), or `offline` |
+| `COLAB_CLI_PATH` | *(auto-discovered)* | Path to `google-colab-cli` (`colab.exe` / `colab`) when not on `PATH` |
+| `COLAB_CLI_AUTH` | *(CLI default)* | Optional auth strategy (`oauth2` or `adc`) passed as `--auth` to `colab` |
 | `COLAB_MCP_COMMAND` | `uvx` | Stdio executable for local MCP bridge |
-| `COLAB_MCP_ARGS` | `["googlecolab/colab-mcp"]` | JSON array or whitespace-separated args for stdio command |
+| `COLAB_MCP_ARGS` | `["git+https://github.com/googlecolab/colab-mcp"]` | Args for stdio MCP bridge |
 | `COLAB_MCP_URL` | `https://colaboratory.googleapis.com/mcp` | Hosted Colab MCP endpoint (`http` mode) |
 | `COLAB_MCP_BEARER_TOKEN` | *(empty)* | OAuth bearer token required when `COLAB_MCP_MODE=http` |
 | `COLAB_MCP_TIMEOUT_SEC` | `600` | Per-job timeout in seconds |
-| `COLAB_AUTO_RUN_ON_STARTUP` | `1` | Auto-runs missing/stale Colab jobs on server startup (`0` disables) |
+| `COLAB_AUTO_RUN_ON_STARTUP` | `0` | Set `1` to auto-run missing/stale Colab jobs on server startup (default: run manually via **▶ Refresh All Cloud Insights**) |
+| `COLAB_MCP_PERSISTENT_SESSION` | `1` | Keeps one `colab-mcp` process + linked Colab browser tab for the whole server run in `stdio` mode (`0` = fresh session per run) |
 
-### Browser Handshake & Offline Fallback
-- When launching `stdio` jobs via `uvx`, `ColabMCPClient` shares a single session across pipeline jobs and invokes `open_colab_browser_connection` if execution tools aren't unlocked yet — opening one Google Colab browser tab for you to sign in/approve within 60s.
+### Headless CLI, Browser Handshake & Offline Fallback
+- **Headless CLI (`mode="cli"`):** When `google-colab-cli` is installed (and authorized once via `colab sessions`), each job runs via ephemeral `colab run --config <temp> --timeout 600 [--gpu T4|L4] <script>` — no browser tab required, strict GPU allowlist (`CPU`, `T4`, `L4`), and every remote VM self-terminates on completion or error.
+- **Browser Fallback (`mode="stdio"`):** Launches `uvx googlecolab/colab-mcp` and invokes `open_colab_browser_connection` if execution tools aren't unlocked yet.
 - **Outbound Bundle (`export_colab_bundle`):** Strips all API keys, personal cash balances, share counts, and cost basis — only public ticker lists, market aggregates, and OHLCV/rule metadata leave localhost.
 - **Worker Suite (`python/colab_workers/`):**
   - `vol_surface_greeks.py` (Worker #4 — multi-expiry IV surface, Vanna/Charm tags)

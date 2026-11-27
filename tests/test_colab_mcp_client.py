@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import json
 import os
+from pathlib import Path
 import sys
 import tempfile
 import threading
@@ -558,6 +559,101 @@ class TestColabJobManagerAndAPI(unittest.TestCase):
                 res = mgr.maybe_start_startup_pipeline()
             self.assertEqual(res["state"], "disabled")
 
+    def test_maybe_start_startup_pipeline_is_opt_in_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            mgr = colab_jobs.ColabJobManager(
+                cache_dir=td,
+                config_loader=lambda: colab_mcp_client.ColabMCPConfig(mode="stdio"),
+                transport_prober=lambda _cfg: {"mode": "stdio", "ready": False, "setup_hint": "Install uv"},
+            )
+            env = {k: v for k, v in os.environ.items() if k != "COLAB_AUTO_RUN_ON_STARTUP"}
+            with patch.dict(os.environ, env, clear=True):
+                self.assertEqual(mgr.maybe_start_startup_pipeline()["state"], "disabled")
+            with patch.dict(os.environ, {"COLAB_AUTO_RUN_ON_STARTUP": "1"}):
+                self.assertEqual(mgr.maybe_start_startup_pipeline()["state"], "setup_required")
+
+    def test_persistent_session_reuses_one_open_and_restarts_after_close(self) -> None:
+        from contextlib import asynccontextmanager
+        from types import SimpleNamespace
+
+        opens = []
+
+        class _Sess:
+            def __init__(self, idx):
+                self.idx = idx
+
+            async def initialize(self):
+                pass
+
+        @asynccontextmanager
+        async def _opener():
+            sess = _Sess(len(opens) + 1)
+            opens.append(sess)
+            yield sess
+
+        ps = colab_mcp_client.PersistentColabSession(opener=_opener)
+        try:
+            async def _body(session):
+                await asyncio.sleep(0)
+                return session.idx
+
+            linked_client = SimpleNamespace(_browser_linked=True)
+            self.assertEqual(ps.run(_body, timeout=5, client=linked_client), 1)
+            self.assertEqual(ps.run(_body, timeout=5), 1)
+            self.assertEqual(len(opens), 1)
+            st = ps.status()
+            self.assertTrue(st["alive"])
+            self.assertTrue(st["browser_linked"])
+
+            async def _hang(_session):
+                await asyncio.sleep(30)
+
+            with self.assertRaises(asyncio.TimeoutError):
+                ps.run(_hang, timeout=0.3)
+            self.assertFalse(ps.status()["alive"])
+
+            self.assertEqual(ps.run(_body, timeout=5), 2)
+            self.assertEqual(len(opens), 2)
+            self.assertFalse(ps.status()["browser_linked"])
+        finally:
+            ps.close()
+        self.assertFalse(ps.is_alive())
+
+    def test_persistent_session_start_failure_surfaces_root_cause(self) -> None:
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _bad_opener():
+            raise RuntimeError("uvx exploded")
+            yield  # pragma: no cover
+
+        ps = colab_mcp_client.PersistentColabSession(opener=_bad_opener)
+
+        async def _body(_s):
+            return 1
+
+        with self.assertRaises(RuntimeError) as ctx:
+            ps.run(_body, timeout=5)
+        self.assertIn("uvx exploded", str(ctx.exception))
+
+    def test_persistent_session_toggle_and_routing(self) -> None:
+        self.assertTrue(colab_mcp_client.is_persistent_session_enabled({}))
+        self.assertFalse(colab_mcp_client.is_persistent_session_enabled({"COLAB_MCP_PERSISTENT_SESSION": "0"}))
+        stdio_client = colab_mcp_client.ColabMCPClient(config=colab_mcp_client.ColabMCPConfig(mode="stdio"))
+        with patch.dict(os.environ, {"COLAB_MCP_PERSISTENT_SESSION": "1"}):
+            self.assertTrue(stdio_client._use_persistent_session())
+        with patch.dict(os.environ, {"COLAB_MCP_PERSISTENT_SESSION": "0"}):
+            self.assertFalse(stdio_client._use_persistent_session())
+        injected = colab_mcp_client.ColabMCPClient(
+            config=colab_mcp_client.ColabMCPConfig(mode="stdio"),
+            session_factory=lambda _c: None,
+        )
+        self.assertFalse(injected._use_persistent_session())
+        http_client = colab_mcp_client.ColabMCPClient(
+            config=colab_mcp_client.ColabMCPConfig(mode="http", http_bearer_token="t"),
+        )
+        self.assertFalse(http_client._use_persistent_session())
+
     def test_run_all_endpoint_accepts_request_and_rejects_unknown_keys(self) -> None:
         from fastapi.testclient import TestClient
         import web_server
@@ -728,6 +824,220 @@ class TestColabJobManagerAndAPI(unittest.TestCase):
         self.assertTrue(res["sec_nlp"]["ok"])
         self.assertEqual(res["vol_surface"]["payload"], {"step": 1})
         self.assertEqual(res["sec_nlp"]["payload"], {"step": 2})
+
+    def test_sitecustomize_hook_captures_allowed_colab_url_and_rejects_untrusted_hosts(self) -> None:
+        import subprocess
+
+        hook_dir = Path(__file__).resolve().parent.parent / "python" / "colab_hook"
+        self.assertEqual(sorted(p.name for p in hook_dir.iterdir() if p.name != "__pycache__"), ["sitecustomize.py"])
+        with tempfile.TemporaryDirectory() as td:
+            out_file = Path(td) / "url.txt"
+            env = dict(os.environ)
+            env["GEM_COLAB_CONNECT_URL_FILE"] = str(out_file)
+            env["GEM_COLAB_SKIP_OS_OPEN"] = "1"
+            env["PYTHONPATH"] = str(hook_dir)
+
+            good_url = "https://colab.research.google.com/notebooks/empty.ipynb#mcpProxyToken=tok&mcpProxyPort=5555"
+            code = (
+                "import webbrowser, sys\n"
+                "ok = webbrowser.open_new(sys.argv[1])\n"
+                "webbrowser.open_new('https://evil.example.com/phish')\n"
+                "webbrowser.open_new_tab('http://colab.research.google.com/insecure')\n"
+                "sys.exit(0 if ok else 3)\n"
+            )
+            proc = subprocess.run(
+                [sys.executable, "-c", code, good_url],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            # Untrusted / non-https URLs must not overwrite the valid captured URL
+            self.assertEqual(out_file.read_text(encoding="utf-8").strip(), good_url)
+
+    def test_browser_handshake_invokes_connect_url_callback(self) -> None:
+        from contextlib import asynccontextmanager
+        from types import SimpleNamespace
+
+        seen_urls = []
+        target_url = "https://colab.research.google.com/notebooks/empty.ipynb#mcpProxyToken=abc&mcpProxyPort=51277"
+
+        with tempfile.NamedTemporaryFile(prefix="gem-test-url-", suffix=".txt", delete=False) as tf:
+            tmp_path = tf.name
+        try:
+            class _BridgeSession:
+                def __init__(self):
+                    self.unlocked = False
+
+                async def initialize(self):
+                    pass
+
+                async def list_tools(self):
+                    if not self.unlocked:
+                        return SimpleNamespace(tools=[SimpleNamespace(name="open_colab_browser_connection", input_schema={})])
+                    return SimpleNamespace(tools=[
+                        SimpleNamespace(name="execute_code", input_schema={"properties": {"code": {"type": "string"}}}),
+                    ])
+
+                async def call_tool(self, name, args):
+                    if name == "open_colab_browser_connection":
+                        Path(tmp_path).write_text(target_url, encoding="utf-8")
+                        await asyncio.sleep(0.25)
+                        self.unlocked = True
+                        return SimpleNamespace(isError=False, content=[SimpleNamespace(text="true")], structured_content={"result": True})
+                    return SimpleNamespace(
+                        isError=False,
+                        content=[SimpleNamespace(text=f"{colab_mcp_client.JSON_START_MARKER}{{\"ok\":true}}{colab_mcp_client.JSON_END_MARKER}")],
+                    )
+
+            @asynccontextmanager
+            async def _factory(_cfg):
+                yield _BridgeSession()
+
+            client = colab_mcp_client.ColabMCPClient(
+                config=colab_mcp_client.ColabMCPConfig(mode="stdio"),
+                session_factory=_factory,
+            )
+            client._connect_url_file = tmp_path
+            out = client.execute_python_script_sync(
+                "print(1)",
+                {"job_type": "vol_surface", "symbols": ["NVDA"]},
+                connect_url_callback=lambda u: seen_urls.append(u),
+            )
+            self.assertEqual(out, {"ok": True})
+            self.assertIn(target_url, seen_urls)
+            self.assertIsNone(seen_urls[-1])
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    def test_wrap_script_preserves_future_imports_across_all_workers(self) -> None:
+        workers_dir = Path(__file__).resolve().parent.parent / "python" / "colab_workers"
+        worker_files = (
+            "vol_surface_worker.py",
+            "quant_scout_worker.py",
+            "sec_nlp_worker.py",
+            "walk_forward_worker.py",
+        )
+        for name in worker_files:
+            src = (workers_dir / name).read_text(encoding="utf-8")
+            wrapped = colab_mcp_client.ColabMCPClient._wrap_script(src, {"symbols": ["NVDA"], "job_type": name})
+            # Must compile without SyntaxError (`from __future__` must stay above imports/assignments)
+            compile(wrapped, name, "exec")
+            future_idx = wrapped.index("from __future__ import annotations")
+            inputs_idx = wrapped.index("GEM_JOB_INPUTS = ")
+            self.assertLess(future_idx, inputs_idx, msg=f"{name} placed GEM_JOB_INPUTS before __future__")
+
+    def test_from_env_autodetects_cli_when_colab_installed_else_stdio(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            fake_exe = Path(td) / ("colab.exe" if os.name == "nt" else "colab")
+            fake_exe.write_text("", encoding="utf-8")
+            cfg_cli = colab_mcp_client.ColabMCPConfig.from_env({"COLAB_CLI_PATH": str(fake_exe)})
+            self.assertEqual(cfg_cli.mode, "cli")
+
+        cfg_no_cli = colab_mcp_client.ColabMCPConfig.from_env({"PATH": ""})
+        self.assertEqual(cfg_no_cli.mode, "stdio")
+
+        with self.assertRaises(ValueError):
+            colab_mcp_client.ColabMCPConfig(mode="cli", cli_auth="invalid-auth")
+
+    def test_cli_mode_executes_ephemeral_run_allowlists_gpus_and_aborts_on_auth_error(self) -> None:
+        from types import SimpleNamespace
+
+        recorded_cmds = []
+
+        def _fake_run(cmd, **_kwargs):
+            recorded_cmds.append(list(cmd))
+            if "T4" in cmd:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=f"{colab_mcp_client.JSON_START_MARKER}{{\"step\":\"t4\"}}{colab_mcp_client.JSON_END_MARKER}",
+                    stderr="",
+                )
+            return SimpleNamespace(
+                returncode=0,
+                stdout=f"{colab_mcp_client.JSON_START_MARKER}{{\"step\":\"cpu\"}}{colab_mcp_client.JSON_END_MARKER}",
+                stderr="",
+            )
+
+        cfg = colab_mcp_client.ColabMCPConfig(mode="cli", cli_path="/mock/colab", cli_auth="oauth2", timeout_sec=300)
+        client = colab_mcp_client.ColabMCPClient(config=cfg)
+        with patch("colab_mcp_client.find_colab_cli", return_value="/mock/colab"), \
+             patch("colab_mcp_client.subprocess.run", side_effect=_fake_run):
+            out = client.execute_python_script_sync("from __future__ import annotations\nprint(1)", {"symbols": ["NVDA"]}, accelerator="CPU")
+            self.assertEqual(out, {"step": "cpu"})
+            self.assertIn("--config", recorded_cmds[0])
+            self.assertIn("--auth", recorded_cmds[0])
+            self.assertIn("oauth2", recorded_cmds[0])
+            self.assertIn("run", recorded_cmds[0])
+            self.assertIn("--timeout", recorded_cmds[0])
+            self.assertIn("300", recorded_cmds[0])
+            self.assertNotIn("--gpu", recorded_cmds[0])
+
+            # Reject unapproved accelerators so colab-cli cannot silently fall back to A100
+            with self.assertRaises(ValueError):
+                client.execute_python_script_sync("print(1)", {"symbols": ["NVDA"]}, accelerator="A100")
+
+            # Batch mode runs sequentially via CLI and honors T4
+            events = []
+            batch = client.execute_scripts_batch_sync(
+                [
+                    ("vol_surface", "print(1)", {"symbols": ["NVDA"]}, "CPU"),
+                    ("sec_nlp", "print(2)", {"symbols": ["NVDA"]}, "T4"),
+                ],
+                progress_callback=lambda jt, ph, msg: events.append((jt, ph)),
+            )
+            self.assertTrue(batch["vol_surface"]["ok"])
+            self.assertTrue(batch["sec_nlp"]["ok"])
+            self.assertEqual(batch["sec_nlp"]["payload"], {"step": "t4"})
+            self.assertIn("--gpu", recorded_cmds[-1])
+            self.assertIn("T4", recorded_cmds[-1])
+            self.assertIn(("sec_nlp", "succeeded"), events)
+
+        # Auth error surfaces `colab sessions` hint and aborts remaining batch items
+        def _fake_auth_fail(_cmd, **_kwargs):
+            return SimpleNamespace(returncode=1, stdout="", stderr="401 Unauthorized: invalid credentials")
+
+        with patch("colab_mcp_client.find_colab_cli", return_value="/mock/colab"), \
+             patch("colab_mcp_client.subprocess.run", side_effect=_fake_auth_fail):
+            bad_batch = client.execute_scripts_batch_sync([
+                ("vol_surface", "print(1)", {"symbols": ["NVDA"]}, "CPU"),
+                ("quant_scout", "print(2)", {"symbols": ["NVDA"]}, "CPU"),
+            ])
+            self.assertFalse(bad_batch["vol_surface"]["ok"])
+            self.assertIn("colab sessions", bad_batch["vol_surface"]["error"])
+            self.assertEqual(bad_batch["quant_scout"]["error"], bad_batch["vol_surface"]["error"])
+
+    def test_persistent_session_resets_when_handshake_times_out(self) -> None:
+        from contextlib import asynccontextmanager
+        from types import SimpleNamespace
+
+        opens = []
+
+        class _Sess:
+            async def initialize(self):
+                pass
+
+        @asynccontextmanager
+        async def _opener():
+            s = SimpleNamespace(idx=len(opens) + 1)
+            opens.append(s)
+            yield _Sess()
+
+        ps = colab_mcp_client.PersistentColabSession(opener=_opener)
+        try:
+            fake_client = SimpleNamespace(_browser_linked=False, _session_broken=True)
+
+            async def _fail_handshake(_session):
+                raise colab_mcp_client.ColabHandshakeTimeoutError("timed out")
+
+            with self.assertRaises(colab_mcp_client.ColabHandshakeTimeoutError):
+                ps.run(_fail_handshake, timeout=5, client=fake_client)
+            self.assertFalse(ps.is_alive())
+            self.assertFalse(ps.status()["alive"])
+        finally:
+            ps.close()
 
 
 if __name__ == "__main__":

@@ -9,13 +9,21 @@ All notable engineering, architecture, UI, and governance changes to `gemini_cli
 ## [Unreleased] — Colab MCP Handshake Fix & User Documentation Parity Agent
 
 ### Fixed & Improved
+- **Headless Google Colab CLI Mode (`mode="cli"`, `python/colab_mcp_client.py`, `python/colab_jobs.py`, `static/app.js`):**
+  - Added `mode="cli"` powered by `google-colab-cli` (`colab run --config <temp> --timeout <sec> [--gpu T4|L4]`), auto-selected as the default when `colab` is installed (`COLAB_CLI_PATH`, `COLAB_CLI_AUTH`). Eliminates browser-tab handshakes and self-terminates each ephemeral VM cleanly; strictly allowlists `CPU`/`T4`/`L4` to prevent silent A100 fallback.
+  - Updated `ColabMCPClient._wrap_script()` via `ast.parse` so `GEM_JOB_INPUTS` is injected *after* module docstrings and `from __future__ import annotations` lines.
+  - Updated `PersistentColabSession` to tear down and reset if a `stdio` browser handshake times out at 60s, and updated the transport pill to `Colab: Ready (cli)`.
+- **Persistent Colab Session — Connect Once per Server Run (`python/colab_mcp_client.py`, `python/colab_jobs.py`, `static/app.js`):**
+  - Added `PersistentColabSession` holding one `colab-mcp` stdio session on a dedicated background event loop; pipelines, retries, and single jobs reuse the same linked Colab browser tab (`COLAB_MCP_PERSISTENT_SESSION`, default on). Crashed or timed-out sessions reset and restart lazily.
+  - `/api/colab/status` now reports `"session"` (`alive`, `browser_linked`); the MCP pill shows **Colab linked ✓**.
+- **Startup Auto-Run Now Opt-In (`COLAB_AUTO_RUN_ON_STARTUP`, default `0`):** No surprise browser tab or 60s countdown at boot; run via **▶ Refresh All Cloud Insights** or set `1`.
 - **Google Colab MCP Handshake & Root-Cause Diagnostics (`python/colab_mcp_client.py`, `python/colab_jobs.py`):**
   - Implemented `open_colab_browser_connection` handshake inside `ColabMCPClient._run_on_session()` so `googlecolab/colab-mcp` automatically opens the browser bridge tab and unlocks execution tools cleanly.
   - Fixed `mcp==2.3.0` `Tool.input_schema` attribute compatibility via `_tool_input_schema()`.
   - Added recursive `unwrap_exception_message()` so `ExceptionGroup` / `TaskGroup` errors surface concrete root-cause guidance instead of opaque TaskGroup strings.
-  - Added `execute_scripts_batch_sync()` so multi-job pipelines share one Colab browser connection session instead of spawning four tabs.
-- **Cloud Research Error & Retry Banner (`static/index.html`, `static/styles.css`, `static/app.js`):**
-  - Added red/amber `.is-failed` / `.is-partial` visual states, inline `#colab-pipeline-error-detail` messages, `↻ Retry` (`#colab-banner-retry-btn`), and `×` dismiss (`#colab-banner-dismiss-btn`).
+  - Added `execute_scripts_batch_sync()` so multi-job pipelines share one Colab browser connection session instead of spawning four tabs, plus an in-process `python/colab_hook/sitecustomize.py` `webbrowser` hook (loaded via `PYTHONPATH`) capturing ephemeral `colab.research.google.com` proxy URLs instantly — avoiding nested `BROWSER` subprocesses that stall inside the Windows MCP stdio Job Object.
+- **Cloud Research Connect, Error & Retry Banner (`static/index.html`, `static/styles.css`, `static/app.js`):**
+  - Added allowlisted **🔗 Open Google Colab to Connect** banner link (`#colab-connect-link`), red/amber `.is-failed` / `.is-partial` visual states, inline `#colab-pipeline-error-detail` messages, `↻ Retry` (`#colab-banner-retry-btn`), and `×` dismiss (`#colab-banner-dismiss-btn`).
 - **User Documentation Parity Agent & Gate (`docs/agents/documentation-agent.md`, `docs/agents/roles.json`, `docs/USER_GUIDE.md`, `scripts/stage_gate.py`):**
   - Expanded `documentation-subagent` to own plain-English user docs (`README.md`, `CHANGELOG.md`, `docs/USER_GUIDE.md`).
   - Added `docs/USER_GUIDE.md` trader handbook and automated `check_user_docs_parity()` in `scripts/stage_gate.py`.

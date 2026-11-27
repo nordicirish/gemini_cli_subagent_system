@@ -2888,6 +2888,10 @@ let _lastColabStatus = null;
 let _colabPipelinePollTimer = null;
 let _colabBannerDismissedKey = null;
 
+function _isSafeColabConnectUrl(url) {
+    return /^https:\/\/(colab\.research\.google\.com|colab\.google\.com)\//i.test(String(url || '').trim());
+}
+
 function _briefActionClick(actionType, arg) {
     if (actionType === 'chat') {
         if (window.chatUI && typeof window.chatUI.open === 'function') window.chatUI.open();
@@ -3137,6 +3141,7 @@ function renderColabProgressAndSetup(data) {
     const fillEl = document.getElementById('colab-pipeline-bar-fill');
     const chipsEl = document.getElementById('colab-pipeline-chips');
     const retryBtn = document.getElementById('colab-banner-retry-btn');
+    const connectLink = document.getElementById('colab-connect-link');
     const errDetailEl = document.getElementById('colab-pipeline-error-detail');
     const pipeState = String(pipe.state || 'idle');
     const pct = Math.max(0, Math.min(100, Number(pipe.percent || 0)));
@@ -3173,6 +3178,16 @@ function renderColabProgressAndSetup(data) {
     }
     if (retryBtn) {
         retryBtn.style.display = isErrState ? 'inline-block' : 'none';
+    }
+    if (connectLink) {
+        const rawUrl = String(pipe.connect_url || '').trim();
+        if (pipeState === 'running' && _isSafeColabConnectUrl(rawUrl)) {
+            connectLink.href = rawUrl;
+            connectLink.style.display = 'inline-block';
+        } else {
+            connectLink.href = '#';
+            connectLink.style.display = 'none';
+        }
     }
     if (errDetailEl) {
         let firstErr = String(pipe.error_summary || '').trim();
@@ -3219,9 +3234,19 @@ async function fetchColabMcpStatus() {
         const data = await res.json();
         const tr = data && data.transport ? data.transport : {};
         const ready = Boolean(tr.ready);
-        pillEl.textContent = ready ? `MCP: Ready (${tr.mode})` : `MCP: Setup (${tr.mode})`;
+        const mode = String(tr.mode || 'cli');
+        const linked = Boolean(data && data.session && data.session.browser_linked);
+        if (mode === 'cli') {
+            pillEl.textContent = ready ? 'Colab: Ready (cli)' : 'Colab: Setup (cli)';
+        } else {
+            pillEl.textContent = ready
+                ? `MCP: Ready (${mode})${linked ? ' · Colab linked ✓' : ''}`
+                : `MCP: Setup (${mode})`;
+        }
         pillEl.className = `colab-mcp-transport-pill${ready ? ' is-ready' : ''}`;
-        if (tr.setup_hint) pillEl.title = tr.setup_hint;
+        if (tr.setup_hint) pillEl.title = (linked && mode !== 'cli')
+            ? `${tr.setup_hint} Google Colab tab is linked for this server session — keep it open to avoid reconnecting.`
+            : tr.setup_hint;
         renderColabProgressAndSetup(data);
         renderActionBrief(_lastRenderState, _lastQuantAnalytics);
 
@@ -3231,7 +3256,7 @@ async function fetchColabMcpStatus() {
             if (!_colabPipelinePollTimer) {
                 _colabPipelinePollTimer = setInterval(() => {
                     fetchColabMcpStatus();
-                }, 2500);
+                }, 1500);
             }
         } else if (_colabPipelinePollTimer) {
             clearInterval(_colabPipelinePollTimer);
@@ -3334,9 +3359,23 @@ async function launchColabJob(jobType, btnEl) {
                         return;
                     }
                     const pData = await pRes.json();
+                    if (pData.connect_url && _isSafeColabConnectUrl(pData.connect_url)) {
+                        renderColabProgressAndSetup({
+                            transport: (_lastColabStatus && _lastColabStatus.transport) || {},
+                            pipeline: {
+                                state: 'running',
+                                trigger: 'manual',
+                                percent: Number(pData.progress_pct || 25),
+                                step_label: pData.progress || `Waiting to connect ${pData.label || jobType}...`,
+                                connect_url: pData.connect_url,
+                                jobs: { [jobType]: { status: 'running', label: pData.label || jobType } },
+                            },
+                        });
+                    }
                     if (pData.status === 'succeeded') {
                         clearInterval(timer);
                         _restoreButtonBusy(btnEl);
+                        renderColabProgressAndSetup({ transport: (_lastColabStatus && _lastColabStatus.transport) || {}, pipeline: { state: 'idle' } });
                         _setColabJobStatus(statusEls, `${pData.label || jobType} completed cleanly.`, 'status-message inline-feedback active text-green');
                         await fetchColabMcpStatus();
                         if (typeof fetchAnalyticsAndBacktest === 'function') fetchAnalyticsAndBacktest();

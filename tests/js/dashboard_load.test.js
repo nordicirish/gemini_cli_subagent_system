@@ -1060,6 +1060,36 @@ async function main() {
         assert.strictEqual(dismissedBannerOk, true, 'Dismiss button should hide #colab-progress-banner');
     });
 
+    const connectUrl = 'https://colab.research.google.com/notebooks/empty.ipynb#mcpProxyToken=abc&mcpProxyPort=51277';
+    mockColabPipeline = {
+        state: 'running',
+        trigger: 'manual',
+        started_at_utc: '2026-11-26T20:10:00Z',
+        percent: 25,
+        step_label: "Click 'Open Google Colab to Connect' in the banner",
+        connect_url: connectUrl,
+        jobs: {
+            vol_surface: { status: 'running', label: 'Options Flow & Vol Surface', progress_pct: 25 },
+        },
+    };
+    await window.fetchColabMcpStatus();
+    const connectLink = window.document.getElementById('colab-connect-link');
+    const safeLinkShown = connectLink && connectLink.style.display === 'inline-block' && connectLink.getAttribute('href') === connectUrl;
+
+    mockColabPipeline = {
+        ...mockColabPipeline,
+        started_at_utc: '2026-11-26T20:11:00Z',
+        connect_url: 'javascript:alert(1)',
+    };
+    await window.fetchColabMcpStatus();
+    const badLinkBlocked = connectLink && connectLink.style.display === 'none' && connectLink.getAttribute('href') === '#';
+    mockColabPipeline = { state: 'idle', percent: 0, step_label: 'Idle', jobs: {} };
+    await window.fetchColabMcpStatus();
+    check('Colab Connect Link: surfaces safe colab.research.google.com URL and blocks unsafe URLs', () => {
+        assert.strictEqual(safeLinkShown, true, 'Expected #colab-connect-link visible with safe Colab URL');
+        assert.strictEqual(badLinkBlocked, true, 'Unsafe javascript: URL must remain hidden and reset to #');
+    });
+
     window.close();
     console.log(results.join('\n'));
     const failed = results.filter((r) => r.startsWith('FAIL')).length;

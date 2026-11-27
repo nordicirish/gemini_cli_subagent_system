@@ -3564,6 +3564,28 @@ td.num-col {
     gap: 8px;
 }
 
+.colab-connect-btn,
+.colab-connect-btn:link,
+.colab-connect-btn:visited {
+    display: inline-block;
+    border: 1px solid rgba(63, 185, 80, 0.65);
+    background: rgba(63, 185, 80, 0.2);
+    color: #7ee787;
+    text-decoration: none;
+    font-family: var(--font-sans);
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
+}
+
+.colab-connect-btn:hover {
+    background: rgba(63, 185, 80, 0.32);
+    color: #aff5b4;
+    border-color: rgba(63, 185, 80, 0.85);
+}
+
 .colab-banner-btn {
     border: 1px solid rgba(88, 166, 255, 0.4);
     background: rgba(88, 166, 255, 0.14);

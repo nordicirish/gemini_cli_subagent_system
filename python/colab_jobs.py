@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections import OrderedDict
 import copy
 from datetime import datetime, timezone
+import inspect
 import json
 import os
 import sys
@@ -37,6 +38,7 @@ try:
     from colab_mcp_client import (
         ColabMCPClient,
         ColabMCPConfig,
+        get_persistent_session_status,
         probe_transport,
         sanitize_job_inputs,
         unwrap_exception_message,
@@ -53,6 +55,7 @@ except ImportError:
     from python.colab_mcp_client import (
         ColabMCPClient,
         ColabMCPConfig,
+        get_persistent_session_status,
         probe_transport,
         sanitize_job_inputs,
         unwrap_exception_message,
@@ -200,6 +203,7 @@ class ColabJobManager:
             "failed_count": 0,
             "percent": 0,
             "step_label": "Idle",
+            "connect_url": None,
             "jobs": {},
         }
 
@@ -251,6 +255,8 @@ class ColabJobManager:
             http_bearer_token=base_cfg.http_bearer_token,
             timeout_sec=base_cfg.timeout_sec,
             allow_loopback_http=base_cfg.allow_loopback_http,
+            cli_path=base_cfg.cli_path,
+            cli_auth=base_cfg.cli_auth,
         )
         if cfg.mode == "offline":
             raise ValueError(
@@ -281,6 +287,7 @@ class ColabJobManager:
                 "status": "queued",
                 "progress": "Queued for MCP dispatch",
                 "progress_pct": 5,
+                "connect_url": None,
                 "created_at_utc": _utc_now_iso(),
                 "started_at_utc": None,
                 "finished_at_utc": None,
@@ -312,15 +319,24 @@ class ColabJobManager:
                     progress=f"Executing {spec.get('label', norm_type)} on Colab ({accelerator})",
                     progress_pct=55,
                 )
-                result_payload = client.execute_python_script_sync(
+                exec_fn = client.execute_python_script_sync
+                exec_sig = inspect.signature(exec_fn)
+                extra_kwargs: Dict[str, Any] = {}
+                if "status_callback" in exec_sig.parameters:
+                    extra_kwargs["status_callback"] = lambda msg: self._update_job(job_id, progress=msg)
+                if "connect_url_callback" in exec_sig.parameters:
+                    extra_kwargs["connect_url_callback"] = lambda url: self._update_job(job_id, connect_url=url)
+                result_payload = exec_fn(
                     script_source,
                     job_inputs,
                     accelerator=accelerator,
+                    **extra_kwargs,
                 )
                 self._update_job(
                     job_id,
                     progress="Validating and saving Colab results",
                     progress_pct=90,
+                    connect_url=None,
                 )
                 summary = import_colab_artifact(
                     spec["artifact_type"],
@@ -508,7 +524,7 @@ class ColabJobManager:
                             lbl = JOB_SPEC.get(step_jt, {}).get("label", step_jt)
                             self._pipeline["current_job"] = step_jt
                             if phase == "handshake":
-                                self._pipeline["step_label"] = msg
+                                self._pipeline["step_label"] = f"Step {step_idx}/{len(targets)}: {lbl} — {msg}"
                                 self._pipeline["jobs"][step_jt]["status"] = "running"
                                 self._pipeline["jobs"][step_jt]["progress_pct"] = 25
                             elif phase == "running":
@@ -524,7 +540,15 @@ class ColabJobManager:
                                 self._pipeline["jobs"][step_jt]["error"] = redact_secrets(msg)
                             self._pipeline["percent"] = _recompute_percent_locked()
 
-                    batch_out = client.execute_scripts_batch_sync(batch_items, progress_callback=_on_step)
+                    def _on_connect_url(url: Optional[str]) -> None:
+                        with self._lock:
+                            self._pipeline["connect_url"] = url
+
+                    batch_fn = client.execute_scripts_batch_sync
+                    batch_kwargs: Dict[str, Any] = {"progress_callback": _on_step}
+                    if "connect_url_callback" in inspect.signature(batch_fn).parameters:
+                        batch_kwargs["connect_url_callback"] = _on_connect_url
+                    batch_out = batch_fn(batch_items, **batch_kwargs)
                     for jt in to_run:
                         res_item = batch_out.get(jt) or {"ok": False, "error": "No result returned"}
                         if res_item.get("ok"):
@@ -653,6 +677,7 @@ class ColabJobManager:
                         "percent": 100,
                         "step_label": final_label,
                         "error_summary": first_error,
+                        "connect_url": None,
                     })
             finally:
                 with self._lock:
@@ -663,9 +688,9 @@ class ColabJobManager:
         return snapshot
 
     def maybe_start_startup_pipeline(self) -> Dict[str, Any]:
-        """Trigger automatic stale-only Colab research on startup unless disabled."""
-        raw_flag = (os.environ.get("COLAB_AUTO_RUN_ON_STARTUP") or "1").strip().lower()
-        if raw_flag in {"0", "false", "no", "off"}:
+        """Trigger automatic stale-only Colab research on startup only when opted in (`COLAB_AUTO_RUN_ON_STARTUP=1`)."""
+        raw_flag = (os.environ.get("COLAB_AUTO_RUN_ON_STARTUP") or "0").strip().lower()
+        if raw_flag not in {"1", "true", "yes", "on"}:
             with self._lock:
                 self._pipeline = {
                     "state": "disabled",
@@ -678,7 +703,8 @@ class ColabJobManager:
                     "skipped_fresh_count": 0,
                     "failed_count": 0,
                     "percent": 0,
-                    "step_label": "Auto-run on startup disabled (COLAB_AUTO_RUN_ON_STARTUP=0)",
+                    "step_label": "Cloud research runs when you click ▶ Refresh All Cloud Insights (set COLAB_AUTO_RUN_ON_STARTUP=1 to auto-run on startup)",
+                    "connect_url": None,
                     "jobs": {},
                 }
                 return copy.deepcopy(self._pipeline)
@@ -702,8 +728,13 @@ class ColabJobManager:
             recent_jobs = self.list_jobs(limit=10)
             pipeline_snapshot = copy.deepcopy(self._pipeline)
         artifacts_status = get_all_colab_artifacts_status(cache_dir=self.cache_dir)
+        try:
+            session_status = get_persistent_session_status(cfg)
+        except Exception:
+            session_status = {"persistent": False, "alive": False, "browser_linked": False}
         return {
             "transport": self._transport_prober(cfg),
+            "session": session_status,
             "job_types": {
                 k: {
                     "label": v.get("label", k),
@@ -735,7 +766,7 @@ def get_colab_job_manager() -> ColabJobManager:
 
 def _cli(argv: List[str]) -> int:
     if len(argv) < 2 or argv[1] not in {"status", "run"}:
-        print("Usage: python -m colab_jobs [status|run <job_type> [--mode stdio|http] [--use-llm]]")
+        print("Usage: python -m colab_jobs [status|run <job_type> [--mode cli|stdio|http] [--use-llm]]")
         return 1
     mgr = get_colab_job_manager()
     if argv[1] == "status":
@@ -749,7 +780,7 @@ def _cli(argv: List[str]) -> int:
     if "--mode" in argv:
         idx = argv.index("--mode")
         if idx + 1 >= len(argv):
-            print("--mode requires stdio or http")
+            print("--mode requires cli, stdio, or http")
             return 1
         mode = argv[idx + 1]
     options: Dict[str, Any] = {}
