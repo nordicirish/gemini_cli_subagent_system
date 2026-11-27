@@ -9,6 +9,12 @@ All notable engineering, architecture, UI, and governance changes to `gemini_cli
 ## [Unreleased] — Colab MCP Handshake Fix & User Documentation Parity Agent
 
 ### Fixed & Improved
+- **Council On-Demand Quantitative Investigations (`python/quant_investigations.py`, `python/colab_workers/custom_study_worker.py`, `python/tools.py`, `python/agent_factory.py`, `python/web_server.py`):**
+  - Added read-only `run_quant_investigation` tool (wired to `Terminal Orchestrator`, `Data Analyst`, and `Research Engine` + `POST /api/analytics/investigate`) supporting `overnight_to_morning_peak`, `gap_behavior`, `vwap_reversion`, and `regime_forward_returns` locally (`<2s`) or via zero-secret Google Colab offload with Monte Carlo bootstrap CIs, causal zero-lookahead fills, and explicit round-trip friction hurdles.
+- **Proposal Apply Owner Attribution & Real-Time Dynamic Alerts (`python/web_server.py`, `python/tool_registry.py`, `python/alert_sentinel.py`, `python/alert_monitor.py`, `python/fetch_stocks.py`):**
+  - Fixed `POST /api/proposals/{id}/apply` HTTP 500 caused by `PermissionError` mismatch (`Active context 'System' cannot claim 'Owner' attribution`) by binding `execution_role_context("Owner")` around `PROPOSAL_STORE.apply()` and unifying `_ACTIVE_CALLER_ROLE` across `tool_registry` / `python.tool_registry` imports.
+  - Updated deterministic `AlertSentinel` so **watchlist tickers only receive actionable entry-point triggers** (`Entry: VWAP Reclaim`, `Entry: VWAP Pullback`, `Entry: Fib/HOD Breakout`, skipping overbought `RSI >= 75`) while held positions keep exit/risk triggers.
+  - Added real-time tick synchronization (`fetch_stocks.py`), automatic pruning of fired one-shot/out-of-universe auto rules (`prune_stale_auto_rules`), dynamic level re-arming when VWAP/Fib/HOD levels shift, and auto-clearing of resolved non-sticky mandate events.
 - **Local Deterministic AlertSentinel Default (`python/alert_sentinel.py`, `cache/alert_sentinel_config.json`, `static/index.html`, `static/app.js`):**
   - Added `provider="deterministic"` (`local-rules-v1`, zero-LLM `<1 ms` trigger tuning from live VWAP, Fib resistance/HOD, Gamma Flip / Colab Vol Surface, Peak Window front-run targets, and VIX thresholds) as the default AlertSentinel mode for **⚡ Tune Triggers Now**, eliminating Gemini 404/JSON-truncation failures (`app.js?v=18.94`).
   - Updated the optional `gemini_free` fallback chain from retired `2.0` IDs to `["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-2.5-flash"]` with `max_output_tokens=2048`.

@@ -746,3 +746,68 @@ GLOBAL_TOOL_REGISTRY.register(
     parameters={"artifact_type": str, "ticker": str},
     target_resource="cache/colab_*.json",
 )
+
+
+def run_quant_investigation(
+    study_type: str,
+    ticker: str,
+    lookback_days: int = 60,
+    friction_pct: float = 0.85,
+    entry_time_et: str = "15:55",
+    exit_cutoff_et: str = "10:30",
+    stop_loss_pct: Optional[float] = None,
+    compute_target: str = "local",
+    bootstrap_paths: int = 2000,
+) -> str:
+    """
+    Runs a strictly read-only, zero-lookahead historical backtest or statistical study
+    (`overnight_to_morning_peak`, `gap_behavior`, `vwap_reversion`, `regime_forward_returns`)
+    locally (<2s) or on Google Colab (zero-secret offload with fallback to local).
+    """
+    try:
+        try:
+            from quant_investigations import run_investigation
+        except ImportError:
+            from python.quant_investigations import run_investigation
+
+        result = run_investigation(
+            study_type=study_type,
+            ticker=ticker,
+            lookback_days=lookback_days,
+            friction_pct=friction_pct,
+            entry_time_et=entry_time_et,
+            exit_cutoff_et=exit_cutoff_et,
+            stop_loss_pct=stop_loss_pct,
+            compute_target=compute_target,
+            bootstrap_paths=bootstrap_paths,
+        )
+        return json.dumps(result, indent=2, default=str)
+    except Exception as exc:
+        return json.dumps({"status": "error", "error": redact_secrets(str(exc))}, indent=2)
+
+
+GLOBAL_TOOL_REGISTRY.register(
+    name="run_quant_investigation",
+    func=run_quant_investigation,
+    description=(
+        "Runs read-only quantitative backtests/studies (`overnight_to_morning_peak`, `gap_behavior`, "
+        "`vwap_reversion`, `regime_forward_returns`) locally (<2s) or on Google Colab with friction hurdles."
+    ),
+    classification="READ",
+    required_permission="read_market",
+    requires_human_approval=False,
+    allowed_roles=ALL_VALID_ROLES,
+    affects_financial_state=False,
+    parameters={
+        "study_type": str,
+        "ticker": str,
+        "lookback_days": int,
+        "friction_pct": float,
+        "entry_time_et": str,
+        "exit_cutoff_et": str,
+        "stop_loss_pct": float,
+        "compute_target": str,
+        "bootstrap_paths": int,
+    },
+    target_resource="market_history_read_only",
+)

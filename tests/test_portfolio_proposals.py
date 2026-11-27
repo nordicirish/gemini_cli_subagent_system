@@ -244,6 +244,66 @@ class TestProposalEndpoints(unittest.TestCase):
         self.assertEqual(res.status_code, 409)
         self.assertIn("changed since", res.json()["detail"])
 
+    def test_http_apply_proposal_succeeds_with_real_sqlite_adapter(self):
+        import json
+        import tempfile
+        from persistence import PersistenceService, SqlitePersistenceAdapter
+        from python.database.manager import DatabaseManager, PRIMARY_FINANCIAL_PROFILE
+        from python.database.schema import SchemaMigrator
+
+        tmp = tempfile.TemporaryDirectory()
+        adapter = None
+        mgr = None
+        try:
+            ssot_path = os.path.join(tmp.name, "ssot.json")
+            db_path = os.path.join(tmp.name, "gem.db")
+            with open(ssot_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "mutable_state": {
+                            "portfolio_snapshot": [{"ticker": "UMAC", "shares": "1860", "wac": "12.6"}],
+                            "unallocated_cash_eur": "0.00",
+                            "unallocated_cash_usd": "0.00",
+                            "watched_tickers": ["AKAM"],
+                        }
+                    },
+                    f,
+                )
+
+            mgr = DatabaseManager(db_path, profile=PRIMARY_FINANCIAL_PROFILE)
+            with mgr.connection() as conn:
+                SchemaMigrator.initialize_core_schema(conn)
+            adapter = SqlitePersistenceAdapter(mgr, base_ssot_path=ssot_path)
+            real_service = PersistenceService(adapter)
+            with execution_role_context("Owner"):
+                real_service.save_portfolio_basket(
+                    portfolio=[{"ticker": "UMAC", "shares": Decimal("1860"), "wac": Decimal("12.6")}],
+                    unallocated_cash_eur=Decimal("0.00"),
+                    unallocated_cash_usd=Decimal("0.00"),
+                )
+
+            store = ProposalStore(service_factory=lambda: real_service)
+            pid = store.submit(
+                _payload(
+                    [{"ticker": "UMAC", "shares": "1660", "wac": "12.6"}],
+                    unallocated_cash_eur="1756.53",
+                    unallocated_cash_usd="1922.00",
+                )
+            )["proposal"]["proposal_id"]
+
+            with patch.object(self.web_server, "PROPOSAL_STORE", store):
+                res = self.client.post(f"/api/proposals/{pid}/apply")
+            self.assertEqual(res.status_code, 200, res.text)
+            basket = real_service.get_portfolio_basket()
+            self.assertEqual(basket["portfolio"][0]["ticker"], "UMAC")
+            self.assertEqual(Decimal(str(basket["portfolio"][0]["shares"])), Decimal("1660"))
+            self.assertEqual(Decimal(str(basket["unallocated_cash_eur"])), Decimal("1756.53"))
+            self.assertEqual(Decimal(str(basket["unallocated_cash_usd"])), Decimal("1922.00"))
+        finally:
+            if adapter is not None:
+                adapter.close()
+            tmp.cleanup()
+
 
 class TestChatEndpointStagesPayload(unittest.TestCase):
     @patch("web_server.get_chart_parts", return_value=([], []))

@@ -349,6 +349,51 @@ class AlertMonitor:
 
         return {"armed": armed, "removed": removed, "total_rules": total_rules}
 
+    def prune_stale_auto_rules(
+        self,
+        active_tickers: Iterable[str],
+        now_ts: Optional[float] = None,
+    ) -> Dict[str, int]:
+        """Removes fired one-shot auto rules and auto rules/events for tickers removed from active scan.
+
+        Manual rules (source == 'manual') are always preserved.
+        """
+        active_set = {t for t in (_normalize_ticker(x) for x in (active_tickers or [])) if t}
+        if not active_set:
+            return {"removed_rules": 0, "cleared_events": 0}
+
+        removed_rules = 0
+        cleared_events = 0
+        with self._lock:
+            kept: List[Dict[str, Any]] = []
+            for r in self._rules:
+                src = str(r.get("source") or "manual").lower()
+                sym = _normalize_ticker(r.get("ticker"))
+                if src in ("sentinel", "council"):
+                    fired_oneshot = bool(r.get("one_shot", True)) and not bool(r.get("enabled", True)) and int(r.get("trigger_count", 0) or 0) > 0
+                    out_of_universe = bool(sym and sym not in active_set)
+                    if fired_oneshot or out_of_universe:
+                        removed_rules += 1
+                        continue
+                kept.append(r)
+
+            if removed_rules:
+                self._rules = kept
+
+            for ev in self._events:
+                if ev.get("acknowledged"):
+                    continue
+                if ev.get("source") in ("analytics", "sentinel", "council"):
+                    ev_sym = _normalize_ticker(ev.get("ticker"))
+                    if ev_sym and ev_sym not in active_set:
+                        ev["acknowledged"] = True
+                        cleared_events += 1
+
+            if removed_rules or cleared_events:
+                self._persist()
+
+        return {"removed_rules": removed_rules, "cleared_events": cleared_events}
+
     def delete_rule(self, rule_id: str) -> bool:
         with self._lock:
             before = len(self._rules)
@@ -695,7 +740,7 @@ class AlertMonitor:
                     alertable_mandates.append((m, rule_id, severity, trim_pct))
                     active_alertable_ids.add(rule_id)
 
-                # Re-arm non-sticky mandates once their trigger condition clears
+                # Re-arm non-sticky mandates & auto-clear resolved alerts once condition clears
                 prefix = f"{ticker}|"
                 for k in list(self._suppressed_mandates.keys()):
                     if not k.startswith(prefix):
@@ -704,6 +749,19 @@ class AlertMonitor:
                     if mid not in SESSION_STICKY_MANDATES and mid not in active_alertable_ids:
                         del self._suppressed_mandates[k]
                         mutated = True
+
+                for ev in self._events:
+                    if (
+                        not ev.get("acknowledged")
+                        and ev.get("source") == "analytics"
+                        and _normalize_ticker(ev.get("ticker")) == ticker
+                    ):
+                        erule = str(ev.get("rule_id") or "")
+                        if erule.startswith("mandate:"):
+                            emid = erule.split(":", 1)[1].strip()
+                            if emid not in SESSION_STICKY_MANDATES and emid not in active_alertable_ids:
+                                ev["acknowledged"] = True
+                                mutated = True
 
                 for m, rule_id, severity, trim_pct in alertable_mandates:
                     cd_key = f"{ticker}|{rule_id}"

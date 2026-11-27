@@ -543,6 +543,94 @@ class TestAlertSentinelFallbackAndPrivacy(unittest.TestCase):
         self.assertTrue(any("Predicted Daily Peak Sell" in lbl for lbl in labels))
         self.assertIn("VIX 25 Stress Gate", labels)
 
+    def test_watchlist_entry_only_and_dynamic_adjustment_and_pruning(self):
+        # Held UMAC + Watchlist AKAM (entry-worthy) + Watchlist OB (RSI 80 -> skipped)
+        snap1 = {
+            "status": "OPEN",
+            "local_storage_state": {
+                "mutable_state": {
+                    "portfolio_snapshot": [{"ticker": "UMAC", "shares": "1660", "wac": "12.6"}],
+                }
+            },
+            "tickers": [
+                _valid_tick("UMAC", 9.55, vwap=9.33, hod=9.80, fib_next=9.70),
+                {**_valid_tick("AKAM", 88.50, vwap=89.10, hod=91.00, fib_next=90.20, rsi=52.0), "trend": "UP"},
+                {**_valid_tick("DFTX", 33.50, vwap=32.80, hod=34.20, fib_next=34.00, rsi=78.0), "trend": "UP"},
+            ],
+        }
+        sentinel = AlertSentinel(alert_monitor=self.monitor, config_path=self.cfg_path)
+        sentinel.update_config({"enabled": True, "provider": "deterministic", "peak_predictor_enabled": True}, persist=False)
+
+        with patch(
+            "peak_predictor.predict_daily_peak",
+            return_value={"status": "ok", "front_run_sell_limit_usd": 9.85, "exhaustion_score": 55, "profile": {"median_peak_time_et": "10:02"}},
+        ):
+            res1 = sentinel.run_once(snapshot=snap1, force=False, now_ts=8000.0)
+        self.assertEqual(res1["status"], "OK")
+
+        rules1 = [r for r in self.monitor.get_dashboard_payload()["rules"] if r.get("source") == "sentinel"]
+        umac_labels = {r["label"] for r in rules1 if r["ticker"] == "UMAC"}
+        akam_labels = {r["label"] for r in rules1 if r["ticker"] == "AKAM"}
+        dftx_rules = [r for r in rules1 if r["ticker"] == "DFTX"]
+
+        self.assertIn("VWAP Breakdown", umac_labels)
+        self.assertTrue(any("Predicted Daily Peak Sell" in lbl for lbl in umac_labels))
+        # Watchlist AKAM must ONLY get entry triggers, never peak sell or VWAP breakdown
+        self.assertTrue(akam_labels and all(lbl.startswith("Entry:") for lbl in akam_labels), f"Unexpected AKAM labels: {akam_labels}")
+        self.assertIn("Entry: VWAP Reclaim", akam_labels)
+        # Overbought watchlist ticker DFTX (RSI 78 >= 75) gets zero entry triggers
+        self.assertEqual(dftx_rules, [])
+
+        # Dynamic real-time adjustment: UMAC VWAP rises to 9.50 -> old 9.33 trigger replaced by 9.50
+        snap2 = json.loads(json.dumps(snap1))
+        snap2["tickers"][0]["vwap"] = 9.50
+        snap2["tickers"] = [t for t in snap2["tickers"] if t["ticker"] != "DFTX"]
+        with patch(
+            "peak_predictor.predict_daily_peak",
+            return_value={"status": "ok", "front_run_sell_limit_usd": 9.85, "exhaustion_score": 55, "profile": {"median_peak_time_et": "10:02"}},
+        ):
+            res2 = sentinel.run_once(snapshot=snap2, force=False, now_ts=8060.0)
+        self.assertEqual(res2["status"], "OK")
+        umac_vwap_targets = [
+            r["target"] for r in self.monitor.get_dashboard_payload()["rules"]
+            if r["ticker"] == "UMAC" and r["label"] == "VWAP Breakdown"
+        ]
+        self.assertEqual(umac_vwap_targets, [9.5])
+
+        # Manual rule preserved while fired one-shot sentinel rule & out-of-universe council rule are pruned
+        self.monitor.add_rule({"ticker": "UMAC", "metric": "price", "op": ">=", "target": 12.0, "label": "Owner Manual Target"}, source="manual")
+        self.monitor.add_rule({"ticker": "OLDX", "metric": "price", "op": ">=", "target": 5.0, "label": "Removed Symbol"}, source="council")
+        prune_out = self.monitor.prune_stale_auto_rules(["UMAC", "AKAM"])
+        self.assertGreaterEqual(prune_out["removed_rules"], 1)
+        remaining_rules = self.monitor.get_dashboard_payload()["rules"]
+        self.assertTrue(any(r["source"] == "manual" and r["ticker"] == "UMAC" for r in remaining_rules))
+        self.assertFalse(any(r["ticker"] == "OLDX" for r in remaining_rules))
+
+        # Resolved non-sticky mandate event auto-clears
+        ev_m52 = self.monitor.record_mandate_alerts([{
+            "ticker": "UMAC",
+            "valid_telemetry": True,
+            "price": 8.80,
+            "vwap": 9.10,
+            "session_change_pct": -3.0,
+            "dealer_posture": "SHORT_GAMMA",
+            "tranches": {},
+            "triggered_mandates": [{"rule_id": "MANDATE_52", "action": "MANDATORY_25PCT_SWEEP_TRIM", "trim_pct": 25, "severity": "critical", "detail": "Sub-VWAP"}],
+        }], market_status="OPEN", now_ts=8100.0)
+        self.assertEqual(len(ev_m52), 1)
+        self.assertEqual(self.monitor.get_dashboard_payload()["unacknowledged_count"], 1)
+        self.monitor.record_mandate_alerts([{
+            "ticker": "UMAC",
+            "valid_telemetry": True,
+            "price": 9.30,
+            "vwap": 9.10,
+            "session_change_pct": 2.0,
+            "dealer_posture": "SHORT_GAMMA",
+            "tranches": {},
+            "triggered_mandates": [],
+        }], market_status="OPEN", now_ts=8160.0)
+        self.assertEqual(self.monitor.get_dashboard_payload()["unacknowledged_count"], 0)
+
 
 class TestAlertApiRoutes(unittest.TestCase):
     def test_alert_and_sentinel_http_routes(self):

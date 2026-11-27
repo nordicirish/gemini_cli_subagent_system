@@ -148,7 +148,7 @@ def build_agent_runtime(
         name="Research Engine",
         file_path="engine_instructions/research.md",
         mode="THINKING",
-        agent_tools=[tools.perform_web_forensic_search, tools.fetch_sec_filings],
+        agent_tools=[tools.perform_web_forensic_search, tools.fetch_sec_filings, tools.run_quant_investigation],
     )
     macro_narrative_engine = framework.create_agent_tool(
         name="Macro Narrative Engine",
@@ -160,7 +160,7 @@ def build_agent_runtime(
         name="Data Analyst",
         file_path="engine_instructions/data_analyst.md",
         mode="PRO",
-        agent_tools=[tools.perform_web_forensic_search, tools.get_market_data, tools.fetch_sec_filings],
+        agent_tools=[tools.perform_web_forensic_search, tools.get_market_data, tools.fetch_sec_filings, tools.run_quant_investigation],
     )
 
     state_validation_router = framework.create_deterministic_agent_tool(
@@ -301,6 +301,7 @@ def build_agent_runtime(
         tools.run_decision_backtest,
         tools.fetch_sec_filings,
         tools.read_colab_quant_signals,
+        tools.run_quant_investigation,
         refresh_analytics,
         macro_sentinel,
         research_engine,

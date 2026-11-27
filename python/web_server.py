@@ -1371,7 +1371,12 @@ def list_proposals():
 def apply_proposal(proposal_id: str):
     """Owner approval: writes a proposal's position and cash changes after a staleness check."""
     try:
-        applied = PROPOSAL_STORE.apply(proposal_id, approver_role="Owner")
+        from tool_registry import execution_role_context
+    except ImportError:
+        from python.tool_registry import execution_role_context
+    try:
+        with execution_role_context("Owner"):
+            applied = PROPOSAL_STORE.apply(proposal_id, approver_role="Owner")
     except ProposalNotFoundError:
         return JSONResponse({"status": "error", "detail": "Proposal not found (it may have expired after a server restart)."}, status_code=404)
     except (ProposalStateError, ProposalConflictError) as ce:
@@ -1385,6 +1390,10 @@ def apply_proposal(proposal_id: str):
         return JSONResponse({"status": "error", "detail": "Failed to apply portfolio proposal"}, status_code=503)
     framework.log(f"[System] Owner applied portfolio proposal {proposal_id}: {applied['summary']}")
     _refresh_live_portfolio_state()
+    try:
+        ALERT_SENTINEL.sync_if_deterministic()
+    except Exception:
+        pass
     return {"status": "success", "proposal": applied}
 
 
@@ -1658,6 +1667,11 @@ async def save_basket(request: Request):
         except Exception as se:
             framework.log(f"[Warning] Failed to hot-reload TICKERS: {redact_secrets(str(se))}")
 
+        try:
+            ALERT_SENTINEL.sync_if_deterministic()
+        except Exception:
+            pass
+
         return DecimalJSONResponse({
             "status": "success",
             "portfolio": updated_basket.get("portfolio", new_snapshot),
@@ -1738,7 +1752,12 @@ async def save_watch_list(req: Request):
                 fetch_stocks.GLOBAL_STATE["local_storage_state"] = service.get_ssot_data()
         except Exception as se:
             framework.log(f"[Warning] Failed to hot-reload TICKERS: {se}")
-            
+
+        try:
+            ALERT_SENTINEL.sync_if_deterministic()
+        except Exception:
+            pass
+
         return {"status": "success"}
     except PermissionError:
         raise
@@ -2288,6 +2307,45 @@ def get_execution_plan_endpoint():
 def get_macro_calendar_endpoint():
     """Read-only Tier-1 Macro Economic Calendar Shield status (ENH_47 / ENH_259)."""
     return get_macro_calendar_status(now_ny=agent_framework.ny_now())
+
+
+class QuantInvestigationRequest(BaseModel):
+    study_type: str
+    ticker: str
+    lookback_days: int = 60
+    friction_pct: float = 0.85
+    entry_time_et: str = "15:55"
+    exit_cutoff_et: str = "10:30"
+    stop_loss_pct: Optional[float] = None
+    compute_target: str = "local"
+    bootstrap_paths: int = 2000
+
+
+@app.post("/api/analytics/investigate")
+def run_quant_investigation_endpoint(req: QuantInvestigationRequest):
+    """Read-only parameterized quantitative backtest/study (local or Colab offload)."""
+    try:
+        try:
+            from quant_investigations import run_investigation
+        except ImportError:
+            from python.quant_investigations import run_investigation
+
+        return run_investigation(
+            study_type=req.study_type,
+            ticker=req.ticker,
+            lookback_days=req.lookback_days,
+            friction_pct=req.friction_pct,
+            entry_time_et=req.entry_time_et,
+            exit_cutoff_et=req.exit_cutoff_et,
+            stop_loss_pct=req.stop_loss_pct,
+            compute_target=req.compute_target,
+            bootstrap_paths=req.bootstrap_paths,
+        )
+    except ValueError as ve:
+        return JSONResponse({"status": "error", "detail": redact_secrets(str(ve))}, status_code=422)
+    except Exception as exc:
+        framework.log(f"[Error] Quantitative investigation failed: {redact_secrets(str(exc))}")
+        return JSONResponse({"status": "error", "detail": "Failed to run quantitative investigation"}, status_code=500)
 
 
 @app.get("/api/analytics/peak/{ticker}")

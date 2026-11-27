@@ -65,11 +65,14 @@ from audit_logger import redact_secrets
 from tool_registry import authorize_financial_mutation
 try:
     from alert_monitor import ALERT_MONITOR
+    from alert_sentinel import ALERT_SENTINEL
 except ImportError:
     try:
         from python.alert_monitor import ALERT_MONITOR
+        from python.alert_sentinel import ALERT_SENTINEL
     except ImportError:
         ALERT_MONITOR = None
+        ALERT_SENTINEL = None
 
 try:
     from analytics_engine import ANALYTICS_ENGINE
@@ -7711,6 +7714,12 @@ def run_daemon():
             try:
                 if ALERT_MONITOR is not None:
                     ALERT_MONITOR.evaluate_snapshot(data, market_status=status)
+                    active_syms = [
+                        r.get("ticker") for r in (data or []) if isinstance(r, dict) and r.get("ticker")
+                    ]
+                    ALERT_MONITOR.prune_stale_auto_rules(active_syms)
+                    if ALERT_SENTINEL is not None and ALERT_SENTINEL.is_deterministic_live_sync_enabled():
+                        ALERT_SENTINEL.run_once(snapshot=final_output, force=False)
                     final_output["alerts"] = ALERT_MONITOR.get_dashboard_payload()
             except Exception as alert_err:
                 logger.warning(f"[AlertMonitor] Tick evaluation skipped: {alert_err}")

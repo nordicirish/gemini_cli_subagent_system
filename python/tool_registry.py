@@ -144,10 +144,19 @@ FINANCIAL_MUTATION_ALLOWED_ROLES: Dict[str, Set[str]] = {
     "update_rules": {"Context Engine"} | TRUSTED_SYSTEM_ROLES,
 }
 
-# Context variable tracking the currently executing caller role across call stacks
-_ACTIVE_CALLER_ROLE: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "_ACTIVE_CALLER_ROLE", default="System"
-)
+# Context variable tracking the currently executing caller role across call stacks.
+# Share a single ContextVar/module reference across bare `tool_registry` and `python.tool_registry`
+# imports so execution_role_context() and _resolve_effective_actor() never see split state.
+_PEER_TOOL_REGISTRY_NAME = "python.tool_registry" if __name__ == "tool_registry" else "tool_registry"
+_PEER_TOOL_REGISTRY_MOD = sys.modules.get(_PEER_TOOL_REGISTRY_NAME)
+if _PEER_TOOL_REGISTRY_MOD is not None and hasattr(_PEER_TOOL_REGISTRY_MOD, "_ACTIVE_CALLER_ROLE"):
+    _ACTIVE_CALLER_ROLE = _PEER_TOOL_REGISTRY_MOD._ACTIVE_CALLER_ROLE
+else:
+    _ACTIVE_CALLER_ROLE: contextvars.ContextVar[str] = contextvars.ContextVar(
+        "_ACTIVE_CALLER_ROLE", default="System"
+    )
+if __name__ in ("tool_registry", "python.tool_registry") and _PEER_TOOL_REGISTRY_NAME not in sys.modules:
+    sys.modules[_PEER_TOOL_REGISTRY_NAME] = sys.modules[__name__]
 
 
 def get_active_caller_role() -> str:

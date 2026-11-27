@@ -15,7 +15,7 @@ import json
 import os
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 try:
     from alert_monitor import ALERT_MONITOR, AlertMonitor, _safe_float
@@ -181,13 +181,52 @@ def _extract_sentinel_rules_from_response(raw_text: str) -> List[Dict[str, Any]]
     raise ValueError("Sentinel JSON missing 'triggers' list")
 
 
+def _extract_held_tickers(snapshot: Dict[str, Any]) -> Set[str]:
+    """Returns uppercase symbols with positive shares in authoritative portfolio_snapshot."""
+    snap = _thaw_snapshot(snapshot) if isinstance(snapshot, (dict, Mapping)) else {}
+    ssot = snap.get("local_storage_state") if ("local_storage_state" in snap and snap.get("local_storage_state") is not None) else None
+    if ssot is None:
+        try:
+            try:
+                from persistence import get_persistence_service
+            except ImportError:
+                from python.persistence import get_persistence_service
+            ssot = _thaw_snapshot(get_persistence_service().get_ssot_data())
+        except Exception:
+            ssot = {}
+    ms = ssot.get("mutable_state", ssot) if isinstance(ssot, dict) and isinstance(ssot.get("mutable_state"), dict) else (ssot if isinstance(ssot, dict) else {})
+    rows = ms.get("portfolio_snapshot") if isinstance(ms, dict) else None
+    held: Set[str] = set()
+    if isinstance(rows, list):
+        for pos in rows:
+            if not isinstance(pos, dict):
+                continue
+            sym = str(pos.get("ticker") or "").strip().upper()
+            sh = _safe_float(pos.get("shares"))
+            if sym and sh is not None and sh > 0:
+                held.add(sym)
+    return held
+
+
 def build_deterministic_triggers(
     public_payload: Dict[str, Any],
     peak_predictor_enabled: bool = True,
+    held_tickers: Optional[Iterable[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """Builds zero-LLM deterministic key-level triggers from live technicals & cached priors."""
+    """Builds zero-LLM deterministic key-level triggers.
+
+    Held positions receive exit/risk levels (Peak Sell, VWAP Breakdown/Reclaim, Fib/HOD break,
+    Gamma Flip boundary). Unheld watchlist symbols receive strictly ENTRY-POINT triggers only
+    (VWAP Reclaim, VWAP Pullback in UP trend, or Fib/HOD breakout) when non-overbought.
+    """
     if not isinstance(public_payload, dict):
         return []
+
+    held_set: Optional[Set[str]] = (
+        {str(s).strip().upper() for s in held_tickers if str(s).strip()}
+        if held_tickers is not None
+        else None
+    )
 
     vs_tickers: Dict[str, Any] = {}
     try:
@@ -206,21 +245,22 @@ def build_deterministic_triggers(
     per_ticker_counts: Dict[str, int] = {}
     total_cap = 16
 
-    def _add_rule(rule: Dict[str, Any]) -> None:
+    def _add_rule(rule: Dict[str, Any], per_cap: int = 4) -> bool:
         if len(triggers) >= total_cap:
-            return
+            return False
         sym = str(rule.get("ticker") or "").strip().upper()
         target = _safe_float(rule.get("target"))
         if not sym or target is None:
-            return
-        if per_ticker_counts.get(sym, 0) >= 4:
-            return
+            return False
+        if per_ticker_counts.get(sym, 0) >= per_cap:
+            return False
         key = (sym, rule.get("metric"), rule.get("op"), round(target, 2))
         if key in seen:
-            return
+            return False
         seen.add(key)
         per_ticker_counts[sym] = per_ticker_counts.get(sym, 0) + 1
         triggers.append(rule)
+        return True
 
     for item in public_payload.get("tickers") or []:
         if not isinstance(item, dict):
@@ -228,6 +268,65 @@ def build_deterministic_triggers(
         sym = str(item.get("ticker") or "").strip().upper()
         price = _safe_float(item.get("price"))
         if not sym or price is None or price <= 0:
+            continue
+
+        is_held = True if held_set is None else (sym in held_set)
+        vwap = _safe_float(item.get("vwap"))
+        fib = item.get("fib") if isinstance(item.get("fib"), dict) else {}
+        fib_next = _safe_float(fib.get("next_res"))
+        hod = _safe_float(fib.get("hod"))
+        rsi = _safe_float(item.get("rsi"))
+        trend = str(item.get("trend") or "FLAT").strip().upper()
+
+        if not is_held:
+            # Watchlist: ENTRY-POINT triggers only (never exit/peak-sell/breakdown triggers).
+            if rsi is not None and rsi >= 75.0:
+                continue
+            if vwap is not None and vwap > 0:
+                if price < vwap and (vwap - price) / price <= 0.05:
+                    _add_rule({
+                        "ticker": sym,
+                        "metric": "price",
+                        "op": "crosses_above",
+                        "target": round(vwap, 2),
+                        "confirm": {"rvol_gte": 1.2},
+                        "severity": "info",
+                        "label": "Entry: VWAP Reclaim",
+                        "one_shot": True,
+                    }, per_cap=2)
+                elif trend == "UP" and vwap * 1.003 <= price <= vwap * 1.04:
+                    _add_rule({
+                        "ticker": sym,
+                        "metric": "price",
+                        "op": "<=",
+                        "target": round(vwap * 1.002, 2),
+                        "severity": "info",
+                        "label": "Entry: VWAP Pullback",
+                        "one_shot": True,
+                    }, per_cap=2)
+
+            if fib_next is not None and price * 1.003 <= fib_next <= price * 1.06:
+                _add_rule({
+                    "ticker": sym,
+                    "metric": "price",
+                    "op": "crosses_above",
+                    "target": round(fib_next, 2),
+                    "confirm": {"rvol_gte": 1.5, "above_vwap": True},
+                    "severity": "info",
+                    "label": "Entry: Fib Breakout",
+                    "one_shot": True,
+                }, per_cap=2)
+            elif hod is not None and price * 1.003 <= hod <= price * 1.06:
+                _add_rule({
+                    "ticker": sym,
+                    "metric": "price",
+                    "op": "crosses_above",
+                    "target": round(hod, 2),
+                    "confirm": {"rvol_gte": 1.5, "above_vwap": True},
+                    "severity": "info",
+                    "label": "Entry: HOD Breakout",
+                    "one_shot": True,
+                }, per_cap=2)
             continue
 
         if peak_predictor_enabled and isinstance(item.get("peak_zone"), dict):
@@ -245,7 +344,6 @@ def build_deterministic_triggers(
                     "one_shot": True,
                 })
 
-        vwap = _safe_float(item.get("vwap"))
         if vwap is not None and vwap > 0:
             if price >= vwap:
                 _add_rule({
@@ -269,9 +367,6 @@ def build_deterministic_triggers(
                     "one_shot": True,
                 })
 
-        fib = item.get("fib") if isinstance(item.get("fib"), dict) else {}
-        fib_next = _safe_float(fib.get("next_res"))
-        hod = _safe_float(fib.get("hod"))
         if fib_next is not None and fib_next >= price * 1.002:
             _add_rule({
                 "ticker": sym,
@@ -466,14 +561,19 @@ class AlertSentinel:
                 self._persist_config()
             return dict(self._config)
 
-    def _has_structural_change(self, public_payload: Dict[str, Any], has_sentinel_rules: bool) -> bool:
-        if not has_sentinel_rules:
-            return True
+    def _has_structural_change(
+        self,
+        public_payload: Dict[str, Any],
+        has_sentinel_rules: bool,
+        deterministic_mode: bool = False,
+        held_tickers: Optional[Set[str]] = None,
+    ) -> bool:
         tickers = public_payload.get("tickers", [])
         if not tickers:
             return False
 
-        changed = False
+        move_thresh = 0.25 if deterministic_mode else DEFAULT_MOVE_PCT_THRESHOLD
+        changed = not has_sentinel_rules
         new_fps: Dict[str, Tuple[Any, ...]] = {}
         for item in tickers:
             sym = item["ticker"]
@@ -481,13 +581,32 @@ class AlertSentinel:
             vwap = item.get("vwap") or 0.0
             above_vwap = bool(vwap > 0 and price >= vwap)
             fib = item.get("fib") or {}
-            fp = (
-                price,
-                above_vwap,
-                item.get("trend"),
-                fib.get("mode"),
-                fib.get("status"),
-            )
+            if deterministic_mode:
+                peak_lim = round(_safe_float((item.get("peak_zone") or {}).get("front_run_sell_limit_usd")) or 0.0, 2)
+                is_held = bool(sym in held_tickers) if held_tickers is not None else True
+                rsi_overbought = (_safe_float(item.get("rsi")) or 50.0) >= 75.0
+                fp: Tuple[Any, ...] = (
+                    price,
+                    above_vwap,
+                    item.get("trend"),
+                    fib.get("mode"),
+                    fib.get("status"),
+                    round(_safe_float(vwap) or 0.0, 2),
+                    round(_safe_float(fib.get("next_res")) or 0.0, 2),
+                    round(_safe_float(fib.get("hod")) or 0.0, 2),
+                    round(_safe_float(item.get("gamma_flip")) or 0.0, 2),
+                    peak_lim,
+                    is_held,
+                    rsi_overbought,
+                )
+            else:
+                fp = (
+                    price,
+                    above_vwap,
+                    item.get("trend"),
+                    fib.get("mode"),
+                    fib.get("status"),
+                )
             new_fps[sym] = fp
             old_fp = self._last_fingerprints.get(sym)
             if old_fp is None:
@@ -495,12 +614,36 @@ class AlertSentinel:
                 continue
             old_price = float(old_fp[0] or 0.0)
             pct_move = abs(price - old_price) / old_price * 100.0 if old_price > 0 else 0.0
-            if pct_move >= DEFAULT_MOVE_PCT_THRESHOLD or fp[1:] != old_fp[1:]:
+            if pct_move >= move_thresh or fp[1:] != old_fp[1:]:
                 changed = True
+
+        if set(new_fps.keys()) != set(self._last_fingerprints.keys()):
+            changed = True
 
         if changed:
             self._last_fingerprints = new_fps
         return changed
+
+    def is_deterministic_live_sync_enabled(self) -> bool:
+        with self._lock:
+            return bool(self._config.get("enabled") and self._config.get("provider") == "deterministic")
+
+    def sync_if_deterministic(self, snapshot: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """Immediately prunes stale auto rules and re-syncs deterministic Sentinel on portfolio/watchlist edits."""
+        with self._lock:
+            prov = self._config.get("provider")
+            enabled = bool(self._config.get("enabled"))
+        if prov != "deterministic":
+            return None
+        raw_snap = snapshot if snapshot is not None else (self._snapshot_provider() if self._snapshot_provider else {})
+        snap = _thaw_snapshot(raw_snap) if isinstance(raw_snap, (dict, Mapping)) else {}
+        if isinstance(snap, dict) and snap.get("tickers"):
+            active_syms = [t.get("ticker") for t in (snap.get("tickers") or []) if isinstance(t, dict) and t.get("ticker")]
+            if active_syms:
+                self.alert_monitor.prune_stale_auto_rules(active_syms)
+        if not enabled or not isinstance(snap, dict) or not snap.get("tickers"):
+            return None
+        return self.run_once(snapshot=snap, force=True)
 
     @staticmethod
     def _build_prompt(public_payload: Dict[str, Any], peak_predictor_enabled: bool = False) -> str:
@@ -513,7 +656,10 @@ class AlertSentinel:
         )
         return (
             "You are a concise intraday technical trigger tuner. "
-            "Given ONLY public market technicals below, return JSON with key 'triggers' containing 1 to 6 "
+            "Given ONLY public market technicals below (note held=true vs held=false watchlist), "
+            "for watchlist tickers (held=false) emit ONLY entry-point triggers (VWAP reclaim/pullback or Fib/HOD breakout); "
+            "never emit peak-sell or stop-loss breakdown triggers for watchlist tickers. "
+            "Return JSON with key 'triggers' containing 1 to 6 "
             "actionable key-level alerts. Allowed metrics: price, rsi, rvol, macd_hist, session_change_pct. "
             "Allowed ops: >=, <=, crosses_above, crosses_below. Allowed target_ref: vwap, hod, fib_next, fib_cap, gamma_flip. "
             "Each item: {\"ticker\": str, \"metric\": \"price\", \"op\": \">=\"|\"<=\"|\"crosses_above\"|\"crosses_below\", "
@@ -581,9 +727,13 @@ class AlertSentinel:
 
         dash_alerts = self.alert_monitor.get_dashboard_payload()
         sentinel_rules = [r for r in dash_alerts.get("rules", []) if r.get("source") == "sentinel"]
+        held_tickers = _extract_held_tickers(snap)
         public_payload = build_public_technicals_payload(snap, sentinel_rules)
         if not public_payload["tickers"]:
             return self._finish_status("SKIPPED", skipped_reason="no_valid_tickers", now_ts=ts)
+
+        for pub in public_payload["tickers"]:
+            pub["held"] = pub["ticker"] in held_tickers
 
         if cfg.get("peak_predictor_enabled"):
             try:
@@ -596,8 +746,10 @@ class AlertSentinel:
                     for item in (snap.get("tickers") or [])
                     if isinstance(item, dict) and item.get("ticker")
                 }
-                for pub in public_payload["tickers"][:5]:
+                for pub in public_payload["tickers"][:8]:
                     sym = pub["ticker"]
+                    if held_tickers and sym not in held_tickers:
+                        continue
                     pk = predict_daily_peak(sym, live_row=raw_by_sym.get(sym, {}))
                     if pk.get("status") == "ok":
                         pub["peak_zone"] = {
@@ -609,16 +761,26 @@ class AlertSentinel:
             except Exception:
                 pass
 
-        if not force and not self._has_structural_change(public_payload, bool(sentinel_rules)):
+        provider_pref = cfg["provider"]
+        is_det = provider_pref == "deterministic"
+        has_effective_sentinel_rules = bool(sentinel_rules) and (
+            not is_det or all(bool(r.get("enabled", True)) for r in sentinel_rules)
+        )
+        if not force and not self._has_structural_change(
+            public_payload,
+            has_effective_sentinel_rules,
+            deterministic_mode=is_det,
+            held_tickers=held_tickers,
+        ):
             return self._finish_status("SKIPPED", skipped_reason="no_structural_change", now_ts=ts)
 
-        provider_pref = cfg["provider"]
         valid_symbols = {t["ticker"] for t in public_payload["tickers"]} | {t["ticker"] for t in public_payload["macro"]}
 
-        if provider_pref == "deterministic":
+        if is_det:
             parsed_triggers = build_deterministic_triggers(
                 public_payload,
                 peak_predictor_enabled=bool(cfg.get("peak_predictor_enabled")),
+                held_tickers=held_tickers,
             )
             scoped_triggers = [
                 t for t in parsed_triggers if str(t.get("ticker") or "").strip().upper() in valid_symbols
