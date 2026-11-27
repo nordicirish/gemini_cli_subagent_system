@@ -9,6 +9,7 @@ with per-model cooldown/exponential backoff and optional Antigravity fallback.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 import json
 import os
@@ -21,16 +22,31 @@ try:
 except ImportError:
     from python.alert_monitor import ALERT_MONITOR, AlertMonitor, _safe_float
 
+try:
+    from analytics_engine import _thaw as _thaw_snapshot
+except ImportError:
+    try:
+        from python.analytics_engine import _thaw as _thaw_snapshot
+    except ImportError:
+        def _thaw_snapshot(obj: Any) -> Any:
+            if isinstance(obj, dict):
+                return {k: _thaw_snapshot(v) for k, v in obj.items()}
+            if isinstance(obj, Mapping):
+                return {k: _thaw_snapshot(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)) or (isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray))):
+                return [_thaw_snapshot(v) for v in obj]
+            return obj
+
 DEFAULT_GEMINI_FREE_MODEL_CHAIN: List[str] = [
-    "gemini-2.5-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
     "gemini-2.5-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-2.0-flash",
 ]
 DEFAULT_ANTIGRAVITY_FALLBACK_MODEL = "gemini-3.8-flash-low"
 DEFAULT_SENTINEL_CONFIG_PATH = os.path.join("cache", "alert_sentinel_config.json")
 
-VALID_PROVIDERS = {"gemini_free", "auto", "antigravity"}
+VALID_PROVIDERS = {"deterministic", "gemini_free", "auto", "antigravity"}
 DEFAULT_MOVE_PCT_THRESHOLD = 0.5
 
 
@@ -84,6 +100,7 @@ def build_public_technicals_payload(
     Excludes portfolio_snapshot, shares, wac, cash balances, local_storage_state,
     and trade_lessons to uphold confidentiality on Free Tier endpoints.
     """
+    snapshot = _thaw_snapshot(snapshot)
     raw_tickers = snapshot.get("tickers", []) if isinstance(snapshot, dict) else []
     public_tickers: List[Dict[str, Any]] = []
     macro_tickers: List[Dict[str, Any]] = []
@@ -164,6 +181,151 @@ def _extract_sentinel_rules_from_response(raw_text: str) -> List[Dict[str, Any]]
     raise ValueError("Sentinel JSON missing 'triggers' list")
 
 
+def build_deterministic_triggers(
+    public_payload: Dict[str, Any],
+    peak_predictor_enabled: bool = True,
+) -> List[Dict[str, Any]]:
+    """Builds zero-LLM deterministic key-level triggers from live technicals & cached priors."""
+    if not isinstance(public_payload, dict):
+        return []
+
+    vs_tickers: Dict[str, Any] = {}
+    try:
+        try:
+            from colab_calibration import load_colab_artifact
+        except ImportError:
+            from python.colab_calibration import load_colab_artifact
+        vs_data = load_colab_artifact("vol_surface")
+        if isinstance(vs_data, dict) and isinstance(vs_data.get("tickers"), dict):
+            vs_tickers = vs_data["tickers"]
+    except Exception:
+        vs_tickers = {}
+
+    triggers: List[Dict[str, Any]] = []
+    seen: set = set()
+    per_ticker_counts: Dict[str, int] = {}
+    total_cap = 16
+
+    def _add_rule(rule: Dict[str, Any]) -> None:
+        if len(triggers) >= total_cap:
+            return
+        sym = str(rule.get("ticker") or "").strip().upper()
+        target = _safe_float(rule.get("target"))
+        if not sym or target is None:
+            return
+        if per_ticker_counts.get(sym, 0) >= 4:
+            return
+        key = (sym, rule.get("metric"), rule.get("op"), round(target, 2))
+        if key in seen:
+            return
+        seen.add(key)
+        per_ticker_counts[sym] = per_ticker_counts.get(sym, 0) + 1
+        triggers.append(rule)
+
+    for item in public_payload.get("tickers") or []:
+        if not isinstance(item, dict):
+            continue
+        sym = str(item.get("ticker") or "").strip().upper()
+        price = _safe_float(item.get("price"))
+        if not sym or price is None or price <= 0:
+            continue
+
+        if peak_predictor_enabled and isinstance(item.get("peak_zone"), dict):
+            pz = item["peak_zone"]
+            peak_lim = _safe_float(pz.get("front_run_sell_limit_usd"))
+            ex_score = _safe_float(pz.get("exhaustion_score")) or 0.0
+            if peak_lim is not None and peak_lim >= price * 0.995:
+                _add_rule({
+                    "ticker": sym,
+                    "metric": "price",
+                    "op": ">=",
+                    "target": round(peak_lim, 2),
+                    "severity": "warning" if ex_score >= 45.0 else "info",
+                    "label": f"Predicted Daily Peak Sell (${peak_lim:.2f})",
+                    "one_shot": True,
+                })
+
+        vwap = _safe_float(item.get("vwap"))
+        if vwap is not None and vwap > 0:
+            if price >= vwap:
+                _add_rule({
+                    "ticker": sym,
+                    "metric": "price",
+                    "op": "crosses_below",
+                    "target": round(vwap, 2),
+                    "severity": "warning",
+                    "label": "VWAP Breakdown",
+                    "one_shot": True,
+                })
+            else:
+                _add_rule({
+                    "ticker": sym,
+                    "metric": "price",
+                    "op": "crosses_above",
+                    "target": round(vwap, 2),
+                    "confirm": {"rvol_gte": 1.2},
+                    "severity": "info",
+                    "label": "VWAP Reclaim",
+                    "one_shot": True,
+                })
+
+        fib = item.get("fib") if isinstance(item.get("fib"), dict) else {}
+        fib_next = _safe_float(fib.get("next_res"))
+        hod = _safe_float(fib.get("hod"))
+        if fib_next is not None and fib_next >= price * 1.002:
+            _add_rule({
+                "ticker": sym,
+                "metric": "price",
+                "op": "crosses_above",
+                "target": round(fib_next, 2),
+                "confirm": {"rvol_gte": 1.2},
+                "severity": "info",
+                "label": "Fib Resistance Break",
+                "one_shot": True,
+            })
+        elif hod is not None and hod >= price * 1.002:
+            _add_rule({
+                "ticker": sym,
+                "metric": "price",
+                "op": "crosses_above",
+                "target": round(hod, 2),
+                "confirm": {"rvol_gte": 1.2},
+                "severity": "warning",
+                "label": "HOD Breakout",
+                "one_shot": True,
+            })
+
+        gflip = _safe_float(item.get("gamma_flip"))
+        if gflip is None and isinstance(vs_tickers.get(sym), dict):
+            gflip = _safe_float(vs_tickers[sym].get("gamma_flip_multi_expiry"))
+        if gflip is not None and gflip > 0 and abs(gflip - price) / price <= 0.12:
+            _add_rule({
+                "ticker": sym,
+                "metric": "price",
+                "op": "crosses_below" if price >= gflip else "crosses_above",
+                "target": round(gflip, 2),
+                "severity": "warning",
+                "label": "Gamma Flip Boundary",
+                "one_shot": True,
+            })
+
+    for macro in public_payload.get("macro") or []:
+        if not isinstance(macro, dict):
+            continue
+        msym = str(macro.get("ticker") or "").strip().upper()
+        mprice = _safe_float(macro.get("price"))
+        if msym == "^VIX" and mprice is not None and mprice > 0:
+            if mprice < 20.0:
+                _add_rule({"ticker": "^VIX", "metric": "price", "op": ">=", "target": 20.0, "severity": "critical", "label": "VIX 20 Risk Gate", "one_shot": True})
+            elif mprice < 25.0:
+                _add_rule({"ticker": "^VIX", "metric": "price", "op": ">=", "target": 25.0, "severity": "warning", "label": "VIX 25 Stress Gate", "one_shot": True})
+            else:
+                _add_rule({"ticker": "^VIX", "metric": "price", "op": ">=", "target": round(mprice * 1.08, 2), "severity": "critical", "label": "VIX +8% Spike Alert", "one_shot": True})
+            break
+
+    return triggers
+
+
 def _default_invoke_gemini(model_name: str, prompt: str, api_key: str) -> str:
     from google import genai
     from google.genai import types
@@ -175,7 +337,7 @@ def _default_invoke_gemini(model_name: str, prompt: str, api_key: str) -> str:
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             temperature=0.1,
-            max_output_tokens=1024,
+            max_output_tokens=2048,
         ),
     )
     return getattr(resp, "text", "") or ""
@@ -219,7 +381,7 @@ class AlertSentinel:
         ]
         self._config: Dict[str, Any] = {
             "enabled": False,
-            "provider": "gemini_free",
+            "provider": "deterministic",
             "interval_sec": 600,
             "market_hours_only": True,
             "peak_predictor_enabled": False,
@@ -405,7 +567,8 @@ class AlertSentinel:
         now_ts: Optional[float] = None,
     ) -> Dict[str, Any]:
         ts = time.time() if now_ts is None else float(now_ts)
-        snap = snapshot if snapshot is not None else (self._snapshot_provider() if self._snapshot_provider else {})
+        raw_snap = snapshot if snapshot is not None else (self._snapshot_provider() if self._snapshot_provider else {})
+        snap = _thaw_snapshot(raw_snap)
         if not isinstance(snap, dict) or not snap.get("tickers"):
             return self._finish_status("SKIPPED", skipped_reason="no_market_data", now_ts=ts)
 
@@ -449,8 +612,30 @@ class AlertSentinel:
         if not force and not self._has_structural_change(public_payload, bool(sentinel_rules)):
             return self._finish_status("SKIPPED", skipped_reason="no_structural_change", now_ts=ts)
 
-        prompt = self._build_prompt(public_payload, peak_predictor_enabled=bool(cfg.get("peak_predictor_enabled")))
         provider_pref = cfg["provider"]
+        valid_symbols = {t["ticker"] for t in public_payload["tickers"]} | {t["ticker"] for t in public_payload["macro"]}
+
+        if provider_pref == "deterministic":
+            parsed_triggers = build_deterministic_triggers(
+                public_payload,
+                peak_predictor_enabled=bool(cfg.get("peak_predictor_enabled")),
+            )
+            scoped_triggers = [
+                t for t in parsed_triggers if str(t.get("ticker") or "").strip().upper() in valid_symbols
+            ]
+            arm_outcome = self.alert_monitor.upsert_rules(scoped_triggers, source="sentinel", replace_source=True)
+            self._last_run_ts = ts
+            self._log(f"[AlertSentinel] deterministic/local-rules-v1 armed {len(arm_outcome['armed'])} trigger(s)")
+            return self._finish_status(
+                "OK",
+                model_used="local-rules-v1",
+                provider_used="deterministic",
+                fallback_count=0,
+                armed_count=len(arm_outcome["armed"]),
+                now_ts=ts,
+            )
+
+        prompt = self._build_prompt(public_payload, peak_predictor_enabled=bool(cfg.get("peak_predictor_enabled")))
         api_key = _load_gemini_api_key(self.env_path)
 
         raw_response: Optional[str] = None

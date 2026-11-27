@@ -14,7 +14,7 @@ try:
     from agent_framework import AgentFramework
     import tools
     import fx_rates
-    from analytics_engine import ANALYTICS_ENGINE
+    from analytics_engine import ANALYTICS_ENGINE, _thaw
     from persistence import get_persistence_service, strip_ssot_history
     from sec_edgar import fetch_recent_sec_filings
     from tool_registry import ALL_VALID_ROLES, GLOBAL_TOOL_REGISTRY
@@ -23,7 +23,7 @@ except ImportError:
     from python.agent_framework import AgentFramework
     from python import tools
     from python import fx_rates
-    from python.analytics_engine import ANALYTICS_ENGINE
+    from python.analytics_engine import ANALYTICS_ENGINE, _thaw
     from python.persistence import get_persistence_service, strip_ssot_history
     from python.sec_edgar import fetch_recent_sec_filings
     from python.tool_registry import ALL_VALID_ROLES, GLOBAL_TOOL_REGISTRY
@@ -36,7 +36,7 @@ def load_live_analytics_context() -> tuple:
             from fetch_stocks import get_global_state_snapshot
         except ImportError:
             from python.fetch_stocks import get_global_state_snapshot
-        live_state = get_global_state_snapshot()
+        live_state = _thaw(get_global_state_snapshot())
     except Exception:
         live_state = {}
 

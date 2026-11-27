@@ -104,6 +104,79 @@ class TestWalkForwardWorkerAndTool(unittest.TestCase):
             self.assertTrue(parsed["artifacts"]["vol_surface"]["loaded"])
             self.assertEqual(list(parsed["artifacts"]["vol_surface"]["data"]["tickers"].keys()), ["NVDA"])
 
+    def test_non_improving_candidates_suppress_proposed_rule_deltas(self):
+        base_metrics = {
+            "sharpe_ratio": 0.8144,
+            "sortino_ratio": 1.15,
+            "max_drawdown_pct": -4.5759,
+            "hit_rate_pct": 48.8189,
+            "profit_factor": 1.25,
+        }
+        sample_delta = {
+            "rule_id": "ENH_104",
+            "parameter": "trailing_stop_vwap_ext_pct",
+            "current_value": 2.0,
+            "proposed_value": 1.5,
+            "rationale": "Test delta.",
+        }
+        base_pack = {
+            "schema_version": "2.0",
+            "generated_at_utc": "2026-11-27T14:51:04Z",
+            "source": "google_colab_mcp",
+            "protocol_06_read_only": True,
+            "folds": 6,
+            "universe_count": 9,
+            "friction_hurdle_pct": 0.85,
+            "stability_score": 0.5,
+            "baseline_metrics": base_metrics,
+            "proposed_rule_deltas": [sample_delta],
+        }
+
+        # 1. Worsening candidate OOS Sharpe (0.81 -> 0.69) suppresses deltas on validation and disk load
+        worse_pack = {
+            **base_pack,
+            "candidate_metrics": {
+                "sharpe_ratio": 0.686,
+                "sortino_ratio": 0.92,
+                "max_drawdown_pct": -4.9273,
+                "hit_rate_pct": 47.0284,
+                "profit_factor": 1.10,
+            },
+        }
+        self.assertEqual(colab_calibration.validate_backtest_evidence_artifact(worse_pack)["proposed_rule_deltas"], [])
+        with tempfile.TemporaryDirectory() as td:
+            p = colab_calibration.get_artifact_cache_path("backtest_evidence", cache_dir=td)
+            with open(p, "w", encoding="utf-8") as fh:
+                json.dump(worse_pack, fh)
+            loaded = colab_calibration.load_colab_artifact("backtest_evidence", cache_dir=td)
+            self.assertEqual(loaded["proposed_rule_deltas"], [])
+
+        # 2. Better Sharpe but >1.0% worse MaxDD also suppresses deltas
+        bad_dd_pack = {
+            **base_pack,
+            "candidate_metrics": {
+                "sharpe_ratio": 1.15,
+                "sortino_ratio": 1.60,
+                "max_drawdown_pct": -7.50,
+                "hit_rate_pct": 54.0,
+                "profit_factor": 1.55,
+            },
+        }
+        self.assertEqual(colab_calibration.validate_backtest_evidence_artifact(bad_dd_pack)["proposed_rule_deltas"], [])
+
+        # 3. Better Sharpe + acceptable MaxDD + stability >= 0.5 preserves deltas
+        good_pack = {
+            **base_pack,
+            "candidate_metrics": {
+                "sharpe_ratio": 1.25,
+                "sortino_ratio": 1.75,
+                "max_drawdown_pct": -4.20,
+                "hit_rate_pct": 56.0,
+                "profit_factor": 1.65,
+            },
+        }
+        self.assertEqual(len(colab_calibration.validate_backtest_evidence_artifact(good_pack)["proposed_rule_deltas"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

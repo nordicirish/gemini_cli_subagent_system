@@ -427,6 +427,13 @@ class TestAlertSentinelFallbackAndPrivacy(unittest.TestCase):
             config_path=self.cfg_path,
             gemini_invoker=fake_gemini,
         )
+        sentinel.update_config(
+            {
+                "provider": "gemini_free",
+                "model_chain": ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-2.0-flash"],
+            },
+            persist=False,
+        )
         with patch.dict(os.environ, {"GEMINI_API_KEY": "test-dummy-key"}):
             res = sentinel.run_once(snapshot=self.sample_snapshot, force=True, now_ts=5000.0)
 
@@ -491,6 +498,50 @@ class TestAlertSentinelFallbackAndPrivacy(unittest.TestCase):
             out = alert_sentinel._default_invoke_antigravity("gemini-3.8-flash-low", "Check NVDA")
         self.assertEqual(out, '{"triggers": []}')
         mock_runner.run_prompt.assert_called_once_with("Check NVDA", mode="FAST", model_name="gemini-3.8-flash-low")
+
+    def test_deterministic_provider_arms_key_level_and_peak_triggers_without_llm(self):
+        llm_calls = []
+
+        def fail_if_called(*_args, **_kwargs):
+            llm_calls.append(True)
+            raise AssertionError("LLM invoker must not be called in deterministic mode")
+
+        sentinel = AlertSentinel(
+            alert_monitor=self.monitor,
+            config_path=self.cfg_path,
+            gemini_invoker=fail_if_called,
+            antigravity_invoker=fail_if_called,
+        )
+        sentinel.update_config({"provider": "deterministic", "peak_predictor_enabled": True}, persist=False)
+        snap = json.loads(json.dumps(self.sample_snapshot))
+        snap["tickers"][0]["gamma_flip_price"] = 9.10
+        snap["tickers"].append(_valid_tick("^VIX", 21.5))
+
+        with patch(
+            "peak_predictor.predict_daily_peak",
+            return_value={
+                "status": "ok",
+                "front_run_sell_limit_usd": 9.55,
+                "exhaustion_score": 60,
+                "exhaustion_state": "APPROACHING_PEAK",
+                "profile": {"median_peak_time_et": "10:02"},
+            },
+        ):
+            res = sentinel.run_once(snapshot=snap, force=True, now_ts=7000.0)
+
+        self.assertEqual(llm_calls, [])
+        self.assertEqual(res["status"], "OK")
+        self.assertEqual(res["provider_used"], "deterministic")
+        self.assertEqual(res["model_used"], "local-rules-v1")
+        self.assertGreaterEqual(res["armed_count"], 4)
+
+        armed_rules = [r for r in self.monitor.get_dashboard_payload()["rules"] if r.get("source") == "sentinel"]
+        labels = {r["label"] for r in armed_rules}
+        self.assertIn("VWAP Breakdown", labels)
+        self.assertIn("Fib Resistance Break", labels)
+        self.assertIn("Gamma Flip Boundary", labels)
+        self.assertTrue(any("Predicted Daily Peak Sell" in lbl for lbl in labels))
+        self.assertIn("VIX 25 Stress Gate", labels)
 
 
 class TestAlertApiRoutes(unittest.TestCase):

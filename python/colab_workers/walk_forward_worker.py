@@ -47,6 +47,26 @@ _PARAM_RULE_MAP: Dict[str, str] = {
 }
 
 
+def rule_deltas_improve_baseline(
+    baseline_metrics: Dict[str, Any],
+    candidate_metrics: Dict[str, Any],
+    stability_score: float,
+    *,
+    max_dd_worsening_pct: float = 1.0,
+    min_stability: float = 0.5,
+) -> bool:
+    """Only propose rule tweaks when OOS Sharpe improves, drawdown doesn't worsen materially, and stability >= 0.5."""
+    b_sharpe = float((baseline_metrics or {}).get("sharpe_ratio") or 0.0)
+    c_sharpe = float((candidate_metrics or {}).get("sharpe_ratio") or 0.0)
+    b_dd = float((baseline_metrics or {}).get("max_drawdown_pct") or 0.0)
+    c_dd = float((candidate_metrics or {}).get("max_drawdown_pct") or 0.0)
+    return (
+        c_sharpe > b_sharpe
+        and c_dd >= (b_dd - max_dd_worsening_pct)
+        and float(stability_score or 0.0) >= min_stability
+    )
+
+
 def _compute_rsi(close: pd.Series, window: int = 14) -> pd.Series:
     delta = close.diff()
     gain = delta.clip(lower=0.0).rolling(window, min_periods=window).mean()
@@ -336,8 +356,7 @@ def run_walk_forward_sweep(
         modal_params = dict(BASELINE_RULE_PARAMS)
 
     proposed_deltas: List[Dict[str, Any]] = []
-    improved = candidate_metrics["sharpe_ratio"] > baseline_metrics["sharpe_ratio"]
-    if improved or stability_score >= 0.5:
+    if rule_deltas_improve_baseline(baseline_metrics, candidate_metrics, stability_score):
         for param_name, rule_id in _PARAM_RULE_MAP.items():
             cur_v = BASELINE_RULE_PARAMS[param_name]
             prop_v = modal_params[param_name]

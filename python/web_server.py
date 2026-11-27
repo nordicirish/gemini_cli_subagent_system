@@ -2295,9 +2295,12 @@ def get_daily_peak_prediction(ticker: str):
     """Read-only 60d empirical RTH peak timing & intraday exhaustion predictor."""
     sym = str(ticker or "").strip().upper()
     live_state, _ssot, _fx, ny_dt = _load_live_analytics_context()
-    tickers = live_state.get("tickers", []) if isinstance(live_state, dict) else []
+    tickers = live_state.get("tickers", []) if isinstance(live_state, collections.abc.Mapping) else []
     live_row = next(
-        (t for t in tickers if isinstance(t, dict) and str(t.get("ticker") or "").strip().upper() == sym),
+        (
+            t for t in tickers
+            if isinstance(t, collections.abc.Mapping) and str(t.get("ticker") or "").strip().upper() == sym
+        ),
         None,
     )
     tracker = ANALYTICS_ENGINE._get_tracker_snapshot(sym)

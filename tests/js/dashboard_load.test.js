@@ -1179,6 +1179,72 @@ async function main() {
         assert.strictEqual(modalClosedOk, true, 'Close button should dismiss #scout-rankings-modal-overlay');
     });
 
+    const origQuantFetch = window.fetch;
+    let analyticsPhase = 0;
+    window.fetch = async (url, opts = {}) => {
+        const pathOnly = String(url).split('?')[0];
+        if (pathOnly === '/api/analytics') {
+            analyticsPhase += 1;
+            const body = analyticsPhase === 1
+                ? {
+                    regime: { volatility_state: 'BEAR_VOLATILE', strategy_permissibility: {} },
+                    global_vetoes: [],
+                    positions: [{ ticker: 'UMAC', price: null, tranches: {}, triggered_mandates: [] }],
+                    watchlist_signals: [],
+                }
+                : {
+                    regime: { volatility_state: 'BEAR_VOLATILE', strategy_permissibility: {} },
+                    global_vetoes: [],
+                    positions: [{ ticker: 'UMAC', price: 9.52, sweep_limit_usd: 9.47, tranches: { '25pct': { sell_shares: 465 }, '50pct': { sell_shares: 930 } }, triggered_mandates: [] }],
+                    watchlist_signals: [],
+                };
+            return { ok: true, status: 200, json: async () => body };
+        }
+        if (pathOnly === '/api/data') {
+            const baseData = JSON.parse(JSON.stringify(API['/api/data']));
+            baseData.timestamp = '2026-11-27T10:35:00-05:00';
+            baseData.tickers = [
+                { ticker: 'UMAC', price: 9.52, price_validity: 'VALID', freshness: 'CURRENT', regular_close: 9.07, fib_forecast: {} },
+                ...(baseData.tickers || []),
+            ];
+            return { ok: true, status: 200, json: async () => baseData };
+        }
+        return origQuantFetch(url, opts);
+    };
+    await window.eval('fetchAnalyticsAndBacktest()');
+    const quantPanelEl = window.document.getElementById('analytics-quant-panel');
+    const showedAwaitingInitially = Boolean(quantPanelEl && quantPanelEl.textContent.includes('awaiting live price'));
+    await window.eval('pollData()');
+    await new Promise((r) => setTimeout(r, 80));
+    const clearedAwaitingAfterPoll = Boolean(
+        quantPanelEl
+        && !quantPanelEl.textContent.includes('awaiting live price')
+        && quantPanelEl.textContent.includes('465sh')
+        && quantPanelEl.textContent.includes('$9.47')
+    );
+    window.fetch = origQuantFetch;
+    check('Quant Analytics auto-resync: pollData updates UMAC awaiting live price once /api/data receives VALID quote', () => {
+        assert.strictEqual(showedAwaitingInitially, true, 'Expected initial unpriced /api/analytics to show awaiting live price');
+        assert.strictEqual(clearedAwaitingAfterPoll, true, 'Expected pollData() with live UMAC quote to re-fetch /api/analytics and render 465sh / $9.47');
+    });
+
+    const sentProvSel = window.document.getElementById('sentinel-provider-select');
+    const hasDeterministicOpt = Boolean(sentProvSel && [...sentProvSel.options].some((o) => o.value === 'deterministic'));
+    window.renderSentinelStatus({
+        enabled: true,
+        provider: 'deterministic',
+        interval_sec: 60,
+        peak_predictor_enabled: true,
+        api_key_configured: false,
+        last_run: { status: 'OK', provider_used: 'deterministic', model_used: 'local-rules-v1', armed_count: 5 },
+    });
+    const sentMetaTxt = (window.document.getElementById('sentinel-status-text') || {}).textContent || '';
+    check('Sentinel Deterministic mode: exposes deterministic option and renders 0-LLM status without key warning', () => {
+        assert.strictEqual(hasDeterministicOpt, true, 'Expected #sentinel-provider-select to include deterministic option');
+        assert.strictEqual(sentMetaTxt.includes('Local Deterministic') && sentMetaTxt.includes('5 armed'), true, `Unexpected status text: ${sentMetaTxt}`);
+        assert.strictEqual(sentMetaTxt.includes('GEMINI_API_KEY'), false, 'Deterministic mode must never show missing API key error');
+    });
+
     window.close();
     console.log(results.join('\n'));
     const failed = results.filter((r) => r.startsWith('FAIL')).length;

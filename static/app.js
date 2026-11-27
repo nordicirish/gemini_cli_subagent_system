@@ -1357,7 +1357,19 @@ async function pollData() {
 
             if (state.precomputed_analytics && typeof state.precomputed_analytics === 'object') {
                 _lastQuantAnalytics = state.precomputed_analytics;
+                _lastAnalyticsLiveFetchMs = Date.now();
                 renderQuantAnalyticsPanel(_lastQuantAnalytics, _lastBacktestSummary);
+            } else {
+                const stateStamp = String(state.timestamp || '');
+                const hasLiveQuotes = Array.isArray(state.tickers)
+                    && state.tickers.some((t) => t && t.price_validity === 'VALID' && Number(t.price) > 0);
+                const missingTranchesNow = _analyticsHasUnpricedPositions(_lastQuantAnalytics, state);
+                const cycleAdvanced = Boolean(stateStamp && stateStamp !== _lastAnalyticsStateStamp);
+                const staleInterval = (Date.now() - _lastAnalyticsLiveFetchMs) >= 15000;
+                if (hasLiveQuotes && (missingTranchesNow || cycleAdvanced || staleInterval)) {
+                    if (stateStamp) _lastAnalyticsStateStamp = stateStamp;
+                    refreshQuantAnalyticsLive();
+                }
             }
 
             // Heavy Refresh indicator
@@ -1913,13 +1925,26 @@ function renderSentinelStatus(sentinel) {
     if (peakToggle) peakToggle.checked = Boolean(sentinel.peak_predictor_enabled);
     if (statusText) {
         const last = sentinel.last_run || {};
-        const chainTop = Array.isArray(sentinel.model_chain) && sentinel.model_chain.length ? sentinel.model_chain[0] : 'gemini-2.5-flash-lite';
-        const activeModel = last.model_used || chainTop;
-        const keyNote = (sentinel.provider === 'gemini_free' && !sentinel.api_key_configured)
-            ? 'GEMINI_API_KEY not set'
-            : (last.error ? `Degraded: ${last.error}` : (last.skipped_reason ? `Idle (${last.skipped_reason})` : `Model: ${activeModel}`));
-        const fbSuffix = last.fallback_count ? ` · ${last.fallback_count} fallback(s)` : '';
-        statusText.textContent = `${keyNote}${fbSuffix}`;
+        if (sentinel.provider === 'deterministic') {
+            if (last.error) {
+                statusText.textContent = `Degraded: ${last.error}`;
+            } else if (last.skipped_reason) {
+                statusText.textContent = `Local Deterministic · Idle (${last.skipped_reason})`;
+            } else if (last.status === 'OK') {
+                const armedN = Number(last.armed_count || 0);
+                statusText.textContent = `Local Deterministic · ${armedN} armed (0 LLM)`;
+            } else {
+                statusText.textContent = 'Engine: local-rules-v1 (0 LLM)';
+            }
+        } else {
+            const chainTop = Array.isArray(sentinel.model_chain) && sentinel.model_chain.length ? sentinel.model_chain[0] : 'gemini-3.5-flash-lite';
+            const activeModel = last.model_used || chainTop;
+            const keyNote = (sentinel.provider === 'gemini_free' && !sentinel.api_key_configured)
+                ? 'GEMINI_API_KEY not set'
+                : (last.error ? `Degraded: ${last.error}` : (last.skipped_reason ? `Idle (${last.skipped_reason})` : `Model: ${activeModel}`));
+            const fbSuffix = last.fallback_count ? ` · ${last.fallback_count} fallback(s)` : '';
+            statusText.textContent = `${keyNote}${fbSuffix}`;
+        }
     }
 }
 
@@ -2089,7 +2114,7 @@ async function saveSentinelConfig(overrides = {}) {
     const peakToggle = document.getElementById('sentinel-peak-toggle');
     const statusEl = document.getElementById('alerts-panel-status');
     const payload = {
-        provider: providerSel ? providerSel.value : 'gemini_free',
+        provider: providerSel ? providerSel.value : 'deterministic',
         interval_sec: intervalSel ? Number(intervalSel.value) : 600,
         peak_predictor_enabled: peakToggle ? Boolean(peakToggle.checked) : false,
         ...overrides,
@@ -2522,12 +2547,24 @@ async function armQuickTriggerFromPlan(ticker, op, target, label) {
     }
 }
 
+let _execModalRetryTimer = null;
+let _execModalActiveSym = '';
+
+function _clearExecModalRetry() {
+    if (_execModalRetryTimer) {
+        clearTimeout(_execModalRetryTimer);
+        _execModalRetryTimer = null;
+    }
+}
+
 function closeExecutionPlanModal() {
+    _clearExecModalRetry();
+    _execModalActiveSym = '';
     const overlay = document.getElementById('execution-plan-modal-overlay');
     if (overlay) closeModal(overlay);
 }
 
-async function openExecutionPlanModal(ticker) {
+async function openExecutionPlanModal(ticker, _retryAttempt = 0) {
     const overlay = document.getElementById('execution-plan-modal-overlay');
     const titleSym = document.getElementById('exec-modal-ticker');
     const bodyEl = document.getElementById('exec-modal-body');
@@ -2535,10 +2572,14 @@ async function openExecutionPlanModal(ticker) {
     if (!overlay || !bodyEl) return;
 
     const sym = String(ticker || '').trim().toUpperCase();
+    _clearExecModalRetry();
+    _execModalActiveSym = sym;
     if (titleSym) titleSym.textContent = sym || 'PORTFOLIO';
-    if (fbEl) { fbEl.textContent = ''; fbEl.className = 'status-message inline-feedback'; }
-    bodyEl.innerHTML = '<div class="empty-msg">Computing deterministic execution plan...</div>';
-    openModal(overlay);
+    if (_retryAttempt === 0) {
+        if (fbEl) { fbEl.textContent = ''; fbEl.className = 'status-message inline-feedback'; }
+        bodyEl.innerHTML = '<div class="empty-msg">Computing deterministic execution plan...</div>';
+        openModal(overlay);
+    }
 
     try {
         const [execRes, peakRes] = await Promise.allSettled([
@@ -2614,6 +2655,12 @@ async function openExecutionPlanModal(ticker) {
                 </div>`;
         }
 
+        const needsLivePrice = pos.price == null
+            || (peakData && peakData.status === 'ok' && peakData.front_run_sell_limit_usd == null);
+        const awaitingLabel = (needsLivePrice && _retryAttempt < 8)
+            ? 'Awaiting live price — auto-refreshing...'
+            : null;
+
         const ladderRows = ladder.length
             ? ladder.map((lvl) => {
                 const ordTxt = _escAlertHtml(lvl.order_text || '');
@@ -2633,7 +2680,7 @@ async function openExecutionPlanModal(ticker) {
                         </td>
                     </tr>`;
             }).join('')
-            : '<tr><td colspan="5" class="empty-msg">Awaiting live price for Fib ladder</td></tr>';
+            : `<tr><td colspan="5" class="empty-msg">${awaitingLabel || 'Awaiting live price for Fib ladder'}</td></tr>`;
 
         const t25 = (pos.tranches || {})['25pct'];
         const t50 = (pos.tranches || {})['50pct'];
@@ -2649,7 +2696,7 @@ async function openExecutionPlanModal(ticker) {
                             <button type="button" class="exec-mini-btn" onclick="copyExecutionOrderText('${_escAlertHtml(ordTxt)}', this)">📋 Copy Order</button>
                         </div>`;
                 }).join('')
-            : '<div class="empty-msg">Awaiting live price for sweep trims</div>';
+            : `<div class="empty-msg">${awaitingLabel || 'Awaiting live price for sweep trims'}</div>`;
 
         const directivesBanner = directives.length
             ? `<div class="exec-ticket-section alert">
@@ -2686,6 +2733,13 @@ async function openExecutionPlanModal(ticker) {
                 <div class="quant-tranche-row">${_escAlertHtml(cash.proof || 'Cash proof unavailable')}</div>
             </div>
         `;
+        if (needsLivePrice && _retryAttempt < 8 && overlay.classList.contains('active') && _execModalActiveSym === sym) {
+            _execModalRetryTimer = setTimeout(() => {
+                if (overlay.classList.contains('active') && _execModalActiveSym === sym) {
+                    openExecutionPlanModal(sym, _retryAttempt + 1);
+                }
+            }, 4000);
+        }
     } catch (e) {
         bodyEl.innerHTML = `<div class="quant-veto-item">Failed to load execution ticket: ${_escAlertHtml(e.message || 'error')}</div>`;
     }
@@ -2703,6 +2757,45 @@ window.openExecutionPlanModal = openExecutionPlanModal;
 window.armQuickTriggerFromPlan = armQuickTriggerFromPlan;
 window.copyExecutionOrderText = copyExecutionOrderText;
 
+let _analyticsLiveInFlight = false;
+let _lastAnalyticsLiveFetchMs = 0;
+let _lastAnalyticsStateStamp = '';
+
+function _analyticsHasUnpricedPositions(analytics, liveState) {
+    const positions = analytics && Array.isArray(analytics.positions) ? analytics.positions : [];
+    if (!positions.length) return !analytics;
+    const tickers = liveState && Array.isArray(liveState.tickers) ? liveState.tickers : [];
+    const pricedSet = new Set();
+    tickers.forEach((t) => {
+        if (t && t.ticker && t.price_validity === 'VALID' && Number(t.price) > 0) {
+            pricedSet.add(String(t.ticker).trim().toUpperCase());
+        }
+    });
+    return positions.some((p) => {
+        if (!p || !p.ticker) return false;
+        const tr = p.tranches || {};
+        const hasTranches = Boolean(tr['25pct'] || tr['50pct']);
+        return !hasTranches && pricedSet.has(String(p.ticker).trim().toUpperCase());
+    });
+}
+
+async function refreshQuantAnalyticsLive() {
+    if (_analyticsLiveInFlight) return;
+    _analyticsLiveInFlight = true;
+    try {
+        const res = await fetch(`${API_BASE}/analytics`);
+        _lastAnalyticsLiveFetchMs = Date.now();
+        if (res && res.ok) {
+            _lastQuantAnalytics = await res.json();
+            renderQuantAnalyticsPanel(_lastQuantAnalytics, _lastBacktestSummary);
+        }
+    } catch (_) {
+        /* ignore transient analytics poll errors */
+    } finally {
+        _analyticsLiveInFlight = false;
+    }
+}
+
 async function fetchAnalyticsAndBacktest() {
     const btn = document.getElementById('refresh-analytics-btn');
     if (btn) btn.disabled = true;
@@ -2713,6 +2806,7 @@ async function fetchAnalyticsAndBacktest() {
         ]);
         if (aRes.status === 'fulfilled' && aRes.value && aRes.value.ok) {
             _lastQuantAnalytics = await aRes.value.json();
+            _lastAnalyticsLiveFetchMs = Date.now();
         }
         if (bRes.status === 'fulfilled' && bRes.value && bRes.value.ok) {
             _lastBacktestSummary = await bRes.value.json();

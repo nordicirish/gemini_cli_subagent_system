@@ -9,6 +9,7 @@ into a deterministic 0-100 Exhaustion Score and front-run sell limit zone.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 import json
 import math
@@ -217,6 +218,17 @@ def compute_historical_peak_profile(
     return profile
 
 
+def _thaw_value(obj: Any) -> Any:
+    """Recursively converts read-only Mapping/Sequence snapshots to plain dict/list."""
+    if isinstance(obj, dict):
+        return {k: _thaw_value(v) for k, v in obj.items()}
+    if isinstance(obj, Mapping):
+        return {k: _thaw_value(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)) or (isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray))):
+        return [_thaw_value(v) for v in obj]
+    return obj
+
+
 def predict_daily_peak(
     ticker: str,
     live_row: Optional[Dict[str, Any]] = None,
@@ -234,8 +246,10 @@ def predict_daily_peak(
     else:
         now_ny = now_ny.astimezone(NY_TZ)
 
-    row = live_row if isinstance(live_row, dict) else {}
-    trk = tracker if isinstance(tracker, dict) else {}
+    thawed_row = _thaw_value(live_row)
+    thawed_trk = _thaw_value(tracker)
+    row = thawed_row if isinstance(thawed_row, dict) else {}
+    trk = thawed_trk if isinstance(thawed_trk, dict) else {}
     profile = compute_historical_peak_profile(sym, bars_df=bars_df, cache_path=cache_path, now_ts=now_ny.timestamp())
 
     colab_prior = None

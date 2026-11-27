@@ -165,6 +165,11 @@ class TestRegimeAndSizing(unittest.TestCase):
             classify_regime(frozen["tickers"], market_status="OPEN"),
             classify_regime(plain["tickers"], market_status="OPEN"),
         )
+        import json as _json
+        gex_out = _json.loads(engine.format_gex_engine_response(frozen, ssot=frozen["local_storage_state"]))
+        strat_out = _json.loads(engine.format_strategy_engine_response(frozen, ssot=frozen["local_storage_state"]))
+        self.assertGreaterEqual(len(gex_out["tickers"]), 3)
+        self.assertEqual(strat_out["setups"][0]["Ticker"], "UMAC")
 
     def test_engine_reads_rate_from_real_fx_public_snapshot(self):
         # Production passes fx_rates.fx_public(...), which carries the rate under "rate" (a string).

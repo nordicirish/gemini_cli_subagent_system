@@ -935,6 +935,7 @@ class AnalyticsEngine:
         ny_dt: Optional[datetime] = None,
     ) -> str:
         """Zero-LLM deterministic response matching engine_instructions/gex_engine.md."""
+        live_state, ssot = _thaw(live_state), _thaw(ssot)
         bundle = self.evaluate(live_state, ssot=ssot, ny_dt=ny_dt)
         tickers = live_state.get("tickers", []) if isinstance(live_state, dict) else []
         gex_rows: List[Dict[str, Any]] = []
@@ -1065,6 +1066,7 @@ class AnalyticsEngine:
         ny_dt: Optional[datetime] = None,
     ) -> str:
         """Zero-LLM deterministic response matching engine_instructions/strategy_engine.md."""
+        live_state, ssot, fx_info = _thaw(live_state), _thaw(ssot), _thaw(fx_info)
         bundle = self.evaluate(live_state, ssot=ssot, fx_info=fx_info, ny_dt=ny_dt)
         reg = bundle["regime"]
         permissibility = reg["strategy_permissibility"]

@@ -31,8 +31,10 @@ except ImportError:
 
 try:
     from colab_workers.quant_scout_worker import infer_sector_for_ticker, is_excluded_non_stock_ticker
+    from colab_workers.walk_forward_worker import rule_deltas_improve_baseline
 except ImportError:
     from python.colab_workers.quant_scout_worker import infer_sector_for_ticker, is_excluded_non_stock_ticker
+    from python.colab_workers.walk_forward_worker import rule_deltas_improve_baseline
 
 
 CALIBRATION_SCHEMA_VERSION = "1.0"
@@ -773,7 +775,11 @@ def validate_backtest_evidence_artifact(payload: Any) -> Dict[str, Any]:
             "proposed_value": d["proposed_value"] if not isinstance(d["proposed_value"], str) else d["proposed_value"].strip()[:64],
             "rationale": rationale[:300],
         })
-    out["proposed_rule_deltas"] = cleaned_deltas
+    out["proposed_rule_deltas"] = (
+        cleaned_deltas
+        if rule_deltas_improve_baseline(out["baseline_metrics"], out["candidate_metrics"], out["stability_score"])
+        else []
+    )
     return out
 
 

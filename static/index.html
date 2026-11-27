@@ -409,6 +409,7 @@
                             <div class="sentinel-config-row">
                                 <select id="sentinel-provider-select" title="Model Provider"
                                     style="flex: 1; min-width: 0;">
+                                    <option value="deterministic" selected>Deterministic (Local · 0 LLM)</option>
                                     <option value="gemini_free">Gemini Free Tier</option>
                                     <option value="auto">Auto (Free → Local)</option>
                                     <option value="antigravity">Local Antigravity</option>
@@ -430,8 +431,7 @@
                             </div>
                             <button id="sentinel-run-now-btn" type="button" class="alert-action-btn full"
                                 title="Run Sentinel Trigger Tune Now">⚡ Tune Triggers Now</button>
-                            <div id="sentinel-status-text" class="sentinel-status-meta">Sentinel idle (Free Tier
-                                fallback ready)</div>
+                            <div id="sentinel-status-text" class="sentinel-status-meta">Sentinel idle (Local deterministic ready)</div>
                         </div>
                         <div id="alerts-panel-status" class="status-message inline-feedback" style="margin-top: 6px;">
                         </div>
@@ -834,7 +834,7 @@
     </div>
 
     <script src="portfolio.js?v=18.63"></script>
-    <script src="app.js?v=18.91"></script>
+    <script src="app.js?v=18.94"></script>
     <script src="modern_ui.js?v=18.66"></script>
 </body>
 
