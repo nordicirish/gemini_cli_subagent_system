@@ -114,6 +114,86 @@ function _friendlyRegimeLabel(upper) {
     return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+// In-page, accessible replacement for the browser's native confirm / alert popups (UX Stage 4): focus moves into
+// the dialog, Tab stays inside it, Esc cancels, and focus returns to where it was.
+function _gemDialog({ message, confirmLabel = 'OK', cancelLabel = null, danger = false }) {
+    return new Promise((resolve) => {
+        const uid = `gem-dialog-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay active gem-dialog-overlay';
+        overlay.setAttribute('role', 'alertdialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-describedby', `${uid}-msg`);
+        const box = document.createElement('div');
+        box.className = 'modal gem-dialog';
+        const msg = document.createElement('p');
+        msg.id = `${uid}-msg`;
+        msg.className = 'gem-dialog-msg';
+        msg.textContent = String(message || '');
+        const actions = document.createElement('div');
+        actions.className = 'gem-dialog-actions';
+        const buttons = [];
+        if (cancelLabel) {
+            const cancel = document.createElement('button');
+            cancel.type = 'button';
+            cancel.className = 'glow-btn outline mini gem-dialog-cancel';
+            cancel.textContent = cancelLabel;
+            cancel.addEventListener('click', () => close(false));
+            actions.appendChild(cancel);
+            buttons.push(cancel);
+        }
+        const ok = document.createElement('button');
+        ok.type = 'button';
+        ok.className = `glow-btn mini gem-dialog-confirm${danger ? ' danger' : ''}`;
+        ok.textContent = confirmLabel;
+        ok.addEventListener('click', () => close(true));
+        actions.appendChild(ok);
+        buttons.push(ok);
+        box.append(msg, actions);
+        overlay.appendChild(box);
+
+        const prevFocus = document.activeElement;
+        const onKey = (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                close(false);
+            } else if (e.key === 'Tab' && buttons.length) {
+                const idx = buttons.indexOf(document.activeElement);
+                const next = e.shiftKey ? (idx <= 0 ? buttons.length - 1 : idx - 1) : (idx + 1) % buttons.length;
+                e.preventDefault();
+                buttons[next].focus();
+            }
+        };
+        function close(result) {
+            document.removeEventListener('keydown', onKey, true);
+            overlay.remove();
+            if (prevFocus && typeof prevFocus.focus === 'function') {
+                try { prevFocus.focus(); } catch (_) {}
+            }
+            resolve(result);
+        }
+        document.addEventListener('keydown', onKey, true);
+        document.body.appendChild(overlay);
+        (cancelLabel && danger ? buttons[0] : ok).focus();
+    });
+}
+
+function gemConfirm(message, opts = {}) {
+    return _gemDialog({
+        message,
+        confirmLabel: opts.confirmLabel || 'Confirm',
+        cancelLabel: opts.cancelLabel || 'Cancel',
+        danger: Boolean(opts.danger),
+    });
+}
+
+function gemNotice(message) {
+    return _gemDialog({ message, confirmLabel: 'OK' });
+}
+window.gemConfirm = gemConfirm;
+window.gemNotice = gemNotice;
+
 // Rule IDs (ENH_72, MANDATE_36, ENH_16_E …) are for the LLM/rule engine, never the trader UI.
 // Strips them from backend-supplied prose, e.g. "(ENH_57 exempts biotechs)" -> "(exempts biotechs)".
 function _stripRuleIds(text) {
@@ -608,6 +688,14 @@ function _initTableToolbarAndShortcuts() {
             _syncSortHeadersUi();
             _rerenderCurrentTable();
         });
+        // Keyboard: sortable headers are focusable and sort on Enter / Space.
+        th.tabIndex = 0;
+        th.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                th.click();
+            }
+        });
         th._gemSortBound = true;
     });
 
@@ -627,7 +715,8 @@ function _initTableToolbarAndShortcuts() {
                 }
             } else if (/^[1-5]$/.test(e.key)) {
                 // 1–5 switch workspace views (Today, Portfolio, Opportunities, Alerts, Research)
-                if (document.querySelector('.modal-overlay.active, .chart-modal-overlay.active, #chat-window.active')) return;
+                // Allowed while the AI Council is docked beside the dashboard; not behind modals.
+                if (document.querySelector('.modal-overlay.active, .chart-modal-overlay.active, #chat-window.active.is-expanded')) return;
                 e.preventDefault();
                 setWorkspaceView(WORKSPACE_VIEWS[Number(e.key) - 1]);
             } else if (e.key === 'c' || e.key === 'C') {
@@ -1666,8 +1755,8 @@ async function pollData() {
                         hudHtml += `
                             <div class="macro-card glass-panel empty-card" id="macro-card-${tickerStr.replace(/[^a-zA-Z0-9]/g, '')}">
                                 ${headerHtml}
-                                <div class="macro-val text-muted" style="font-size: 1.2rem; color: #666; margin: 4px 0;">—</div>
-                                <div class="macro-gap text-muted" style="color: #666; font-size: 0.9rem;">Awaiting data...</div>
+                                <div class="macro-val text-muted" style="font-size: 1.2rem; color: var(--text-muted); margin: 4px 0;">—</div>
+                                <div class="macro-gap text-muted" style="color: var(--text-muted); font-size: 0.9rem;">Awaiting data...</div>
                             </div>
                         `;
                     }
@@ -1912,7 +2001,7 @@ function renderScoutCategories(activeList) {
                     aria-pressed="${isActive ? 'true' : 'false'}"
                     data-sector="${safeSector}"
                     onclick="toggleScoutCategory('${safeSector}')" 
-                    style="padding: 4px 8px; border-radius: 4px; border: 1px solid; font-size: 0.65rem; font-weight: 600; cursor: pointer; transition: all 0.2s; ${style}">
+                    style="padding: 4px 8px; border-radius: 4px; border: 1px solid; font-size: var(--text-xs); font-weight: 600; cursor: pointer; transition: all 0.2s; ${style}">
                 ${safeSector}
             </button>
         `;
@@ -3186,7 +3275,8 @@ async function copySessionReviewPayload(triggerBtn, statusEl) {
 const dClearLogBtn = document.getElementById('clear-log-btn');
 if (dClearLogBtn) {
     dClearLogBtn.addEventListener('click', async () => {
-        if (!confirm("Are you sure you want to clear the entire Decision Log? This cannot be undone.")) return;
+        const ok = await gemConfirm('Clear the entire decision log? This cannot be undone.', { confirmLabel: 'Clear log', danger: true });
+        if (!ok) return;
         
         const statusEl = document.getElementById('clear-log-status');
         dClearLogBtn.disabled = true;
@@ -4504,7 +4594,7 @@ async function openChartModal(symbol) {
             width:  dChartContainer.clientWidth  || 920,
             height: dChartContainer.clientHeight || 500,
             layout: {
-                background: { color: '#131722' },
+                background: { color: '#111520' },
                 textColor:  '#9598a1',
                 fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
                 fontSize: 11
@@ -4594,12 +4684,12 @@ async function openChartModal(symbol) {
 
         // ─── Candlestick series ───
         const candleSeries = chart.addCandlestickSeries({
-            upColor:          '#089981',
-            downColor:        '#f23645',
-            borderUpColor:    '#089981',
-            borderDownColor:  '#f23645',
-            wickUpColor:      '#089981',
-            wickDownColor:    '#f23645',
+            upColor:          '#3fb950',
+            downColor:        '#f85149',
+            borderUpColor:    '#3fb950',
+            borderDownColor:  '#f85149',
+            wickUpColor:      '#3fb950',
+            wickDownColor:    '#f85149',
             priceLineVisible: false
         });
         candleSeries.setData(bars);
@@ -4639,7 +4729,7 @@ async function openChartModal(symbol) {
 
         // EMA 9 — Red
         const ema9Series = chart.addLineSeries({
-            color: '#f23645',
+            color: '#f85149',
             lineWidth: 1.5,
             priceLineVisible: false,
             lastValueVisible: true,
@@ -4713,9 +4803,9 @@ async function openChartModal(symbol) {
         });
         vwapCenterSeries.setData(centerList);
 
-        // Upper VWAP Band (Green #089981 dashed)
+        // Upper VWAP Band (green, dashed)
         const vwapUpperSeries = chart.addLineSeries({
-            color: '#089981',
+            color: '#3fb950',
             lineWidth: 1,
             lineStyle: LightweightCharts.LineStyle.Dashed,
             priceLineVisible: false,
@@ -4724,9 +4814,9 @@ async function openChartModal(symbol) {
         });
         vwapUpperSeries.setData(upperList);
 
-        // Lower VWAP Band (Green #089981 dashed)
+        // Lower VWAP Band (green, dashed)
         const vwapLowerSeries = chart.addLineSeries({
-            color: '#089981',
+            color: '#3fb950',
             lineWidth: 1,
             lineStyle: LightweightCharts.LineStyle.Dashed,
             priceLineVisible: false,

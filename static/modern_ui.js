@@ -180,6 +180,30 @@ const ModernChat = {
             window._gemChatEscapeBound = true;
         }
 
+        // Docked co-pilot panel by default; "Expand" switches to the full-screen reading view.
+        const expandBtn = document.getElementById('chat-expand-btn');
+        if (expandBtn && !expandBtn._gemExpandBound) {
+            expandBtn._gemExpandBound = true;
+            let savedExpanded = false;
+            try { savedExpanded = localStorage.getItem('gem_chat_expanded') === 'true'; } catch (_) {}
+            this.setExpanded(savedExpanded);
+            expandBtn.addEventListener('click', () => {
+                this.setExpanded(!this.overlay.classList.contains('is-expanded'));
+            });
+        }
+
+        // Settings switches are role="switch" divs: make them keyboard operable.
+        document.querySelectorAll('#settings-popover .settings-switch[role="switch"]').forEach((sw) => {
+            if (sw._gemSwitchKeys) return;
+            sw._gemSwitchKeys = true;
+            sw.addEventListener('keydown', (e) => {
+                if (e.key === ' ' || e.key === 'Enter') {
+                    e.preventDefault();
+                    sw.click();
+                }
+            });
+        });
+
         // --- Settings gear popover ---
         const gearBtn = document.getElementById('settings-gear-btn');
         const popover = document.getElementById('settings-popover');
@@ -356,7 +380,7 @@ const ModernChat = {
                 border: 1px solid rgba(255,255,255,0.18);
                 background: rgba(255,255,255,0.07);
                 color: rgba(255,255,255,0.85);
-                font-size: 0.72rem;
+                font-size: var(--text-xs);
                 font-weight: 500;
                 letter-spacing: 0.4px;
                 cursor: pointer;
@@ -424,7 +448,7 @@ const ModernChat = {
                 }
 
                 if (combined.length === 0) {
-                    alert('Validation Error: Please add tickers to your Watchlist or run a sector scout before using Deep Dive Watchlist.');
+                    window.gemNotice('Add tickers to your Watchlist (or run a sector scout) before using Deep Dive Watchlist.');
                     return;
                 }
 
@@ -593,24 +617,19 @@ const ModernChat = {
         const knob = document.getElementById(knobId);
         const track = document.getElementById(trackId);
         if (knob) knob.style.left = isOn ? '22px' : '4px';
-        if (track) track.style.background = isOn ? '#238636' : '#30363d';
+        if (track) {
+            track.style.background = isOn ? '#238636' : '#30363d';
+            track.setAttribute('aria-checked', isOn ? 'true' : 'false');
+        }
     },
 
     syncSettingsPopover() {
         const subOn = this.geminiSubscriptionToggle ? this.geminiSubscriptionToggle.checked : true;
         const paidOn = this.paidTiersToggle ? this.paidTiersToggle.checked : false;
-        const cacheOn = false; // Context caching is inactive in local CLI execution mode
 
+        // (The retired "Context Caching" switch was removed: caching is not used by the local runtime.)
         this._setKnob('settings-sub-knob', 'settings-sub-toggle', subOn);
         this._setKnob('settings-paid-knob', 'settings-paid-toggle', paidOn);
-        this._setKnob('settings-caching-knob', 'settings-caching-toggle', cacheOn);
-
-        const cachingTrack = document.getElementById('settings-caching-toggle');
-        if (cachingTrack) {
-            cachingTrack.style.opacity = '0.45';
-            cachingTrack.style.cursor = 'not-allowed';
-            cachingTrack.title = 'Context caching is not active in local CLI execution mode';
-        }
 
         // Show/hide plan banner and advanced section based on subscription state
         const banner = document.getElementById('settings-plan-banner');
@@ -697,7 +716,7 @@ const ModernChat = {
                 Paid Tier keys support higher rate limits and unlock Pro reasoning models for full Council execution.
             </p>
             <button id="upgrade-tier-btn" style="
-                background: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%);
+                background: #58a6ff;
                 border: none;
                 color: white;
                 padding: 12px 20px;
@@ -762,7 +781,7 @@ const ModernChat = {
     },
 
     async startNewChat() {
-        if (confirm('Archive current session and start a new conversation?')) {
+        if (await window.gemConfirm('Archive this conversation and start a new one?', { confirmLabel: 'Start new' })) {
             try { this.archiveCurrentSession(); } catch(e) { console.error('Archive failed', e); }
             this.messages.innerHTML = '';
             this.restoreNodes = null;
@@ -802,7 +821,7 @@ const ModernChat = {
     showHistory() {
         const sessions = JSON.parse(localStorage.getItem('gemini_chat_sessions') || '[]');
         if (sessions.length === 0) {
-            alert('No archived sessions found.');
+            window.gemNotice('No archived sessions yet.');
             return;
         }
         let historyHtml = '<div style="padding: 10px;"><h3>Archived Sessions</h3>';
@@ -811,11 +830,11 @@ const ModernChat = {
             historyHtml += `
                 <div onclick="window.chatUI.loadSession(${sid})" style="padding: 10px; margin-bottom: 8px; background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                        <div style="font-size: 0.75rem; color: #8b949e;">${escapeHtml(s.date)}</div>
+                        <div style="font-size: var(--text-xs); color: #8b949e;">${escapeHtml(s.date)}</div>
                         <div style="font-weight: 500; margin-top: 4px;">${escapeHtml(s.preview)}</div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
-                        <button onclick="event.stopPropagation(); window.chatUI.deleteSession(${sid})" style="background: rgba(255, 68, 68, 0.15); border: 1px solid rgba(255, 68, 68, 0.3); color: #ff6b6b; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 0.75rem;" title="Delete Session">&times;</button>
+                        <button onclick="event.stopPropagation(); window.chatUI.deleteSession(${sid})" style="background: rgba(255, 68, 68, 0.15); border: 1px solid rgba(255, 68, 68, 0.3); color: #ff6b6b; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: var(--text-xs);" title="Delete Session">&times;</button>
                     </div>
                 </div>
             `;
@@ -828,8 +847,8 @@ const ModernChat = {
         this.messages.innerHTML = historyHtml + `<div style="display: flex; justify-content: center;"><button onclick="window.chatUI.restoreCurrentView()" style="margin: 10px; padding: 8px 16px; background: #238636; border: none; color: white; border-radius: 6px; cursor: pointer; width: fit-content;">← Back to Chat</button></div>`;
     },
 
-    deleteSession(id) {
-        if (confirm('Delete this archived session permanently?')) {
+    async deleteSession(id) {
+        if (await window.gemConfirm('Delete this archived session permanently?', { confirmLabel: 'Delete', danger: true })) {
             let sessions = JSON.parse(localStorage.getItem('gemini_chat_sessions') || '[]');
             sessions = sessions.filter(s => s.id !== id);
             localStorage.setItem('gemini_chat_sessions', JSON.stringify(sessions));
@@ -849,11 +868,11 @@ const ModernChat = {
         }
     },
 
-    loadSession(id) {
+    async loadSession(id) {
         const sessions = JSON.parse(localStorage.getItem('gemini_chat_sessions') || '[]');
         const session = sessions.find(s => s.id === id);
         if (session) {
-            if (confirm('Load this archived session? (Current session will be archived)')) {
+            if (await window.gemConfirm('Load this archived session? Your current conversation is archived first.', { confirmLabel: 'Load' })) {
                 try { this.archiveCurrentSession(); } catch(e) {}
                 localStorage.setItem('gem_chat_history', JSON.stringify(session.messages));
                 this.restoreNodes = null;
@@ -975,6 +994,21 @@ const ModernChat = {
         this.input.focus();
         // Update watchlist-gated quick prompt visibility each time chat opens
         this.updateWatchlistPromptVisibility();
+    },
+
+    setExpanded(expanded) {
+        if (!this.overlay) return;
+        const on = Boolean(expanded);
+        this.overlay.classList.toggle('is-expanded', on);
+        // Docked panel leaves the dashboard usable (non-modal); expanded view is modal.
+        this.overlay.setAttribute('aria-modal', on ? 'true' : 'false');
+        const btn = document.getElementById('chat-expand-btn');
+        if (btn) {
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+            btn.textContent = on ? '⇥ Dock' : '⤢ Expand';
+            btn.title = on ? 'Dock beside the dashboard' : 'Expand to a full-screen reading view';
+        }
+        try { localStorage.setItem('gem_chat_expanded', on ? 'true' : 'false'); } catch (_) {}
     },
 
     hide() {
@@ -1615,7 +1649,7 @@ const ModernChat = {
         thinkingText.innerHTML = '📡 <strong>Fetching live data & thinking...</strong>';
 
         const logText = document.createElement('div');
-        logText.style.cssText = 'font-size:0.78rem; color:#888; margin-top:5px; font-style:italic;';
+        logText.style.cssText = 'font-size:var(--text-xs); color:#888; margin-top:5px; font-style:italic;';
         logText.textContent = 'Awaiting DATA_PACKET injection...';
 
         const abortController = new AbortController();

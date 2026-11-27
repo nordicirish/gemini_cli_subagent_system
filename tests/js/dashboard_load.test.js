@@ -1493,6 +1493,80 @@ async function main() {
         assert.strictEqual(s3BriefToResearch, true, 'cloud-research actions should open the Research view');
     });
 
+    // ── UX Stage 4: type scale, motion, palette, chat co-pilot, accessible dialogs ──
+    const s4Css = read(path.join(staticDir, 'styles.css')) + '\n' + read(path.join(staticDir, 'modern_ui.css'));
+    const s4Markup = ['index.html', 'app.js', 'modern_ui.js', 'portfolio.js'].map((f) => read(path.join(staticDir, f))).join('\n');
+    const tinyRem = [...(s4Css + s4Markup).matchAll(/font-size:\s*(0?\.\d+)rem/g)].map((m) => m[0]).filter((d) => parseFloat(d.split(':')[1]) < 0.75);
+    const tinyPx = [...(s4Css + s4Markup).matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => m[0]).filter((d) => parseFloat(d.split(':')[1]) < 12);
+    check('Stage 4: 12px type floor, no "transition: all", global reduced-motion, single palette', () => {
+        assert.deepStrictEqual(tinyRem, [], `sub-12px rem font sizes remain: ${tinyRem.slice(0, 8).join(', ')}`);
+        assert.deepStrictEqual(tinyPx, [], `sub-12px px font sizes remain: ${tinyPx.slice(0, 8).join(', ')}`);
+        assert(/--text-xs:\s*12px/.test(s4Css) && /--text-sm:\s*13px/.test(s4Css) && /--text-body:\s*15px/.test(s4Css), 'type-scale tokens missing');
+        assert(!/transition:\s*all\b/.test(s4Css), 'transition: all must be replaced with explicit properties');
+        assert(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\*, \*::before, \*::after/.test(s4Css), 'global reduced-motion rule missing');
+        ['#131722', '#089981', '#f23645', '#bc85ff', '#8b5cf6', '#6e7681'].forEach((c) => {
+            assert(!(s4Css + s4Markup).includes(c), `stray off-palette colour ${c}`);
+        });
+    });
+    check('Stage 4: no native alert()/confirm() popups in dashboard scripts', () => {
+        ['app.js', 'modern_ui.js', 'portfolio.js'].forEach((f) => {
+            const src = read(path.join(staticDir, f));
+            assert(!/(^|[^.\w])(alert|confirm)\(/m.test(src.replace(/window\.gem(Confirm|Notice)/g, '')), `${f} still calls alert()/confirm()`);
+        });
+    });
+
+    const s4Chat = window.document.getElementById('chat-window');
+    const s4Expand = window.document.getElementById('chat-expand-btn');
+    window.chatUI.setExpanded(false);
+    window.chatUI.show();
+    const s4DockedOk = s4Chat.classList.contains('active') && !s4Chat.classList.contains('is-expanded')
+        && s4Chat.getAttribute('aria-modal') === 'false';
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: '2', bubbles: true }));
+    const s4ViewSwitchWhileDocked = !window.document.getElementById('view-portfolio').hidden;
+    window.setWorkspaceView('today');
+    s4Expand.click();
+    const s4ExpandedOk = s4Chat.classList.contains('is-expanded') && s4Chat.getAttribute('aria-modal') === 'true'
+        && s4Expand.getAttribute('aria-pressed') === 'true';
+    s4Expand.click();
+    const s4ReDocked = !s4Chat.classList.contains('is-expanded');
+    window.chatUI.hide();
+    const s4PaidSwitch = window.document.getElementById('settings-paid-toggle');
+    check('Stage 4: AI Council docks beside the dashboard (non-modal) and expands on demand', () => {
+        assert.strictEqual(s4DockedOk, true, 'chat should open docked and non-modal');
+        assert.strictEqual(s4ViewSwitchWhileDocked, true, 'dashboard stays usable while the chat is docked');
+        assert.strictEqual(s4ExpandedOk, true, 'Expand should switch to the modal full-screen view');
+        assert.strictEqual(s4ReDocked, true, 'Dock should return to the side panel');
+        assert(!window.document.getElementById('settings-caching-toggle'), 'retired Context Caching switch should be removed');
+        assert(s4PaidSwitch && s4PaidSwitch.getAttribute('role') === 'switch' && s4PaidSwitch.tabIndex === 0, 'settings toggles must be keyboard switches');
+        assert(['true', 'false'].includes(s4PaidSwitch.getAttribute('aria-checked')), 'switch must expose aria-checked');
+    });
+
+    const s4ConfirmCancel = window.gemConfirm('Delete it?', { confirmLabel: 'Delete', danger: true });
+    const s4DialogOpen = window.document.querySelector('.gem-dialog-overlay[role="alertdialog"]');
+    const s4FocusInDialog = Boolean(s4DialogOpen && s4DialogOpen.contains(window.document.activeElement));
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const s4CancelResult = await s4ConfirmCancel;
+    const s4ConfirmOk = window.gemConfirm('Proceed?');
+    window.document.querySelector('.gem-dialog-confirm').click();
+    const s4OkResult = await s4ConfirmOk;
+    const s4Modals = [...window.document.querySelectorAll('.modal-overlay')];
+    const s4Unlabelled = s4Modals.filter((m) => !['dialog', 'alertdialog'].includes(m.getAttribute('role'))).map((m) => m.id);
+    const s4SortTh = window.document.querySelector('#data-table thead th[data-sort-key="price"]');
+    s4SortTh.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    const s4SortedByKey = s4SortTh.getAttribute('aria-sort') === 'descending';
+    s4SortTh.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    s4SortTh.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    check('Stage 4: accessible confirm dialog, dialog roles on every modal, keyboard-sortable headers', () => {
+        assert(s4DialogOpen, 'gemConfirm should render an alertdialog');
+        assert.strictEqual(s4FocusInDialog, true, 'focus should move into the dialog');
+        assert.strictEqual(s4CancelResult, false, 'Esc should cancel');
+        assert.strictEqual(s4OkResult, true, 'Confirm should resolve true');
+        assert(!window.document.querySelector('.gem-dialog-overlay'), 'dialog should be removed after closing');
+        assert.deepStrictEqual(s4Unlabelled, [], `modals without role=dialog: ${s4Unlabelled}`);
+        assert.strictEqual(s4SortTh.tabIndex, 0, 'sortable headers must be focusable');
+        assert.strictEqual(s4SortedByKey, true, 'Enter on a sortable header should sort');
+    });
+
     window.close();
     console.log(results.join('\n'));
     const failed = results.filter((r) => r.startsWith('FAIL')).length;

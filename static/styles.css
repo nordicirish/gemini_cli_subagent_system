@@ -1,4 +1,9 @@
 :root {
+    /* Type scale (UX Stage 4): 4 steps, 12px floor. px keeps the floor on mobile too. */
+    --text-xs: 12px;
+    --text-sm: 13px;
+    --text-body: 15px;
+    --text-display: 20px;
     /* Overlay layers. Generic modals (Execution Ticket, Indices, Top Recommendations) sit on top
        because they can be opened from inside the chart modal and the AI Council chat. */
     --z-drawer: 900;
@@ -159,7 +164,7 @@ header.glass-panel {
 }
 
 .ticker-label {
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     font-weight: 800;
     color: var(--text-muted);
     letter-spacing: 1px;
@@ -232,7 +237,7 @@ header.glass-panel {
 }
 
 .alert-item {
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     padding: 2px 8px;
     border-radius: 4px;
@@ -264,7 +269,7 @@ header.glass-panel {
 }
 
 .empty-state {
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     opacity: 0.5;
     letter-spacing: 2px;
@@ -298,7 +303,7 @@ h1 {
 }
 
 .version {
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     font-weight: 400;
     padding-left: 6px;
@@ -329,7 +334,7 @@ h1 {
     display: flex;
     align-items: center;
     gap: 14px;
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     flex-wrap: nowrap;
     min-width: 0;
 }
@@ -350,13 +355,13 @@ h1 {
 .status-item .value {
     font-weight: 600;
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
 }
 
 .header-action-btn {
     width: auto !important;
     padding: 5px 10px !important;
-    font-size: 0.68rem !important;
+    font-size: var(--text-xs) !important;
     display: inline-flex !important;
     align-items: center;
     justify-content: center;
@@ -428,7 +433,7 @@ h1 {
 }
 
 .macro-ticker {
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
     font-weight: 700;
     color: var(--text-main);
     font-family: var(--font-mono);
@@ -437,7 +442,7 @@ h1 {
 }
 
 .macro-subtitle {
-    font-size: 0.6rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.7px;
@@ -450,7 +455,7 @@ h1 {
 }
 
 .macro-card h3 {
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 1.5px;
@@ -474,7 +479,7 @@ h1 {
 }
 
 .macro-gap {
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     font-weight: 500;
@@ -486,7 +491,7 @@ h1 {
 }
 
 .macro-gex {
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono);
     font-weight: 500;
     color: var(--text-muted);
@@ -508,7 +513,7 @@ h1 {
     padding: 2px 9px;
     border-radius: 999px;
     font-family: var(--font-mono);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     letter-spacing: 0.6px;
     text-transform: uppercase;
@@ -573,7 +578,7 @@ h1 {
     text-align: left;
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 0.80rem;
+    font-size: var(--text-sm);
 }
 
 thead {
@@ -585,7 +590,7 @@ thead {
 th {
     padding: 10px 8px;
     font-family: var(--font-sans);
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     font-weight: 600;
     text-transform: uppercase;
@@ -650,7 +655,7 @@ td {
 @media (max-width: 768px) {
     th, td {
         padding: 10px 12px !important;
-        font-size: 0.75rem;
+        font-size: var(--text-xs);
     }
     th:first-child, td:first-child {
         padding-left: 16px !important;
@@ -670,7 +675,7 @@ tbody tr:hover td {
 
 .table-section-header td {
     padding: 8px 18px !important;
-    font-size: 0.7rem !important;
+    font-size: var(--text-xs) !important;
     font-weight: 700 !important;
     text-transform: uppercase !important;
     letter-spacing: 2px !important;
@@ -692,7 +697,7 @@ tbody tr:hover td {
 
 .table-sub-header td {
     padding: 8px 18px !important;
-    font-size: 0.7rem !important;
+    font-size: var(--text-xs) !important;
     font-weight: 700 !important;
     text-transform: uppercase !important;
     letter-spacing: 1.5px !important;
@@ -769,7 +774,7 @@ tbody tr:hover td {
     padding: 3px 10px;
     border-radius: 6px;
     font-weight: 700;
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
     font-family: var(--font-mono);
 }
 
@@ -791,7 +796,7 @@ tbody tr:hover td {
 /* Note tag next to score */
 .note-tag {
     display: inline-block;
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     background: rgba(255,255,255,0.05);
     border-radius: 4px;
@@ -805,7 +810,7 @@ tbody tr:hover td {
 /* Trend tag*/
 .trend-tag {
     display: inline-block;
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     padding: 2px 10px;
     border-radius: 4px;
@@ -824,7 +829,7 @@ tbody tr:hover td {
 /* ─── MACD Indicator Tag ─── */
 .macd-tag {
     display: inline-block;
-    font-size: 0.70rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     padding: 2px 8px;
     border-radius: 4px;
@@ -854,7 +859,7 @@ tbody tr:hover td {
 /* ─── Dealer Posture Badge ─── */
 .dealer-badge {
     display: inline-block;
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     padding: 2px 10px;
     border-radius: 4px;
@@ -890,7 +895,7 @@ tbody tr:hover td {
     justify-content: flex-start;
     gap: 8px;
     margin-bottom: 8px;
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 1px;
@@ -903,7 +908,7 @@ tbody tr:hover td {
 }
 
 .sidebar-card .subtitle {
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     margin-bottom: 20px;
     text-align: center;
@@ -920,7 +925,7 @@ textarea {
     padding: 10px 12px;
     color: var(--text-secondary);
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     resize: vertical;
     margin-bottom: 12px;
     outline: none;
@@ -943,10 +948,10 @@ textarea:focus {
     border-radius: var(--radius-sm);
     font-weight: 600;
     cursor: pointer;
-    transition: all var(--transition);
+    transition: background-color var(--transition), border-color var(--transition), color var(--transition), opacity var(--transition), transform var(--transition), box-shadow var(--transition);
     text-transform: uppercase;
     letter-spacing: 0.8px;
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-family: var(--font-sans);
 }
 
@@ -963,7 +968,7 @@ textarea:focus {
 
 .glow-btn.mini {
     padding: 6px 10px;
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     height: 32px;
     display: flex;
     align-items: center;
@@ -1023,7 +1028,7 @@ textarea:focus {
 
 /* ─── Status Messages ─── */
 .status-message {
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 500;
     text-align: center;
     transition: opacity 0.3s ease, max-height 0.3s ease;
@@ -1036,8 +1041,8 @@ textarea:focus {
     max-height: 0;
     overflow: hidden;
     opacity: 0;
-    transition: all 0.25s ease;
-    font-size: 0.68rem;
+    transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease, opacity 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+    font-size: var(--text-xs);
     line-height: 1.3;
 }
 
@@ -1178,7 +1183,7 @@ textarea:focus {
     border: 1px solid var(--panel-border);
     color: var(--text-main);
     border-radius: 4px;
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     padding: 3px 6px;
     outline: none;
     font-family: var(--font-mono);
@@ -1195,7 +1200,7 @@ textarea:focus {
     border: 1px solid var(--panel-border);
     color: var(--text-main);
     border-radius: var(--radius-sm);
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
     padding: 8px 12px;
     height: 38px;
     outline: none;
@@ -1236,7 +1241,7 @@ textarea:focus {
     font-size: 0.9rem;
     cursor: pointer;
     font-weight: bold;
-    transition: all var(--transition);
+    transition: background-color var(--transition), border-color var(--transition), color var(--transition), opacity var(--transition), transform var(--transition), box-shadow var(--transition);
 }
 
 .add-btn:hover {
@@ -1253,14 +1258,14 @@ textarea:focus {
 .manager-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     table-layout: fixed; /* Force column control */
 }
 
 .manager-table th {
     padding: 6px 4px;
     text-align: left;
-    font-size: 0.6rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     border-bottom: 1px solid var(--panel-border);
     text-transform: uppercase;
@@ -1284,7 +1289,7 @@ textarea:focus {
     border: 1px solid transparent;
     color: var(--text-main);
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     padding: 2px 4px;
     border-radius: 2px;
 }
@@ -1335,7 +1340,7 @@ textarea:focus {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     transition: border-color var(--transition);
 }
@@ -1351,7 +1356,7 @@ textarea:focus {
 .sync-btn {
     width: auto;
     padding: 4px 10px;
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
 }
 
 /* ─── Modal Overlay & Centering ─── */
@@ -1439,7 +1444,7 @@ textarea:focus {
 
 .modal .subtitle {
     color: #8b949e;
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     margin-bottom: 8px;
     font-weight: 500;
 }
@@ -1451,7 +1456,7 @@ textarea:focus {
     border-radius: 6px;
     color: #f0f6fc;
     font-family: var(--font-mono);
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
     padding: 10px 12px;
     margin-top: 4px;
     margin-bottom: 12px;
@@ -1474,11 +1479,11 @@ textarea:focus {
     color: #38bdf8;
     font-weight: 700;
     letter-spacing: 0.8px;
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
     display: block;
     margin-bottom: 16px;
 }
@@ -1492,7 +1497,7 @@ textarea:focus {
 
 .modal-section-title {
     color: #e6edf3;
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
     font-weight: 600;
     margin-bottom: 12px;
 }
@@ -1519,7 +1524,7 @@ textarea:focus {
 }
 
 .index-card .index-name {
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     color: #8b949e;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -1536,14 +1541,14 @@ textarea:focus {
 }
 
 .index-card .index-gap {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono);
     font-weight: 600;
 }
 
 .index-card .index-details {
-    font-size: 0.65rem;
-    color: #6e7681;
+    font-size: var(--text-xs);
+    color: var(--text-muted);
     margin-top: 4px;
     font-family: var(--font-mono);
     line-height: 1.3;
@@ -1565,7 +1570,7 @@ textarea:focus {
     padding: 10px 12px;
     color: var(--text-secondary);
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     outline: none;
     transition: border-color var(--transition), box-shadow var(--transition);
 }
@@ -1583,7 +1588,7 @@ textarea:focus {
     padding: 10px 12px;
     color: var(--text-secondary);
     font-family: var(--font-sans);
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     outline: none;
     cursor: pointer;
     transition: border-color var(--transition), box-shadow var(--transition);
@@ -1729,7 +1734,7 @@ textarea:focus {
     border-radius: var(--radius-sm);
     padding: 12px 16px;
     font-family: var(--font-mono);
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     color: var(--text-muted);
     min-height: 44px;
     display: flex;
@@ -1741,7 +1746,7 @@ textarea:focus {
 .progress-details .loading-ticker {
     color: var(--accent);
     font-weight: 600;
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
 }
 
 /* Blurred View for Main Content */
@@ -1777,7 +1782,7 @@ textarea:focus {
     width: 980px;
     max-width: 96vw;
     max-height: 92vh;
-    background: #131722;
+    background: var(--panel-bg-solid);
     border: 1px solid rgba(255,255,255,0.12);
     border-radius: var(--radius-lg, 12px);
     box-shadow: 0 24px 80px rgba(0,0,0,0.7), 0 0 60px rgba(41,98,255,0.06);
@@ -1798,7 +1803,7 @@ textarea:focus {
     justify-content: space-between;
     padding: 12px 18px;
     border-bottom: 1px solid rgba(255,255,255,0.08);
-    background: #1e222d;
+    background: #171d2a;
     flex-shrink: 0;
 }
 
@@ -1827,7 +1832,7 @@ textarea:focus {
     display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     color: #9598a1;
     letter-spacing: 0.3px;
@@ -1847,7 +1852,7 @@ textarea:focus {
     flex: 1 1 auto;
     min-height: 240px;
     height: min(500px, 50vh);
-    background: #131722;
+    background: var(--panel-bg-solid);
 }
 
 .chart-loading {
@@ -1857,7 +1862,7 @@ textarea:focus {
     height: 100%;
     color: #9598a1;
     font-family: var(--font-mono, monospace);
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
 }
 
 .chart-modal-footer {
@@ -1873,7 +1878,7 @@ textarea:focus {
 
 .chart-meta-label {
     font-family: var(--font-mono, monospace);
-    font-size: 0.63rem;
+    font-size: var(--text-xs);
     color: var(--text-secondary, #8b949e);
     letter-spacing: 0.3px;
 }
@@ -1885,12 +1890,12 @@ textarea:focus {
     padding: 5px 12px;
     border-radius: 6px;
     cursor: pointer;
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     display: flex;
     align-items: center;
     gap: 5px;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .chart-copy-btn:hover {
@@ -1916,13 +1921,13 @@ tr.chart-clickable:hover {
     padding: 3px 8px;
     border-radius: 6px;
     font-family: var(--font-mono, monospace);
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     letter-spacing: 0.3px;
     white-space: nowrap;
     border: 1px solid transparent;
     cursor: default;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .fib-target-tag.t1 {
@@ -1995,7 +2000,7 @@ tr.chart-clickable:hover {
 }
 
 .fib-peak-indicator {
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     color: var(--text-dim, #8b949e);
     white-space: nowrap;
 }
@@ -2007,7 +2012,7 @@ tr.chart-clickable:hover {
 
 .fib-atr-confluence-badge {
     display: inline-block;
-    font-size: 0.55rem;
+    font-size: var(--text-xs);
     padding: 1px 4px;
     border-radius: 3px;
     background: rgba(255, 152, 0, 0.2);
@@ -2020,7 +2025,7 @@ tr.chart-clickable:hover {
 
 .fib-status-pill {
     display: inline-block;
-    font-size: 0.55rem;
+    font-size: var(--text-xs);
     padding: 1px 4px;
     border-radius: 3px;
     font-weight: 600;
@@ -2053,10 +2058,10 @@ tr.chart-clickable:hover {
     color: #c9d1d9;
     padding: 4px 10px;
     border-radius: 6px;
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -2077,7 +2082,7 @@ tr.chart-clickable:hover {
 
 .chart-tool-btn.btn-clear:hover {
     background: rgba(242, 54, 69, 0.2);
-    border-color: #f23645;
+    border-color: var(--red);
     color: #ff8080;
 }
 
@@ -2089,7 +2094,7 @@ tr.chart-clickable:hover {
     background: rgba(0, 0, 0, 0.25);
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     font-family: var(--font-mono, monospace);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     color: #8b949e;
 }
 
@@ -2122,7 +2127,7 @@ tr.chart-clickable:hover {
 }
 
 .fib-hud-title {
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     color: #e6edf3;
     letter-spacing: 0.4px;
@@ -2130,7 +2135,7 @@ tr.chart-clickable:hover {
 
 .fib-hud-impulse {
     font-family: var(--font-mono, monospace);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     color: #8b949e;
 }
 
@@ -2148,7 +2153,7 @@ tr.chart-clickable:hover {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .fib-level-card:hover {
@@ -2163,7 +2168,7 @@ tr.chart-clickable:hover {
 }
 
 .fib-card-ratio {
-    font-size: 0.6rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     color: #8b949e;
     text-transform: uppercase;
@@ -2178,14 +2183,14 @@ tr.chart-clickable:hover {
 
 .fib-card-price {
     font-family: var(--font-mono, monospace);
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
     font-weight: 700;
     color: #ffffff;
 }
 
 .fib-card-dist {
     font-family: var(--font-mono, monospace);
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     font-weight: 600;
 }
 
@@ -2193,7 +2198,7 @@ tr.chart-clickable:hover {
 .fib-card-dist.negative { color: #ff5252; }
 
 .fib-card-role {
-    font-size: 0.58rem;
+    font-size: var(--text-xs);
     color: #8b949e;
     white-space: nowrap;
     overflow: hidden;
@@ -2212,7 +2217,7 @@ tr.chart-clickable:hover {
     border: none;
     color: inherit;
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
     line-height: 1;
     opacity: 0.75;
     padding: 0 2px;
@@ -2224,7 +2229,7 @@ tr.chart-clickable:hover {
 
 .alerts-count-pill {
     display: inline-block;
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     padding: 1px 6px;
     border-radius: 999px;
     background: rgba(88, 166, 255, 0.16);
@@ -2251,7 +2256,7 @@ tr.chart-clickable:hover {
     border-radius: 6px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--panel-border);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
 }
 
 .alert-rule-row.disabled {
@@ -2278,13 +2283,13 @@ tr.chart-clickable:hover {
 }
 
 .alert-rule-sub {
-    font-size: 0.6rem;
+    font-size: var(--text-xs);
     color: var(--text-dim, #8b949e);
     font-family: var(--font-mono, monospace);
 }
 
 .alert-source-pill {
-    font-size: 0.55rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     text-transform: uppercase;
     padding: 1px 4px;
@@ -2317,7 +2322,7 @@ tr.chart-clickable:hover {
     border: 1px solid var(--panel-border);
     color: var(--text-dim, #8b949e);
     border-radius: 4px;
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     padding: 2px 5px;
     cursor: pointer;
 }
@@ -2352,7 +2357,7 @@ tr.chart-clickable:hover {
     color-scheme: dark;
     border-radius: 4px;
     padding: 4px 6px;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     box-sizing: border-box;
     min-width: 0;
 }
@@ -2372,12 +2377,12 @@ tr.chart-clickable:hover {
     background: rgba(88, 166, 255, 0.1);
     border: 1px solid rgba(88, 166, 255, 0.35);
     color: #79c0ff;
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
     box-sizing: border-box;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .alert-action-btn:hover:not(:disabled) {
@@ -2415,7 +2420,7 @@ tr.chart-clickable:hover {
 }
 
 .sentinel-title {
-    font-size: 0.64rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     letter-spacing: 0.4px;
     text-transform: uppercase;
@@ -2428,7 +2433,7 @@ tr.chart-clickable:hover {
     border: 1px solid var(--panel-border);
     background: rgba(255, 255, 255, 0.04);
     color: var(--text-dim, #8b949e);
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     cursor: pointer;
 }
@@ -2450,7 +2455,7 @@ tr.chart-clickable:hover {
 }
 
 .sentinel-status-meta {
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     color: var(--text-dim, #8b949e);
     font-family: var(--font-mono, monospace);
     line-height: 1.35;
@@ -2466,7 +2471,7 @@ tr.chart-clickable:hover {
     background: rgba(248, 81, 73, 0.16);
     border: 1px solid rgba(248, 81, 73, 0.55);
     color: #ff7b72;
-    font-size: 0.6rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     font-family: var(--font-mono, monospace);
     letter-spacing: 0.2px;
@@ -2486,7 +2491,7 @@ tr.chart-clickable:hover {
     flex-direction: column;
     gap: 8px;
     margin-bottom: 8px;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     box-sizing: border-box;
     width: 100%;
     overflow: hidden;
@@ -2503,7 +2508,7 @@ tr.chart-clickable:hover {
 }
 
 .quant-section-title {
-    font-size: 0.61rem;
+    font-size: var(--text-xs);
     color: var(--text-dim, #8b949e);
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -2521,7 +2526,7 @@ tr.chart-clickable:hover {
 }
 
 .quant-perm-tag {
-    font-size: 0.6rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono, monospace);
     padding: 1px 6px;
     border-radius: 4px;
@@ -2540,7 +2545,7 @@ tr.chart-clickable:hover {
 }
 
 .quant-veto-item {
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     color: #ff7b72;
     line-height: 1.35;
     margin-top: 2px;
@@ -2548,12 +2553,12 @@ tr.chart-clickable:hover {
 }
 
 .quant-ok-line {
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     color: #3fb950;
 }
 
 .quant-tranche-row {
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono, monospace);
     color: #c9d1d9;
     line-height: 1.4;
@@ -2566,7 +2571,7 @@ tr.chart-clickable:hover {
     border-radius: 3px;
     background: rgba(248, 81, 73, 0.16);
     color: #ff7b72;
-    font-size: 0.58rem;
+    font-size: var(--text-xs);
 }
 
 .quant-backtest-grid {
@@ -2584,12 +2589,12 @@ tr.chart-clickable:hover {
 
 .quant-backtest-grid span {
     display: block;
-    font-size: 0.56rem;
+    font-size: var(--text-xs);
     color: var(--text-dim, #8b949e);
 }
 
 .quant-backtest-grid strong {
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono, monospace);
     color: #e6edf3;
 }
@@ -2600,7 +2605,7 @@ tr.chart-clickable:hover {
     align-items: center;
     padding: 2px 8px;
     border-radius: 999px;
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono, monospace);
     font-weight: 600;
     white-space: nowrap;
@@ -2633,7 +2638,7 @@ tr.chart-clickable:hover {
     border: 1px solid rgba(88, 166, 255, 0.35);
     background: rgba(88, 166, 255, 0.12);
     color: #79c0ff;
-    font-size: 0.58rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
@@ -2648,7 +2653,7 @@ tr.chart-clickable:hover {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono, monospace);
     padding: 2px 0;
 }
@@ -2656,7 +2661,7 @@ tr.chart-clickable:hover {
 .quant-setup-pill {
     padding: 1px 6px;
     border-radius: 4px;
-    font-size: 0.58rem;
+    font-size: var(--text-xs);
     border: 1px solid var(--panel-border);
 }
 
@@ -2695,7 +2700,7 @@ tr.chart-clickable:hover {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    font-size: 0.74rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono, monospace);
     color: #c9d1d9;
 }
@@ -2703,14 +2708,14 @@ tr.chart-clickable:hover {
 .exec-ticket-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono, monospace);
 }
 
 .exec-ticket-table th {
     text-align: left;
     color: var(--text-dim, #8b949e);
-    font-size: 0.64rem;
+    font-size: var(--text-xs);
     padding: 4px 6px;
     border-bottom: 1px solid var(--panel-border);
 }
@@ -2733,7 +2738,7 @@ tr.chart-clickable:hover {
     border: 1px solid var(--panel-border);
     background: rgba(255, 255, 255, 0.06);
     color: #e6edf3;
-    font-size: 0.64rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
@@ -2769,7 +2774,7 @@ tr.chart-clickable:hover {
     background: rgba(248, 81, 73, 0.18);
     border: 1px solid rgba(248, 81, 73, 0.5);
     color: #ff7b72;
-    font-size: 0.54rem;
+    font-size: var(--text-xs);
     font-weight: 800;
     vertical-align: middle;
 }
@@ -2795,14 +2800,14 @@ tr.chart-clickable:hover {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.76rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
 }
 
 .cmd-label {
     font-family: var(--font-sans);
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.6px;
     color: var(--text-muted);
@@ -2816,7 +2821,7 @@ tr.chart-clickable:hover {
     min-width: 20px;
     padding: 1px 6px;
     border-radius: 999px;
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
 }
 
 .cmd-veto-badge.clear {
@@ -2851,13 +2856,13 @@ tr.chart-clickable:hover {
 
 .cmd-plan-btn {
     padding: 3px 9px;
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
 }
 
 .row-plan-btn {
     margin-left: 6px;
     padding: 1px 5px;
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     vertical-align: middle;
 }
 
@@ -2885,7 +2890,7 @@ td.num-col {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     color: var(--text-secondary, #c9d1d9);
     cursor: pointer;
@@ -2907,13 +2912,13 @@ td.num-col {
 
 .peak-stat-grid span {
     display: block;
-    font-size: 0.58rem;
+    font-size: var(--text-xs);
     color: var(--text-muted, #8b949e);
     text-transform: uppercase;
 }
 
 .peak-stat-grid strong {
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono, monospace);
     color: #e6edf3;
 }
@@ -2945,7 +2950,7 @@ td.num-col {
 }
 
 .peak-signal-chip {
-    font-size: 0.6rem;
+    font-size: var(--text-xs);
     font-family: var(--font-mono, monospace);
     padding: 1px 6px;
     border-radius: 4px;
@@ -2994,7 +2999,7 @@ td.num-col {
     background: rgba(0, 0, 0, 0.32);
     color: var(--text-main);
     font-family: var(--font-mono);
-    font-size: 0.74rem;
+    font-size: var(--text-xs);
     outline: none;
     transition: border-color 0.15s ease, width 0.15s ease;
 }
@@ -3010,7 +3015,7 @@ td.num-col {
     background: transparent;
     border: none;
     color: var(--text-muted);
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
     cursor: pointer;
     padding: 0 3px;
     line-height: 1;
@@ -3030,7 +3035,7 @@ td.num-col {
     border: 1px solid var(--panel-border-hover);
     background: rgba(255, 255, 255, 0.04);
     color: var(--text-secondary);
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     cursor: pointer;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
@@ -3052,7 +3057,7 @@ td.num-col {
 
 .kbd-hint {
     font-family: var(--font-mono);
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     opacity: 0.85;
 }
@@ -3085,7 +3090,7 @@ td.num-col {
 .sort-indicator {
     display: inline-block;
     margin-left: 4px;
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     color: var(--accent);
     min-width: 8px;
 }
@@ -3097,14 +3102,14 @@ td.num-col {
 .table-container.density-compact #data-table td {
     padding-top: 5px;
     padding-bottom: 5px;
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
 }
 
 .table-empty-filter-row td {
     text-align: center;
     color: var(--text-muted);
     padding: 18px 12px;
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
 }
 
 :focus-visible {
@@ -3132,7 +3137,7 @@ td.num-col {
 }
 
 .colab-mcp-transport-pill {
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     padding: 2px 6px;
     border-radius: 999px;
     background: rgba(148, 163, 184, 0.14);
@@ -3177,7 +3182,7 @@ td.num-col {
 }
 
 .colab-scout-empty {
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
 }
 
@@ -3190,7 +3195,7 @@ td.num-col {
     border-radius: 6px;
     background: rgba(15, 23, 42, 0.45);
     border: 1px solid var(--panel-border);
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
 }
 
 .colab-scout-meta {
@@ -3206,7 +3211,7 @@ td.num-col {
 
 .colab-scout-meta span {
     color: var(--text-muted);
-    font-size: 0.65rem;
+    font-size: var(--text-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3215,7 +3220,7 @@ td.num-col {
 .colab-scout-promote-btn {
     flex-shrink: 0;
     padding: 2px 7px;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     border-radius: 4px;
     border: 1px solid rgba(56, 189, 248, 0.4);
     background: rgba(56, 189, 248, 0.12);
@@ -3250,7 +3255,7 @@ td.num-col {
 }
 
 .scout-modal-meta {
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     font-family: 'JetBrains Mono', monospace;
 }
@@ -3271,7 +3276,7 @@ td.num-col {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.74rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     font-weight: 600;
 }
@@ -3283,7 +3288,7 @@ td.num-col {
     color: var(--text-primary, #e6edf3);
     border-radius: 6px;
     padding: 4px 8px;
-    font-size: 0.74rem;
+    font-size: var(--text-xs);
 }
 
 .scout-modal-search {
@@ -3301,7 +3306,7 @@ td.num-col {
 .scout-rankings-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.76rem;
+    font-size: var(--text-xs);
 }
 
 .scout-rankings-table th {
@@ -3312,7 +3317,7 @@ td.num-col {
     color: var(--text-muted);
     font-weight: 700;
     text-transform: uppercase;
-    font-size: 0.66rem;
+    font-size: var(--text-xs);
     letter-spacing: 0.4px;
     padding: 8px 10px;
     text-align: left;
@@ -3338,7 +3343,7 @@ td.num-col {
     border-radius: 5px;
     font-family: 'JetBrains Mono', monospace;
     font-weight: 700;
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     background: rgba(255, 255, 255, 0.06);
     color: var(--text-primary, #e6edf3);
 }
@@ -3354,7 +3359,7 @@ td.num-col {
     margin-top: 2px;
     padding: 1px 6px;
     border-radius: 999px;
-    font-size: 0.64rem;
+    font-size: var(--text-xs);
     background: rgba(56, 189, 248, 0.12);
     color: #7dd3fc;
     border: 1px solid rgba(56, 189, 248, 0.25);
@@ -3371,7 +3376,7 @@ td.num-col {
     display: inline-block;
     padding: 1px 6px;
     border-radius: 4px;
-    font-size: 0.64rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     background: rgba(168, 85, 247, 0.14);
     color: #d8b4fe;
@@ -3382,7 +3387,7 @@ td.num-col {
 .scout-notes-cell {
     min-width: 220px;
     max-width: 340px;
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     line-height: 1.35;
 }
@@ -3396,7 +3401,7 @@ td.num-col {
 
 .scout-modal-footer {
     margin-top: 8px;
-    font-size: 0.71rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     display: flex;
     justify-content: space-between;
@@ -3409,7 +3414,7 @@ td.num-col {
     margin-left: 4px;
     padding: 1px 4px;
     border-radius: 4px;
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     background: rgba(56, 189, 248, 0.14);
     color: #7dd3fc;
@@ -3426,7 +3431,7 @@ td.num-col {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     cursor: pointer;
     user-select: none;
@@ -3437,7 +3442,7 @@ td.num-col {
     margin-left: 4px;
     padding: 1px 5px;
     border-radius: 4px;
-    font-size: 0.62rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     background: rgba(148, 163, 184, 0.14);
     color: var(--text-secondary);
@@ -3470,7 +3475,7 @@ td.num-col {
 }
 
 .colab-p06-banner {
-    font-size: 0.63rem;
+    font-size: var(--text-xs);
     color: #facc15;
     opacity: 0.9;
 }
@@ -3479,12 +3484,12 @@ td.num-col {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
 }
 
 .colab-evidence-metrics {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     color: var(--text-primary);
     background: rgba(15, 23, 42, 0.45);
     border: 1px solid var(--panel-border);
@@ -3497,7 +3502,7 @@ td.num-col {
     border-radius: 5px;
     background: rgba(56, 189, 248, 0.08);
     border: 1px solid rgba(56, 189, 248, 0.25);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     color: var(--text-secondary);
 }
 
@@ -3517,7 +3522,7 @@ td.num-col {
     background: transparent;
     color: var(--text-muted);
     font-family: var(--font-sans);
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     padding: 5px 8px;
     border-radius: 4px;
@@ -3556,7 +3561,7 @@ td.num-col {
 
 .colab-offline-details summary {
     cursor: pointer;
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     color: var(--text-muted);
     user-select: none;
@@ -3608,7 +3613,7 @@ td.num-col {
     color: #7ee787;
     text-decoration: none;
     font-family: var(--font-sans);
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     padding: 4px 10px;
     border-radius: 6px;
@@ -3626,7 +3631,7 @@ td.num-col {
     background: rgba(88, 166, 255, 0.14);
     color: var(--accent);
     font-family: var(--font-sans);
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     padding: 2px 8px;
     border-radius: 5px;
@@ -3655,7 +3660,7 @@ td.num-col {
     background: rgba(248, 81, 73, 0.12);
     border: 1px solid rgba(248, 81, 73, 0.35);
     color: #ffa198;
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     line-height: 1.4;
 }
 
@@ -3676,20 +3681,20 @@ td.num-col {
 }
 
 .colab-progress-badge {
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     color: var(--accent);
     white-space: nowrap;
 }
 
 .colab-pipeline-step-label {
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     color: var(--text-secondary);
 }
 
 .colab-pipeline-percent {
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     color: var(--accent);
     white-space: nowrap;
@@ -3718,7 +3723,7 @@ td.num-col {
 }
 
 .colab-pipeline-chip {
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     padding: 2px 8px;
     border-radius: 999px;
     border: 1px solid var(--panel-border);
@@ -3756,7 +3761,7 @@ td.num-col {
 }
 
 .colab-setup-guidance-text {
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     color: var(--text-secondary);
     line-height: 1.4;
 }
@@ -3773,7 +3778,7 @@ td.num-col {
 
 .colab-setup-cmd-row code {
     font-family: var(--font-mono);
-    font-size: 0.64rem;
+    font-size: var(--text-xs);
     color: var(--text-main);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3816,7 +3821,7 @@ td.num-col {
 }
 
 .brief-mood-pill {
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     padding: 2px 10px;
     border-radius: 999px;
@@ -3840,7 +3845,7 @@ td.num-col {
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--panel-border);
-    font-size: 0.76rem;
+    font-size: var(--text-xs);
     line-height: 1.35;
 }
 
@@ -3868,12 +3873,12 @@ td.num-col {
 
 .action-brief-copy strong {
     color: var(--text-main);
-    font-size: 0.76rem;
+    font-size: var(--text-xs);
 }
 
 .action-brief-copy span {
     color: var(--text-muted);
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
 }
 
 .brief-action-btn {
@@ -3882,7 +3887,7 @@ td.num-col {
     background: rgba(255, 255, 255, 0.06);
     color: var(--text-main);
     font-family: var(--font-sans);
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     padding: 4px 10px;
     border-radius: 6px;
@@ -3904,7 +3909,7 @@ td.num-col {
 }
 
 .action-brief-empty {
-    font-size: 0.76rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     padding: 4px 2px;
 }
@@ -3925,7 +3930,7 @@ td.num-col {
     background: transparent;
     color: var(--text-muted);
     font-family: var(--font-sans);
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     padding: 3px 8px;
     border-radius: 4px;
@@ -3946,7 +3951,7 @@ td.num-col {
     margin-right: 4px;
     padding: 2px 6px;
     border-radius: 5px;
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     white-space: nowrap;
     border: 1px solid transparent;
@@ -4056,7 +4061,7 @@ td.num-col {
     margin: 0;
 }
 .metric-guide-popover dt {
-    font-size: 0.8125rem;
+    font-size: var(--text-sm);
     font-weight: 700;
     color: var(--text-main);
     margin-top: 10px;
@@ -4066,7 +4071,7 @@ td.num-col {
 }
 .metric-guide-popover dd {
     margin: 2px 0 0;
-    font-size: 0.8125rem;
+    font-size: var(--text-sm);
     line-height: 1.45;
     color: var(--text-secondary);
 }
@@ -4077,7 +4082,7 @@ td.num-col {
     margin-left: 6px;
     padding: 0 5px;
     font-family: var(--font-mono, monospace);
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     font-weight: 500;
     letter-spacing: 0;
     text-transform: none;
@@ -4100,14 +4105,14 @@ td.num-col {
 }
 .exec-advisory-note {
     margin-top: 4px;
-    font-size: 0.8125rem;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
 }
 
 /* Collapsed technical / engine settings (progressive disclosure) */
 .tech-settings {
     margin: 4px 0;
-    font-size: 0.8125rem;
+    font-size: var(--text-sm);
 }
 .tech-settings > summary {
     cursor: pointer;
@@ -4214,7 +4219,7 @@ header.glass-panel {
     flex-wrap: wrap;
 }
 .card-hint {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
 }
 
@@ -4258,7 +4263,7 @@ header.glass-panel {
     gap: 6px;
 }
 .app-settings-title {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     font-weight: 700;
     color: var(--text-muted);
 }
@@ -4270,11 +4275,11 @@ header.glass-panel {
 .positions-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.8125rem;
+    font-size: var(--text-sm);
     font-variant-numeric: tabular-nums;
 }
 .positions-table th {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     color: var(--text-muted);
     text-align: left;
@@ -4312,7 +4317,7 @@ header.glass-panel {
     justify-content: space-between;
     gap: 10px;
     padding: 8px 12px;
-    font-size: 0.8125rem;
+    font-size: var(--text-sm);
     white-space: normal;
 }
 
@@ -4330,3 +4335,50 @@ header.glass-panel {
 /* Full-width workspace cards can show more rows than the old 320px drawer allowed */
 .workspace-view .colab-scout-list { max-height: 520px; }
 .workspace-view .alerts-rules-list { max-height: 360px; }
+
+/* ─── UX Stage 4: honour reduced-motion everywhere (pulses, shimmer, flashes, modals) ─── */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ─── UX Stage 4: accessible confirm / notice dialog (replaces window.confirm/alert) ─── */
+.gem-dialog-overlay {
+    z-index: calc(var(--z-modal) + 10);
+}
+.gem-dialog {
+    width: min(420px, calc(100vw - 32px));
+    padding: 20px 22px;
+}
+.gem-dialog-msg {
+    margin: 0 0 16px;
+    font-size: var(--text-body);
+    line-height: 1.5;
+    color: var(--text-main);
+}
+.gem-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+.gem-dialog-actions .glow-btn {
+    width: auto;
+    margin: 0;
+}
+.gem-dialog-confirm.danger {
+    background: var(--red);
+    border-color: var(--red);
+    color: #fff;
+}
+
+/* Keyboard focus ring for sortable headers and switches */
+#data-table thead th.sortable-th:focus-visible,
+.settings-switch[role="switch"]:focus-visible,
+.gem-dialog-actions .glow-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}

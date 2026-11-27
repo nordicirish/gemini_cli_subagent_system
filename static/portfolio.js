@@ -92,7 +92,7 @@ const PortfolioPanel = {
                 banner = document.createElement('div');
                 banner.id = 'portfolio-degraded-banner';
                 banner.className = 'portfolio-degraded-banner';
-                banner.style.cssText = 'margin: 8px 0; padding: 8px 10px; border-radius: 6px; border: 1px solid #f85149; background: rgba(248, 81, 73, 0.12); color: #ff7b72; font-size: 0.78rem; font-weight: 700;';
+                banner.style.cssText = 'margin: 8px 0; padding: 8px 10px; border-radius: 6px; border: 1px solid #f85149; background: rgba(248, 81, 73, 0.12); color: #ff7b72; font-size: var(--text-xs); font-weight: 700;';
                 if (typeof container.insertBefore === 'function' && container.firstChild) {
                     container.insertBefore(banner, container.firstChild);
                 } else if (typeof container.appendChild === 'function') {
@@ -240,14 +240,14 @@ const PortfolioPanel = {
         const totalTitle = totalTitleText ? ` title="${totalTitleText}"` : fxTitle;
         html += `
         <tr class="cash-row" style="background: rgba(0, 255, 148, 0.05);">
-            <td style="color: var(--green); font-weight: 700; font-size: 0.75rem;">CASH (€)</td>
+            <td style="color: var(--green); font-weight: 700; font-size: var(--text-xs);">CASH (€)</td>
             <td><input type="number" step="0.01" class="portfolio-input" id="cash-input-eur" value="${cashRaw}" style="color: var(--green);" oninput="updatePortfolioTotals()" onchange="savePortfolio()"></td>
-            <td colspan="2" id="cash-val-usd"${fxTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${cashUsd}</td>
+            <td colspan="2" id="cash-val-usd"${fxTitle} style="font-size: var(--text-xs); font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${cashUsd}</td>
         </tr>
         <tr class="total-row" style="background: rgba(88, 166, 255, 0.08);">
-            <td style="color: var(--accent); font-weight: 700; font-size: 0.75rem;">TOTAL</td>
-            <td id="total-val-eur"${totalTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; font-family: var(--font-mono);">${totalEurText}</td>
-            <td colspan="2" id="total-val-usd"${totalTitle} style="font-size: 0.75rem; font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${totalUsdText}</td>
+            <td style="color: var(--accent); font-weight: 700; font-size: var(--text-xs);">TOTAL</td>
+            <td id="total-val-eur"${totalTitle} style="font-size: var(--text-xs); font-weight: 700; color: #fff; font-family: var(--font-mono);">${totalEurText}</td>
+            <td colspan="2" id="total-val-usd"${totalTitle} style="font-size: var(--text-xs); font-weight: 700; color: #fff; text-align: left; padding-left: 8px; font-family: var(--font-mono);">${totalUsdText}</td>
         </tr>
     `;
 

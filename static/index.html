@@ -7,8 +7,8 @@
     <title>Gemini Gem Stock Market Council Dashboard</title>
     <meta name="description" content="Gemini Gem Stock Market Council — Real-time market intelligence dashboard">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="styles.css?v=18.87">
-    <link rel="stylesheet" href="modern_ui.css?v=18.63">
+    <link rel="stylesheet" href="styles.css?v=18.88">
+    <link rel="stylesheet" href="modern_ui.css?v=18.65">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
         rel="stylesheet">
@@ -324,7 +324,7 @@
                             <button id="save-portfolio-btn" class="glow-btn sync-btn">SYNC</button>
                         </div>
                         <div id="portfolio-feedback" class="status-message inline-feedback"
-                            style="margin-bottom: 6px; font-size: 0.72rem;"></div>
+                            style="margin-bottom: 6px; font-size: var(--text-xs);"></div>
                         <div class="manager-table-container" style="margin-top: 0;">
                             <table class="manager-table">
                                 <thead>
@@ -424,7 +424,7 @@
                         </div>
 
                         <div class="sidebar-tab-pane hidden" data-tab-pane="scout-sector" role="tabpanel">
-                            <p style="font-size: 0.62rem; color: var(--text-muted); margin-bottom: 8px; line-height: 1.4;">
+                            <p style="font-size: var(--text-xs); color: var(--text-muted); margin-bottom: 8px; line-height: 1.4;">
                                 Enable sectors below, then scan via Google Colab to discover ranked stock ideas from those industries (falls back to local scout when offline).</p>
                             <div id="scout-categories-container" class="scout-grid-container"
                                 style="margin-top: 0; min-height: 40px; border: 1px dashed var(--panel-border); padding: 8px; border-radius: 4px; margin-bottom: 10px;">
@@ -433,14 +433,14 @@
                             <div
                                 style="background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
                                 <p
-                                    style="font-size: 0.6rem; color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 10px;">
+                                    style="font-size: var(--text-xs); color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 10px;">
                                     Filter Config</p>
                                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
                                     <label for="scout-limit-select"
-                                        style="font-size: 0.65rem; color: var(--text-muted); font-weight: 600; flex: 1;">Max
+                                        style="font-size: var(--text-xs); color: var(--text-muted); font-weight: 600; flex: 1;">Max
                                         Tickers (1–5):</label>
                                     <select id="scout-limit-select" class="mini-input"
-                                        style="width: auto; padding: 2px 6px; font-size: 0.7rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--accent); border-radius: 4px;">
+                                        style="width: auto; padding: 2px 6px; font-size: var(--text-xs); background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--accent); border-radius: 4px;">
                                         <option value="1">1</option>
                                         <option value="2" selected>2</option>
                                         <option value="3">3</option>
@@ -450,10 +450,10 @@
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 8px;">
                                     <label for="scout-max-rsi-select"
-                                        style="font-size: 0.65rem; color: var(--text-muted); font-weight: 600; flex: 1;">Max
+                                        style="font-size: var(--text-xs); color: var(--text-muted); font-weight: 600; flex: 1;">Max
                                         RSI:</label>
                                     <select id="scout-max-rsi-select" class="mini-input"
-                                        style="min-width: 120px; width: auto; padding: 2px 6px; font-size: 0.7rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--accent); border-radius: 4px;">
+                                        style="min-width: 120px; width: auto; padding: 2px 6px; font-size: var(--text-xs); background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--accent); border-radius: 4px;">
                                         <option value="50">50 — Strict</option>
                                         <option value="60">60 — Guarded</option>
                                         <option value="70">70 — Balanced</option>
@@ -463,7 +463,7 @@
                                     </select>
                                 </div>
                             </div>
-                            <button id="run-ai-scout-btn" class="glow-btn" style="margin-top: 0; font-size: 0.7rem;"
+                            <button id="run-ai-scout-btn" class="glow-btn" style="margin-top: 0; font-size: var(--text-xs);"
                                 title="Discover new tickers from enabled sectors above">🔭 Scout New Sectors</button>
                             <div id="ai-scout-status" class="status-message inline-feedback" style="margin-top: 6px;"></div>
                         </div>
@@ -636,7 +636,7 @@
                                         <input type="file" id="colab-import-file" accept="application/json,.json" hidden>
                                     </div>
                                     <div id="colab-calibration-status" class="status-message inline-feedback"
-                                        style="margin-top: 6px; font-size: 0.7rem;">No Colab calibration loaded</div>
+                                        style="margin-top: 6px; font-size: var(--text-xs);">No Colab calibration loaded</div>
                                 </details>
                             </div>
                         </div>
@@ -649,11 +649,11 @@
     </div>
 
     <!-- ─── Indices Modal ─── -->
-    <div class="modal-overlay" id="indices-modal-overlay">
+    <div class="modal-overlay" id="indices-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="indices-modal-title">
         <div class="modal modal-wide">
             <div class="modal-header">
-                <h3>📈 Manage Indices</h3>
-                <button class="modal-close" id="close-indices-modal">&times;</button>
+                <h3 id="indices-modal-title">📈 Manage Indices</h3>
+                <button class="modal-close" id="close-indices-modal" aria-label="Close">&times;</button>
             </div>
             <p class="subtitle">Edit tracked macro indices (comma or space separated)</p>
             <textarea id="indices-input" rows="3" placeholder="^VIX, ^VVIX, VIXY, IEF, UUP, SPY, GDX"></textarea>
@@ -684,12 +684,12 @@
 
 
     <!-- Modern Chat Overlay -->
-    <div class="modern-chat-overlay" id="chat-window">
+    <div class="modern-chat-overlay" id="chat-window" role="dialog" aria-modal="false" aria-labelledby="chat-window-title">
         <div class="modern-chat-panel">
             <div class="modern-chat-header">
                 <div class="modern-header-left">
-                    <div class="modern-logo-box">⚖️</div>
-                    <h2 class="modern-header-title">GEMINI AI COUNCIL</h2>
+                    <div class="modern-logo-box" aria-hidden="true">⚖️</div>
+                    <h2 class="modern-header-title" id="chat-window-title">AI Council</h2>
                 </div>
                 <div class="modern-header-right">
                     <input type="checkbox" id="paid-tiers-toggle" hidden>
@@ -724,7 +724,8 @@
                                     <div class="settings-item-title">Gemini Plan</div>
                                     <div class="settings-item-sub">Pro models, higher limits, auto-caching</div>
                                 </div>
-                                <div id="settings-sub-toggle" class="settings-switch"
+                                <div id="settings-sub-toggle" class="settings-switch" role="switch" tabindex="0"
+                                    aria-checked="true" aria-label="Gemini Plan"
                                     onclick="window.chatUI&&window.chatUI.toggleSettingsSub()">
                                     <div id="settings-sub-knob" class="settings-switch-knob"></div>
                                 </div>
@@ -746,24 +747,15 @@
                             <div id="settings-advanced-section">
                                 <div class="settings-divider"></div>
                                 <div class="settings-section-label">Advanced</div>
-                                <div class="settings-row">
+                                <div class="settings-row last">
                                     <div>
                                         <div class="settings-item-title">Include Paid Models</div>
                                         <div class="settings-item-sub">Show Pro/Preview tiers in selector</div>
                                     </div>
-                                    <div id="settings-paid-toggle" class="settings-switch off"
+                                    <div id="settings-paid-toggle" class="settings-switch off" role="switch" tabindex="0"
+                                        aria-checked="false" aria-label="Include paid models"
                                         onclick="window.chatUI&&window.chatUI.toggleSettingsPaid()">
                                         <div id="settings-paid-knob" class="settings-switch-knob"></div>
-                                    </div>
-                                </div>
-                                <div class="settings-row last">
-                                    <div>
-                                        <div class="settings-item-title">Context Caching</div>
-                                        <div class="settings-item-sub">Managed automatically by local runtime</div>
-                                    </div>
-                                    <div id="settings-caching-toggle" class="settings-switch"
-                                        onclick="window.chatUI&&window.chatUI.toggleSettingsCaching()">
-                                        <div id="settings-caching-knob" class="settings-switch-knob"></div>
                                     </div>
                                 </div>
                             </div>
@@ -777,7 +769,9 @@
                         title="New Conversation"><span>+</span> NEW</button>
                     <button id="history-chat-btn" type="button" class="chat-header-pill"
                         title="History"><span>📂</span> SESSIONS</button>
-                    <button class="modern-ctrl-btn" type="button" id="chat-close-btn">×</button>
+                    <button type="button" id="chat-expand-btn" class="chat-header-pill" aria-pressed="false"
+                        title="Expand to a full-screen reading view">⤢ Expand</button>
+                    <button class="modern-ctrl-btn" type="button" id="chat-close-btn" aria-label="Close AI Council">×</button>
                 </div>
             </div>
 
@@ -805,13 +799,13 @@
     </div>
 
     <!-- ─── Chart Modal ─── -->
-    <div class="modal-overlay chart-modal-overlay" id="chart-modal-overlay">
+    <div class="modal-overlay chart-modal-overlay" id="chart-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-modal-ticker">
         <div class="modal chart-modal glass-panel">
             <div class="modal-header chart-modal-header">
                 <div class="chart-modal-title">
                     <span id="chart-modal-ticker" class="chart-ticker-label">—</span>
                     <div class="chart-indicator-legend">
-                        <span class="legend-item"><span class="legend-dot" style="background:#f23645;"></span>EMA
+                        <span class="legend-item"><span class="legend-dot" style="background:#f85149;"></span>EMA
                             9</span>
                         <span class="legend-item"><span class="legend-dot" style="background:#2962ff;"></span>EMA
                             30</span>
@@ -819,7 +813,7 @@
                             200</span>
                         <span class="legend-item"><span class="legend-dot"
                                 style="background:#ff9800;"></span>VWAP</span>
-                        <span class="legend-item"><span class="legend-dot" style="background:#089981;"></span>VWAP
+                        <span class="legend-item"><span class="legend-dot" style="background:#3fb950;"></span>VWAP
                             Bands</span>
                         <span class="legend-item"><span class="legend-dot" style="background:#2962ff;"></span>Vol
                             (20)</span>
@@ -935,9 +929,9 @@
         </div>
     </div>
 
-    <script src="portfolio.js?v=18.64"></script>
-    <script src="app.js?v=19.00"></script>
-    <script src="modern_ui.js?v=18.69"></script>
+    <script src="portfolio.js?v=18.65"></script>
+    <script src="app.js?v=19.01"></script>
+    <script src="modern_ui.js?v=18.70"></script>
 </body>
 
 </html>
