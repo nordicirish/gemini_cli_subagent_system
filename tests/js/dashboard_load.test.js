@@ -1112,6 +1112,29 @@ async function main() {
         assert.strictEqual(badLinkBlocked, true, 'Unsafe javascript: URL must remain hidden and reset to #');
     });
 
+    mockColabPipeline = {
+        state: 'partial',
+        trigger: 'manual',
+        started_at_utc: '2026-11-26T20:15:00Z',
+        percent: 100,
+        step_label: 'Completed with 1 issue(s) across 4 steps',
+        error_summary: 'Simulated step failure',
+        jobs: {
+            vol_surface: { status: 'succeeded', label: 'Options Flow & Vol Surface', progress_pct: 100 },
+            quant_scout: { status: 'failed', label: 'Stock Finder (500+)', progress_pct: 100, error: 'Simulated step failure' },
+        },
+    };
+    await window.fetchColabMcpStatus();
+    const partialRetryLabelOk = retryBannerBtn && retryBannerBtn.textContent === '↻ Retry Failed';
+    colabJobPosts.length = 0;
+    retryBannerBtn.click();
+    await new Promise((r) => setTimeout(r, 40));
+    const retrySentFailedOnly = colabJobPosts.some((p) => p.path === '/api/colab/jobs/run_all' && p.body && p.body.retry_failed_only === true);
+    check('Colab Partial Retry: Retry button relabels and sends retry_failed_only=true', () => {
+        assert.strictEqual(partialRetryLabelOk, true, 'Expected Retry Failed label on partial pipeline state');
+        assert.strictEqual(retrySentFailedOnly, true, 'Expected Retry button to send retry_failed_only=true');
+    });
+
     const openScoutModalBtn = window.document.getElementById('colab-open-scout-modal-btn');
     const scoutModalOverlay = window.document.getElementById('scout-rankings-modal-overlay');
     const scoutModalTbody = window.document.getElementById('scout-rankings-tbody');
@@ -1122,10 +1145,18 @@ async function main() {
     openScoutModalBtn.click();
     const modalOpenedAll = scoutModalOverlay.classList.contains('active')
         && scoutModalTbody.querySelectorAll('tr[data-scout-rank-row]').length === 2
+        && scoutModalTbody.querySelectorAll('.scout-ticker-row .colab-scout-promote-btn').length === 2
         && scoutModalTbody.innerHTML.includes('SMCI')
         && scoutModalTbody.innerHTML.includes('REGN')
         && scoutModalTbody.innerHTML.includes('#1')
         && !scoutModalTbody.innerHTML.includes('<script>evil()</script>');
+
+    const regnWatchBtn = scoutModalTbody.querySelector('.scout-ticker-row .colab-scout-promote-btn[data-scout-ticker="REGN"]');
+    if (regnWatchBtn) regnWatchBtn.click();
+    await new Promise((r) => setTimeout(r, 40));
+    const regnMarkedWatched = Boolean(
+        scoutModalTbody.querySelector('.scout-ticker-row .colab-scout-promote-btn.is-watched[data-scout-ticker="REGN"]')
+    );
 
     scoutModalSectorSel.value = 'Biotech';
     scoutModalSectorSel.dispatchEvent(new window.Event('change', { bubbles: true }));
@@ -1140,8 +1171,9 @@ async function main() {
 
     scoutModalCloseBtn.click();
     const modalClosedOk = !scoutModalOverlay.classList.contains('active');
-    check('Scout Recommendations Modal: ranks candidates with Colab notes, sector filter, limit control, and clean close', () => {
-        assert.strictEqual(modalOpenedAll, true, 'Expected Top Recommendations modal to open and render escaped ranked rows');
+    check('Scout Recommendations Modal: ranks candidates with inline Watch toggle, sector filter, limit control, and clean close', () => {
+        assert.strictEqual(modalOpenedAll, true, 'Expected Top Recommendations modal to open and render inline Watch buttons');
+        assert.strictEqual(regnMarkedWatched, true, 'Clicking + Watch beside REGN should mark it ✓ Watching (.is-watched)');
         assert.strictEqual(filteredToBiotech, true, 'Expected Biotech sector filter to isolate REGN');
         assert.strictEqual(resetSectorOk, true, 'Expected ALL sector filter to restore both candidates');
         assert.strictEqual(modalClosedOk, true, 'Close button should dismiss #scout-rankings-modal-overlay');

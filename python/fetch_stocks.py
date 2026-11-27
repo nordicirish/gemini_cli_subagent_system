@@ -33,6 +33,7 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 _NY_TZ = ZoneInfo("America/New_York")
+import asyncio
 import base64
 from dataclasses import dataclass
 import os
@@ -1194,49 +1195,95 @@ def _fetch_intraday_payload(sym: str) -> Dict[str, Any]:
         if cached is not None and (now_mono - cached[0]) < _INTRADAY_CACHE_TTL_SECONDS:
             return cached[1]
 
-    ticker_obj = yf.Ticker(clean_sym)
-    # Fetch 5 days of 1m data with extended hours (pre-market and post-market)
-    df = ticker_obj.history(interval="1m", period="5d", prepost=True, auto_adjust=True)
-    if df is None or df.empty:
+    raw_rows: List[Tuple[int, float, float, float, float, int]] = []
+    try:
+        ticker_obj = yf.Ticker(clean_sym)
+        df = ticker_obj.history(interval="1m", period="5d", prepost=True, auto_adjust=True)
+        if df is not None and not df.empty:
+            for ts, row in df.iterrows():
+                try:
+                    t_unix = int(ts.timestamp())
+                    o_val = float(row["Open"])
+                    h_val = float(row["High"])
+                    l_val = float(row["Low"])
+                    c_val = float(row["Close"])
+                    if not (math.isfinite(o_val) and math.isfinite(h_val) and math.isfinite(l_val) and math.isfinite(c_val)):
+                        continue
+                    if o_val <= 0 or h_val <= 0 or l_val <= 0 or c_val <= 0:
+                        continue
+                    v_raw = row.get("Volume", 0)
+                    v_val = int(v_raw) if (v_raw is not None and not pd.isna(v_raw) and v_raw >= 0) else 0
+                    raw_rows.append((t_unix, o_val, h_val, l_val, c_val, v_val))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    # Fallback directly to Yahoo v8 chart JSON if yfinance.history returns empty pre-market
+    if not raw_rows:
+        try:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{clean_sym}?range=5d&interval=1m&includePrePost=true"
+            r = safe_yf_get(url, timeout=4)
+            data = r.json()
+            result = (data.get("chart") or {}).get("result", [None])[0] or {}
+            timestamps = result.get("timestamp") or []
+            quote = ((result.get("indicators") or {}).get("quote") or [{}])[0]
+            opens = quote.get("open") or []
+            highs = quote.get("high") or []
+            lows = quote.get("low") or []
+            closes = quote.get("close") or []
+            vols = quote.get("volume") or []
+            for ts, o_v, h_v, l_v, c_v, v_v in zip(timestamps, opens, highs, lows, closes, vols):
+                if ts is None or o_v is None or h_v is None or l_v is None or c_v is None:
+                    continue
+                try:
+                    o_val, h_val, l_val, c_val = float(o_v), float(h_v), float(l_v), float(c_v)
+                    if not (math.isfinite(o_val) and math.isfinite(h_val) and math.isfinite(l_val) and math.isfinite(c_val)):
+                        continue
+                    if o_val <= 0 or h_val <= 0 or l_val <= 0 or c_val <= 0:
+                        continue
+                    v_val = int(v_v) if (v_v is not None and v_v >= 0) else 0
+                    raw_rows.append((int(ts), o_val, h_val, l_val, c_val, v_val))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    if not raw_rows:
         payload = {"bars": [], "warmup_closes": [], "symbol": clean_sym}
         with _INTRADAY_CACHE_LOCK:
             _INTRADAY_CACHE[clean_sym] = (t_time.monotonic(), payload)
         return payload
 
-    # Determine today's date in the exchange local timezone
-    last_ts = df.index[-1]
-    today_date = last_ts.date()
+    # Deduplicate timestamps and sort ascending so Lightweight Charts always renders cleanly
+    by_time: Dict[int, Tuple[int, float, float, float, float, int]] = {}
+    for row in raw_rows:
+        by_time[row[0]] = row
+    sorted_rows = [by_time[k] for k in sorted(by_time.keys())]
 
+    today_date = datetime.fromtimestamp(float(sorted_rows[-1][0]), tz=timezone.utc).astimezone(_NY_TZ).date()
     bars = []
     warmup_closes = []
 
-    for ts, row in df.iterrows():
-        try:
-            t_unix = int(ts.timestamp())
-        except Exception:
-            continue
-
-        bar_date = ts.date()
-        close_val = round(float(row["Close"]), 4)
-
+    for t_unix, o_val, h_val, l_val, c_val, v_val in sorted_rows:
+        bar_date = datetime.fromtimestamp(float(t_unix), tz=timezone.utc).astimezone(_NY_TZ).date()
+        close_round = round(c_val, 4)
         if bar_date == today_date:
-            # Today's bars: full OHLCV for candlestick rendering
             bars.append({
-                "time":   t_unix,
-                "open":   round(float(row["Open"]),  4),
-                "high":   round(float(row["High"]),  4),
-                "low":    round(float(row["Low"]),   4),
-                "close":  close_val,
-                "volume": int(row["Volume"]) if not pd.isna(row["Volume"]) else 0
+                "time": t_unix,
+                "open": round(o_val, 4),
+                "high": round(h_val, 4),
+                "low": round(l_val, 4),
+                "close": close_round,
+                "volume": v_val,
             })
         else:
-            # Prior-session bars: only the close price for EMA warmup
-            warmup_closes.append(close_val)
+            warmup_closes.append(close_round)
 
     payload = {
-        "bars":           bars,
-        "warmup_closes":  warmup_closes,
-        "symbol":         clean_sym
+        "bars": bars,
+        "warmup_closes": warmup_closes,
+        "symbol": clean_sym,
     }
     with _INTRADAY_CACHE_LOCK:
         _INTRADAY_CACHE[clean_sym] = (t_time.monotonic(), payload)
@@ -2388,20 +2435,39 @@ def _acquire_true_intraday_vwap_bars(symbol, status):
 
     valid = []
     last_ts = None
+    price_only = []
+    last_price_only_ts = None
     if timestamps:
         for ts, h, l, c, v in zip(timestamps, highs, lows, closes, volumes):
             if _epoch_to_utc_iso8601(ts) is None:
                 continue
-            if c is not None and h is not None and l is not None and v is not None and v > 0:
-                dt = datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(ny_tz)
-                if dt.date() == now.date():
-                    valid.append((h, l, c, v))
-                    last_ts = ts
+            if c is None or h is None or l is None:
+                continue
+            try:
+                hf, lf, cf = float(h), float(l), float(c)
+            except (TypeError, ValueError):
+                continue
+            if not (math.isfinite(hf) and math.isfinite(lf) and math.isfinite(cf)) or cf <= 0:
+                continue
+            dt = datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(ny_tz)
+            if dt.date() != now.date():
+                continue
+            if v is not None and v > 0:
+                valid.append((hf, lf, cf, v))
+                last_ts = ts
+            elif status == "PRE-MARKET":
+                # Yahoo pre-market 1m bars frequently report volume=0; keep unit weight so VWAP tracks pre-market prints
+                price_only.append((hf, lf, cf, 1.0))
+                last_price_only_ts = ts
     else:
         valid = [(h, l, c, v) for h, l, c, v in zip(highs, lows, closes, volumes)
                  if c is not None and h is not None and l is not None and v is not None and v > 0]
 
-    return valid, _epoch_to_utc_iso8601(last_ts), False
+    if valid:
+        return valid, _epoch_to_utc_iso8601(last_ts), False
+    if status == "PRE-MARKET" and price_only:
+        return price_only, _epoch_to_utc_iso8601(last_price_only_ts), False
+    return [], _epoch_to_utc_iso8601(last_ts), False
 
 
 def _acquire_fallback_vwap_payload(symbol):
@@ -2412,7 +2478,7 @@ def _acquire_fallback_vwap_payload(symbol):
     try:
         ny_tz = ZoneInfo("America/New_York")
         now = datetime.now(ny_tz)
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=1m"
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=1m&includePrePost=true"
         r = safe_yf_get(url, timeout=2)
         data = r.json()
         result = data['chart']['result'][0]
@@ -2423,24 +2489,43 @@ def _acquire_fallback_vwap_payload(symbol):
         lows = q.get('low', [])
         volumes = q.get('volume', [])
 
-        is_today = False
+        latest_date = None
         if timestamps:
             latest_dt = datetime.fromtimestamp(timestamps[-1], tz=ny_tz)
-            if latest_dt.date() == now.date():
-                is_today = True
+            latest_date = latest_dt.date()
 
-        if is_today:
-            valid = []
-            last_ts = None
-            for ts, h, l, c, v in zip(timestamps, highs, lows, closes, volumes):
-                if c is None or h is None or l is None or v is None or v <= 0:
-                    continue
-                dt = datetime.fromtimestamp(ts, tz=ny_tz)
-                if dt.date() == now.date():
-                    valid.append((h, l, c, v))
-                    last_ts = ts
-            if valid:
-                return {"kind": "vwap", "symbol": symbol, "bars": valid, "source": "FALLBACK_VWAP_CHART"}, _epoch_to_utc_iso8601(last_ts)
+        today_vol_bars = []
+        today_price_bars = []
+        latest_session_bars = []
+        last_vol_ts = None
+        last_price_ts = None
+        last_latest_ts = None
+        for ts, h, l, c, v in zip(timestamps, highs, lows, closes, volumes):
+            if c is None or h is None or l is None:
+                continue
+            try:
+                hf, lf, cf = float(h), float(l), float(c)
+            except (TypeError, ValueError):
+                continue
+            if not (math.isfinite(hf) and math.isfinite(lf) and math.isfinite(cf)) or cf <= 0:
+                continue
+            dt = datetime.fromtimestamp(ts, tz=ny_tz)
+            has_vol = v is not None and v > 0
+            if dt.date() == now.date():
+                if has_vol:
+                    today_vol_bars.append((hf, lf, cf, v))
+                    last_vol_ts = ts
+                else:
+                    today_price_bars.append((hf, lf, cf, 1.0))
+                    last_price_ts = ts
+            elif latest_date is not None and dt.date() == latest_date and has_vol:
+                latest_session_bars.append((hf, lf, cf, v))
+                last_latest_ts = ts
+
+        if today_vol_bars:
+            return {"kind": "vwap", "symbol": symbol, "bars": today_vol_bars, "source": "FALLBACK_VWAP_CHART"}, _epoch_to_utc_iso8601(last_vol_ts)
+        if today_price_bars:
+            return {"kind": "vwap", "symbol": symbol, "bars": today_price_bars, "source": "FALLBACK_VWAP_PREMARKET_TWAP"}, _epoch_to_utc_iso8601(last_price_ts)
 
         # Finnhub OHLC live session proxy fallback
         if USE_FINNHUB and FINNHUB_API_KEY:
@@ -2463,6 +2548,9 @@ def _acquire_fallback_vwap_payload(symbol):
                         }, _epoch_to_utc_iso8601(t)
             except Exception:
                 pass
+
+        if latest_session_bars:
+            return {"kind": "vwap", "symbol": symbol, "bars": latest_session_bars, "source": "FALLBACK_VWAP_PRIOR_SESSION"}, _epoch_to_utc_iso8601(last_latest_ts)
 
         return None, None
     except Exception:
@@ -2967,47 +3055,39 @@ def _acquire_options_gex_raw(
                 T = 0.001
 
             calls_df = getattr(chain, "calls", None)
-            if calls_df is not None and not calls_df.empty:
-                for _, row in calls_df.iterrows():
-                    oi_val = row.get('openInterest')
-                    if pd.isna(oi_val) or oi_val <= 0:
-                        oi_val = row.get('volume')
-                    if pd.isna(oi_val) or oi_val <= 0:
-                        continue
-                    iv_val = row.get('impliedVolatility')
-                    if pd.isna(iv_val) or iv_val <= 0:
-                        continue
-                    k_num = to_float(row.get('strike'))
-                    oi_num = to_float(oi_val)
-                    iv_num = to_float(iv_val)
-                    if k_num is None or k_num <= 0 or oi_num is None or oi_num <= 0 or iv_num is None or iv_num <= 0:
-                        continue
-                    strike_oi_map[k_num] = strike_oi_map.get(k_num, 0.0) + oi_num
-                    option_inventory.append({
-                        'K': k_num, 'T': T, 'sigma': iv_num,
-                        'oi': oi_num, 'type': 'call'
-                    })
-
             puts_df = getattr(chain, "puts", None)
-            if puts_df is not None and not puts_df.empty:
-                for _, row in puts_df.iterrows():
+
+            # Yahoo reports placeholder IV (e.g. 0.00001) on many illiquid strikes pre-market;
+            # substitute median valid expiry IV so OI still contributes realistic Gamma.
+            iv_samples: List[float] = []
+            for leg_df in (calls_df, puts_df):
+                if leg_df is not None and not leg_df.empty and "impliedVolatility" in leg_df.columns:
+                    for raw_iv in leg_df["impliedVolatility"].tolist():
+                        iv_cand = to_float(raw_iv)
+                        if iv_cand is not None and math.isfinite(iv_cand) and iv_cand > 0.05:
+                            iv_samples.append(iv_cand)
+            fallback_iv = float(np.median(iv_samples)) if iv_samples else 0.35
+
+            for opt_type, leg_df in (("call", calls_df), ("put", puts_df)):
+                if leg_df is None or leg_df.empty:
+                    continue
+                for _, row in leg_df.iterrows():
                     oi_val = row.get('openInterest')
                     if pd.isna(oi_val) or oi_val <= 0:
                         oi_val = row.get('volume')
                     if pd.isna(oi_val) or oi_val <= 0:
                         continue
-                    iv_val = row.get('impliedVolatility')
-                    if pd.isna(iv_val) or iv_val <= 0:
-                        continue
+                    iv_num = to_float(row.get('impliedVolatility'))
+                    if iv_num is None or not math.isfinite(iv_num) or iv_num <= 0.05:
+                        iv_num = fallback_iv
                     k_num = to_float(row.get('strike'))
                     oi_num = to_float(oi_val)
-                    iv_num = to_float(iv_val)
-                    if k_num is None or k_num <= 0 or oi_num is None or oi_num <= 0 or iv_num is None or iv_num <= 0:
+                    if k_num is None or k_num <= 0 or oi_num is None or oi_num <= 0:
                         continue
                     strike_oi_map[k_num] = strike_oi_map.get(k_num, 0.0) + oi_num
                     option_inventory.append({
                         'K': k_num, 'T': T, 'sigma': iv_num,
-                        'oi': oi_num, 'type': 'put'
+                        'oi': oi_num, 'type': opt_type,
                     })
         except Exception as chain_err:
             chain_errors.append(f"{exp_date_str}: {chain_err}")

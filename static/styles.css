@@ -3369,6 +3369,19 @@ td.num-col {
     background: rgba(56, 189, 248, 0.25);
 }
 
+.colab-scout-promote-btn.is-watched {
+    border-color: rgba(74, 222, 128, 0.45);
+    background: rgba(74, 222, 128, 0.14);
+    color: #86efac;
+    cursor: default;
+}
+
+.scout-ticker-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
 /* ─── Top Stock Recommendations Modal (Colab Quant) ─── */
 .modal-scout-rankings {
     width: 1140px;

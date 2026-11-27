@@ -9,6 +9,10 @@ All notable engineering, architecture, UI, and governance changes to `gemini_cli
 ## [Unreleased] — Colab MCP Handshake Fix & User Documentation Parity Agent
 
 ### Fixed & Improved
+- **Retry-Failed-Only Pipeline, Pre-Market Completeness & Inline Watchlist Toggle (`python/colab_jobs.py`, `python/fetch_stocks.py`, `python/web_server.py`, `static/app.js`, `static/index.html`, `static/styles.css`):**
+  - **Retry Failed Only:** Banner **↻ Retry Failed** now sends `retry_failed_only: true` to `/api/colab/jobs/run_all`, keeping previously succeeded Colab jobs & cached artifacts intact and re-running only failed steps.
+  - **Pre-Market Intraday Chart, VWAP & GEX:** Fixed missing `import asyncio` in `python/fetch_stocks.py` for `/api/intraday/{symbol}`, added Yahoo v8 chart JSON fallback with timestamp dedupe/sorting, enabled pre-market price-weighted VWAP when Yahoo reports zero volume bars (`FALLBACK_VWAP_PREMARKET_TWAP`), substituted median expiry IV for pre-market `impliedVolatility <= 0.05` placeholders in `_acquire_options_gex_raw()`, and surfaced Colab multi-expiry GEX fallback / 4-decimal formatting in `renderRowUnsafe()`.
+  - **Inline Modal Watch Button:** Placed **`+ Watch` / `✓ Watching`** directly beside each ticker in `#scout-rankings-table` (`styles.css?v=18.83`, `app.js?v=18.91`), live-synced with Watchlist state.
 - **Unified Colab Sector Themes & Top Recommendations Modal (`python/colab_workers/quant_scout_worker.py`, `python/colab_calibration.py`, `python/colab_jobs.py`, `python/web_server.py`, `static/index.html`, `static/styles.css`, `static/app.js`):**
   - Routed **Discovery → Sector Themes** (`POST /api/ai_scout`) through Colab Stock Finder (`quant_scout` with `options.sectors` and `options.max_rsi`), with automatic local fallback when offline.
   - Added canonical sector tagging (`infer_sector_for_ticker`, S&P 500 GICS parsing + parent sector matching), `rsi_14` scoring, and Top-50 default candidate depth; auto-enriches existing cached artifacts on load.

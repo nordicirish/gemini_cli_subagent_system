@@ -388,6 +388,7 @@ class ColabJobManager:
         *,
         job_types: Optional[List[str]] = None,
         only_stale: bool = True,
+        retry_failed_only: bool = False,
         trigger: str = "manual",
         options_by_job: Optional[Dict[str, Dict[str, Any]]] = None,
         service: Optional[Any] = None,
@@ -433,33 +434,68 @@ class ColabJobManager:
                 }
                 return copy.deepcopy(self._pipeline)
 
+        with self._lock:
+            if self._pipeline_active:
+                return copy.deepcopy(self._pipeline)
+            prev_jobs = copy.deepcopy(self._pipeline.get("jobs") or {})
+
         artifacts_status = get_all_colab_artifacts_status(cache_dir=self.cache_dir).get("artifacts", {})
         jobs_map: Dict[str, Dict[str, Any]] = {}
         to_run: List[str] = []
         skipped_fresh = 0
 
-        for jt in targets:
-            art_key = JOB_SPEC[jt]["artifact_type"]
-            art_info = artifacts_status.get(art_key, {}) if isinstance(artifacts_status, dict) else {}
-            is_fresh = bool(art_info.get("loaded")) and not bool((art_info.get("freshness") or {}).get("stale", True))
-            if only_stale and is_fresh:
-                skipped_fresh += 1
-                jobs_map[jt] = {
-                    "status": "skipped_fresh",
-                    "label": JOB_SPEC[jt]["label"],
-                    "job_id": None,
-                    "error": None,
-                    "progress_pct": 100,
-                }
-            else:
-                to_run.append(jt)
-                jobs_map[jt] = {
-                    "status": "pending",
-                    "label": JOB_SPEC[jt]["label"],
-                    "job_id": None,
-                    "error": None,
-                    "progress_pct": 0,
-                }
+        failed_targets = (
+            [jt for jt in targets if (prev_jobs.get(jt) or {}).get("status") in {"failed", "setup_required"}]
+            if retry_failed_only
+            else []
+        )
+
+        if retry_failed_only and failed_targets:
+            for jt in targets:
+                if jt in failed_targets:
+                    to_run.append(jt)
+                    jobs_map[jt] = {
+                        "status": "pending",
+                        "label": JOB_SPEC[jt]["label"],
+                        "job_id": None,
+                        "error": None,
+                        "progress_pct": 0,
+                    }
+                else:
+                    prev_st = str((prev_jobs.get(jt) or {}).get("status") or "skipped_fresh")
+                    kept_status = prev_st if prev_st in {"succeeded", "skipped_fresh"} else "skipped_fresh"
+                    skipped_fresh += 1
+                    jobs_map[jt] = {
+                        "status": kept_status,
+                        "label": JOB_SPEC[jt]["label"],
+                        "job_id": (prev_jobs.get(jt) or {}).get("job_id"),
+                        "error": None,
+                        "progress_pct": 100,
+                    }
+        else:
+            eff_only_stale = True if retry_failed_only else bool(only_stale)
+            for jt in targets:
+                art_key = JOB_SPEC[jt]["artifact_type"]
+                art_info = artifacts_status.get(art_key, {}) if isinstance(artifacts_status, dict) else {}
+                is_fresh = bool(art_info.get("loaded")) and not bool((art_info.get("freshness") or {}).get("stale", True))
+                if eff_only_stale and is_fresh:
+                    skipped_fresh += 1
+                    jobs_map[jt] = {
+                        "status": "skipped_fresh",
+                        "label": JOB_SPEC[jt]["label"],
+                        "job_id": None,
+                        "error": None,
+                        "progress_pct": 100,
+                    }
+                else:
+                    to_run.append(jt)
+                    jobs_map[jt] = {
+                        "status": "pending",
+                        "label": JOB_SPEC[jt]["label"],
+                        "job_id": None,
+                        "error": None,
+                        "progress_pct": 0,
+                    }
 
         with self._lock:
             if self._pipeline_active:

@@ -1096,6 +1096,131 @@ class TestColabJobManagerAndAPI(unittest.TestCase):
                 self.assertEqual(resp_off.status_code, 200)
                 self.assertEqual(resp_off.json()["engine"], "local")
 
+    def test_retry_failed_only_reruns_only_failed_jobs_and_preserves_succeeded(self) -> None:
+        from fastapi.testclient import TestClient
+        import colab_calibration
+        import web_server
+
+        with tempfile.TemporaryDirectory() as td:
+            mock_svc = MagicMock()
+            mock_svc.get_portfolio_basket.return_value = {"portfolio": [], "unallocated_cash_eur": 0.0}
+            mock_svc.get_watchlist.return_value = ["NVDA"]
+            mock_svc.get_decision_log.return_value = []
+
+            run_log = []
+            should_fail_scout = [True]
+
+            class _PartialClient:
+                def execute_scripts_batch_sync(self, items, progress_callback=None, connect_url_callback=None):
+                    out = {}
+                    for jt, _src, _inp, _acc in items:
+                        run_log.append(jt)
+                        if jt == "quant_scout" and should_fail_scout[0]:
+                            out[jt] = {"ok": False, "error": "Transient Yahoo timeout"}
+                        elif jt == "vol_surface":
+                            out[jt] = {"ok": True, "payload": _sample_vol_surface()}
+                        elif jt == "sec_nlp":
+                            out[jt] = {"ok": True, "payload": _sample_sec_nlp()}
+                        elif jt == "quant_scout":
+                            out[jt] = {"ok": True, "payload": _sample_quant_scout()}
+                        else:
+                            out[jt] = {"ok": True, "payload": _sample_backtest_evidence()}
+                    return out
+
+            mgr = colab_jobs.ColabJobManager(
+                cache_dir=td,
+                config_loader=lambda: colab_mcp_client.ColabMCPConfig(mode="cli"),
+                client_factory=lambda _cfg: _PartialClient(),
+                worker_loader=lambda jt: f"print({jt!r})",
+                service_provider=lambda: mock_svc,
+                transport_prober=lambda _cfg: {"mode": "cli", "ready": True},
+            )
+            client = TestClient(web_server.app)
+            with patch.object(web_server, "get_colab_job_manager", return_value=mgr):
+                first = client.post("/api/colab/jobs/run_all", json={"only_stale": False})
+                self.assertEqual(first.status_code, 202)
+                for _ in range(50):
+                    if mgr.get_status()["pipeline"]["state"] in {"partial", "succeeded", "failed"}:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(mgr.get_status()["pipeline"]["state"], "partial")
+                self.assertEqual(set(run_log), {"vol_surface", "sec_nlp", "quant_scout", "walk_forward"})
+
+                run_log.clear()
+                should_fail_scout[0] = False
+                retry = client.post("/api/colab/jobs/run_all", json={"only_stale": False, "retry_failed_only": True})
+                self.assertEqual(retry.status_code, 202)
+                for _ in range(50):
+                    if mgr.get_status()["pipeline"]["state"] in {"partial", "succeeded", "failed"}:
+                        break
+                    time.sleep(0.02)
+
+                final_pipe = mgr.get_status()["pipeline"]
+                self.assertEqual(final_pipe["state"], "succeeded")
+                # Only the failed job (`quant_scout`) re-ran; all 3 succeeded jobs were preserved
+                self.assertEqual(run_log, ["quant_scout"])
+                self.assertEqual(final_pipe["jobs"]["vol_surface"]["status"], "succeeded")
+                self.assertEqual(final_pipe["jobs"]["sec_nlp"]["status"], "succeeded")
+                self.assertEqual(final_pipe["jobs"]["walk_forward"]["status"], "succeeded")
+                self.assertEqual(final_pipe["jobs"]["quant_scout"]["status"], "succeeded")
+                self.assertIsNotNone(colab_calibration.load_colab_artifact("vol_surface", cache_dir=td))
+
+    def test_premarket_intraday_vwap_and_gex_fallbacks(self) -> None:
+        from types import SimpleNamespace
+        from fastapi.testclient import TestClient
+        import pandas as pd
+        import fetch_stocks as fs
+        import web_server
+
+        # 1. `/api/intraday/{symbol}` works cleanly (`asyncio` imported) and returns sorted deduplicated bars
+        mock_payload = {"bars": [{"time": 1700000000, "open": 100.0, "high": 101.0, "low": 99.5, "close": 100.5, "volume": 0}], "warmup_closes": [99.0], "symbol": "NVDA"}
+        client = TestClient(web_server.app)
+        with patch.object(fs, "_fetch_intraday_payload", return_value=mock_payload):
+            res = client.get("/api/intraday/NVDA")
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(len(res.json()["bars"]), 1)
+            self.assertNotIn("error", res.json())
+
+        # 2. Pre-market VWAP preserves valid OHLC price bars when Yahoo emits volume=0
+        ny_now = fs.datetime.now(fs._NY_TZ).replace(hour=6, minute=15, second=0, microsecond=0)
+        ts1 = int((ny_now.replace(hour=5, minute=30)).timestamp())
+        ts2 = int((ny_now.replace(hour=5, minute=31)).timestamp())
+        fake_chart = SimpleNamespace(json=lambda: {
+            "chart": {"result": [{
+                "timestamp": [ts1, ts2],
+                "indicators": {"quote": [{"high": [250.0, 252.0], "low": [249.0, 251.0], "close": [249.5, 251.5], "volume": [0, 0]}]},
+            }]}
+        })
+
+        class _FakeDt(fs.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return ny_now
+
+        with patch.object(fs, "datetime", _FakeDt), \
+             patch.object(fs, "safe_yf_get", return_value=fake_chart):
+            valid, obs_iso, before_anchor = fs._acquire_true_intraday_vwap_bars("AMZN", "PRE-MARKET")
+            self.assertFalse(before_anchor)
+            self.assertEqual(len(valid), 2)
+            self.assertIsNotNone(obs_iso)
+
+        # 3. Pre-market GEX substitutes valid median IV when Yahoo reports placeholder IV<=0.05
+        calls_df = pd.DataFrame([
+            {"strike": 250.0, "openInterest": 1000, "volume": 0, "impliedVolatility": 0.00001},
+            {"strike": 255.0, "openInterest": 500, "volume": 0, "impliedVolatility": 0.36},
+        ])
+        puts_df = pd.DataFrame([
+            {"strike": 245.0, "openInterest": 800, "volume": 0, "impliedVolatility": 0.00001},
+        ])
+        fake_ticker = SimpleNamespace(
+            options=["2099-01-16"],
+            option_chain=lambda _exp: SimpleNamespace(calls=calls_df, puts=puts_df),
+            fast_info=SimpleNamespace(three_month_average_volume=50_000_000),
+        )
+        obs = fs._acquire_options_gex_raw("AMZN", ticker_obj=fake_ticker, spot_price=250.0)
+        self.assertEqual(obs.data["contract_count"], 3)
+        self.assertNotEqual(obs.data["gex_profile"]["net_gex"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

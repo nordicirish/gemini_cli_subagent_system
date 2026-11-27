@@ -1078,32 +1078,39 @@ function renderTable(tickers, state) {
                 <td>${trendHtml}</td>
                 <td>${fibTargetHtml}</td>
                 <td class="pro-col">${(() => {
-                    const gexVal = row.net_gex_total || 0;
-                    const diff = row.gex_diff || 0;
+                    const liveGex = Number(row.net_gex_total || 0);
+                    const diff = Number(row.gex_diff || 0);
                     let chevron = '';
                     if (diff > 0.005) {
                         chevron = `<span class="text-green" style="margin-left: 4px; font-weight: bold;">▲</span>`;
                     } else if (diff < -0.005) {
                         chevron = `<span class="text-red" style="margin-left: 4px; font-weight: bold;">▼</span>`;
                     }
-                    
-                    let dpClass = 'dealer-neutral';
-                    if (gexVal > 0.005) dpClass = 'dealer-long';
-                    else if (gexVal < -0.005) dpClass = 'dealer-short';
 
                     const vsMap = _lastQuantAnalytics && _lastQuantAnalytics.colab_vol_surface && _lastQuantAnalytics.colab_vol_surface.tickers;
                     const vs = vsMap && vsMap[sym] ? vsMap[sym] : null;
+                    const colabGex = vs && Number.isFinite(Number(vs.net_gex_multi_expiry)) ? Number(vs.net_gex_multi_expiry) : 0;
+                    const displayGex = (liveGex === 0 && colabGex !== 0) ? colabGex : liveGex;
+
+                    let dpClass = 'dealer-neutral';
+                    if (displayGex > 0.0005) dpClass = 'dealer-long';
+                    else if (displayGex < -0.0005) dpClass = 'dealer-short';
+
                     let vsTitleAttr = '';
                     let vsTagHtml = '';
                     if (vs) {
                         const staleTxt = vs.stale ? ' [STALE]' : '';
-                        const tip = `Vol Surface (${vs.dealer_flow_regime || 'NEUTRAL'}${staleTxt}): Flip $${Number(vs.gamma_flip_multi_expiry || 0).toFixed(2)} | Vanna ${Number(vs.vanna_exposure || 0).toFixed(2)} | Charm ${Number(vs.charm_decay_bias || 0).toFixed(2)} | 25d Skew ${Number(vs.svi_skew_25d || 0).toFixed(2)}%`;
+                        const srcNote = liveGex === 0 && colabGex !== 0 ? ' · using Colab multi-expiry GEX pre-market' : '';
+                        const tip = `Vol Surface (${vs.dealer_flow_regime || 'NEUTRAL'}${staleTxt}): Flip $${Number(vs.gamma_flip_multi_expiry || 0).toFixed(2)} | Vanna ${Number(vs.vanna_exposure || 0).toFixed(2)} | Charm ${Number(vs.charm_decay_bias || 0).toFixed(2)} | 25d Skew ${Number(vs.svi_skew_25d || 0).toFixed(2)}%${srcNote}`;
                         vsTitleAttr = ` title="${_escAlertHtml(tip)}"`;
                         const tagLabel = vs.stale ? 'STALE' : (Number(vs.vanna_exposure || 0) >= 0 ? 'V+' : 'V-');
                         vsTagHtml = `<span class="vol-surface-tag${vs.stale ? ' is-stale' : ''}">${tagLabel}</span>`;
                     }
-                    
-                    return `<span class="dealer-badge ${dpClass}"${vsTitleAttr}>${gexVal.toFixed(3)}${chevron}</span>${vsTagHtml}`;
+
+                    const gexText = (Math.abs(displayGex) > 0 && Math.abs(displayGex) < 0.001)
+                        ? displayGex.toFixed(4)
+                        : displayGex.toFixed(3);
+                    return `<span class="dealer-badge ${dpClass}"${vsTitleAttr}>${gexText}${chevron}</span>${vsTagHtml}`;
                 })()}</td>
                 <td class="score-col">
                     <span class="signal-plain-pill ${plainSig.cls}" title="Composite Signal Score: ${scoreStr} (scale -6 to +6)">${plainSig.text}</span><span class="score-badge ${scoreBadge}" title="Composite Signal Score (-6 to +6)">${scoreStr}</span>${noteHtml}
@@ -1540,6 +1547,8 @@ async function pollData() {
 init();
 
 // Watchlist Logic
+let _currentWatchlistSet = new Set();
+
 async function fetchWatchlist() {
     if (document.activeElement === dAddWatchlistTicker) return;
     try {
@@ -1550,6 +1559,10 @@ async function fetchWatchlist() {
 }
 
 function renderWatchlist(list) {
+    if (Array.isArray(list)) {
+        _currentWatchlistSet = new Set(list.map((t) => String(t || '').trim().toUpperCase()).filter(Boolean));
+        if (typeof renderScoutRankingsModal === 'function') renderScoutRankingsModal();
+    }
     if (!dWatchlistContainer || !Array.isArray(list)) return;
     let html = '';
     list.forEach((ticker, index) => {
@@ -3238,11 +3251,19 @@ function renderScoutRankingsModal() {
         const adv = Number.isFinite(Number(c.adv_usd_m)) ? `$${Number(c.adv_usd_m).toFixed(0)}M` : '—';
         const cluster = _escAlertHtml(String(c.cluster_label || '—'));
         const rationale = _escAlertHtml(String(c.rationale || 'No Colab notes recorded.'));
+        const rawSym = String(c.ticker || '').toUpperCase();
+        const isWatched = _currentWatchlistSet.has(rawSym);
+        const watchBtnHtml = isWatched
+            ? `<button type="button" class="colab-scout-promote-btn is-watched" data-scout-ticker="${sym}" disabled title="Already on your Watchlist">✓ Watching</button>`
+            : `<button type="button" class="colab-scout-promote-btn" data-scout-ticker="${sym}" title="Add ${sym} to Watchlist">+ Watch</button>`;
         return `
             <tr data-scout-rank-row="${rank}" data-scout-sector="${sec}">
                 <td><span class="scout-rank-badge${rank <= 3 ? ' top3' : ''}">#${rank}</span></td>
                 <td>
-                    <div><strong>${sym}</strong></div>
+                    <div class="scout-ticker-row">
+                        <strong>${sym}</strong>
+                        ${watchBtnHtml}
+                    </div>
                     <span class="scout-sector-pill">${sec}</span>
                 </td>
                 <td><span class="scout-score-pill">${score}</span></td>
@@ -3258,7 +3279,6 @@ function renderScoutRankingsModal() {
                 </td>
                 <td>
                     <div class="scout-action-cell">
-                        <button type="button" class="colab-scout-promote-btn" data-scout-ticker="${sym}">+ Watch</button>
                         <button type="button" class="glow-btn outline mini scout-modal-chart-btn" data-chart-ticker="${sym}" title="Open 1m Chart">📈</button>
                     </div>
                 </td>
@@ -3309,9 +3329,10 @@ async function promoteQuantScoutTicker(ticker, btnEl) {
         });
         const saveData = await saveRes.json().catch(() => ({}));
         if (!saveRes.ok) throw new Error(saveData.detail || `HTTP ${saveRes.status}`);
-        if (btnEl) btnEl.textContent = '✓ Added';
+        _currentWatchlistSet.add(sym);
+        if (typeof renderWatchlist === 'function') renderWatchlist(current);
+        else renderScoutRankingsModal();
         _setColabJobStatus(statusEls, `Added ${sym} to your Watchlist.`, 'status-message inline-feedback active text-green');
-        if (typeof fetchWatchlist === 'function') fetchWatchlist();
     } catch (err) {
         if (btnEl) btnEl.disabled = false;
         _setColabJobStatus(statusEls, err.message || `Failed to add ${sym}.`, 'status-message inline-feedback active text-red');
@@ -3375,6 +3396,7 @@ function renderColabProgressAndSetup(data) {
     }
     if (retryBtn) {
         retryBtn.style.display = isErrState ? 'inline-block' : 'none';
+        retryBtn.textContent = pipeState === 'partial' ? '↻ Retry Failed' : '↻ Retry';
     }
     if (connectLink) {
         const rawUrl = String(pipe.connect_url || '').trim();
@@ -3495,18 +3517,20 @@ function _restoreButtonBusy(btnEl) {
     if (btnEl.dataset.origLabel) btnEl.textContent = btnEl.dataset.origLabel;
 }
 
-async function launchAllColabJobs(btnEl) {
+async function launchAllColabJobs(btnEl, opts = {}) {
     const jobStatusEl = document.getElementById('colab-mcp-job-status');
     const scoutStatusEl = document.getElementById('colab-scout-job-status');
     const statusEls = [jobStatusEl, scoutStatusEl].filter(Boolean);
     const useLlmEl = document.getElementById('colab-sec-use-llm-toggle');
-    _setButtonBusy(btnEl, '⏳ Running All...');
+    const retryFailedOnly = Boolean(opts && opts.retryFailedOnly);
+    _setButtonBusy(btnEl, retryFailedOnly ? '⏳ Retrying Failed...' : '⏳ Running All...');
     try {
         const res = await fetch(`${API_BASE}/colab/jobs/run_all`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 only_stale: false,
+                retry_failed_only: retryFailedOnly,
                 use_llm: Boolean(useLlmEl && useLlmEl.checked),
             }),
         });
@@ -3616,7 +3640,7 @@ if (dColabRunAllBtn) dColabRunAllBtn.addEventListener('click', () => {
 });
 if (dColabBannerRetryBtn) dColabBannerRetryBtn.addEventListener('click', () => {
     _colabBannerDismissedKey = null;
-    launchAllColabJobs(dColabBannerRetryBtn);
+    launchAllColabJobs(dColabBannerRetryBtn, { retryFailedOnly: true });
 });
 if (dColabBannerDismissBtn) dColabBannerDismissBtn.addEventListener('click', () => {
     const p = _lastColabStatus && _lastColabStatus.pipeline ? _lastColabStatus.pipeline : {};
@@ -4121,8 +4145,9 @@ async function openChartModal(symbol) {
         const warmupCloses = data.warmup_closes || [];
 
         if (bars.length === 0) {
-            dChartContainer.innerHTML = '<div class="chart-loading">No intraday data available.</div>';
-            dChartModalMeta.textContent = 'No data returned for this symbol.';
+            const detail = data && data.error ? ` (${_escAlertHtml(String(data.error))})` : '';
+            dChartContainer.innerHTML = `<div class="chart-loading">No intraday data available${detail}.</div>`;
+            dChartModalMeta.textContent = data && data.error ? `Chart error: ${data.error}` : 'No data returned for this symbol.';
             return;
         }
 

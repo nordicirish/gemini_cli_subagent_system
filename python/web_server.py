@@ -2358,7 +2358,7 @@ async def launch_all_colab_mcp_jobs_endpoint(req: Request):
         if not isinstance(body, dict):
             return JSONResponse({"status": "error", "detail": "Request body must be a JSON object."}, status_code=422)
 
-    unknown_keys = set(body.keys()) - {"only_stale", "job_types", "use_llm"}
+    unknown_keys = set(body.keys()) - {"only_stale", "job_types", "use_llm", "retry_failed_only"}
     if unknown_keys:
         return JSONResponse(
             {"status": "error", "detail": f"Unknown request key(s): {sorted(unknown_keys)}"},
@@ -2368,6 +2368,9 @@ async def launch_all_colab_mcp_jobs_endpoint(req: Request):
     only_stale = body.get("only_stale", False)
     if not isinstance(only_stale, bool):
         return JSONResponse({"status": "error", "detail": "only_stale must be a boolean."}, status_code=422)
+    retry_failed_only = body.get("retry_failed_only", False)
+    if not isinstance(retry_failed_only, bool):
+        return JSONResponse({"status": "error", "detail": "retry_failed_only must be a boolean."}, status_code=422)
     job_types = body.get("job_types")
     if job_types is not None and not isinstance(job_types, list):
         return JSONResponse({"status": "error", "detail": "job_types must be a list of strings."}, status_code=422)
@@ -2380,6 +2383,7 @@ async def launch_all_colab_mcp_jobs_endpoint(req: Request):
         pipeline = get_colab_job_manager().run_pipeline(
             job_types=job_types,
             only_stale=only_stale,
+            retry_failed_only=retry_failed_only,
             trigger="manual",
             options_by_job=options_by_job,
         )
